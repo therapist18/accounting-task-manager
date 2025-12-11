@@ -8,14 +8,23 @@ import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Upload, Calendar, Check, X, Clock, Eye, AlertTriangle, Zap, Loader2, Pencil, SkipForward, Clock3 } from "lucide-react"
+import { 
+  Upload, Calendar, Check, X, Clock, Eye, AlertTriangle, Zap, 
+  Loader2, SkipForward, Clock3, MoreHorizontal, CheckCircle2, 
+  Timer, AlertCircle 
+} from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { format, parse, isValid } from "date-fns"
-import { AutomationMappingDialog } from "./AutomationMappingDialog"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
-import { formatDuration, getTimeStatus, isDocumentApplicable, parseDate } from "../overall-view/tableUtils"
+import { formatDuration,getTimeStatus, isDocumentApplicable, parseDate } from "../overall-view/tableUtils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 interface EditableStageCellProps {
   stage: any
@@ -115,7 +124,9 @@ export default function EditableStageCell({
   const [isSkipDialogOpen, setIsSkipDialogOpen] = useState(false);
   const [skipReason, setSkipReason] = useState('');
   const [selectedSkipReason, setSelectedSkipReason] = useState('');
-  const [isCheckingPreviousStages, setIsCheckingPreviousStages] = useState(false);
+  
+  const inputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (previewDocuments.length > 0) {
       console.log('Preview Documents:', previewDocuments.map(doc => ({
@@ -125,8 +136,6 @@ export default function EditableStageCell({
       })));
     }
   }, [previewDocuments, task]);
-
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const handlePreviewDataChange = useCallback((docId: string, fieldName: string, value: any) => {
     setPreviewDocuments(prev =>
@@ -216,22 +225,33 @@ export default function EditableStageCell({
     return task.stages?.[stage.id]?.status === 'completed' || task.stages?.[stage.id]?.status === 'skipped';
   }, [task.stages, stage.id]);
 
-  // --- NEW: Time Calculation Logic ---
+  // --- Time Calculation Logic ---
   const effectiveStartTime = useMemo(() => {
     if (!stages || stages.length === 0) return task.created_at || task.date_initiated;
 
     const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
     const currentStageIndex = sortedStages.findIndex(s => s.id === stage.id);
 
+    // If first stage, use task start time
+    if (currentStageIndex === 0) {
+      return task.date_initiated || task.created_at;
+    }
+
+    // For subsequent stages, check the previous stage
     if (currentStageIndex > 0) {
       const prevStage = sortedStages[currentStageIndex - 1];
       const prevStageData = task.stages?.[prevStage.id];
+      
+      // If previous stage is completed/skipped, use its completion time as start time
       if (prevStageData?.completedAt) return prevStageData.completedAt;
       if (prevStageData?.date) return prevStageData.date;
       if (prevStageData?.status === 'skipped' && prevStageData.skippedAt) return prevStageData.skippedAt;
+      
+      // If previous stage is NOT complete, the current stage hasn't started
+      return null;
     }
 
-    return task.date_initiated || task.created_at;
+    return null;
   }, [task, stage.id, stages]);
 
   const timeStatus = useMemo(() => {
@@ -248,7 +268,6 @@ export default function EditableStageCell({
 
   useEffect(() => {
     if (stageDate && stageDate !== 'NaN/NaN/NaN') {
-      // Try parsing with time first, then fall back to date only
       let parsedDate = parse(stageDate, "yyyy-MM-dd'T'HH:mm", new Date());
       if (!isValid(parsedDate)) {
         parsedDate = parse(stageDate, 'dd/MM/yyyy', new Date());
@@ -278,7 +297,6 @@ export default function EditableStageCell({
 
     if (!dateStr) return '';
 
-    // Try datetime format first
     const dateTimeFormats = [
       "yyyy-MM-dd'T'HH:mm",
       'dd/MM/yyyy HH:mm',
@@ -305,7 +323,6 @@ export default function EditableStageCell({
     }
 
     if (isSkipped) {
-      // Skip date validation for skipped stages
       await onSave(stage.id, task.id, '', {
         ...(linkedDocument?.extracted_details || {}),
         status: 'skipped',
@@ -319,10 +336,8 @@ export default function EditableStageCell({
       return;
     }
 
-    // Handle date with time
     let dateObj = new Date(editValue);
 
-    // If time is not specified (00:00), set it to 9:00 AM
     if (editValue && editValue.endsWith('T00:00')) {
       const [datePart] = editValue.split('T');
       dateObj = new Date(`${datePart}T09:00`);
@@ -363,19 +378,18 @@ export default function EditableStageCell({
     if (!task.stages || !stages || stages.length === 0) return true;
 
     const currentStageIndex = stages.findIndex(s => s.id === stage.id);
-    if (currentStageIndex <= 0) return true; // First stage, nothing to check
+    if (currentStageIndex <= 0) return true; 
 
-    // Check all previous stages
     for (let i = 0; i < currentStageIndex; i++) {
       const prevStage = stages[i];
       const stageStatus = task.stages[prevStage.id]?.status;
 
       if (!stageStatus || (stageStatus !== 'completed' && stageStatus !== 'skipped')) {
-        return false; // Found an incomplete stage
+        return false;
       }
     }
 
-    return true; // All previous stages are complete or skipped
+    return true;
   }, [stage.id, stages, task.stages]);
 
   const handleSkipClick = async () => {
@@ -390,21 +404,17 @@ export default function EditableStageCell({
 
     setIsLoading(true);
     try {
-      // Create a clean reset object
       const resetData = {
         ...(linkedDocument?.extracted_details || {}),
-        // 👇 CHANGE: Explicitly set status to 'in_progress'
         status: 'in_progress',
         skippedAt: null,
         skippedBy: null,
         reason: null,
         date: null,
         completedAt: null,
-        // Ensure we don't have any status flags set
         documentsUploaded: requiresUpload ? false : undefined
       };
 
-      // Call onSave with empty value and the reset data containing the status
       await onSave(stage.id, task.id, '', resetData);
 
       setEditValue('');
@@ -444,60 +454,33 @@ export default function EditableStageCell({
 
   const handleDeleteDocument = useCallback(async (documentToDelete: any) => {
     if (!documentToDelete) {
-      toast({
-        title: 'Error',
-        description: 'No document to delete',
-        variant: 'destructive'
-      });
+      toast({ title: 'Error', description: 'No document to delete', variant: 'destructive' });
       return;
     }
 
     setIsLoading(true);
     try {
-      // 1. Delete file from storage bucket
       if (documentToDelete.file_path) {
         const filePath = documentToDelete.file_path.startsWith('kyc-documents/')
           ? documentToDelete.file_path.substring('kyc-documents/'.length)
           : documentToDelete.file_path;
 
-        const { error: storageError } = await supabase.storage
-          .from('kyc-documents')
-          .remove([filePath]);
-
-        if (storageError) {
-          console.error('Storage deletion error:', storageError);
-        }
+        await supabase.storage.from('kyc-documents').remove([filePath]);
       }
 
-      // 2. Get the document ID with proper validation
       const documentId = documentToDelete.id || documentToDelete.file?.id || documentToDelete.documentId;
 
-      // Ensure we have a valid ID before attempting to delete
-      if (!documentId) {
-        throw new Error('Cannot delete document: Missing document ID');
-      }
+      if (!documentId) throw new Error('Cannot delete document: Missing document ID');
 
-      // 3. Delete document record from database
-      const { error: dbError } = await supabase
-        .from('acc_portal_directors_documents')
-        .delete()
-        .eq('id', documentId);
-
+      const { error: dbError } = await supabase.from('acc_portal_directors_documents').delete().eq('id', documentId);
       if (dbError) throw dbError;
 
-      // 4. Update task's stages JSON and source_document_id
-      const currentTask = await supabase
-        .from('tm_tasks')
-        .select('stages, source_document_id')
-        .eq('id', task.id)
-        .single();
-
+      const currentTask = await supabase.from('tm_tasks').select('stages, source_document_id').eq('id', task.id).single();
       if (currentTask.error) throw currentTask.error;
 
       const updatedStages = { ...currentTask.data.stages };
       const updatedSourceDocIds = { ...currentTask.data.source_document_id };
 
-      // 4. Update source_document_id JSON - remove document reference
       if (updatedSourceDocIds[stage.id]) {
         if (Array.isArray(updatedSourceDocIds[stage.id])) {
           updatedSourceDocIds[stage.id] = updatedSourceDocIds[stage.id].filter(
@@ -506,10 +489,8 @@ export default function EditableStageCell({
               return docId !== (documentToDelete.id || documentToDelete.file?.id);
             }
           );
-          // Remove the stage key if no documents left
           if (updatedSourceDocIds[stage.id].length === 0) {
             delete updatedSourceDocIds[stage.id];
-            // Also reset the stage to pending
             if (updatedStages[stage.id]) {
               delete updatedStages[stage.id];
             }
@@ -521,7 +502,6 @@ export default function EditableStageCell({
 
           if (docId === (documentToDelete.id || documentToDelete.file?.id)) {
             delete updatedSourceDocIds[stage.id];
-            // Also reset the stage to pending
             if (updatedStages[stage.id]) {
               delete updatedStages[stage.id];
             }
@@ -529,44 +509,35 @@ export default function EditableStageCell({
         }
       }
 
-      // 5. Update the task record
-      const { error: updateError } = await supabase
-        .from('tm_tasks')
-        .update({
+      const { error: updateError } = await supabase.from('tm_tasks').update({
           stages: updatedStages,
           source_document_id: updatedSourceDocIds,
           updated_at: new Date().toISOString()
-        })
-        .eq('id', task.id);
+        }).eq('id', task.id);
 
       if (updateError) throw updateError;
 
-      // Update preview documents list
       const updatedPreviewDocs = previewDocuments.filter(
         (doc) => doc.documentId !== (documentToDelete.id || documentToDelete.file?.id)
       );
       setPreviewDocuments(updatedPreviewDocs);
 
-      // Close preview if no more documents
       if (updatedPreviewDocs.length === 0) {
         setIsPreviewOpen(false);
       } else if (currentPreviewIndex >= updatedPreviewDocs.length) {
         setCurrentPreviewIndex(updatedPreviewDocs.length - 1);
       }
 
-      // Trigger a refresh of the task data
       if (onSave) {
         await onSave(stage.id, task.id, '', {});
       }
 
     } catch (error) {
-      console.error('Error deleting document:', error);
       toast({
         title: 'Error',
         description: error instanceof Error ? error.message : 'Failed to delete document',
         variant: 'destructive'
       });
-      throw error;
     } finally {
       setIsLoading(false);
     }
@@ -634,24 +605,15 @@ export default function EditableStageCell({
   }, []);
 
   const buildPreviewDocumentsData = useCallback(async (documents: any[]) => {
-    if (!documents || documents.length === 0) {
-      console.log('No documents found for preview');
-      return [];
-    }
+    if (!documents || documents.length === 0) return [];
 
     const previewDocuments = [];
 
     for (const doc of documents) {
       try {
         const kycDoc = await fetchKycDocumentData(doc.document_id || doc.id);
-        console.log('Fetched KYC doc:', kycDoc);
+        if (!kycDoc) continue;
 
-        if (!kycDoc) {
-          console.log('No KYC document configuration found for document:', doc.id);
-          continue;
-        }
-
-        // Construct the full file URL
         const filePath = doc.file_path || doc.download_url || doc.url || doc.document_url;
         const fileUrl = filePath ?
           (filePath.startsWith('http') ? filePath : `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${filePath}`)
@@ -679,21 +641,14 @@ export default function EditableStageCell({
           },
           created_at: doc.created_at || new Date().toISOString()
         };
-
-        console.log('Built preview data for document:', doc.id, previewData);
         previewDocuments.push(previewData);
       } catch (error) {
         console.error(`Error building preview data for document ${doc.id}:`, error);
-        // Continue with other documents even if one fails
       }
     }
 
     if (previewDocuments.length === 0) {
-      toast({
-        title: 'Error',
-        description: 'Failed to prepare document previews.',
-        variant: 'destructive'
-      });
+      toast({ title: 'Error', description: 'Failed to prepare document previews.', variant: 'destructive' });
     }
 
     return previewDocuments;
@@ -702,22 +657,11 @@ export default function EditableStageCell({
   const handleViewDocument = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
 
-    // Use linkedDocuments if available, otherwise fall back to linkedDocument for backward compatibility
     const documentsToPreview = linkedDocuments && linkedDocuments.length > 0
       ? linkedDocuments
       : linkedDocument ? [linkedDocument] : [];
 
-    if (documentsToPreview.length === 0) {
-      console.log('No documents found to preview');
-      return;
-    }
-
-    console.log('Opening document preview for documents:', documentsToPreview.map(doc => ({
-      documentId: doc.id,
-      documentName: doc.name || doc.document_name,
-      hasFile: !!(doc.file_path || doc.url || doc.document_url),
-      hasExtractedData: !!(doc.extracted_data || doc.extracted_details)
-    })));
+    if (documentsToPreview.length === 0) return;
 
     setIsLoading(true);
     try {
@@ -727,49 +671,23 @@ export default function EditableStageCell({
         setPreviewDocuments(previewDocs);
         setCurrentPreviewIndex(0);
         setIsPreviewOpen(true);
-
-        console.log('Preview documents prepared:', previewDocs.map(doc => ({
-          documentId: doc.documentId,
-          documentName: doc.documentName,
-          hasExtractedData: !!doc.extractedData,
-          fieldsCount: doc.fields?.length || 0,
-          fileUrl: doc.fileUrl
-        })));
       } else {
         throw new Error('No valid documents could be prepared for preview');
       }
     } catch (error) {
-      console.error('Error in handleViewDocument:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to open document preview',
-        variant: 'destructive'
-      });
+      toast({ title: 'Error', description: 'Failed to open document preview', variant: 'destructive' });
     } finally {
       setIsLoading(false);
     }
   }, [linkedDocument, linkedDocuments, buildPreviewDocumentsData]);
 
   const handlePreviewSave = useCallback(async (data: any) => {
-    if (!onSave || previewDocuments.length === 0) {
-      console.error('Missing required data for save:', { onSave, previewDocuments });
-      return;
-    }
+    if (!onSave || previewDocuments.length === 0) return;
 
     try {
       const currentDoc = previewDocuments[currentPreviewIndex];
-      if (!currentDoc) {
-        throw new Error('No active document to save');
-      }
+      if (!currentDoc) throw new Error('No active document to save');
 
-      console.log('Saving document data:', {
-        stageId: stage.id,
-        taskId: task.id,
-        documentId: currentDoc.documentId,
-        extractedData: data
-      });
-
-      // Call onSave with the extracted data
       await onSave(
         stage.id,
         task.id,
@@ -780,7 +698,6 @@ export default function EditableStageCell({
         }
       );
 
-      // Update local state
       const updatedDocs = [...previewDocuments];
       updatedDocs[currentPreviewIndex] = {
         ...currentDoc,
@@ -788,31 +705,21 @@ export default function EditableStageCell({
       };
       setPreviewDocuments(updatedDocs);
 
-      // Call the fetch function to refresh the data
-      if (onFetchData) {
-        await onFetchData();
-      }
+      if (onFetchData) await onFetchData();
 
-      toast({
-        title: 'Success',
-        description: 'Document data saved and refreshed successfully.'
-      });
+      toast({ title: 'Success', description: 'Document data saved and refreshed successfully.' });
 
-      // Move to next document or close
       if (currentPreviewIndex >= previewDocuments.length - 1) {
         setIsPreviewOpen(false);
       } else {
         setCurrentPreviewIndex(prev => prev + 1);
       }
     } catch (error) {
-      console.error('Error saving document data:', error);
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to save document data.',
-        variant: 'destructive'
-      });
+      toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to save document data.', variant: 'destructive' });
     }
   }, [onSave, previewDocuments, currentPreviewIndex, stage.id, task.id, onFetchData]);
+
+  // --- RENDER ---
 
  if (renderMode === 'date') {
     if (!isStageApplicable) return <span className="text-sm text-gray-400 italic">N/A</span>;
@@ -831,23 +738,25 @@ export default function EditableStageCell({
         if (d) formattedSkippedDate = format(d, 'dd/MM/yyyy HH:mm');
       }
 
+      // Matches ReportsPage styling for Skipped
       return (
         <div className="flex items-center gap-2">
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Badge variant="secondary" className="bg-amber-100 text-amber-700 hover:bg-amber-200 border-amber-200 cursor-help font-normal">
-                  Skipped
-                </Badge>
+                <div className="flex items-center gap-1.5 text-xs text-amber-600 font-medium cursor-help bg-transparent border-0 p-0">
+                  <AlertCircle className="h-3.5 w-3.5" /> Skipped
+                </div>
               </TooltipTrigger>
-              <TooltipContent className="bg-slate-900 text-white border-slate-800">
+              <TooltipContent className="bg-amber-50 text-amber-900 border-amber-200">
                 <div className="text-xs text-left space-y-1">
-                  <p><span className="font-semibold text-slate-300">Reason:</span> {reason}</p>
-                  <p><span className="font-semibold text-slate-300">Date:</span> {formattedSkippedDate}</p>
+                  <p><span className="font-semibold">Reason:</span> {reason}</p>
+                  <p><span className="font-semibold">Date:</span> {formattedSkippedDate}</p>
                 </div>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
+          {/* Unskip functionality retained */}
           <Button variant="ghost" size="sm" className="h-6 text-xs text-blue-600 hover:bg-blue-50" onClick={(e) => { e.stopPropagation(); handleUnskip(); }} disabled={isLoading}>
             Unskip
           </Button>
@@ -874,22 +783,33 @@ export default function EditableStageCell({
         }
       }
 
+      // ** COLOR & ICON LOGIC for COMPLETED (Matches ReportsPage) **
+      const textColorClass = isCompletedOverdue ? "text-amber-600" : "text-emerald-600";
+      const icon = isCompletedOverdue ? <Clock className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />;
+      const borderColorClass = isCompletedOverdue ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-100";
+
       return (
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="flex items-center gap-2 group cursor-pointer" onClick={(e) => { e.stopPropagation(); if (!requiresUpload) setIsEditing(true); }}>
-                <div className={`text-gray-800 hover:bg-blue-100 px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${isCompletedOverdue ? 'bg-amber-50 text-amber-900 border border-amber-200' : ''}`}>
-                  {formatDateDisplay(stageDate)}
-                  {isCompletedOverdue && <Clock className="h-3 w-3 text-amber-600" />}
-                </div>
+              <div 
+                className={`flex items-center gap-1.5 font-semibold text-xs ${textColorClass} cursor-pointer hover:underline`} 
+                onClick={(e) => { e.stopPropagation(); if (!requiresUpload) setIsEditing(true); }}
+              >
+                {icon}
+                <span>{formatDateDisplay(stageDate)}</span>
               </div>
             </TooltipTrigger>
-            <TooltipContent>
-              <div className="text-xs space-y-1">
-                <p><span className="font-bold">Completed:</span> {formatDateDisplay(stageDate)}</p>
-                {effectiveStartTime && <p><span className="text-slate-400">Duration:</span> {completionDuration}</p>}
-                {isCompletedOverdue && <p className="text-amber-400 font-bold">Overdue</p>}
+            <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md`}>
+              <div className="space-y-2 p-1">
+                <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
+                  <span className={`font-bold ${textColorClass}`}>{isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time"}</span>
+                </div>
+                <div className="text-xs space-y-1">
+                    <div className="flex justify-between gap-4"><span className="text-slate-500">Completed:</span> <span>{formatDateDisplay(stageDate)}</span></div>
+                    <div className="flex justify-between gap-4"><span className="text-slate-500">Duration:</span> <span>{completionDuration}</span></div>
+                    {isCompletedOverdue && <p className="text-amber-600 font-bold">Overdue</p>}
+                </div>
               </div>
             </TooltipContent>
           </Tooltip>
@@ -897,7 +817,7 @@ export default function EditableStageCell({
       );
     }
 
-    // 3. EDIT MODE
+    // 3. EDIT MODE (Active input)
     if (isEditing && !requiresUpload) {
       return (
         <div className="flex items-center gap-2 min-w-[150px]">
@@ -910,34 +830,40 @@ export default function EditableStageCell({
 
     // 4. IN PROGRESS (Time Status)
     if (timeStatus && !requiresUpload && !hasLinkedDocument) {
+      // ** COLOR & ICON LOGIC for IN PROGRESS (Matches ReportsPage) **
+      const textColorClass = timeStatus.isOverdue ? "text-red-600" : "text-blue-600";
+      const icon = timeStatus.isOverdue ? <AlertTriangle className="h-3.5 w-3.5" /> : <Timer className="h-3.5 w-3.5" />;
+      const borderColorClass = timeStatus.isOverdue ? "border-red-200 bg-red-50" : "border-blue-200 bg-blue-50";
+
       return (
         <div className="flex flex-col gap-1 min-w-[120px] items-start">
-          <span className="text-xs font-medium text-slate-500 flex items-center gap-1">
-            {timeStatus.formattedElapsed} elapsed
-          </span>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className="flex items-center gap-2">
-                  <span className={`inline-flex items-center rounded-md ${timeStatus.isOverdue ? 'bg-red-50 text-red-600 border-red-200' : 'bg-blue-50 text-blue-600 border-blue-200'} text-[10px] px-1.5 py-0.5 font-normal cursor-help`}>
-                    {timeStatus.isOverdue ? <AlertTriangle className="h-3 w-3 mr-1" /> : <Clock3 className="h-3 w-3 mr-1" />}
-                    {timeStatus.isOverdue ? "Overdue" : "In Progress"}
-                  </span>
+                  <div className={`flex items-center gap-1.5 font-medium text-xs ${textColorClass} cursor-default`}>
+                    {icon}
+                    <span>{timeStatus.formattedElapsed} elapsed</span>
+                  </div>
                   {/* Action Button for non-upload stages */}
                   <Button variant="ghost" size="sm" className="h-6 w-6 p-0 border border-dashed border-gray-300 hover:border-gray-400" onClick={() => setIsEditing(true)}>
                     <Check className="h-3 w-3 text-green-600" />
                   </Button>
                 </div>
               </TooltipTrigger>
-              <TooltipContent className="max-w-[250px]">
-                <div className="space-y-2">
-                  <div className="flex justify-between border-b pb-1"><span className="font-bold">{stage.name}</span></div>
-                  {stage.estimated_time > 0 && (
-                    <>
-                      <div className="flex justify-between gap-4"><span className="text-slate-400">Time Remaining:</span><span className={timeStatus.isOverdue ? 'text-red-400' : 'text-green-400'}>{timeStatus.isOverdue ? `Overdue by ${timeStatus.formattedOverdue}` : timeStatus.formattedRemaining}</span></div>
-                      <div className="flex justify-between gap-4"><span className="text-slate-400">Estimate:</span><span>{formatDuration(stage.estimated_time)}</span></div>
-                    </>
-                  )}
+              <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md max-w-[250px]`}>
+                <div className="space-y-2 p-1">
+                  <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
+                    <span className={`font-bold ${textColorClass}`}>{timeStatus.isOverdue ? "In Progress (Overdue)" : "In Progress (On Track)"}</span>
+                  </div>
+                  <div className="text-xs space-y-1">
+                    {stage.estimated_time > 0 && (
+                      <>
+                        <div className="flex justify-between gap-4"><span className="text-slate-500">Remaining:</span><span className={timeStatus.isOverdue ? 'font-bold text-red-600' : 'text-green-600'}>{timeStatus.isOverdue ? `Overdue by ${timeStatus.formattedOverdue}` : timeStatus.formattedRemaining}</span></div>
+                        <div className="flex justify-between gap-4"><span className="text-slate-500">Estimate:</span><span>{formatDuration(stage.estimated_time)}</span></div>
+                      </>
+                    )}
+                  </div>
                 </div>
               </TooltipContent>
             </Tooltip>
@@ -958,178 +884,70 @@ export default function EditableStageCell({
     return <span className="text-sm text-gray-500 italic">-</span>;
   }
 
-  const SkipStageDialog = () => (
-    <Dialog open={isSkipDialogOpen} onOpenChange={setIsSkipDialogOpen}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Skip Stage</DialogTitle>
-          <DialogDescription>
-            Please provide a reason for skipping this stage.
-          </DialogDescription>
-        </DialogHeader>
+  if (renderMode === 'actions') {
+    if (!isStageApplicable) return <span className="text-sm text-gray-400 italic">-</span>;
+    
+    const hasAutomation = !!(stage?.automation?.automationId || stage?.automation?.id || stage?.web_automation?.automationId);
+    const hasAnyAutomation = requiresUpload && stage.documents?.some((doc: any) => isDocumentApplicable(doc, task) && (doc.automationId || doc.automation?.id));
+    
+    const showAutomation = (hasAutomation || hasAnyAutomation) && !hasLinkedDocument;
+    const showSkip = !isStageCompleted;
+    const hasMoreActions = showAutomation || showSkip;
 
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">Select a reason</label>
-            <Select onValueChange={setSelectedSkipReason}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select a reason" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Not Sure">Not Sure</SelectItem>
-                <SelectItem value="Already Completed">Already Completed</SelectItem>
-                <SelectItem value="Cancelled">Cancelled</SelectItem>
-                <SelectItem value="custom">Custom Reason</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+    return (
+      <div className="flex items-center justify-center gap-1">
+        {/* View Document */}
+        {linkedDocument && (
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-green-600 hover:bg-green-50" onClick={handleViewDocument} title="View document details">
+            <Eye className="h-3.5 w-3.5" />
+          </Button>
+        )}
+        
+        {/* Upload Document */}
+        {requiresUpload && (
+          <Button variant="ghost" size="icon" className={`h-7 w-7 ${hasLinkedDocument ? 'text-blue-400 hover:bg-blue-50' : 'text-blue-600 hover:bg-blue-50'}`} onClick={handleDocumentUpload} title={hasLinkedDocument ? 'Upload new document' : 'Upload document'}>
+            <Upload className="h-3.5 w-3.5" />
+          </Button>
+        )}
 
-          {(selectedSkipReason === 'custom' || !selectedSkipReason) && (
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                {selectedSkipReason === 'custom' ? 'Custom reason' : 'Or enter your own reason'}
-              </label>
-              <Textarea
-                placeholder="Enter reason for skipping this stage"
-                value={skipReason}
-                onChange={(e) => setSkipReason(e.target.value)}
-                rows={3}
-              />
-            </div>
-          )}
+        {/* More Actions Dropdown */}
+        {hasMoreActions && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-500 hover:bg-slate-100">
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {showAutomation && (
+                <DropdownMenuItem onClick={handleTriggerAutomation} disabled={isAutomationRunning}>
+                  <Zap className="mr-2 h-3.5 w-3.5" />
+                  {isAutomationRunning ? 'Running...' : 'Run Automation'}
+                </DropdownMenuItem>
+              )}
+              {showSkip && (
+                <DropdownMenuItem onClick={handleSkipClick}>
+                  <SkipForward className="mr-2 h-3.5 w-3.5" />
+                  Skip Stage
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
+    );
+  }
 
-          <div className="flex justify-end gap-2 pt-2">
-            <Button
-              variant="outline"
-              onClick={() => setIsSkipDialogOpen(false)}
-              disabled={isLoading}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={confirmSkip}
-              disabled={isLoading || (!selectedSkipReason && !skipReason)}
-            >
-              {isLoading ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : null}
-              Confirm Skip
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-
-  const renderContent = () => {
-    if (renderMode === 'actions') {
-      if (!isStageApplicable) {
-        return <span className="text-sm text-gray-400 italic">-</span>;
-      }
-
-      const hasAutomation = !!(stage?.automation?.automationId || stage?.automation?.id || stage?.web_automation?.automationId);
-      const hasAnyAutomation = requiresUpload && stage.documents?.some((doc: any) =>
-        isDocumentApplicable(doc, task) && (doc.automationId || doc.automation?.id)
-      );
-
-      if (isDocumentRow && documentData) {
-        const isApplicable = isDocumentApplicable(documentData, task);
-
-        console.log('Document row rendering check:', {
-          documentId: documentData.id,
-          documentName: documentData.name || documentData.document_name,
-          isApplicable,
-          taskId: task.id,
-          taskClass: task.class_id,
-          taskSubdept: task.subdepartment_id || task.subdepartment?.id,
-          documentTargets: documentData.targetEntities,
-          isSpecial: documentData.isSpecial
-        });
-
-        if (!isApplicable) {
-          return (
-            <div className="h-full flex items-center justify-center text-gray-400">
-              N/A
-            </div>
-          );
-        }
-      }
-
-      return (
-        <div className="flex items-center justify-center gap-1">
-          {/* Automation button */}
-          {(hasAutomation || hasAnyAutomation) && !hasLinkedDocument && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-amber-500 hover:bg-amber-50"
-              onClick={handleTriggerAutomation}
-              disabled={isAutomationRunning}
-              title="Run automation"
-            >
-              {isAutomationRunning ? <Clock className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
-            </Button>
-          )}
-
-          {/* View document button - always show if there's a linked document */}
-          {linkedDocument && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-green-600 hover:bg-green-50"
-              onClick={handleViewDocument}
-              title="View document details"
-            >
-              <Eye className="h-3.5 w-3.5" />
-            </Button>
-          )}
-
-          {!isStageCompleted && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-amber-600 hover:bg-amber-50"
-              onClick={handleSkipClick}
-              title="Skip this stage"
-            >
-              <SkipForward className="h-3.5 w-3.5" />
-            </Button>
-          )}
-          {/* Upload document button */}
-          {requiresUpload && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className={`h-7 w-7 ${hasLinkedDocument ? 'text-blue-400 hover:bg-blue-50' : 'text-blue-600 hover:bg-blue-50'}`}
-              onClick={handleDocumentUpload}
-              title={hasLinkedDocument ? 'Upload new document' : 'Upload document'}
-            >
-              <Upload className="h-3.5 w-3.5" />
-            </Button>
-          )}
-        </div>
-      );
-    }
-  };
-
-  // Fallback (shouldn't reach here)
   return (
     <>
-      {renderContent()}
       <SkipStageDialog />
-      {/* Extraction Preview Dialog */}
       <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
         <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden">
           <DialogHeader className="p-6 pb-3 border-b">
             <DialogTitle className="text-lg">
               <div className="flex items-center justify-between">
-                <div>
-                  {task?.name}
-                  {task?.client_name && ` - ${task.client_name}`}
-                </div>
-                <div className="text-sm font-normal text-muted-foreground">
-                  {previewDocuments.length} document{previewDocuments.length !== 1 ? 's' : ''}
-                </div>
+                <div>{task?.name} {task?.client_name && ` - ${task.client_name}`}</div>
+                <div className="text-sm font-normal text-muted-foreground">{previewDocuments.length} document{previewDocuments.length !== 1 ? 's' : ''}</div>
               </div>
             </DialogTitle>
           </DialogHeader>
@@ -1139,17 +957,12 @@ export default function EditableStageCell({
                 {previewDocuments.map((doc, index) => (
                   <div key={doc.documentId} className="border rounded-lg overflow-hidden">
                     <div className="p-4 bg-gray-50 border-b flex justify-between items-center">
-                      <h3 className="font-medium">
-                        {doc.documentName || 'Document'}
-                        <span className="text-muted-foreground text-sm font-normal ml-2">
-                          (Uploaded: {doc.created_at ? formatDateDisplay(doc.created_at) : 'N/A'})
-                        </span>
-                      </h3>
+                      <h3 className="font-medium">{doc.documentName || 'Document'} <span className="text-muted-foreground text-sm font-normal ml-2">(Uploaded: {doc.created_at ? formatDateDisplay(doc.created_at) : 'N/A'})</span></h3>
                     </div>
                     <div className="p-4">
                       <div className="border rounded-lg">
                         <ExtractionPreview
-                          documentId={doc.documentId}  // ← ADD THIS LINE
+                          documentId={doc.documentId}
                           documentName={doc.documentName}
                           extractedData={doc.extractedData || {}}
                           fields={doc.fields || []}
@@ -1162,9 +975,7 @@ export default function EditableStageCell({
                           readOnly={false}
                           type={doc.type}
                           file={doc.file}
-                          onDataChange={(fieldName, value) =>
-                            handlePreviewDataChange(doc.documentId, fieldName, value)
-                          }
+                          onDataChange={(fieldName, value) => handlePreviewDataChange(doc.documentId, fieldName, value)}
                         />
                       </div>
                     </div>
@@ -1172,20 +983,10 @@ export default function EditableStageCell({
                 ))}
               </div>
             ) : (
-              <div className="h-full flex items-center justify-center">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                <p className="ml-4 text-muted-foreground">Loading documents...</p>
-              </div>
+              <div className="h-full flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /><p className="ml-4 text-muted-foreground">Loading documents...</p></div>
             )}
           </div>
-          <div className="p-4 border-t flex justify-end">
-            <Button
-              variant="default"
-              onClick={() => setIsPreviewOpen(false)}
-            >
-              Close
-            </Button>
-          </div>
+          <div className="p-4 border-t flex justify-end"><Button variant="default" onClick={() => setIsPreviewOpen(false)}>Close</Button></div>
         </DialogContent>
       </Dialog>
     </>

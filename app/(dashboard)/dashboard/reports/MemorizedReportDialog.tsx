@@ -1,4 +1,6 @@
 // @ts-nocheck
+// components/MemorizedReportDialog.tsx
+
 "use client"
 
 import React, { useState, useMemo, useCallback, useEffect } from "react"
@@ -16,9 +18,10 @@ import type { Department, KycDocument } from "../utils/taskManagerData"
 import { ENHANCED_TABLE_HEADERS_IMMIGRATION } from "../tasks/overall-view/tableUtils"
 
 // --- Type Definitions ---
+
 type FieldConfig = {
   id: string;
-  isDefault: boolean; 
+  isDefault: boolean; // True = Visible on load
 };
 
 type ReportConfiguration = {
@@ -107,7 +110,7 @@ export function MemorizedReportDialog({
   stages,
   kycDocuments,
   onApplyReport,
-  tableHeaders = ENHANCED_TABLE_HEADERS_IMMIGRATION,
+  tableHeaders,
 }: MemorizedReportDialogProps) {
   const [reports, setReports] = useState<MemorizedReport[]>([])
   const [selectedReport, setSelectedReport] = useState<MemorizedReport | null>(null)
@@ -116,6 +119,7 @@ export function MemorizedReportDialog({
   const [reportName, setReportName] = useState("")
   const [reportConfig, setReportConfig] = useState<ReportConfiguration>(INITIAL_REPORT_CONFIG)
   
+  // UPDATED: Default is now TRUE
   const [showSelectedOnly, setShowSelectedOnly] = useState(true);
 
   const fetchReports = useCallback(async () => {
@@ -143,7 +147,7 @@ export function MemorizedReportDialog({
     } else {
       setSelectedReport(null);
       setIsEditing(false);
-      setShowSelectedOnly(true); 
+      setShowSelectedOnly(true); // Reset to true on open
     }
   }, [open, fetchReports, department]);
 
@@ -234,7 +238,7 @@ export function MemorizedReportDialog({
     }
   };
 
-  // --- Toggle Logic ---
+  // --- Toggle Logic (Updated for Independence) ---
 
   const toggleTaskField = (fieldId: string, type: 'include' | 'default') => {
     setReportConfig(prev => {
@@ -243,11 +247,21 @@ export function MemorizedReportDialog({
       let newFields = [...current];
 
       if (type === 'include') {
-        if (exists) newFields = newFields.filter(f => f.id !== fieldId);
-        else newFields.push({ id: fieldId, isDefault: false });
+        if (exists) {
+          // Unchecking Report Table removes it
+          newFields = newFields.filter(f => f.id !== fieldId);
+        } else {
+          // Checking Report Table adds it (default false)
+          newFields.push({ id: fieldId, isDefault: false });
+        }
       } else if (type === 'default') {
-        if (exists) newFields = newFields.map(f => f.id === fieldId ? { ...f, isDefault: !f.isDefault } : f);
-        else newFields.push({ id: fieldId, isDefault: true });
+        if (exists) {
+          // Toggle default state
+          newFields = newFields.map(f => f.id === fieldId ? { ...f, isDefault: !f.isDefault } : f);
+        } else {
+          // Checking Default on an item that isn't included adds it AND sets default true
+          newFields.push({ id: fieldId, isDefault: true });
+        }
       }
       return { ...prev, taskFields: newFields };
     });
@@ -262,9 +276,13 @@ export function MemorizedReportDialog({
         newStages[stageId].isStageDateSelected = !newStages[stageId].isStageDateSelected;
       } else {
         newStages[stageId].isStageDateDefault = !newStages[stageId].isStageDateDefault;
-        if(newStages[stageId].isStageDateDefault) newStages[stageId].isStageDateSelected = true;
+        // If enabling default, ensure it's selected
+        if(newStages[stageId].isStageDateDefault) {
+            newStages[stageId].isStageDateSelected = true;
+        }
       }
 
+      // Cleanup
       if (!newStages[stageId].isStageDateSelected && Object.keys(newStages[stageId].documents).length === 0) {
         delete newStages[stageId];
       }
@@ -303,8 +321,11 @@ export function MemorizedReportDialog({
         if (exists) newFields = newFields.filter((f: any) => f.id !== fieldId);
         else newFields.push({ id: fieldId, isDefault: false });
       } else if (type === 'default') {
-        if (exists) newFields = newFields.map((f: any) => f.id === fieldId ? { ...f, isDefault: !f.isDefault } : f);
-        else newFields.push({ id: fieldId, isDefault: true });
+        if (exists) {
+            newFields = newFields.map((f: any) => f.id === fieldId ? { ...f, isDefault: !f.isDefault } : f);
+        } else {
+            newFields.push({ id: fieldId, isDefault: true });
+        }
       }
       
       newStages[stageId].documents[kycId].fields = newFields;
@@ -313,6 +334,7 @@ export function MemorizedReportDialog({
   };
 
   // --- Rendering ---
+
   const sortedReports = useMemo(() => {
     return [...reports].sort((a, b) => {
       if (a.is_favorite && !b.is_favorite) return -1;
@@ -351,7 +373,7 @@ export function MemorizedReportDialog({
               
               {selectedReport?.id === report.id && (
                 <div className="flex items-center gap-1 opacity-100 transition-opacity">
-                  <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-500 hover:text-blue-600" onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-500 hover:text-blue-600" onClick={(e) => { e.stopPropagation(); handleEditReport(); }}>
                     <Pencil className="h-3.5 w-3.5"/>
                   </Button>
                   <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-500 hover:text-red-600" onClick={(e) => { e.stopPropagation(); handleDeleteReport(report.id); }}>
@@ -367,6 +389,9 @@ export function MemorizedReportDialog({
     </div>
   );
 
+  const handleEditReport = () => setIsEditing(true);
+
+  // UPDATED: Grid Header with Default First
   const GridHeader = () => (
     <div className="grid grid-cols-12 gap-2 px-2 py-1 bg-slate-100 text-xs font-semibold text-slate-600 rounded mb-2 sticky top-0 z-10">
       <div className="col-span-8">Column Name</div>
@@ -375,22 +400,32 @@ export function MemorizedReportDialog({
     </div>
   );
 
+  // UPDATED: Grid Row with Default First and Independent Checkboxes
   const GridRow = ({ label, isIncluded, isDefault, onToggleInclude, onToggleDefault, depth = 0 }: any) => (
     <div className="grid grid-cols-12 gap-2 py-1.5 items-center hover:bg-slate-50 rounded px-2 transition-colors">
       <div className="col-span-8 flex items-center gap-2">
         <span style={{ marginLeft: `${depth * 12}px` }} className="text-sm truncate" title={label}>{label}</span>
       </div>
+      {/* Default Column First */}
       <div className="col-span-2 flex justify-center">
-        <Checkbox checked={isDefault} onCheckedChange={onToggleDefault} />
+        <Checkbox 
+          checked={isDefault} 
+          onCheckedChange={onToggleDefault}
+          // Disabled prop removed
+        />
       </div>
+      {/* Report Table Column Second */}
       <div className="col-span-2 flex justify-center">
-        <Checkbox checked={isIncluded} onCheckedChange={onToggleInclude} />
+        <Checkbox 
+            checked={isIncluded} 
+            onCheckedChange={onToggleInclude} 
+        />
       </div>
     </div>
   );
 
   const renderReportEditor = () => {
-    // Filter headers logic
+    // Filter Logic
     const filteredTaskFields = tableHeaders.filter(field => {
         if(!showSelectedOnly) return true;
         return reportConfig.taskFields?.some(f => f.id === field.id);
@@ -414,9 +449,14 @@ export function MemorizedReportDialog({
           </div>
           <div className="flex items-center gap-2">
              <div className="flex items-center space-x-2 bg-slate-100 px-3 py-1.5 rounded-md border border-slate-200">
-                <Checkbox id="showSelectedOnly" checked={showSelectedOnly} onCheckedChange={(c) => setShowSelectedOnly(!!c)} />
+                <Checkbox 
+                    id="showSelectedOnly" 
+                    checked={showSelectedOnly} 
+                    onCheckedChange={(c) => setShowSelectedOnly(!!c)} 
+                />
                 <Label htmlFor="showSelectedOnly" className="text-xs cursor-pointer font-medium text-slate-700 flex items-center gap-1">
-                    <Filter className="h-3 w-3" /> Show Selected Only
+                    <Filter className="h-3 w-3" />
+                    Show Selected Only
                 </Label>
              </div>
              <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)}><X className="mr-2 h-4 w-4"/> Cancel</Button>
@@ -473,7 +513,9 @@ export function MemorizedReportDialog({
 
                     return (
                         <AccordionItem key={stage.id} value={`stage-${stage.id}`} className="border-b-0">
-                        <AccordionTrigger className="py-2 hover:no-underline hover:bg-slate-50 px-2 rounded"><span className="font-semibold text-sm">{stage.name}</span></AccordionTrigger>
+                        <AccordionTrigger className="py-2 hover:no-underline hover:bg-slate-50 px-2 rounded">
+                            <span className="font-semibold text-sm">{stage.name}</span>
+                        </AccordionTrigger>
                         <AccordionContent className="pt-1 pb-4 space-y-2">
                             {(!showSelectedOnly || stageConfig?.isStageDateSelected) && (
                                 <GridRow 
@@ -485,6 +527,7 @@ export function MemorizedReportDialog({
                                 depth={1}
                                 />
                             )}
+
                             {filteredDocs.map((doc: any) => {
                             const kycDoc = kycDocuments.get(doc.kycId);
                             if (!kycDoc) return null;
@@ -493,15 +536,23 @@ export function MemorizedReportDialog({
                             return (
                                 <div key={`${stage.id}-${doc.kycId}`} className="mt-2">
                                 <div className="flex items-center gap-2 py-1 px-2 ml-4 bg-slate-50/50 rounded">
-                                    <Checkbox id={`doc-${stage.id}-${doc.kycId}`} checked={isDocActive} onCheckedChange={() => toggleDocument(stage.id, doc.kycId)}/>
-                                    <Label htmlFor={`doc-${stage.id}-${doc.kycId}`} className="text-xs font-semibold text-slate-700 cursor-pointer">{kycDoc.display_name || kycDoc.name}</Label>
+                                    <Checkbox 
+                                        id={`doc-${stage.id}-${doc.kycId}`} 
+                                        checked={isDocActive} 
+                                        onCheckedChange={() => toggleDocument(stage.id, doc.kycId)}
+                                    />
+                                    <Label htmlFor={`doc-${stage.id}-${doc.kycId}`} className="text-xs font-semibold text-slate-700 cursor-pointer">
+                                        {kycDoc.display_name || kycDoc.name}
+                                    </Label>
                                 </div>
+
                                 {isDocActive && (
                                     <div className="mt-1 ml-2 border-l-2 border-slate-100 pl-2">
                                         {kycDoc.fields?.map((field: any) => {
                                             const docConfig = stageConfig?.documents?.[doc.kycId];
                                             const fieldConfig = docConfig?.fields.find((f: any) => f.id === field.id);
                                             if(showSelectedOnly && !fieldConfig) return null;
+
                                             return (
                                             <GridRow
                                                 key={`${stage.id}-${doc.kycId}-${field.id}`}
@@ -555,12 +606,10 @@ export function MemorizedReportDialog({
                 )
               })}
             </div>
-            {/* ... (Stage details rendering logic similar to editor but read-only) ... */}
+
             {Object.entries(reportConfig.stages).map(([stageId, stageConfig]) => {
               const stage = stages.find(s => s.id === stageId);
               if (!stage) return null;
-              if (!stageConfig.isStageDateSelected && Object.keys(stageConfig.documents).length === 0) return null;
-              
               return (
                 <div key={stageId} className="pt-2">
                    <h4 className="font-semibold text-sm mb-2 text-blue-700">{stage.name}</h4>
@@ -617,6 +666,7 @@ export function MemorizedReportDialog({
               </div>
             )}
           </div>
+          
           <DialogFooter className="mt-auto pt-4 border-t">
             {isEditing ? (
               <Button onClick={handleSaveReport} disabled={isLoading || !reportName.trim()} className="w-full sm:w-auto">
@@ -624,7 +674,9 @@ export function MemorizedReportDialog({
                 Save Report Configuration
               </Button>
             ) : selectedReport ? (
-              <Button onClick={handleApply} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700">Apply This Report</Button>
+              <Button onClick={handleApply} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700">
+                Apply This Report
+              </Button>
             ) : null}
           </DialogFooter>
         </div>
