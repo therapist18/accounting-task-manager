@@ -840,11 +840,18 @@ export default function ReportsPage() {
               } catch (e) { return '-'; }
             }
             return '-';
-          case 'officer': return task.officer_name || (typeof task.officer === 'string' ? task.officer : task.officer?.name) || '-';
-          case 'task_manager': return task.task_manager_name || (typeof task.task_manager === 'string' ? task.task_manager : task.task_manager?.name) || task.assigned_to_name || '-';
+          case 'officer': return task.officer_name || (typeof task.officer === 'string' ? task.officer : task.officer?.name) || <span className="text-red-500 text-xs font-bold">Unallocated</span>;
+          case 'task_manager': return task.task_manager_name || (typeof task.task_manager === 'string' ? task.task_manager : task.task_manager?.name) || task.assigned_to_name || <span className="text-red-500 text-xs font-bold">Unallocated</span>;
           default:
             return getCellContent(
-              task, col.field, enhancedTasksData, taskDependants, new Set(), companies,
+              task, 
+              col.field, 
+              // Defensive check: Ensure enhancedTasksData is a Map
+              enhancedTasksData instanceof Map ? enhancedTasksData : new Map(), 
+              // Defensive check: Ensure taskDependants is a Map to prevent .get() crash
+              taskDependants instanceof Map ? taskDependants : new Map(), 
+              new Set(), 
+              companies,
               (t) => ({ department: departments.find(d => d.id === t.department_id), job_level: t.job_level, officer: t.officer || t.officer_name, task_manager: t.task_manager || t.task_manager_name || t.assigned_to_name }),
               getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper,
               (t) => renderImmigrationStatusCell(t, getEnhancedImmigrationStatusWrapper, new Set(), () => { }),
@@ -865,10 +872,20 @@ export default function ReportsPage() {
   // --- 7. Configuration Building --- (Same as original)
   const columns = useMemo(() => {
     if (!activeReport || !stages.length) return [];
-    const getLabel = (id: string) => id.replace(/_/g, ' ').toUpperCase();
+const getLabel = (id: any) => {
+  if (typeof id !== 'string') {
+    console.warn('Expected string id, got:', id);
+    return String(id || '').toUpperCase();
+  }
+  return id.replace(/_/g, ' ').toUpperCase();
+};
     const cols: any[] = [];
-    activeReport.configuration?.taskFields?.forEach((field: any) => {
-      cols.push({ id: `task_${field}`, label: getLabel(field), type: 'task', field });
+    activeReport.configuration?.taskFields?.forEach((fieldItem: any) => {
+      // Fix for "Expected string id" error: Extract id if fieldItem is an object
+      const fieldId = typeof fieldItem === 'string' ? fieldItem : fieldItem?.id;
+      if (!fieldId) return;
+      
+      cols.push({ id: `task_${fieldId}`, label: getLabel(fieldId), type: 'task', field: fieldId });
     });
     cols.push({ id: 'current_stage_name', label: 'Current Stage', type: 'task', field: 'current_stage_name' });
     cols.push({ id: 'imm_status_doc', label: 'Imm Status', type: 'imm_status_doc' });
