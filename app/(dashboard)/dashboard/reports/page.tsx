@@ -1,4 +1,3 @@
-
 // @ts-nocheck
 "use client";
 
@@ -15,7 +14,9 @@ import {
   Calendar, ShieldCheck, Clock, ArrowUpDown, Search, Timer, AlertCircle,
   Check, Clock3,
   DotSquare,
-  MoreHorizontal
+  MoreHorizontal,
+  CheckCircle2,
+  XCircle
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -75,6 +76,10 @@ const SPECIAL_STAGE_IDS = [
   '072b9710-45df-4a05-ba65-01b4ef29d61d', // Status stage
   'caefd742-5de5-4341-a3bb-81d7b9dd2b73'  // Endorsement stage
 ];
+
+// --- CONSTANTS FOR LAYOUT ---
+const COLUMN_WIDTH_CLASS = "w-[180px] min-w-[180px] max-w-[180px]";
+const INDEX_WIDTH_CLASS = "w-[60px] min-w-[60px] max-w-[60px]";
 
 const parseDateString = (dateInput: any): Date | null => {
   return parseDate(dateInput instanceof Date ? dateInput.toISOString() : dateInput);
@@ -441,12 +446,12 @@ export default function ReportsPage() {
   // --- 6. Render Logic ---
   const renderCellValue = (task, col) => {
     // ==================================================================================
-    // ⬇️⬇️⬇️ UPDATED SECTION: STAGE DATE WITH STATUS LOGIC ⬇️⬇️⬇️
+    // ⬇️⬇️⬇️ UPDATED SECTION: STAGE DATE WITH COLOR CODED VISUALS ⬇️⬇️⬇️
     // ==================================================================================
     if (col.type === 'stage_date') {
       const stage = stages.find(s => s.id === col.stageId);
       if (!stage) return <span className="text-slate-300">-</span>;
-      if (!isStageApplicableToTask(stage, task)) return <span className="text-sm text-gray-400 italic">N/A</span>;
+      if (!isStageApplicableToTask(stage, task)) return <span className="text-sm text-gray-300 italic">N/A</span>;
 
       // Current stage Check
       const currentStageStatus = getCurrentStageStatus(task, stages, departments, allDocuments);
@@ -458,7 +463,7 @@ export default function ReportsPage() {
       const stageData = task.stages?.[col.stageId];
       const estimatedMinutes = stage.estimated_time;
 
-      // --- 1. CALCULATE EFFECTIVE START TIME (Moved Up to Apply to Completed Tasks too) ---
+      // --- 1. CALCULATE EFFECTIVE START TIME ---
       let effectiveStartTime = task.created_at ? parseDateString(task.created_at) : null;
       const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
       const currentStageIndex = sortedStages.findIndex(s => s.id === col.stageId);
@@ -507,14 +512,14 @@ export default function ReportsPage() {
         return (
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="inline-flex items-center rounded-md bg-amber-100 text-amber-700 border border-amber-200 cursor-help font-normal text-[10px] px-2 py-0.5">
-                Skipped
+              <span className="flex items-center gap-1.5 text-xs text-amber-600 font-medium cursor-help">
+                <AlertCircle className="h-3.5 w-3.5" /> Skipped
               </span>
             </TooltipTrigger>
-            <TooltipContent className="bg-slate-900 text-white border-slate-800">
+            <TooltipContent className="bg-amber-50 text-amber-900 border-amber-200">
               <div className="text-xs text-left space-y-1">
-                <p><span className="font-semibold text-slate-300">Reason:</span> {reason}</p>
-                {skippedAt && <p><span className="font-semibold text-slate-300">Date:</span> {formatDateTimeForDisplay(skippedAt)}</p>}
+                <p><span className="font-semibold">Reason:</span> {reason}</p>
+                {skippedAt && <p><span className="font-semibold">Date:</span> {formatDateTimeForDisplay(skippedAt)}</p>}
               </div>
             </TooltipContent>
           </Tooltip>
@@ -535,16 +540,7 @@ export default function ReportsPage() {
             const details = linkedDoc.extracted_details || {};
             const kycDoc = kycDocuments.get(linkedDoc.kyc_id || linkedDoc.document_id);
             if (kycDoc?.fields) {
-              // Get all fields that are marked as immigration dates
-              const immigrationDateFields = kycDoc.fields
-                .filter((field: any) => field.isImmigrationDate === true)
-                .map((field: any) => field.fieldName || field.name || '')
-                .filter(Boolean);
-
-              // If no specific immigration date fields, check all date fields
-              const dateFieldsToCheck = immigrationDateFields.length > 0
-                ? immigrationDateFields
-                : kycDoc.fields
+              const dateFieldsToCheck = kycDoc.fields
                   .filter((field: any) => field.fieldType === 'date' || field.type === 'date')
                   .map((field: any) => field.fieldName || field.name || '')
                   .filter(Boolean);
@@ -579,39 +575,34 @@ export default function ReportsPage() {
           durationTakenText = formatDuration(durationMinutes);
         }
 
-        const statusLabel = isCompletedOverdue ? "Completed but Overdue" : "Completed On Time";
-        const badgeColorClass = isCompletedOverdue
-          ? "bg-amber-50 text-amber-700 border-amber-200"
-          : "";
+        // Color coding for completion
+        const textColorClass = isCompletedOverdue ? "text-amber-600" : "text-emerald-600";
+        const icon = isCompletedOverdue ? <Clock className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />;
+        const borderColorClass = isCompletedOverdue ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-100";
 
         return (
-          <div className="flex gap-1 items-center justify-between">
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-semibold text-slate-700">
-                {formatDateTimeForDisplay(completionDate)}
-              </span>
-              {isCompletedOverdue && <Badge variant="outline" className={`${badgeColorClass} text-[10px] px-1.5 py-0 font-normal`}>
-                <Clock className="h-3 w-3 mr-1" />
-                {statusLabel}
-              </Badge>}
-            </div>
-            <Tooltip>
-              <TooltipTrigger asChild enterDelay={300}>
-                <MoreHorizontal className="h-4 w-4" />
-              </TooltipTrigger>
-              <TooltipContent className="max-w-[280px]">
-                <div className="space-y-2">
-                  <div className="flex justify-between border-b pb-1"><span className="font-bold">{stage.name}</span></div>
-                  <div className="flex justify-between gap-4"><span className="text-slate-400">Started:</span> <span>{effectiveStartTime ? formatDateTimeForDisplay(effectiveStartTime) : '-'}</span></div>
-                  <div className="flex justify-between gap-4"><span className="text-slate-400">Completed:</span> <span>{formatDateTimeForDisplay(completionDate)}</span></div>
-                  <div className="flex justify-between gap-4"><span className="text-slate-400">Duration:</span> <span>{durationTakenText}</span></div>
-                  {estimatedMinutes > 0 && (
-                    <div className="flex justify-between gap-4"><span className="text-slate-400">Allowed:</span> <span>{formatDuration(estimatedMinutes)}</span></div>
-                  )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className={`flex items-center gap-1.5 font-semibold text-xs ${textColorClass} cursor-default`}>
+                {icon}
+                <span>{formatDateForDisplay(completionDate)}</span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md`}>
+              <div className="space-y-2 p-1">
+                <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
+                  <span className={`font-bold ${textColorClass}`}>{isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time"}</span>
                 </div>
-              </TooltipContent>
-            </Tooltip>
-          </div>
+                <div className="text-xs space-y-1">
+                    <div className="flex justify-between gap-4"><span className="text-slate-500">Completed:</span> <span>{formatDateTimeForDisplay(completionDate)}</span></div>
+                    <div className="flex justify-between gap-4"><span className="text-slate-500">Duration:</span> <span>{durationTakenText}</span></div>
+                    {estimatedMinutes > 0 && (
+                        <div className="flex justify-between gap-4"><span className="text-slate-500">Allowed:</span> <span>{formatDuration(estimatedMinutes)}</span></div>
+                    )}
+                </div>
+              </div>
+            </TooltipContent>
+          </Tooltip>
         );
       }
 
@@ -620,39 +611,42 @@ export default function ReportsPage() {
 
       const timeStatus = getTimeStatus(effectiveStartTime, estimatedMinutes);
       const isOverdue = timeStatus?.isOverdue || false;
-      const statusLabel = isOverdue ? "In Progress (Overdue)" : "In Progress";
+      
+      // Color coding for In Progress
+      const textColorClass = isOverdue ? "text-red-600" : "text-blue-600";
+      const icon = isOverdue ? <AlertTriangle className="h-3.5 w-3.5" /> : <Timer className="h-3.5 w-3.5" />;
+      const borderColorClass = isOverdue ? "border-red-200 bg-red-50" : "border-blue-200 bg-blue-50";
 
       return (
-        <div className="flex flex-col gap-1 min-w-[120px] items-start">
-          <span className="text-xs font-medium text-slate-500 flex items-center gap-1">
-            {timeStatus?.formattedElapsed} elapsed
-          </span>
-          <Tooltip>
-            <TooltipTrigger asChild enterDelay={300}>
-              <span className={`inline-flex items-center rounded-md ${isOverdue ? 'bg-red-50 text-red-600 border-red-200' : 'bg-blue-50 text-blue-600 border-blue-200'} text-[10px] px-1.5 py-0.5 font-normal`}>
-                {isOverdue ? <AlertTriangle className="h-3 w-3 mr-1" /> : <Clock3 className="h-3 w-3 mr-1" />}
-                {statusLabel}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent className="max-w-[250px]">
-              <div className="space-y-2">
-                <div className="flex justify-between border-b pb-1"><span className="font-bold">{stage.name}</span></div>
-                <div className="flex justify-between gap-4"><span className="text-slate-400">Started:</span> <span>{formatDateTimeForDisplay(effectiveStartTime)}</span></div>
-                {estimatedMinutes > 0 && (
-                  <>
-                    <div className="flex justify-between gap-4">
-                      <span className="text-slate-400">Time Remaining:</span>
-                      <span className={isOverdue ? 'text-red-400' : 'text-green-400'}>
-                        {isOverdue ? `Overdue by ${timeStatus?.formattedOverdue}` : timeStatus?.formattedRemaining}
-                      </span>
-                    </div>
-                    <div className="flex justify-between gap-4"><span className="text-slate-400">Estimate:</span> <span>{formatDuration(estimatedMinutes)}</span></div>
-                  </>
-                )}
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className={`flex items-center gap-1.5 font-medium text-xs ${textColorClass} cursor-default`}>
+              {icon}
+              <span>{timeStatus?.formattedElapsed}</span>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md`}>
+            <div className="space-y-2 p-1">
+                <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
+                  <span className={`font-bold ${textColorClass}`}>{isOverdue ? "In Progress (Overdue)" : "In Progress (On Track)"}</span>
+                </div>
+                <div className="text-xs space-y-1">
+                    <div className="flex justify-between gap-4"><span className="text-slate-500">Started:</span> <span>{formatDateTimeForDisplay(effectiveStartTime)}</span></div>
+                    {estimatedMinutes > 0 && (
+                        <>
+                            <div className="flex justify-between gap-4">
+                                <span className="text-slate-500">Remaining:</span>
+                                <span className={isOverdue ? 'font-bold text-red-600' : 'text-green-600'}>
+                                    {isOverdue ? `Overdue by ${timeStatus?.formattedOverdue}` : timeStatus?.formattedRemaining}
+                                </span>
+                            </div>
+                            <div className="flex justify-between gap-4"><span className="text-slate-500">Estimate:</span> <span>{formatDuration(estimatedMinutes)}</span></div>
+                        </>
+                    )}
+                </div>
+            </div>
+          </TooltipContent>
+        </Tooltip>
       );
     }
 
@@ -660,7 +654,7 @@ export default function ReportsPage() {
     if (col.type === 'extracted_field') {
       const stage = stages.find(s => s.id === col.stageId);
       if (!stage) return <span className="text-slate-300">-</span>;
-      if (!isStageApplicableToTask(stage, task)) return <span className="text-sm text-gray-400 italic">N/A</span>;
+      if (!isStageApplicableToTask(stage, task)) return <span className="text-sm text-gray-300 italic">N/A</span>;
 
       if (col.isAutoAdded) {
         let foundValue = null;
@@ -680,7 +674,7 @@ export default function ReportsPage() {
 
       const stageDocInfo = stage?.documents?.find((d) => d.kycId === col.kycId);
       if (!stageDocInfo) return <span className="text-slate-300">-</span>;
-      if (!isDocumentApplicable(stageDocInfo, task)) return <span className="text-sm text-gray-400 italic">N/A</span>;
+      if (!isDocumentApplicable(stageDocInfo, task)) return <span className="text-sm text-gray-300 italic">N/A</span>;
       const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
       if (!linked) return <span className="text-red-500 text-xs font-bold">Missing</span>;
 
@@ -1111,7 +1105,7 @@ export default function ReportsPage() {
                 <TableHeader className="sticky top-0 z-30 bg-slate-100/80 backdrop-blur-sm">
                   {/* Group Header Row */}
                   <TableRow className="bg-blue-600 hover:bg-blue-600">
-                    <TableHead className="w-16 border-b border-r bg-blue-700 text-white sticky left-0 z-40 text-center font-bold">#</TableHead>
+                    <TableHead className={`${INDEX_WIDTH_CLASS} border-b border-r bg-blue-700 text-white sticky left-0 z-40 text-center font-bold`}>#</TableHead>
                     {columnGroups.map((group, i) => (
                       <TableHead
                         key={i}
@@ -1124,15 +1118,15 @@ export default function ReportsPage() {
                   </TableRow>
                   {/* Column Header Row */}
                   <TableRow className="bg-blue-500 hover:bg-blue-500">
-                    <TableHead className="w-16 border-b border-r bg-blue-600 text-white sticky left-0 z-40 text-center font-semibold text-xs">#</TableHead>
+                    <TableHead className={`${INDEX_WIDTH_CLASS} border-b border-r bg-blue-600 text-white sticky left-0 z-40 text-center font-semibold text-xs`}>#</TableHead>
                     {columns.map(col => (
                       <TableHead
                         key={col.id}
                         onClick={() => handleSort(col.id)}
-                        className="whitespace-nowrap px-4 py-3 font-semibold text-white border-b border-r text-xs bg-blue-500 cursor-pointer hover:bg-blue-600 transition-colors group"
+                        className={`${COLUMN_WIDTH_CLASS} whitespace-nowrap px-4 py-3 font-semibold text-white border-b border-r text-xs bg-blue-500 cursor-pointer hover:bg-blue-600 transition-colors group`}
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 truncate">
                             {col.label}
                             {col.hasSubColumns && (
                               <button
@@ -1140,7 +1134,7 @@ export default function ReportsPage() {
                                   e.stopPropagation();
                                   toggleStageColumns(col.stageId);
                                 }}
-                                className="p-0.5 hover:bg-blue-400 rounded transition-colors text-white"
+                                className="p-0.5 hover:bg-blue-400 rounded transition-colors text-white shrink-0"
                               >
                                 {expandedStageColumns.has(col.stageId) ? (
                                   <Minus className="h-3 w-3" />
@@ -1152,9 +1146,9 @@ export default function ReportsPage() {
                           </div>
 
                           {sortConfig?.key === col.id ? (
-                            <ArrowUpDown className={`h-3 w-3 ${sortConfig.direction === 'asc' ? 'text-white' : 'text-blue-200'}`} />
+                            <ArrowUpDown className={`h-3 w-3 shrink-0 ${sortConfig.direction === 'asc' ? 'text-white' : 'text-blue-200'}`} />
                           ) : (
-                            <ArrowUpDown className="h-3 w-3 text-white" />
+                            <ArrowUpDown className="h-3 w-3 shrink-0 text-white" />
                           )}
                         </div>
                       </TableHead>
@@ -1164,12 +1158,12 @@ export default function ReportsPage() {
                 <TableBody className="divide-y divide-slate-200">
                   {paginatedTasks.length > 0 ? paginatedTasks.map((task, idx) => (
                     <TableRow key={task.id} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-blue-50'} hover:bg-blue-100 transition-colors group`}>
-                      <TableCell className={`sticky left-0 z-20 ${idx % 2 === 0 ? 'bg-white' : 'bg-blue-50'} group-hover:bg-blue-100 border-r border-b border-gray-100 font-medium text-xs text-center text-slate-700`}>
+                      <TableCell className={`${INDEX_WIDTH_CLASS} sticky left-0 z-20 ${idx % 2 === 0 ? 'bg-white' : 'bg-blue-50'} group-hover:bg-blue-100 border-r border-b border-gray-100 font-medium text-xs text-center text-slate-700`}>
                         {(currentPage - 1) * itemsPerPage + idx + 1}
                       </TableCell>
                       {columns.map(col => (
-                        <TableCell key={col.id} className="border-b border-r border-gray-100 p-3 text-xs align-middle">
-                          <div className="truncate max-w-[200px]">
+                        <TableCell key={col.id} className={`${COLUMN_WIDTH_CLASS} border-b border-r border-gray-100 p-3 text-xs align-middle`}>
+                          <div className="truncate w-full">
                             {safeRender(renderCellValue(task, col))}
                           </div>
                         </TableCell>
@@ -1199,14 +1193,14 @@ export default function ReportsPage() {
                     {paginatedTasks.map((task, idx) => (
                       <TableHead
                         key={task.id}
-                        className="min-w-[180px] w-[180px] text-center bg-blue-700 text-white border-r border-blue-600 font-semibold text-xs py-3 px-2"
+                        className={`${COLUMN_WIDTH_CLASS} text-center bg-blue-700 text-white border-r border-blue-600 font-semibold text-xs py-3 px-2`}
                       >
-                        <div className="flex flex-col gap-1">
-                          <span className="font-bold">#{(currentPage - 1) * itemsPerPage + idx + 1}</span>
-                          <span className="truncate block max-w-full" title={task.applicant_name}>
+                        <div className="flex flex-col gap-1 w-full">
+                          <span className="font-bold opacity-80">#{(currentPage - 1) * itemsPerPage + idx + 1}</span>
+                          <span className="truncate block w-full text-sm" title={task.applicant_name}>
                             {task.applicant_name}
                           </span>
-                          <span className="inline-flex items-center rounded-md bg-blue-600 text-blue-100 text-[10px] px-1.5 py-0.5">
+                          <span className="inline-flex items-center justify-center rounded-md bg-blue-600 text-blue-100 text-[10px] px-1.5 py-0.5 mx-auto">
                             ID: {task.id}
                           </span>
                         </div>
@@ -1259,9 +1253,9 @@ export default function ReportsPage() {
                         {paginatedTasks.map((task) => (
                           <TableCell
                             key={task.id}
-                            className="text-center border-r border-slate-100 p-3 min-w-[180px] align-middle"
+                            className={`${COLUMN_WIDTH_CLASS} text-center border-r border-slate-100 p-3 align-middle`}
                           >
-                            <div className="truncate max-w-[180px] mx-auto">
+                            <div className="truncate w-full mx-auto">
                               {safeRender(renderCellValue(task, row))}
                             </div>
                           </TableCell>

@@ -1779,6 +1779,7 @@ export default function DepartmentTasksManager({
       <EditableStageCell
         key={`${row.stage.id}-${renderMode}`}
         stage={row.stage}
+        stages={stages} // <--- ADDED: Pass the full stages array
         task={task}
         value={cellValue}
         onSave={enhancedHandleStageStatusSave}

@@ -8,13 +8,13 @@ import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Upload, Calendar, Check, X, Clock, Eye, AlertTriangle, Zap, Loader2, Pencil, SkipForward } from "lucide-react"
+import { Upload, Calendar, Check, X, Clock, Eye, AlertTriangle, Zap, Loader2, Pencil, SkipForward, Clock3 } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { format, parse, isValid } from "date-fns"
 import { AutomationMappingDialog } from "./AutomationMappingDialog"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
-import { isDocumentApplicable } from "../overall-view/tableUtils"
+import { formatDuration, getTimeStatus, isDocumentApplicable, parseDate } from "../overall-view/tableUtils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 interface EditableStageCellProps {
@@ -22,12 +22,7 @@ interface EditableStageCellProps {
   stages?: any[]
   task: any
   value?: string | null
-  onSave?: (
-    stageId: string,
-    taskId: string,
-    value: string,
-    updatedExtractedDetails?: Record<string, any>
-  ) => Promise<void> | void
+  onSave?: (stageId: string, taskId: string, value: string, updatedExtractedDetails?: Record<string, any>) => Promise<void> | void
   onDocumentUpload?: (task: any, stage: any) => void
   onShowDocuments?: (task: any, stage: any) => void
   getKycFields?: (documentConfig: any) => Promise<any[]>
@@ -37,7 +32,7 @@ interface EditableStageCellProps {
   documentData?: any
   onAutomationClick?: (e: React.MouseEvent, documentData?: any) => void
   departments?: any[]
-  renderMode?: 'date' | 'actions'  // NEW: Specify what to render
+  renderMode?: 'date' | 'actions'
   taskName?: string
   clientName?: string
   onFetchData?: () => Promise<void>;
@@ -121,11 +116,6 @@ export default function EditableStageCell({
   const [skipReason, setSkipReason] = useState('');
   const [selectedSkipReason, setSelectedSkipReason] = useState('');
   const [isCheckingPreviousStages, setIsCheckingPreviousStages] = useState(false);
-const isStageCompleted = useMemo(() => {
-    // When status is 'in_progress', this returns false, showing the skip button
-    return task.stages?.[stage.id]?.status === 'completed' || task.stages?.[stage.id]?.status === 'skipped';
-  }, [task.stages, stage.id]);
-  // Debug logs
   useEffect(() => {
     if (previewDocuments.length > 0) {
       console.log('Preview Documents:', previewDocuments.map(doc => ({
@@ -222,6 +212,33 @@ const isStageCompleted = useMemo(() => {
 
   const isStageApplicable = useMemo(() => isStageApplicableToTask(stage, task, departments), [stage, task, departments]);
 
+  const isStageCompleted = useMemo(() => {
+    return task.stages?.[stage.id]?.status === 'completed' || task.stages?.[stage.id]?.status === 'skipped';
+  }, [task.stages, stage.id]);
+
+  // --- NEW: Time Calculation Logic ---
+  const effectiveStartTime = useMemo(() => {
+    if (!stages || stages.length === 0) return task.created_at || task.date_initiated;
+
+    const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
+    const currentStageIndex = sortedStages.findIndex(s => s.id === stage.id);
+
+    if (currentStageIndex > 0) {
+      const prevStage = sortedStages[currentStageIndex - 1];
+      const prevStageData = task.stages?.[prevStage.id];
+      if (prevStageData?.completedAt) return prevStageData.completedAt;
+      if (prevStageData?.date) return prevStageData.date;
+      if (prevStageData?.status === 'skipped' && prevStageData.skippedAt) return prevStageData.skippedAt;
+    }
+
+    return task.date_initiated || task.created_at;
+  }, [task, stage.id, stages]);
+
+  const timeStatus = useMemo(() => {
+    return getTimeStatus(effectiveStartTime, stage.estimated_time);
+  }, [effectiveStartTime, stage.estimated_time]);
+
+
   useEffect(() => {
     if (isEditing && inputRef.current) {
       inputRef.current.focus();
@@ -258,9 +275,9 @@ const isStageCompleted = useMemo(() => {
       }
       return 'Skipped';
     }
-    
+
     if (!dateStr) return '';
-    
+
     // Try datetime format first
     const dateTimeFormats = [
       "yyyy-MM-dd'T'HH:mm",
@@ -270,7 +287,7 @@ const isStageCompleted = useMemo(() => {
       'MM/dd/yyyy',
       'dd-MM-yyyy'
     ];
-    
+
     for (const formatStr of dateTimeFormats) {
       const parsedDate = parse(dateStr, formatStr, new Date());
       if (isValid(parsedDate)) {
@@ -281,7 +298,7 @@ const isStageCompleted = useMemo(() => {
     return dateStr;
   };
 
-const handleSave = useCallback(async (isSkipped = false, skipReason = '') => {
+  const handleSave = useCallback(async (isSkipped = false, skipReason = '') => {
     if (!onSave) {
       toast({ title: "Error", description: "Save handler not available", variant: "destructive" });
       return;
@@ -365,7 +382,7 @@ const handleSave = useCallback(async (isSkipped = false, skipReason = '') => {
     setIsSkipDialogOpen(true);
   };
 
-const handleUnskip = async () => {
+  const handleUnskip = async () => {
     if (!onSave) {
       toast({ title: "Error", description: "Save handler not available", variant: "destructive" });
       return;
@@ -377,7 +394,7 @@ const handleUnskip = async () => {
       const resetData = {
         ...(linkedDocument?.extracted_details || {}),
         // 👇 CHANGE: Explicitly set status to 'in_progress'
-        status: 'in_progress', 
+        status: 'in_progress',
         skippedAt: null,
         skippedBy: null,
         reason: null,
@@ -389,15 +406,15 @@ const handleUnskip = async () => {
 
       // Call onSave with empty value and the reset data containing the status
       await onSave(stage.id, task.id, '', resetData);
-      
+
       setEditValue('');
-      
-      toast({ 
-        title: "Success", 
+
+      toast({
+        title: "Success",
         description: "Stage reset.",
         variant: "default"
       });
-      
+
       if (onFetchData) {
         await onFetchData();
       }
@@ -798,26 +815,20 @@ const handleUnskip = async () => {
   }, [onSave, previewDocuments, currentPreviewIndex, stage.id, task.id, onFetchData]);
 
  if (renderMode === 'date') {
-    if (!isStageApplicable) {
-      return <span className="text-sm text-gray-400 italic">N/A</span>;
-    }
+    if (!isStageApplicable) return <span className="text-sm text-gray-400 italic">N/A</span>;
     
-    // Get status variables early
     const stageData = task.stages?.[stage.id];
     const stageStatus = stageData?.status;
     const isSkipped = stageStatus === 'skipped';
 
-    // 1. RENDER SKIPPED BADGE WITH TOOLTIP
+    // 1. SKIPPED STATUS
     if (isSkipped) {
-         const skippedAt = stageData?.skippedAt;
+      const skippedAt = stageData?.skippedAt;
       const reason = stageData?.reason || 'No reason provided';
-      
       let formattedSkippedDate = 'N/A';
       if (skippedAt) {
-        try {
-          const date = new Date(skippedAt);
-          if (isValid(date)) formattedSkippedDate = format(date, 'dd/MM/yyyy HH:mm');
-        } catch (e) { console.error(e); }
+        const d = parseDate(skippedAt);
+        if (d) formattedSkippedDate = format(d, 'dd/MM/yyyy HH:mm');
       }
 
       return (
@@ -825,10 +836,7 @@ const handleUnskip = async () => {
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Badge 
-                  variant="secondary" 
-                  className="bg-amber-100 text-amber-700 hover:bg-amber-200 border-amber-200 cursor-help font-normal"
-                >
+                <Badge variant="secondary" className="bg-amber-100 text-amber-700 hover:bg-amber-200 border-amber-200 cursor-help font-normal">
                   Skipped
                 </Badge>
               </TooltipTrigger>
@@ -840,78 +848,109 @@ const handleUnskip = async () => {
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 text-xs text-blue-600 hover:bg-blue-50"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleUnskip();
-            }}
-            disabled={isLoading}
-          >
+          <Button variant="ghost" size="sm" className="h-6 text-xs text-blue-600 hover:bg-blue-50" onClick={(e) => { e.stopPropagation(); handleUnskip(); }} disabled={isLoading}>
             Unskip
           </Button>
         </div>
       );
     }
 
-    // 2. Date editing mode (Only if NOT skipped)
-    if (isEditing && !requiresUpload) {
-         return (
-        <div className="flex items-center gap-2 min-w-[150px]">
-          <Input
-            ref={inputRef}
-            type="datetime-local"
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onBlur={handleSave}
-            className="text-sm h-7"
-            disabled={isLoading}
-            step="60"
-          />
-          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-green-600" onClick={handleSave} disabled={isLoading}>
-            <Check className="h-3 w-3" />
-          </Button>
-          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-red-600" onClick={handleCancel} disabled={isLoading}>
-            <X className="h-3 w-3" />
-          </Button>
-        </div>
-      );
-    }
-
- // 3. Displaying Completed Date
+    // 2. COMPLETED STATUS
     const isExplicitlyCompleted = stageStatus === 'completed';
     const isLegacyCompleted = !stageStatus && (!!value || stageData?.documentsUploaded === true);
 
     if ((isExplicitlyCompleted || isLegacyCompleted) && stageDate && stageDate !== 'NaN/NaN/NaN') {
+      const completionDate = parseDate(stageDate);
+      let isCompletedOverdue = false;
+      let completionDuration = 'N/A';
+
+      if (completionDate && effectiveStartTime && stage.estimated_time) {
+        const start = parseDate(effectiveStartTime instanceof Date ? effectiveStartTime.toISOString() : effectiveStartTime);
+        if (start) {
+          const durationMs = completionDate.getTime() - start.getTime();
+          const durationMinutes = Math.floor(durationMs / (1000 * 60));
+          isCompletedOverdue = durationMinutes > stage.estimated_time;
+          completionDuration = formatDuration(durationMinutes);
+        }
+      }
+
       return (
-        <div
-          className="flex items-center gap-2 group cursor-pointer"
-          onClick={(e) => {
-            e.stopPropagation();
-            if (!requiresUpload) setIsEditing(true);
-          }}
-        >
-          <div className="text-gray-800 hover:bg-blue-100 px-2 py-0.5 rounded transition-colors">
-            {formatDateDisplay(stageDate)}
-          </div>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex items-center gap-2 group cursor-pointer" onClick={(e) => { e.stopPropagation(); if (!requiresUpload) setIsEditing(true); }}>
+                <div className={`text-gray-800 hover:bg-blue-100 px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${isCompletedOverdue ? 'bg-amber-50 text-amber-900 border border-amber-200' : ''}`}>
+                  {formatDateDisplay(stageDate)}
+                  {isCompletedOverdue && <Clock className="h-3 w-3 text-amber-600" />}
+                </div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <div className="text-xs space-y-1">
+                <p><span className="font-bold">Completed:</span> {formatDateDisplay(stageDate)}</p>
+                {effectiveStartTime && <p><span className="text-slate-400">Duration:</span> {completionDuration}</p>}
+                {isCompletedOverdue && <p className="text-amber-400 font-bold">Overdue</p>}
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      );
+    }
+
+    // 3. EDIT MODE
+    if (isEditing && !requiresUpload) {
+      return (
+        <div className="flex items-center gap-2 min-w-[150px]">
+          <Input ref={inputRef} type="datetime-local" value={editValue} onChange={(e) => setEditValue(e.target.value)} onKeyDown={handleKeyDown} onBlur={handleSave} className="text-sm h-7" disabled={isLoading} step="60" />
+          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-green-600" onClick={handleSave} disabled={isLoading}><Check className="h-3 w-3" /></Button>
+          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-red-600" onClick={handleCancel} disabled={isLoading}><X className="h-3 w-3" /></Button>
         </div>
       );
     }
 
-    // 4. Add Date Button
+    // 4. IN PROGRESS (Time Status)
+    if (timeStatus && !requiresUpload && !hasLinkedDocument) {
+      return (
+        <div className="flex flex-col gap-1 min-w-[120px] items-start">
+          <span className="text-xs font-medium text-slate-500 flex items-center gap-1">
+            {timeStatus.formattedElapsed} elapsed
+          </span>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-2">
+                  <span className={`inline-flex items-center rounded-md ${timeStatus.isOverdue ? 'bg-red-50 text-red-600 border-red-200' : 'bg-blue-50 text-blue-600 border-blue-200'} text-[10px] px-1.5 py-0.5 font-normal cursor-help`}>
+                    {timeStatus.isOverdue ? <AlertTriangle className="h-3 w-3 mr-1" /> : <Clock3 className="h-3 w-3 mr-1" />}
+                    {timeStatus.isOverdue ? "Overdue" : "In Progress"}
+                  </span>
+                  {/* Action Button for non-upload stages */}
+                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0 border border-dashed border-gray-300 hover:border-gray-400" onClick={() => setIsEditing(true)}>
+                    <Check className="h-3 w-3 text-green-600" />
+                  </Button>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[250px]">
+                <div className="space-y-2">
+                  <div className="flex justify-between border-b pb-1"><span className="font-bold">{stage.name}</span></div>
+                  {stage.estimated_time > 0 && (
+                    <>
+                      <div className="flex justify-between gap-4"><span className="text-slate-400">Time Remaining:</span><span className={timeStatus.isOverdue ? 'text-red-400' : 'text-green-400'}>{timeStatus.isOverdue ? `Overdue by ${timeStatus.formattedOverdue}` : timeStatus.formattedRemaining}</span></div>
+                      <div className="flex justify-between gap-4"><span className="text-slate-400">Estimate:</span><span>{formatDuration(stage.estimated_time)}</span></div>
+                    </>
+                  )}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
+      );
+    }
+
+    // 5. Default "Add Date" for non-upload stages if no time status derived (fallback)
     if (!requiresUpload) {
       return (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 px-3 text-gray-600 border border-dashed border-gray-300 hover:border-gray-400"
-          onClick={() => setIsEditing(true)}
-        >
-          <Calendar className="h-3 w-3 mr-1" />
-          Add Date
+        <Button variant="ghost" size="sm" className="h-7 px-3 text-gray-600 border border-dashed border-gray-300 hover:border-gray-400" onClick={() => setIsEditing(true)}>
+          <Calendar className="h-3 w-3 mr-1" /> Add Date
         </Button>
       );
     }
