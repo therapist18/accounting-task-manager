@@ -12,7 +12,9 @@ import {
   ChevronDown, ChevronsRight, ChevronsDown, X, FileText, ArrowLeft,
   List, ChevronLeft, ChevronRight, RefreshCw, Filter, AlertTriangle,
   Calendar, ShieldCheck, Clock, ArrowUpDown, Search, Timer, AlertCircle,
-  Check, Clock3
+  Check, Clock3,
+  DotSquare,
+  MoreHorizontal
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -269,7 +271,7 @@ export default function ReportsPage() {
   // View & Pagination State
   const [view, setView] = useState<'standard' | 'transposed'>('standard');
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(100); 
+  const [itemsPerPage, setItemsPerPage] = useState(100);
   const [expandedSections, setExpandedSections] = useState(() => new Set(['task_details']));
 
   // --- NEW: State for toggling stage doc columns ---
@@ -461,7 +463,7 @@ export default function ReportsPage() {
     let linked = task.source_document_id?.[stage.id];
     if (!linked && task.stages?.[stage.id]?.documents) {
       linked = Object.values(task.stages[stage.id].documents).map((doc: any) =>
-        doc.document_id || doc.id 
+        doc.document_id || doc.id
       );
     }
     if (!linked) return [];
@@ -526,88 +528,39 @@ export default function ReportsPage() {
 
   // --- 6. Render Logic ---
   const renderCellValue = (task, col) => {
-    // ... (Imm status and basic task fields remain the same) ...
+    if (col.type === 'task' && col.field === 'current_stage_name') {
+      const stageStatus = getCurrentStageStatus(task, stages, departments, allDocuments);
+      return stageStatus?.stageStatus === 'Unallocated'
+        ? <span className="text-xs text-amber-500">{stageStatus.stageStatus}</span>
+        : <span className="text-xs text-slate-700">{stageStatus?.stageStatus}</span>;
+    }
+    if (['imm_status_doc', 'imm_status_expiry', 'imm_status_days'].includes(col.type)) {
+      const statusData = getEnhancedImmigrationStatusWrapper(task);
 
-    if (col.type === 'task' && col.field === 'current_stage_status') {
-        const stageStatus = getCurrentStageStatus(task, stages, departments, allDocuments);
-  
-        if (!stageStatus || stageStatus.stageName === 'No Stage') return <span className="text-slate-300 text-xs">-</span>;
-        const stage = stages.find(s => s.name === stageStatus.stageName);
-        const startTimeStr = task.current_stage_started_at || task.created_at;
-        const startedAt = parseDateString(startTimeStr);
-        const allowedMinutes = stage?.estimated_time;
-        const timeStatus = getTimeStatus(startedAt, allowedMinutes);
-        if (!allowedMinutes || allowedMinutes <= 0) {
-          return (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200 text-[10px] px-1 gap-1">
-                  <ShieldCheck className="h-3 w-3" /> {stageStatus.stageName}
-                </Badge>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Status: {stageStatus.stageStatus}</p>
-                {startedAt && <p>Started: {formatDateTimeForDisplay(startedAt)}</p>}
-              </TooltipContent>
-            </Tooltip>
-          );
-        }
-        const progress = timeStatus ? Math.min(100, Math.max(0, timeStatus.progress)) : 0;
-        const isOverdue = timeStatus?.isOverdue || false;
-        return (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="flex flex-col gap-1 w-full">
-                <div className="flex items-center gap-1.5">
-                  <Badge variant={isOverdue ? "destructive" : "outline"} className={`${isOverdue ? "bg-red-50 text-red-600 border-red-200" : "bg-green-50 text-green-600 border-green-200"} text-[10px] px-1 gap-1`}>
-                    {isOverdue ? <AlertCircle className="h-3 w-3" /> : <ShieldCheck className="h-3 w-3" />}
-                    {stageStatus.stageName}
-                  </Badge>
-                </div>
-                <div className="text-[10px] text-gray-500">{timeStatus?.formattedElapsed} / {formatDuration(allowedMinutes)}</div>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent className="max-w-[300px]">
-              <div className="space-y-1">
-                <div className="flex justify-between"><span className="font-medium">Stage:</span><span>{stageStatus.stageName}</span></div>
-                <div className="flex justify-between"><span className="font-medium">Status:</span><span className={isOverdue ? 'text-red-600' : 'text-green-600'}>{isOverdue ? 'Overdue' : 'In Progress'}</span></div>
-                <div className="flex justify-between"><span className="font-medium">Time Elapsed:</span><span>{timeStatus?.formattedElapsed}</span></div>
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        );
+      if (col.type === 'imm_status_doc') {
+        return statusData?.documentType
+          ? <span className="text-xs font-medium text-slate-700">{statusData.documentType}</span>
+          : <span className="text-red-500 text-xs font-semibold">Missing</span>;
       }
-      if (col.type === 'task' && col.field === 'current_stage_name') {
-        const stageStatus = getCurrentStageStatus(task, stages, departments, allDocuments);
-        return <div className="flex flex-col"><span className="text-xs font-medium text-blue-700">{stageStatus?.stageName || 'No Stage'}</span>{stageStatus?.stageStatus && <span className="text-xs text-slate-500">{stageStatus.stageStatus}</span>}</div>;
+
+      if (col.type === 'imm_status_expiry') {
+        const expiryDate = statusData?.date;
+        return <span className="text-xs text-slate-700">{
+          expiryDate
+            ? formatDateForDisplay(expiryDate)
+            : 'N/A'
+        }</span>;
       }
-      if (['imm_status_doc', 'imm_status_expiry', 'imm_status_days'].includes(col.type)) {
-        const statusData = getEnhancedImmigrationStatusWrapper(task);
-  
-        if (col.type === 'imm_status_doc') {
-          return statusData?.documentType
-            ? <span className="text-xs font-medium text-slate-700">{statusData.documentType}</span>
-            : <span className="text-red-500 text-xs font-semibold">Missing</span>;
-        }
-  
-        if (col.type === 'imm_status_expiry') {
-          const expiryDate = statusData?.date;
-          return <span className="text-xs text-slate-700">{
-            expiryDate
-              ? formatDateForDisplay(expiryDate)
-              : 'N/A'
-          }</span>;
-        }
-  
-        if (col.type === 'imm_status_days') {
-          const expiryDate = statusData?.date;
-          if (!expiryDate) return <span className="text-gray-400 text-xs">-</span>;
-          const days = Math.ceil((expiryDate.getTime() - new Date().setHours(0, 0, 0, 0)) / (1000 * 60 * 60 * 24));
-          return <span className={`text-xs ${days < 0 ? 'text-red-600 font-bold' : 'text-green-600'}`}>
-            {days} days
-          </span>;
-        }
+
+      if (col.type === 'imm_status_days') {
+        const expiryDate = statusData?.date;
+        if (!expiryDate) return <span className="text-gray-400 text-xs">-</span>;
+        const days = Math.ceil((expiryDate.getTime() - new Date().setHours(0, 0, 0, 0)) / (1000 * 60 * 60 * 24));
+        return <span className={`text-xs ${days < 0 ? 'text-red-600 font-bold' : 'text-green-600'}`}>
+          {days} days
+        </span>;
       }
+    }
 
     // ==================================================================================
     // ⬇️⬇️⬇️ UPDATED SECTION: STAGE DATE WITH STATUS LOGIC ⬇️⬇️⬇️
@@ -676,9 +629,9 @@ export default function ReportsPage() {
         return (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Badge variant="secondary" className="bg-amber-100 text-amber-700 hover:bg-amber-200 border-amber-200 cursor-help font-normal text-[10px] px-2">
+              <span className="inline-flex items-center rounded-md bg-amber-100 text-amber-700 border border-amber-200 cursor-help font-normal text-[10px] px-2 py-0.5">
                 Skipped
-              </Badge>
+              </span>
             </TooltipTrigger>
             <TooltipContent className="bg-slate-900 text-white border-slate-800">
               <div className="text-xs text-left space-y-1">
@@ -704,19 +657,19 @@ export default function ReportsPage() {
             const details = linkedDoc.extracted_details || {};
             const kycDoc = kycDocuments.get(linkedDoc.kyc_id || linkedDoc.document_id);
             if (kycDoc?.fields) {
-               // Get all fields that are marked as immigration dates
-               const immigrationDateFields = kycDoc.fields
-               .filter((field: any) => field.isImmigrationDate === true)
-               .map((field: any) => field.fieldName || field.name || '')
-               .filter(Boolean);
+              // Get all fields that are marked as immigration dates
+              const immigrationDateFields = kycDoc.fields
+                .filter((field: any) => field.isImmigrationDate === true)
+                .map((field: any) => field.fieldName || field.name || '')
+                .filter(Boolean);
 
-             // If no specific immigration date fields, check all date fields
-             const dateFieldsToCheck = immigrationDateFields.length > 0
-               ? immigrationDateFields
-               : kycDoc.fields
-                 .filter((field: any) => field.fieldType === 'date' || field.type === 'date')
-                 .map((field: any) => field.fieldName || field.name || '')
-                 .filter(Boolean);
+              // If no specific immigration date fields, check all date fields
+              const dateFieldsToCheck = immigrationDateFields.length > 0
+                ? immigrationDateFields
+                : kycDoc.fields
+                  .filter((field: any) => field.fieldType === 'date' || field.type === 'date')
+                  .map((field: any) => field.fieldName || field.name || '')
+                  .filter(Boolean);
 
               for (const field of dateFieldsToCheck) {
                 const parsed = parseDateString(details[field]);
@@ -740,45 +693,47 @@ export default function ReportsPage() {
       if (completionDate) {
         let isCompletedOverdue = false;
         let durationTakenText = 'N/A';
-        
+
         if (effectiveStartTime && estimatedMinutes && estimatedMinutes > 0) {
-           const durationMs = completionDate.getTime() - effectiveStartTime.getTime();
-           const durationMinutes = Math.floor(durationMs / (1000 * 60));
-           isCompletedOverdue = durationMinutes > estimatedMinutes;
-           durationTakenText = formatDuration(durationMinutes);
+          const durationMs = completionDate.getTime() - effectiveStartTime.getTime();
+          const durationMinutes = Math.floor(durationMs / (1000 * 60));
+          isCompletedOverdue = durationMinutes > estimatedMinutes;
+          durationTakenText = formatDuration(durationMinutes);
         }
 
         const statusLabel = isCompletedOverdue ? "Completed but Overdue" : "Completed On Time";
-        const badgeColorClass = isCompletedOverdue 
-            ? "bg-amber-50 text-amber-700 border-amber-200" 
-            : "bg-green-50 text-green-700 border-green-200";
+        const badgeColorClass = isCompletedOverdue
+          ? "bg-amber-50 text-amber-700 border-amber-200"
+          : "";
 
         return (
-          <Tooltip>
-            <TooltipTrigger asChild>
-                <div className="flex flex-col gap-1 min-w-[120px] items-start">
-                    <span className="text-xs font-semibold text-slate-700 flex items-center gap-1">
-                        <Calendar className="h-3 w-3 text-slate-400" />
-                        {formatDateTimeForDisplay(completionDate)}
-                    </span>
-                    <Badge variant="outline" className={`${badgeColorClass} text-[10px] px-1.5 py-0 font-normal`}>
-                        {isCompletedOverdue ? <Clock className="h-3 w-3 mr-1" /> : <Check className="h-3 w-3 mr-1" />}
-                        {statusLabel}
-                    </Badge>
-                </div>
-            </TooltipTrigger>
-            <TooltipContent className="max-w-[280px]">
+          <div className="flex gap-1 items-center justify-between">
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-semibold text-slate-700">
+                {formatDateTimeForDisplay(completionDate)}
+              </span>
+              {isCompletedOverdue && <Badge variant="outline" className={`${badgeColorClass} text-[10px] px-1.5 py-0 font-normal`}>
+                <Clock className="h-3 w-3 mr-1" />
+                {statusLabel}
+              </Badge>}
+            </div>
+            <Tooltip>
+              <TooltipTrigger asChild enterDelay={300}>
+                <MoreHorizontal className="h-4 w-4" />
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[280px]">
                 <div className="space-y-2">
-                    <div className="flex justify-between border-b pb-1"><span className="font-bold">{stage.name}</span></div>
-                    <div className="flex justify-between gap-4"><span className="text-slate-400">Started:</span> <span>{effectiveStartTime ? formatDateTimeForDisplay(effectiveStartTime) : '-'}</span></div>
-                    <div className="flex justify-between gap-4"><span className="text-slate-400">Completed:</span> <span>{formatDateTimeForDisplay(completionDate)}</span></div>
-                    <div className="flex justify-between gap-4"><span className="text-slate-400">Duration:</span> <span>{durationTakenText}</span></div>
-                    {estimatedMinutes > 0 && (
-                         <div className="flex justify-between gap-4"><span className="text-slate-400">Allowed:</span> <span>{formatDuration(estimatedMinutes)}</span></div>
-                    )}
+                  <div className="flex justify-between border-b pb-1"><span className="font-bold">{stage.name}</span></div>
+                  <div className="flex justify-between gap-4"><span className="text-slate-400">Started:</span> <span>{effectiveStartTime ? formatDateTimeForDisplay(effectiveStartTime) : '-'}</span></div>
+                  <div className="flex justify-between gap-4"><span className="text-slate-400">Completed:</span> <span>{formatDateTimeForDisplay(completionDate)}</span></div>
+                  <div className="flex justify-between gap-4"><span className="text-slate-400">Duration:</span> <span>{durationTakenText}</span></div>
+                  {estimatedMinutes > 0 && (
+                    <div className="flex justify-between gap-4"><span className="text-slate-400">Allowed:</span> <span>{formatDuration(estimatedMinutes)}</span></div>
+                  )}
                 </div>
-            </TooltipContent>
-          </Tooltip>
+              </TooltipContent>
+            </Tooltip>
+          </div>
         );
       }
 
@@ -788,42 +743,41 @@ export default function ReportsPage() {
       const timeStatus = getTimeStatus(effectiveStartTime, estimatedMinutes);
       const isOverdue = timeStatus?.isOverdue || false;
       const statusLabel = isOverdue ? "In Progress (Overdue)" : "In Progress";
-      
+
       return (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <div className="flex flex-col gap-1 min-w-[120px] items-start">
-               <span className="text-xs font-medium text-slate-500 flex items-center gap-1">
-                  <Timer className="h-3 w-3" />
-                  {timeStatus?.formattedElapsed} elapsed
-               </span>
-               <Badge variant="outline" className={`${isOverdue ? 'bg-red-50 text-red-600 border-red-200' : 'bg-blue-50 text-blue-600 border-blue-200'} text-[10px] px-1.5 py-0 font-normal`}>
-                   {isOverdue ? <AlertTriangle className="h-3 w-3 mr-1" /> : <Clock3 className="h-3 w-3 mr-1" />}
-                   {statusLabel}
-               </Badge>
-            </div>
-          </TooltipTrigger>
-          <TooltipContent className="max-w-[250px]">
-            <div className="space-y-2">
-              <div className="flex justify-between border-b pb-1"><span className="font-bold">{stage.name}</span></div>
-              <div className="flex justify-between gap-4"><span className="text-slate-400">Started:</span> <span>{formatDateTimeForDisplay(effectiveStartTime)}</span></div>
-              {estimatedMinutes > 0 && (
-                <>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-slate-400">Time Remaining:</span>
-                    <span className={isOverdue ? 'text-red-400' : 'text-green-400'}>
-                      {isOverdue ? `Overdue by ${timeStatus?.formattedOverdue}` : timeStatus?.formattedRemaining}
-                    </span>
-                  </div>
-                  <div className="flex justify-between gap-4"><span className="text-slate-400">Estimate:</span> <span>{formatDuration(estimatedMinutes)}</span></div>
-                </>
-              )}
-            </div>
-          </TooltipContent>
-        </Tooltip>
+        <div className="flex flex-col gap-1 min-w-[120px] items-start">
+          <span className="text-xs font-medium text-slate-500 flex items-center gap-1">
+            {timeStatus?.formattedElapsed} elapsed
+          </span>
+          <Tooltip>
+            <TooltipTrigger asChild enterDelay={300}>
+              <span className={`inline-flex items-center rounded-md ${isOverdue ? 'bg-red-50 text-red-600 border-red-200' : 'bg-blue-50 text-blue-600 border-blue-200'} text-[10px] px-1.5 py-0.5 font-normal`}>
+                {isOverdue ? <AlertTriangle className="h-3 w-3 mr-1" /> : <Clock3 className="h-3 w-3 mr-1" />}
+                {statusLabel}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-[250px]">
+              <div className="space-y-2">
+                <div className="flex justify-between border-b pb-1"><span className="font-bold">{stage.name}</span></div>
+                <div className="flex justify-between gap-4"><span className="text-slate-400">Started:</span> <span>{formatDateTimeForDisplay(effectiveStartTime)}</span></div>
+                {estimatedMinutes > 0 && (
+                  <>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-slate-400">Time Remaining:</span>
+                      <span className={isOverdue ? 'text-red-400' : 'text-green-400'}>
+                        {isOverdue ? `Overdue by ${timeStatus?.formattedOverdue}` : timeStatus?.formattedRemaining}
+                      </span>
+                    </div>
+                    <div className="flex justify-between gap-4"><span className="text-slate-400">Estimate:</span> <span>{formatDuration(estimatedMinutes)}</span></div>
+                  </>
+                )}
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        </div>
       );
     }
-    
+
     // ... (Extracted fields and task fields logic remain the same) ...
     if (col.type === 'extracted_field') {
       const stage = stages.find(s => s.id === col.stageId);
@@ -852,7 +806,7 @@ export default function ReportsPage() {
       const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
       if (!linked) return <span className="text-red-500 text-xs font-bold">Missing</span>;
 
-      if (linked.indicator) return <Badge variant="destructive" className="text-[10px] px-1 h-5">Indicator</Badge>;
+      if (linked.indicator) return <span className="inline-flex items-center rounded-md bg-red-50 text-red-600 border border-red-200 text-[10px] px-1.5 py-0.5">Indicator</span>;
       const val = linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
       const isOld = linked.created_at && task.created_at && new Date(linked.created_at) < new Date(task.created_at);
       const display = col.fieldType === 'Date' ? formatDateForDisplay(val) : val;
@@ -917,7 +871,6 @@ export default function ReportsPage() {
       cols.push({ id: `task_${field}`, label: getLabel(field), type: 'task', field });
     });
     cols.push({ id: 'current_stage_name', label: 'Current Stage', type: 'task', field: 'current_stage_name' });
-    cols.push({ id: 'current_stage_status', label: 'Stage Status', type: 'task', field: 'current_stage_status' });
     cols.push({ id: 'imm_status_doc', label: 'Imm Status', type: 'imm_status_doc' });
     cols.push({ id: 'imm_status_expiry', label: 'Expiry Date', type: 'imm_status_expiry' });
     cols.push({ id: 'imm_status_days', label: 'Days To Go', type: 'imm_status_days' });
@@ -939,7 +892,7 @@ export default function ReportsPage() {
           type: 'stage_date',
           stageId: stage.id,
           stageName: stage.name,
-          hasSubColumns: hasDocuments 
+          hasSubColumns: hasDocuments
         });
       }
 
@@ -1316,7 +1269,7 @@ export default function ReportsPage() {
                             {col.hasSubColumns && (
                               <button
                                 onClick={(e) => {
-                                  e.stopPropagation(); 
+                                  e.stopPropagation();
                                   toggleStageColumns(col.stageId);
                                 }}
                                 className="p-0.5 hover:bg-blue-400 rounded transition-colors text-white"
@@ -1385,9 +1338,9 @@ export default function ReportsPage() {
                           <span className="truncate block max-w-full" title={task.applicant_name}>
                             {task.applicant_name}
                           </span>
-                          <Badge variant="secondary" className="w-fit mx-auto text-[10px] h-4 px-1 bg-blue-600 text-blue-100 border-none">
+                          <span className="inline-flex items-center rounded-md bg-blue-600 text-blue-100 text-[10px] px-1.5 py-0.5">
                             ID: {task.id}
-                          </Badge>
+                          </span>
                         </div>
                       </TableHead>
                     ))}

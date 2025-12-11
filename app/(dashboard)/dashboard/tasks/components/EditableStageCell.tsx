@@ -281,7 +281,7 @@ const isStageCompleted = useMemo(() => {
     return dateStr;
   };
 
-  const handleSave = useCallback(async (isSkipped = false, skipReason = '') => {
+const handleSave = useCallback(async (isSkipped = false, skipReason = '') => {
     if (!onSave) {
       toast({ title: "Error", description: "Save handler not available", variant: "destructive" });
       return;
@@ -305,18 +305,10 @@ const isStageCompleted = useMemo(() => {
     // Handle date with time
     let dateObj = new Date(editValue);
 
-    // If the date is today and no time is provided, set the current time
-    const today = new Date();
-    if (
-      dateObj.getDate() === today.getDate() &&
-      dateObj.getMonth() === today.getMonth() &&
-      dateObj.getFullYear() === today.getFullYear() &&
-      editValue.split('T')[1] === '00:00' // Check if time was not specified (defaults to 00:00)
-    ) {
-      // Create a new date with today's date but keep the time part from the input
-      dateObj = new Date();
-      const [year, month, day] = editValue.split('T')[0].split('-').map(Number);
-      dateObj.setFullYear(year, month - 1, day);
+    // If time is not specified (00:00), set it to 9:00 AM
+    if (editValue && editValue.endsWith('T00:00')) {
+      const [datePart] = editValue.split('T');
+      dateObj = new Date(`${datePart}T09:00`);
     }
 
     const formattedDate = format(dateObj, "dd/MM/yyyy HH:mm");
@@ -328,27 +320,15 @@ const isStageCompleted = useMemo(() => {
 
     setIsLoading(true);
     try {
-      const status = isSkipped ? 'skipped' : 'completed';
-      const skipData = isSkipped ? {
-        skippedAt: new Date().toISOString(),
-        skippedBy: 'userId', // Replace with actual user ID from auth
-        reason: skipReason || selectedSkipReason || 'Not specified',
-      } : {};
-
       await onSave(stage.id, task.id, formattedDate, {
         ...(linkedDocument?.extracted_details || {}),
-        status,
-        ...skipData,
+        status: 'completed',
       });
 
       setIsEditing(false);
-      setIsSkipDialogOpen(false);
-
       toast({
         title: "Success",
-        description: isSkipped
-          ? "Stage marked as skipped"
-          : "Date saved successfully"
+        description: "Date saved successfully"
       });
     } catch (error) {
       console.error('Save error:', error);
