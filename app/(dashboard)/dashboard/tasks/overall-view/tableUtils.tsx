@@ -247,8 +247,6 @@ export const calculateDaysRemaining = (expiryDate: Date | null): string => {
     return diffDays.toString();
 };
 
-// --- Display Getters ---
-
 export const getJobLevelDisplay = (task: any, departments: any[]): string => {
   const jobLevel = task.job_level;
   if (!jobLevel) return 'N/A';
@@ -267,13 +265,22 @@ export const getJobLevelDisplay = (task: any, departments: any[]): string => {
         (sd: any) => sd.id == jobLevel.subdepartment_id
       );
 
-      if (subdepartment?.classes?.length && jobLevel.class_id) {
+      // For level 3 (class)
+      if (jobLevel.level === 3 && subdepartment?.classes?.length && jobLevel.class_id) {
         const classItem = subdepartment.classes.find(
           (c: any) => c.id == jobLevel.class_id
         );
         if (classItem?.name) return classItem.name;
+        return `Class ${jobLevel.class_id}`;
       }
 
+      // For level 2 (subdepartment)
+      if (jobLevel.level === 2 && jobLevel.subdepartment_id) {
+        if (subdepartment?.name) return subdepartment.name;
+        return `SubDept ${jobLevel.subdepartment_id}`;
+      }
+
+      // Fallback cases
       if (jobLevel.class_id) return `Class ${jobLevel.class_id}`;
       if (jobLevel.subclass_id) return `Subclass ${jobLevel.subclass_id}`;
       if (jobLevel.subdepartment_id) return `SubDept ${jobLevel.subdepartment_id}`;

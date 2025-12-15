@@ -55,6 +55,7 @@ interface FormData {
     task_manager_id: string
     task_assistant_id: string
     enquiry_date: string
+    job_level: number | null
 }
 
 const INITIAL_FORM_DATA: FormData = {
@@ -72,7 +73,8 @@ const INITIAL_FORM_DATA: FormData = {
     officer_id: '',
     task_manager_id: '',
     task_assistant_id: '',
-    enquiry_date: new Date().toISOString().split('T')[0]
+    enquiry_date: new Date().toISOString().split('T')[0],
+    job_level: null
 }
 
 export function EnquiryDialog({
@@ -95,28 +97,28 @@ export function EnquiryDialog({
     const [searchLoading, setSearchLoading] = useState(false)
     const [loadingCompanies, setLoadingCompanies] = useState(false)
     const [loadingStaff, setLoadingStaff] = useState(false)
-    
+
     // Data Lists
     const [localUsers, setLocalUsers] = useState<any[]>(users)
     const [localOfficers, setLocalOfficers] = useState<any[]>(officers)
     const [individuals, setIndividuals] = useState<Individual[]>([])
-    
+
     // Selection State
     const [applicantType, setApplicantType] = useState<'principal' | 'dependant'>('principal')
     const [selectedIndividual, setSelectedIndividual] = useState<Individual | null>(null)
     const [principalForDependant, setPrincipalForDependant] = useState<Individual | null>(null)
-    
+
     // Related Entities
     const [companies, setCompanies] = useState<any[]>([])
     const [selectedCompany, setSelectedCompany] = useState<string>('')
     const [understudies, setUnderstudies] = useState<any[]>([])
     const [selectedUnderstudy, setSelectedUnderstudy] = useState<string>('')
-    
+
     // Checkboxes & Multi-select
     const [includeDependants, setIncludeDependants] = useState(false)
     const [availableDependants, setAvailableDependants] = useState<Individual[]>([])
     const [selectedDependants, setSelectedDependants] = useState<string[]>([])
-    
+
     const [includeReferences, setIncludeReferences] = useState(false)
     const [availableReferences, setAvailableReferences] = useState<Individual[]>([])
     const [selectedReferences, setSelectedReferences] = useState<string[]>([])
@@ -127,7 +129,7 @@ export function EnquiryDialog({
 
     // --- Derived State (Memoized) ---
     // Instead of using effects to set these, we calculate them during render
-    
+
     const availableSubdepartments = useMemo(() => {
         if (!formData.department_id) return []
         const dept = departments.find(d => d.id.toString() === formData.department_id)
@@ -156,7 +158,7 @@ export function EnquiryDialog({
         if (!subdept) return { availableOfficers: localOfficers, availableManagers: localUsers }
 
         const getActiveIds = (history: any[]) => history?.filter(h => !h.end_date).map(h => h.id) || []
-        
+
         const activeOfficerIds = getActiveIds(subdept.officer_history)
         const activeManagerIds = getActiveIds(subdept.manager_history)
 
@@ -169,11 +171,11 @@ export function EnquiryDialog({
         }
 
         return {
-            availableOfficers: activeOfficerIds.length 
-                ? localOfficers.filter(o => activeOfficerIds.includes(o.id)) 
+            availableOfficers: activeOfficerIds.length
+                ? localOfficers.filter(o => activeOfficerIds.includes(o.id))
                 : localOfficers,
-            availableManagers: activeManagerIds.length 
-                ? localUsers.filter(u => activeManagerIds.includes(u.id)) 
+            availableManagers: activeManagerIds.length
+                ? localUsers.filter(u => activeManagerIds.includes(u.id))
                 : localUsers.filter(u => ['user', 'admin'].includes(u.role))
         }
     }, [formData.subdepartment_id, availableSubdepartments, localUsers, localOfficers])
@@ -181,7 +183,7 @@ export function EnquiryDialog({
     // Derived Assistants based on selected Manager
     const availableAssistants = useMemo(() => {
         if (!formData.task_manager_id || !formData.subdepartment_id) return []
-        
+
         const subdept = availableSubdepartments.find(s => s.id.toString() === formData.subdepartment_id)
         if (!subdept?.assistant_history) return localUsers.filter(u => u.role === 'user')
 
@@ -189,8 +191,8 @@ export function EnquiryDialog({
             .filter(h => !h.end_date && h.manager_id?.toString() === formData.task_manager_id)
             .map(h => h.id)
 
-        return assistantIds.length > 0 
-            ? localUsers.filter(u => assistantIds.includes(u.id)) 
+        return assistantIds.length > 0
+            ? localUsers.filter(u => assistantIds.includes(u.id))
             : []
     }, [formData.task_manager_id, formData.subdepartment_id, availableSubdepartments, localUsers])
 
@@ -297,50 +299,50 @@ export function EnquiryDialog({
                 .select('references')
                 .eq('id', individual.id)
                 .single()
-            
+
             if (refData?.references?.length) {
                 const refIds = refData.references.map((r: any) => r.id).filter(Boolean)
                 const { data: refs } = await supabase
                     .from('registry_individuals')
                     .select('id, full_name')
                     .in('id', refIds)
-                
+
                 setAvailableReferences(refs?.map(r => ({ ...r, relationship_type: 'Reference' })) || [])
             }
 
             // 2. Fetch Companies (If Principal)
             if (individual.individual_type === 'principal') {
-                 setLoadingCompanies(true)
-                 const empData = individual.employment_data?.associations || []
-                 const validAssocs = empData.filter((a: any) => a.individual_type === 'Principal' && a.company_id)
-                 
-                 if (validAssocs.length) {
-                     const ids = [...new Set(validAssocs.map((a: any) => a.company_id))]
-                     const { data: comps } = await supabase
-                         .from('acc_portal_company_duplicate')
-                         .select('id, company_name, understudy')
-                         .in('id', ids)
-                     
-                     // Enhance company data with "Current" / "Bill To" flags
-                     const enhancedComps = (comps || []).map(c => {
-                         const assoc = validAssocs.find((a: any) => a.company_id.toString() === c.id.toString())
-                         return {
-                             ...c,
-                             is_current: assoc?.is_current,
-                             is_bill_to: assoc?.is_current // Simplification based on logic
-                         }
-                     })
-                     
-                     setCompanies(enhancedComps)
-                     
-                     // Auto-select company logic
-                     if (enhancedComps.length === 1) handleCompanyChange(enhancedComps[0].id.toString())
-                     else {
-                         const current = enhancedComps.find(c => c.is_current)
-                         if (current) handleCompanyChange(current.id.toString())
-                     }
-                 }
-                 setLoadingCompanies(false)
+                setLoadingCompanies(true)
+                const empData = individual.employment_data?.associations || []
+                const validAssocs = empData.filter((a: any) => a.individual_type === 'Principal' && a.company_id)
+
+                if (validAssocs.length) {
+                    const ids = [...new Set(validAssocs.map((a: any) => a.company_id))]
+                    const { data: comps } = await supabase
+                        .from('acc_portal_company_duplicate')
+                        .select('id, company_name, understudy')
+                        .in('id', ids)
+
+                    // Enhance company data with "Current" / "Bill To" flags
+                    const enhancedComps = (comps || []).map(c => {
+                        const assoc = validAssocs.find((a: any) => a.company_id.toString() === c.id.toString())
+                        return {
+                            ...c,
+                            is_current: assoc?.is_current,
+                            is_bill_to: assoc?.is_current // Simplification based on logic
+                        }
+                    })
+
+                    setCompanies(enhancedComps)
+
+                    // Auto-select company logic
+                    if (enhancedComps.length === 1) handleCompanyChange(enhancedComps[0].id.toString())
+                    else {
+                        const current = enhancedComps.find(c => c.is_current)
+                        if (current) handleCompanyChange(current.id.toString())
+                    }
+                }
+                setLoadingCompanies(false)
             }
         } catch (error) {
             console.error(error)
@@ -375,7 +377,7 @@ export function EnquiryDialog({
                         .from('registry_individuals')
                         .select('id, full_name')
                         .in('id', familyIds)
-                    
+
                     const familyWithRel = (family || []).map(f => {
                         const rel = ind.relationships?.find(r => r.individual_id === f.id)
                         return { ...f, relationship_type: rel?.relationship || 'Family' }
@@ -385,8 +387,8 @@ export function EnquiryDialog({
             }
         } else {
             // It's a Dependant - Find Principal
-            const principalRel = ind.relationships?.find((r: any) => 
-                r.isPrincipal === 'Yes' || 
+            const principalRel = ind.relationships?.find((r: any) =>
+                r.isPrincipal === 'Yes' ||
                 ['principal', 'spouse', 'husband', 'wife', 'father', 'mother'].includes(r.relationship?.toLowerCase())
             )
 
@@ -400,12 +402,12 @@ export function EnquiryDialog({
                 if (principal) {
                     setPrincipalForDependant(principal)
                     updateForm({ principal_member_id: principal.id.toString() })
-                    
+
                     // Allow selecting principal as "family" for the dependant
                     setAvailableDependants([{ ...principal, relationship_type: 'Principal Member' }])
                     setIncludeDependants(true)
                     setSelectedDependants([principal.id.toString()])
-                    
+
                     // Load Principal's companies
                     await fetchRelatedData({ ...principal, individual_type: 'principal' } as Individual)
                 }
@@ -414,14 +416,14 @@ export function EnquiryDialog({
     }, [updateForm, fetchRelatedData])
 
     // --- Search & Init ---
-    
+
     useEffect(() => {
         if (open) {
             // Reset form on open
             setFormData(INITIAL_FORM_DATA)
             setApplicantType('principal')
             setSelectedIndividual(null)
-            
+
             // Lazy load individuals
             setSearchLoading(true)
             supabase.from('registry_individuals')
@@ -472,8 +474,8 @@ export function EnquiryDialog({
             return
         }
         if (!formData.department_id) {
-             toast({ title: "Validation Error", description: "Department is required.", variant: "destructive" });
-             return
+            toast({ title: "Validation Error", description: "Department is required.", variant: "destructive" });
+            return
         }
 
         setLoading(true)
@@ -492,26 +494,35 @@ export function EnquiryDialog({
                 applicant_type: applicantType,
                 applicant_name: selectedIndividual.full_name,
                 date_initiated: formData.enquiry_date,
-                
+             job_level: {
+    level: formData.subclass_id ? 4 : 
+           formData.class_id ? 3 : 
+           formData.subdepartment_id ? 2 : 
+           formData.department_id ? 1 : null,
+    class_id: formData.class_id || null,
+    subclass_id: formData.subclass_id || null,
+    department_id: formData.department_id ? parseInt(formData.department_id) : null,
+    subdepartment_id: formData.subdepartment_id ? parseInt(formData.subdepartment_id) : null
+},
                 // Relations
                 principal_member: applicantType === 'dependant' ? formData.principal_member_id : selectedIndividual.id,
                 company_id: selectedCompany || null,
                 understudy: selectedUnderstudy || null,
-                
+
                 // Staff
                 officer_id: formData.officer_id === 'none' || !formData.officer_id ? null : formData.officer_id,
                 task_manager_id: formData.task_manager_id === 'none' || !formData.task_manager_id ? null : formData.task_manager_id,
                 task_assistant_id: formData.task_assistant_id === 'none' || !formData.task_assistant_id ? null : formData.task_assistant_id,
-                
+
                 // JSONB fields
                 dependant_member: includeDependants ? availableDependants
                     .filter(d => selectedDependants.includes(d.id.toString()))
                     .map(d => ({ id: d.id, name: d.full_name, relationship: d.relationship_type })) : [],
-                
+
                 references: includeReferences ? availableReferences
                     .filter(r => selectedReferences.includes(r.id.toString()))
                     .map(r => ({ id: r.id, name: r.full_name, relationship: 'Reference' })) : [],
-                
+
                 stages: {
                     '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa': {
                         date: format(new Date(), 'dd/MM/yyyy'),
@@ -559,7 +570,7 @@ export function EnquiryDialog({
 
                 <form onSubmit={handleSubmit} className="space-y-6 pt-4">
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        
+
                         {/* LEFT COLUMN: IDENTIFICATION */}
                         <div className="lg:col-span-1 space-y-6">
                             {/* Applicant Type */}
@@ -644,14 +655,14 @@ export function EnquiryDialog({
                             {/* Relationships Checkboxes */}
                             {(availableDependants.length > 0 || availableReferences.length > 0) && (
                                 <Card>
-                                    <CardHeader className="pb-3 bg-blue-50/50"><CardTitle className="text-base font-semibold text-blue-800"><UserPlus className="h-4 w-4 inline mr-2"/>Relations</CardTitle></CardHeader>
+                                    <CardHeader className="pb-3 bg-blue-50/50"><CardTitle className="text-base font-semibold text-blue-800"><UserPlus className="h-4 w-4 inline mr-2" />Relations</CardTitle></CardHeader>
                                     <CardContent className="pt-4 space-y-4">
                                         {availableDependants.length > 0 && (
                                             <div className="space-y-2">
                                                 <div className="flex items-center space-x-2">
                                                     <input type="checkbox" checked={includeDependants} onChange={e => {
-                                                        setIncludeDependants(e.target.checked); if(!e.target.checked) setSelectedDependants([])
-                                                    }} className="h-4 w-4 rounded border-gray-300"/>
+                                                        setIncludeDependants(e.target.checked); if (!e.target.checked) setSelectedDependants([])
+                                                    }} className="h-4 w-4 rounded border-gray-300" />
                                                     <label className="text-sm font-medium">Include Family/Principal</label>
                                                 </div>
                                                 {includeDependants && (
@@ -672,8 +683,8 @@ export function EnquiryDialog({
                                             <div className="space-y-2">
                                                 <div className="flex items-center space-x-2">
                                                     <input type="checkbox" checked={includeReferences} onChange={e => {
-                                                        setIncludeReferences(e.target.checked); if(!e.target.checked) setSelectedReferences([])
-                                                    }} className="h-4 w-4 rounded border-gray-300"/>
+                                                        setIncludeReferences(e.target.checked); if (!e.target.checked) setSelectedReferences([])
+                                                    }} className="h-4 w-4 rounded border-gray-300" />
                                                     <label className="text-sm font-medium">Include References</label>
                                                 </div>
                                                 {includeReferences && (
@@ -708,7 +719,7 @@ export function EnquiryDialog({
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
                                             <Label>Task Type</Label>
-                                            <Select value={taskType} onValueChange={(v:any) => setTaskType(v)}>
+                                            <Select value={taskType} onValueChange={(v: any) => setTaskType(v)}>
                                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                                 <SelectContent><SelectItem value="new">New</SelectItem><SelectItem value="renewal">Renewal</SelectItem></SelectContent>
                                             </Select>

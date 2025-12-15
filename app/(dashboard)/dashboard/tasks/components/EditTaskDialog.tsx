@@ -185,27 +185,6 @@ export function EditTaskDialog({
     });
   };
 
-  // Helper function to convert DD/MM/YYYY to YYYY-MM-DD
-  const convertDateToInput = (dateString) => {
-    if (!dateString) return '';
-    try {
-      // Check if it's already in YYYY-MM-DD format
-      if (dateString.includes('-') && dateString.length === 10) {
-        return dateString;
-      }
-      
-      // Handle DD/MM/YYYY format
-      if (dateString.includes('/')) {
-        const [day, month, year] = dateString.split('/');
-        return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-      }
-      
-      // Fallback to formatDateForInput
-      return formatDateForInput(dateString);
-    } catch {
-      return '';
-    }
-  };
   // Helper function to calculate age from date of birth
   const calculateAge = (dateOfBirth) => {
     if (!dateOfBirth) return null;
@@ -295,41 +274,10 @@ export function EditTaskDialog({
     if (!stages || !stages.length || !departmentId) return [];
     
     // Filter stages based on your business logic
-    // This is a simplified version - you may need to adjust based on how stages are associated with departments
     return stages.filter(stage => {
-      // Add your filtering logic here
-      // For example, if stages have department_id or other identifiers
-      return true; // For now, return all stages
+      // Add logic here if stages are filtered by department
+      return true; 
     }).sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-  };
-
-  // Stage update handler
-  const handleStageUpdate = (stageId: string, field: string, value: string) => {
-    setTaskStages(prev => {
-      const currentStageData = prev[stageId] || {};
-      
-      if (field === 'date') {
-        if (value) {
-          // Convert to DD/MM/YYYY format for database consistency
-          const formattedDate = convertDateToDbFormat(value);
-      return {
-        ...prev,
-        [stageId]: {
-              ...currentStageData,
-          date: formattedDate,
-          status: 'completed',
-          completedAt: new Date().toISOString()
-        }
-      };
-        } else {
-          // Clear the stage
-          const { [stageId]: removed, ...rest } = prev;
-          return rest;
-        }
-      }
-      
-      return prev;
-    });
   };
 
   // EFFECT 1: Main population effect when the dialog opens or task data changes
@@ -489,6 +437,19 @@ export function EditTaskDialog({
   const handleSave = async () => {
     setLoading(true);
     try {
+        // 1. Calculate the job_level JSON object based on current hierarchy selection
+        // This matches the EnquiryDialog logic
+        const jobLevel = {
+            level: formData.subclass_id ? 4 : 
+                   formData.class_id ? 3 : 
+                   formData.subdepartment_id ? 2 : 
+                   formData.department_id ? 1 : null,
+            class_id: formData.class_id ? parseInt(formData.class_id, 10) : null,
+            subclass_id: formData.subclass_id ? parseInt(formData.subclass_id, 10) : null,
+            department_id: formData.department_id ? parseInt(formData.department_id, 10) : null,
+            subdepartment_id: formData.subdepartment_id ? parseInt(formData.subdepartment_id, 10) : null
+        };
+
       const updateData = {
         // Basic Information
         applicant_name: formData.applicant_name.trim(),
@@ -498,13 +459,16 @@ export function EditTaskDialog({
         nationality: formData.nationality.trim() || null,
         date_of_birth: formData.date_of_birth || null,
         
-        // Department Hierarchy
+        // Department Hierarchy (Parsed as Integers)
         department_id: formData.department_id ? parseInt(formData.department_id, 10) : null,
         subdepartment_id: formData.subdepartment_id ? parseInt(formData.subdepartment_id, 10) : null,
         class_id: formData.class_id ? parseInt(formData.class_id, 10) : null,
         subclass_id: formData.subclass_id ? parseInt(formData.subclass_id, 10) : null,
         
-        // Staff Assignment
+        // Job Level JSON
+        job_level: jobLevel,
+
+        // Staff Assignment (Handle 'none' strings)
         task_manager_id: formData.task_manager_id && formData.task_manager_id !== 'none' ? parseInt(formData.task_manager_id, 10) : null,
         officer_id: formData.officer_id && formData.officer_id !== 'none' ? parseInt(formData.officer_id, 10) : null,
         task_assistant_id: formData.task_assistant_id && formData.task_assistant_id !== 'none' ? parseInt(formData.task_assistant_id, 10) : null,
@@ -518,12 +482,12 @@ export function EditTaskDialog({
         batch: formData.batch.trim() || null,
         applied_by: formData.applied_by.trim() || null,
         understudy: formData.understudy.trim() || null,
-        company_id: formData.company_id ? parseInt(formData.company_id, 10) : null,
+        company_id: formData.company_id && formData.company_id !== 'none' ? parseInt(formData.company_id, 10) : null,
         
         // Dates
         date_initiated: formData.date_initiated || null,
         
-        // Stages - this is the key addition that matches your DB structure
+        // Stages
         stages: taskStages,
         
         updated_at: new Date().toISOString()

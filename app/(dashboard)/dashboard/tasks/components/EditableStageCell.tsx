@@ -189,7 +189,7 @@ export default function EditableStageCell({
   const stageDate = useMemo(() => {
     const dateFields = [
       'application_date', 'date', 'upload_date', 'created_date',
-      'date_and_time_generated', 'invoice_date_and_time', 'With_Effect_From',
+      'date_and_time','date_and_time_generated', 'invoice_date_and_time', 'With_Effect_From',
       'Expiry_Date', 'Date_of_Issue'
     ];
 
@@ -684,17 +684,16 @@ export default function EditableStageCell({
 
     return previewDocuments;
   }, [fetchKycDocumentData, transformKycFieldsToPreviewFormat]);
- 
-  // Also, modify the handleViewDocument function to log when it's called
+
   const handleViewDocument = useCallback(async (e: React.MouseEvent) => {
-     e.stopPropagation();
+    e.stopPropagation();
 
     try {
       const documentsToPreview = linkedDocuments && linkedDocuments.length > 0
         ? linkedDocuments
         : linkedDocument ? [linkedDocument] : [];
 
-       if (documentsToPreview.length === 0) {
+      if (documentsToPreview.length === 0) {
         toast({
           title: 'No documents',
           description: 'No documents available to preview',
@@ -706,7 +705,7 @@ export default function EditableStageCell({
       setIsLoading(true);
       const previewDocs = await buildPreviewDocumentsData(documentsToPreview);
 
-        if (previewDocs.length > 0) {
+      if (previewDocs.length > 0) {
         setCurrentPreviewIndex(0);
         setPreviewDocuments(previewDocs);
         setIsPreviewOpen(true);
