@@ -3,7 +3,7 @@
 
 "use client"
 
-import React, { useState, useMemo, useCallback, useEffect } from "react"
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -116,7 +116,10 @@ export function MemorizedReportDialog({
   const [isLoading, setIsLoading] = useState(false)
   const [reportName, setReportName] = useState("")
   const [reportConfig, setReportConfig] = useState<ReportConfiguration>(INITIAL_REPORT_CONFIG)
-
+  
+  // State to track which fields are included in the report (separate from default visibility)
+  const [includedFields, setIncludedFields] = useState<Set<string>>(new Set());
+  
   const [showSelectedOnly, setShowSelectedOnly] = useState(true);
 
   const fetchReports = useCallback(async () => {
@@ -138,28 +141,45 @@ export function MemorizedReportDialog({
     }
   }, [department]);
 
+  // EFFECT 1: Fetch reports when dialog opens. 
+  // FIX: REMOVED the "else" block that was resetting state on close.
   useEffect(() => {
     if (open && department) {
       fetchReports();
-    } else {
-      setSelectedReport(null);
-      setIsEditing(false);
-      setShowSelectedOnly(true);
     }
   }, [open, fetchReports, department]);
+
+  // EFFECT 2: Reset state ONLY when department changes.
+  useEffect(() => {
+    setSelectedReport(null);
+    setReportName("");
+    setReportConfig(INITIAL_REPORT_CONFIG);
+    setIncludedFields(new Set(['applicant_name'])); // Default reset
+    setIsEditing(false);
+    setShowSelectedOnly(true);
+  }, [department?.id]);
 
   const handleCreateNew = () => {
     setSelectedReport(null);
     setReportName("");
     setReportConfig(INITIAL_REPORT_CONFIG);
+    setIncludedFields(new Set(['applicant_name'])); 
     setIsEditing(true);
     setShowSelectedOnly(true);
   };
 
   const handleSelectReport = (report: MemorizedReport) => {
+    const config = normalizeConfiguration(report.configuration);
+    
     setSelectedReport(report);
     setReportName(report.name);
-    setReportConfig(normalizeConfiguration(report.configuration));
+    setReportConfig(config);
+    
+    // When manually selecting a report from the list, we load its saved defaults.
+    // This overwrites any previous session fields, which is expected behavior when switching reports.
+    const included = new Set(config.taskFields.map(f => f.id));
+    setIncludedFields(included);
+    
     setIsEditing(false);
     setShowSelectedOnly(true);
   };
@@ -179,6 +199,7 @@ export function MemorizedReportDialog({
   const handleSaveReport = async () => {
     if (!reportName.trim() || !department) return;
     setIsLoading(true);
+    
     try {
       const finalConfig = getFinalConfiguration(reportConfig);
       const reportData = {
@@ -187,20 +208,37 @@ export function MemorizedReportDialog({
         department_id: department.id,
       };
 
+      let savedReportData;
+
       if (selectedReport && selectedReport.id) {
+        // Update existing
         const { data, error } = await supabase.from('tm_memorized_reports').update(reportData).eq('id', selectedReport.id).select().single();
         if (error) throw error;
-        handleSelectReport(data);
+        savedReportData = data;
         toast({ title: "Success", description: "Report updated." });
       } else {
+        // Create new
         const { data, error } = await supabase.from('tm_memorized_reports').insert(reportData).select().single();
         if (error) throw error;
-        setSelectedReport(data);
+        savedReportData = data;
         toast({ title: "Success", description: "Report created." });
       }
+
+      // FIX: Update the selected report reference to the saved one, 
+      // but DO NOT reset 'includedFields'. Keep the user's current session selections.
+      const normalizedSavedConfig = normalizeConfiguration(savedReportData.configuration);
+      
+      setSelectedReport(savedReportData);
+      setReportName(savedReportData.name);
+      
+      // Update config to match DB (defaults), but UI checkboxes for "Include" are driven by 'includedFields' state
+      setReportConfig(normalizedSavedConfig); 
+      
       setIsEditing(false);
       await fetchReports();
+      
     } catch (error) {
+      console.error(error);
       toast({ title: "Error", description: "Failed to save report.", variant: "destructive" });
     } finally {
       setIsLoading(false);
@@ -230,31 +268,18 @@ export function MemorizedReportDialog({
       onApplyReport({
         ...selectedReport,
         configuration: finalConfig,
-        sessionIncludedFields: Array.from(includedFields) // Pass session-only fields
+        // Pass the session-only fields which are currently in state
+        sessionIncludedFields: Array.from(includedFields) 
       });
       onOpenChange(false);
     }
   };
-
-  // State to track which fields are included in the report (separate from default visibility)
-  const [includedFields, setIncludedFields] = useState<Set<string>>(new Set());
-  
-  useEffect(() => {
-    if (reportConfig?.taskFields) {
-      console.log('Initializing included fields from reportConfig:', reportConfig.taskFields);
-      // Include ALL fields from the configuration (both default and non-default)
-      const included = new Set(reportConfig.taskFields.map(f => f.id));
-      console.log('Setting included fields:', Array.from(included));
-      setIncludedFields(included);
-    }
-  }, [selectedReport?.id]); // Only reset when the selected report changes, not when toggling edit mode
 
   const isTaskFieldIncluded = useCallback((fieldId: string) => {
     return includedFields.has(fieldId);
   }, [includedFields]);
 
   const toggleTaskFieldInclude = useCallback((fieldId: string) => {
-    console.log('Toggling field:', fieldId, 'Current included fields:', Array.from(includedFields));
     setIncludedFields(prev => {
       const newSet = new Set(prev);
       if (newSet.has(fieldId)) {
@@ -262,21 +287,13 @@ export function MemorizedReportDialog({
       } else {
         newSet.add(fieldId);
       }
-      console.log('New included fields:', Array.from(newSet));
       return newSet;
     });
   }, [includedFields]);
 
   // Get the final configuration - ONLY save fields marked as default (isDefault: true)
-  // Fields that are included but not default are session-only
   const getFinalConfiguration = (config: ReportConfiguration): ReportConfiguration => {
-    // Only save fields that are marked as default (isDefault: true)
-    // Fields that are included but not default should NOT be persisted to database
     const fieldsToSave = config.taskFields.filter(f => f.isDefault === true);
-    
-    console.log('Getting final configuration. Included fields (session):', Array.from(includedFields));
-    console.log('Fields to save (default only):', fieldsToSave);
-    
     return {
       ...config,
       taskFields: fieldsToSave
@@ -322,7 +339,6 @@ export function MemorizedReportDialog({
         newStages[stageId].isStageDateSelected = !newStages[stageId].isStageDateSelected;
       }
       
-      // Clean up if nothing selected
       if (!newStages[stageId].isStageDateSelected && Object.keys(newStages[stageId].documents).length === 0) {
         delete newStages[stageId];
       }
@@ -338,7 +354,6 @@ export function MemorizedReportDialog({
         newStages[stageId] = { isStageDateSelected: true, isStageDateDefault: true, documents: {} };
       } else {
         newStages[stageId].isStageDateDefault = !newStages[stageId].isStageDateDefault;
-        // If setting as default, must be included
         if (newStages[stageId].isStageDateDefault) {
           newStages[stageId].isStageDateSelected = true;
         }
@@ -361,7 +376,6 @@ export function MemorizedReportDialog({
         newStages[stageId].documents[kycId] = { fields: [] };
       }
       
-      // Clean up if nothing selected
       if (!newStages[stageId].isStageDateSelected && Object.keys(newStages[stageId].documents).length === 0) {
         delete newStages[stageId];
       }
@@ -379,10 +393,8 @@ export function MemorizedReportDialog({
       const exists = currentFields.find((f: any) => f.id === fieldId);
 
       if (exists) {
-        // Remove field
         newStages[stageId].documents[kycId].fields = currentFields.filter((f: any) => f.id !== fieldId);
       } else {
-        // Add field with default off
         newStages[stageId].documents[kycId].fields.push({ id: fieldId, isDefault: false });
       }
       
@@ -399,12 +411,10 @@ export function MemorizedReportDialog({
       const exists = currentFields.find((f: any) => f.id === fieldId);
 
       if (exists) {
-        // Toggle default
         newStages[stageId].documents[kycId].fields = currentFields.map((f: any) => 
           f.id === fieldId ? { ...f, isDefault: !f.isDefault } : f
         );
       } else {
-        // Add field with default on
         newStages[stageId].documents[kycId].fields.push({ id: fieldId, isDefault: true });
       }
       
@@ -482,8 +492,8 @@ export function MemorizedReportDialog({
     isDefault, 
     onToggleInclude, 
     onToggleDefault, 
-    depth = 0,
-    isSessionOnly = false 
+    depth = 0, 
+    isSessionOnly = false
   }: {
     label: string;
     isIncluded: boolean;
@@ -605,6 +615,7 @@ export function MemorizedReportDialog({
                   </AccordionItem>
                 )}
 
+                {/* Stages and Documents rendering */}
                 {filteredStages.map(stage => {
                     const stageConfig = reportConfig.stages?.[stage.id];
                     const filteredDocs = (stage.documents || []).filter((doc: any) => {
