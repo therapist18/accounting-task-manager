@@ -476,21 +476,47 @@ export function MemorizedReportDialog({
     </div>
   );
 
-  const GridRow = ({ label, isIncluded, isDefault, onToggleInclude, onToggleDefault, depth = 0 }: any) => (
+  const GridRow = ({ 
+    label, 
+    isIncluded, 
+    isDefault, 
+    onToggleInclude, 
+    onToggleDefault, 
+    depth = 0,
+    isSessionOnly = false 
+  }: {
+    label: string;
+    isIncluded: boolean;
+    isDefault: boolean;
+    onToggleInclude: () => void;
+    onToggleDefault: () => void;
+    depth?: number;
+    isSessionOnly?: boolean;
+  }) => (
     <div className="grid grid-cols-12 gap-2 py-1.5 items-center hover:bg-slate-50 rounded px-2 transition-colors">
-      <div className="col-span-8 flex items-center gap-2">
-        <span style={{ marginLeft: `${depth * 12}px` }} className="text-sm truncate" title={label}>{label}</span>
+      <div className="col-span-6 flex items-center gap-2">
+        <span 
+          style={{ marginLeft: `${depth * 12}px` }} 
+          className={`text-sm truncate ${isSessionOnly ? 'text-blue-600' : ''}`} 
+          title={label}
+        >
+          {label}
+          {isSessionOnly && ' (Session Only)'}
+        </span>
       </div>
-      <div className="col-span-2 flex justify-center">
+      <div className="col-span-3 flex justify-center">
         <Checkbox 
           checked={isDefault} 
           onCheckedChange={onToggleDefault}
+          disabled={isSessionOnly}
+          aria-label={`Default visibility for ${label}`}
         />
       </div>
-      <div className="col-span-2 flex justify-center">
+      <div className="col-span-3 flex justify-center">
         <Checkbox 
           checked={isIncluded} 
-          onCheckedChange={onToggleInclude} 
+          onCheckedChange={onToggleInclude}
+          aria-label={`Include ${label} in report`}
         />
       </div>
     </div>
@@ -560,6 +586,8 @@ export function MemorizedReportDialog({
                       {filteredTaskFields.map(field => {
                         const isIncluded = isTaskFieldIncluded(field.id);
                         const config = reportConfig.taskFields?.find(f => f.id === field.id);
+                        const isSessionOnly = isIncluded && !config?.isDefault;
+                        
                         return (
                           <GridRow 
                             key={field.id}
@@ -569,6 +597,7 @@ export function MemorizedReportDialog({
                             onToggleInclude={() => toggleTaskFieldInclude(field.id)}
                             onToggleDefault={() => toggleTaskFieldDefault(field.id)}
                             depth={1}
+                            isSessionOnly={isSessionOnly}
                           />
                         );
                       })}
@@ -636,6 +665,7 @@ export function MemorizedReportDialog({
                                                 onToggleInclude={() => toggleDocFieldInclude(stage.id, doc.kycId, field.id)}
                                                 onToggleDefault={() => toggleDocFieldDefault(stage.id, doc.kycId, field.id)}
                                                 depth={2}
+                                                isSessionOnly={!!fieldConfig && !fieldConfig.isDefault}
                                             />
                                             );
                                         })}
@@ -656,7 +686,14 @@ export function MemorizedReportDialog({
     );
   };
 
-  const renderReportViewer = () => (
+const renderReportViewer = () => {
+  // Get all included fields (both default and session-only)
+  const allIncludedFields = new Set([
+    ...(reportConfig.taskFields?.map(f => f.id) || []),
+    ...Array.from(includedFields)
+  ]);
+
+  return (
     <div className="flex flex-col h-full">
       <div className="mb-4">
         <h3 className="text-lg font-semibold text-slate-800">{selectedReport?.name}</h3>
@@ -669,15 +706,32 @@ export function MemorizedReportDialog({
           <div className="space-y-4">
             <div>
               <h4 className="font-semibold text-sm mb-2 text-blue-700">Task Fields</h4>
-              {reportConfig.taskFields?.map(f => {
-                const header = tableHeaders.find(h => h.id === f.id);
+              {Array.from(allIncludedFields).map(fieldId => {
+                const fieldConfig = reportConfig.taskFields?.find(f => f.id === fieldId);
+                const header = tableHeaders.find(h => h.id === fieldId);
+                const isSessionOnly = !fieldConfig?.isDefault;
+                
                 return (
-                  <div key={f.id} className="grid grid-cols-12 text-sm py-1 border-b border-dashed border-slate-100 last:border-0">
-                    <div className="col-span-8 text-slate-700">{header?.label || f.id}</div>
-                    <div className="col-span-2 text-center text-green-600">{f.isDefault ? "✓" : "-"}</div>
+                  <div 
+                    key={fieldId} 
+                    className={`grid grid-cols-12 text-sm py-1 border-b border-dashed border-slate-100 last:border-0 ${
+                      isSessionOnly ? 'text-blue-600' : 'text-slate-700'
+                    }`}
+                  >
+                    <div className="col-span-8 flex items-center gap-1">
+                      {header?.label || fieldId}
+                      {isSessionOnly && <span className="text-xs text-blue-500">(Session Only)</span>}
+                    </div>
+                    <div className="col-span-2 text-center">
+                      {fieldConfig?.isDefault ? (
+                        <span className="text-green-600">✓</span>
+                      ) : (
+                        <span className="text-slate-300">-</span>
+                      )}
+                    </div>
                     <div className="col-span-2 text-center font-bold text-blue-600">✓</div>
                   </div>
-                )
+                );
               })}
             </div>
 
@@ -686,38 +740,67 @@ export function MemorizedReportDialog({
               if (!stage) return null;
               return (
                 <div key={stageId} className="pt-2">
-                   <h4 className="font-semibold text-sm mb-2 text-blue-700">{stage.name}</h4>
-                   {stageConfig.isStageDateSelected && (
-                     <div className="grid grid-cols-12 text-sm py-1 border-b border-dashed border-slate-100">
-                        <div className="col-span-8 text-slate-700 pl-2">Completion Date</div>
-                        <div className="col-span-2 text-center text-green-600">{stageConfig.isStageDateDefault ? "✓" : "-"}</div>
-                        <div className="col-span-2 text-center font-bold text-blue-600">✓</div>
-                     </div>
-                   )}
-                   {Object.entries(stageConfig.documents).map(([kycId, docConfig]) => {
-                      const kycDoc = kycDocuments.get(kycId);
-                      if (!kycDoc) return null;
-                      return (
-                        <div key={kycId} className="mt-2 pl-4 border-l-2 border-slate-100 ml-1">
-                          <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{kycDoc.display_name || kycDoc.name}</h5>
-                          {docConfig.fields.map(f => (
-                             <div key={f.id} className="grid grid-cols-12 text-sm py-1">
-                                <div className="col-span-8 text-slate-700">{kycDoc.fields?.find((field: any) => field.id === f.id)?.fieldName || f.id}</div>
-                                <div className="col-span-2 text-center text-green-600">{f.isDefault ? "✓" : "-"}</div>
-                                <div className="col-span-2 text-center font-bold text-blue-600">✓</div>
-                             </div>
-                          ))}
-                        </div>
-                      )
-                   })}
+                  <h4 className="font-semibold text-sm mb-2 text-blue-700">{stage.name}</h4>
+                  {stageConfig.isStageDateSelected && (
+                    <div className="grid grid-cols-12 text-sm py-1 border-b border-dashed border-slate-100">
+                      <div className="col-span-8 text-slate-700 pl-2">Completion Date</div>
+                      <div className="col-span-2 text-center text-green-600">{stageConfig.isStageDateDefault ? "✓" : "-"}</div>
+                      <div className="col-span-2 text-center font-bold text-blue-600">✓</div>
+                    </div>
+                  )}
+                  {Object.entries(stageConfig.documents).map(([kycId, docConfig]) => {
+                    const kycDoc = kycDocuments.get(kycId);
+                    if (!kycDoc) return null;
+                    
+                    // Get all document fields (both default and session-only)
+                    const docFields = new Set([
+                      ...(docConfig.fields?.map((f: any) => f.id) || [])
+                    ]);
+                    
+                    return (
+                      <div key={kycId} className="mt-2 pl-4 border-l-2 border-slate-100 ml-1">
+                        <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+                          {kycDoc.display_name || kycDoc.name}
+                        </h5>
+                        {Array.from(docFields).map(fieldId => {
+                          const fieldConfig = docConfig.fields.find((f: any) => f.id === fieldId);
+                          const fieldInfo = kycDoc.fields?.find((f: any) => f.id === fieldId);
+                          const isSessionOnly = !fieldConfig?.isDefault;
+                          
+                          return (
+                            <div 
+                              key={fieldId} 
+                              className={`grid grid-cols-12 text-sm py-1 ${
+                                isSessionOnly ? 'text-blue-600' : 'text-slate-700'
+                              }`}
+                            >
+                              <div className="col-span-8 flex items-center gap-1">
+                                {fieldInfo?.fieldName || fieldId}
+                                {isSessionOnly && <span className="text-xs text-blue-500">(Session Only)</span>}
+                              </div>
+                              <div className="col-span-2 text-center">
+                                {fieldConfig?.isDefault ? (
+                                  <span className="text-green-600">✓</span>
+                                ) : (
+                                  <span className="text-slate-300">-</span>
+                                )}
+                              </div>
+                              <div className="col-span-2 text-center font-bold text-blue-600">✓</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
                 </div>
-              )
+              );
             })}
           </div>
         </ScrollArea>
       </div>
     </div>
   );
+};
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

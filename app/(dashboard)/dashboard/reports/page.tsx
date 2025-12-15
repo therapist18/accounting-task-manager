@@ -1031,30 +1031,7 @@ const columns = useMemo(() => {
         </div>
 
         <div className="flex items-center gap-3">
-          {activeReport && (
-             <>
-                <Button 
-                    variant="outline" 
-                    size="sm" 
-                    className="flex items-center gap-2 bg-slate-50"
-                    onClick={() => setIsColVisOpen(true)}
-                >
-                    <Columns className="h-4 w-4 text-slate-500" />
-                    <span className="hidden sm:inline">Columns</span>
-                </Button>
-                <ColumnVisibilityDialog 
-                    open={isColVisOpen}
-                    onOpenChange={setIsColVisOpen}
-                    stages={stages}
-                    kycDocuments={kycDocuments}
-                    tableHeaders={ENHANCED_TABLE_HEADERS_IMMIGRATION}
-                    visibleColumns={visibleColumnIds}
-                    onApply={setVisibleColumnIds}
-                />
-             </>
-          )}
-
-          {activeReport && (
+                {activeReport && (
             <div className="relative w-64 hidden md:block">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
               <Input
