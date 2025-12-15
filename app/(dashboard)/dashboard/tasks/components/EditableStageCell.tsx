@@ -5,19 +5,19 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogPortal, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { 
-  Upload, Calendar, Check, X, Clock, Eye, AlertTriangle, Zap, 
-  Loader2, SkipForward, Clock3, MoreHorizontal, CheckCircle2, 
-  Timer, AlertCircle 
+import {
+  Upload, Calendar, Check, X, Clock, Eye, AlertTriangle, Zap,
+  Loader2, SkipForward, Clock3, MoreHorizontal, CheckCircle2,
+  Timer, AlertCircle
 } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { format, parse, isValid } from "date-fns"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
-import { formatDuration,getTimeStatus, isDocumentApplicable, parseDate } from "../overall-view/tableUtils"
+import { formatDuration, getTimeStatus, isDocumentApplicable, parseDate } from "../overall-view/tableUtils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   DropdownMenu,
@@ -25,6 +25,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { DialogTrigger } from "@radix-ui/react-dialog"
 
 interface EditableStageCellProps {
   stage: any
@@ -116,7 +117,6 @@ export default function EditableStageCell({
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
   const [isAutomationRunning, setIsAutomationRunning] = useState(false);
   const [previewDocuments, setPreviewDocuments] = useState<any[]>([]);
@@ -124,7 +124,7 @@ export default function EditableStageCell({
   const [isSkipDialogOpen, setIsSkipDialogOpen] = useState(false);
   const [skipReason, setSkipReason] = useState('');
   const [selectedSkipReason, setSelectedSkipReason] = useState('');
-  
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -241,12 +241,12 @@ export default function EditableStageCell({
     if (currentStageIndex > 0) {
       const prevStage = sortedStages[currentStageIndex - 1];
       const prevStageData = task.stages?.[prevStage.id];
-      
+
       // If previous stage is completed/skipped, use its completion time as start time
       if (prevStageData?.completedAt) return prevStageData.completedAt;
       if (prevStageData?.date) return prevStageData.date;
       if (prevStageData?.status === 'skipped' && prevStageData.skippedAt) return prevStageData.skippedAt;
-      
+
       // If previous stage is NOT complete, the current stage hasn't started
       return null;
     }
@@ -378,7 +378,7 @@ export default function EditableStageCell({
     if (!task.stages || !stages || stages.length === 0) return true;
 
     const currentStageIndex = stages.findIndex(s => s.id === stage.id);
-    if (currentStageIndex <= 0) return true; 
+    if (currentStageIndex <= 0) return true;
 
     for (let i = 0; i < currentStageIndex; i++) {
       const prevStage = stages[i];
@@ -510,10 +510,10 @@ export default function EditableStageCell({
       }
 
       const { error: updateError } = await supabase.from('tm_tasks').update({
-          stages: updatedStages,
-          source_document_id: updatedSourceDocIds,
-          updated_at: new Date().toISOString()
-        }).eq('id', task.id);
+        stages: updatedStages,
+        source_document_id: updatedSourceDocIds,
+        updated_at: new Date().toISOString()
+      }).eq('id', task.id);
 
       if (updateError) throw updateError;
 
@@ -605,23 +605,45 @@ export default function EditableStageCell({
   }, []);
 
   const buildPreviewDocumentsData = useCallback(async (documents: any[]) => {
-    if (!documents || documents.length === 0) return [];
+    console.log('buildPreviewDocumentsData called with documents:', documents); // Debug log
+    if (!documents || documents.length === 0) {
+      console.log('No documents provided to buildPreviewDocumentsData'); // Debug log
+      return [];
+    }
 
     const previewDocuments = [];
 
     for (const doc of documents) {
       try {
+        console.log('Processing document:', doc.id || doc.document_id, doc); // Debug log
         const kycDoc = await fetchKycDocumentData(doc.document_id || doc.id);
-        if (!kycDoc) continue;
+        console.log('Fetched KYC doc:', kycDoc); // Debug log
+
+        if (!kycDoc) {
+          console.warn('No KYC document found for ID:', doc.document_id || doc.id); // Debug log
+          continue;
+        }
 
         const filePath = doc.file_path || doc.download_url || doc.url || doc.document_url;
+        console.log('File path:', filePath); // Debug log
+
         const fileUrl = filePath ?
           (filePath.startsWith('http') ? filePath : `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${filePath}`)
           : null;
 
+        console.log('File URL:', fileUrl); // Debug log
+
         const fileName = doc.file_name || filePath?.split('/').pop() || 'document.pdf';
         const documentType = doc.type || kycDoc.document_type || 'document';
         const documentName = kycDoc.display_name || kycDoc.name || doc.name || doc.document_name || 'Document';
+
+        console.log('Creating preview data with:', { // Debug log
+          documentId: doc.id,
+          documentName,
+          fileUrl,
+          fileName,
+          documentType
+        });
 
         const previewData = {
           documentId: doc.id,
@@ -641,46 +663,70 @@ export default function EditableStageCell({
           },
           created_at: doc.created_at || new Date().toISOString()
         };
+
         previewDocuments.push(previewData);
+        console.log('Added preview data for document:', doc.id); // Debug log
       } catch (error) {
         console.error(`Error building preview data for document ${doc.id}:`, error);
       }
     }
 
     if (previewDocuments.length === 0) {
-      toast({ title: 'Error', description: 'Failed to prepare document previews.', variant: 'destructive' });
+      console.error('No preview documents were created'); // Debug log
+      toast({
+        title: 'Error',
+        description: 'Failed to prepare document previews.',
+        variant: 'destructive'
+      });
+    } else {
+      console.log(`Successfully created ${previewDocuments.length} preview documents`); // Debug log
     }
 
     return previewDocuments;
   }, [fetchKycDocumentData, transformKycFieldsToPreviewFormat]);
-
+ 
+  // Also, modify the handleViewDocument function to log when it's called
   const handleViewDocument = useCallback(async (e: React.MouseEvent) => {
-    e.stopPropagation();
+     e.stopPropagation();
 
-    const documentsToPreview = linkedDocuments && linkedDocuments.length > 0
-      ? linkedDocuments
-      : linkedDocument ? [linkedDocument] : [];
-
-    if (documentsToPreview.length === 0) return;
-
-    setIsLoading(true);
     try {
+      const documentsToPreview = linkedDocuments && linkedDocuments.length > 0
+        ? linkedDocuments
+        : linkedDocument ? [linkedDocument] : [];
+
+       if (documentsToPreview.length === 0) {
+        toast({
+          title: 'No documents',
+          description: 'No documents available to preview',
+          variant: 'default'
+        });
+        return;
+      }
+
+      setIsLoading(true);
       const previewDocs = await buildPreviewDocumentsData(documentsToPreview);
 
-      if (previewDocs.length > 0) {
-        setPreviewDocuments(previewDocs);
+        if (previewDocs.length > 0) {
         setCurrentPreviewIndex(0);
+        setPreviewDocuments(previewDocs);
         setIsPreviewOpen(true);
       } else {
-        throw new Error('No valid documents could be prepared for preview');
+        toast({
+          title: 'Error',
+          description: 'No valid documents could be prepared for preview',
+          variant: 'destructive'
+        });
       }
     } catch (error) {
-      toast({ title: 'Error', description: 'Failed to open document preview', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to open document preview',
+        variant: 'destructive'
+      });
     } finally {
       setIsLoading(false);
     }
   }, [linkedDocument, linkedDocuments, buildPreviewDocumentsData]);
-
   const handlePreviewSave = useCallback(async (data: any) => {
     if (!onSave || previewDocuments.length === 0) return;
 
@@ -721,9 +767,9 @@ export default function EditableStageCell({
 
   // --- RENDER ---
 
- if (renderMode === 'date') {
+  if (renderMode === 'date') {
     if (!isStageApplicable) return <span className="text-sm text-gray-400 italic">N/A</span>;
-    
+
     const stageData = task.stages?.[stage.id];
     const stageStatus = stageData?.status;
     const isSkipped = stageStatus === 'skipped';
@@ -792,8 +838,8 @@ export default function EditableStageCell({
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <div 
-                className={`flex items-center gap-1.5 font-semibold text-xs ${textColorClass} cursor-pointer hover:underline`} 
+              <div
+                className={`flex items-center gap-1.5 font-semibold text-xs ${textColorClass} cursor-pointer hover:underline`}
                 onClick={(e) => { e.stopPropagation(); if (!requiresUpload) setIsEditing(true); }}
               >
                 {icon}
@@ -806,9 +852,9 @@ export default function EditableStageCell({
                   <span className={`font-bold ${textColorClass}`}>{isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time"}</span>
                 </div>
                 <div className="text-xs space-y-1">
-                    <div className="flex justify-between gap-4"><span className="text-slate-500">Completed:</span> <span>{formatDateDisplay(stageDate)}</span></div>
-                    <div className="flex justify-between gap-4"><span className="text-slate-500">Duration:</span> <span>{completionDuration}</span></div>
-                    {isCompletedOverdue && <p className="text-amber-600 font-bold">Overdue</p>}
+                  <div className="flex justify-between gap-4"><span className="text-slate-500">Completed:</span> <span>{formatDateDisplay(stageDate)}</span></div>
+                  <div className="flex justify-between gap-4"><span className="text-slate-500">Duration:</span> <span>{completionDuration}</span></div>
+                  {isCompletedOverdue && <p className="text-amber-600 font-bold">Overdue</p>}
                 </div>
               </div>
             </TooltipContent>
@@ -886,10 +932,10 @@ export default function EditableStageCell({
 
   if (renderMode === 'actions') {
     if (!isStageApplicable) return <span className="text-sm text-gray-400 italic">-</span>;
-    
+
     const hasAutomation = !!(stage?.automation?.automationId || stage?.automation?.id || stage?.web_automation?.automationId);
     const hasAnyAutomation = requiresUpload && stage.documents?.some((doc: any) => isDocumentApplicable(doc, task) && (doc.automationId || doc.automation?.id));
-    
+
     const showAutomation = (hasAutomation || hasAnyAutomation) && !hasLinkedDocument;
     const showSkip = !isStageCompleted;
     const hasMoreActions = showAutomation || showSkip;
@@ -898,11 +944,88 @@ export default function EditableStageCell({
       <div className="flex items-center justify-center gap-1">
         {/* View Document */}
         {linkedDocument && (
-          <Button variant="ghost" size="icon" className="h-7 w-7 text-green-600 hover:bg-green-50" onClick={handleViewDocument} title="View document details">
-            <Eye className="h-3.5 w-3.5" />
-          </Button>
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-green-600 hover:bg-green-50"
+                title="View document details"
+                onClick={handleViewDocument}
+              >
+                <Eye className="h-3.5 w-3.5" />
+              </Button>
+            </DialogTrigger>
+
+            <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden" onOpenAutoFocus={e => e.preventDefault()}>
+              <DialogHeader className="p-4 border-b">
+                <DialogTitle className="text-lg">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      {task?.name}
+                      {task?.client_name && ` - ${task.client_name}`}
+                    </div>
+                    <div className="text-sm font-normal text-muted-foreground">
+                      {previewDocuments.length} document{previewDocuments.length !== 1 ? 's' : ''}
+                    </div>
+                  </div>
+                </DialogTitle>
+              </DialogHeader>
+
+              <div className="flex-1 overflow-auto p-4">
+                {previewDocuments.length > 0 ? (
+                  previewDocuments.map((doc) => (
+                    <div key={doc.documentId} className="border rounded-lg overflow-hidden mb-4">
+                      <div className="p-4 bg-gray-50 border-b">
+                        <h3 className="font-medium">
+                          {doc.documentName || 'Document'}
+                          <span className="text-muted-foreground text-sm font-normal ml-2">
+                            (Uploaded: {doc.created_at ? formatDateDisplay(doc.created_at) : 'N/A'})
+                          </span>
+                        </h3>
+                      </div>
+                      <div className="p-4">
+                        <ExtractionPreview
+                          documentId={doc.documentId}
+                          documentName={doc.documentName}
+                          extractedData={doc.extractedData || {}}
+                          fields={doc.fields || []}
+                          fileUrl={doc.fileUrl}
+                          fileName={doc.fileName}
+                          onSave={handlePreviewSave}
+                          onDelete={handleDeleteDocument}
+                          expanded={true}
+                          showSaveButton={!!onSave}
+                          readOnly={false}
+                          type={doc.type}
+                          file={doc.file}
+                          onDataChange={(fieldName, value) =>
+                            handlePreviewDataChange(doc.documentId, fieldName, value)
+                          }
+                        />
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="h-full flex items-center justify-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                    <p className="ml-4 text-muted-foreground">Loading documents...</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-4 border-t flex justify-end">
+                <Button
+                  variant="default"
+                  onClick={() => setIsPreviewOpen(false)}
+                >
+                  Close
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         )}
-        
+
         {/* Upload Document */}
         {requiresUpload && (
           <Button variant="ghost" size="icon" className={`h-7 w-7 ${hasLinkedDocument ? 'text-blue-400 hover:bg-blue-50' : 'text-blue-600 hover:bg-blue-50'}`} onClick={handleDocumentUpload} title={hasLinkedDocument ? 'Upload new document' : 'Upload document'}>
@@ -941,54 +1064,6 @@ export default function EditableStageCell({
   return (
     <>
       <SkipStageDialog />
-      <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
-        <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden">
-          <DialogHeader className="p-6 pb-3 border-b">
-            <DialogTitle className="text-lg">
-              <div className="flex items-center justify-between">
-                <div>{task?.name} {task?.client_name && ` - ${task.client_name}`}</div>
-                <div className="text-sm font-normal text-muted-foreground">{previewDocuments.length} document{previewDocuments.length !== 1 ? 's' : ''}</div>
-              </div>
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex-grow overflow-y-auto p-6 space-y-6">
-            {previewDocuments.length > 0 ? (
-              <div className="space-y-6">
-                {previewDocuments.map((doc, index) => (
-                  <div key={doc.documentId} className="border rounded-lg overflow-hidden">
-                    <div className="p-4 bg-gray-50 border-b flex justify-between items-center">
-                      <h3 className="font-medium">{doc.documentName || 'Document'} <span className="text-muted-foreground text-sm font-normal ml-2">(Uploaded: {doc.created_at ? formatDateDisplay(doc.created_at) : 'N/A'})</span></h3>
-                    </div>
-                    <div className="p-4">
-                      <div className="border rounded-lg">
-                        <ExtractionPreview
-                          documentId={doc.documentId}
-                          documentName={doc.documentName}
-                          extractedData={doc.extractedData || {}}
-                          fields={doc.fields || []}
-                          fileUrl={doc.fileUrl}
-                          fileName={doc.fileName}
-                          onSave={handlePreviewSave}
-                          onDelete={handleDeleteDocument}
-                          expanded={true}
-                          showSaveButton={!!onSave}
-                          readOnly={false}
-                          type={doc.type}
-                          file={doc.file}
-                          onDataChange={(fieldName, value) => handlePreviewDataChange(doc.documentId, fieldName, value)}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="h-full flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /><p className="ml-4 text-muted-foreground">Loading documents...</p></div>
-            )}
-          </div>
-          <div className="p-4 border-t flex justify-end"><Button variant="default" onClick={() => setIsPreviewOpen(false)}>Close</Button></div>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }
