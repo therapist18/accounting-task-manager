@@ -17,11 +17,9 @@ import { Loader2, Plus, Pencil, Trash2, X, Save, Star, Filter } from "lucide-rea
 import type { Department, KycDocument } from "../utils/taskManagerData"
 import { ENHANCED_TABLE_HEADERS_IMMIGRATION } from "../tasks/overall-view/tableUtils"
 
-// --- Type Definitions ---
-
 type FieldConfig = {
   id: string;
-  isDefault: boolean; // True = Visible on load
+  isDefault: boolean;
 };
 
 type ReportConfiguration = {
@@ -46,6 +44,7 @@ export type MemorizedReport = {
   configuration: ReportConfiguration;
   department_id: number;
   is_favorite?: boolean;
+  sessionIncludedFields?: string[]; // Fields included in this session (not persisted)
 };
 
 interface MemorizedReportDialogProps {
@@ -63,7 +62,6 @@ const INITIAL_REPORT_CONFIG: ReportConfiguration = {
   stages: {}
 };
 
-// --- Helper: Normalizer for Backward Compatibility ---
 const normalizeConfiguration = (config: any): ReportConfiguration => {
   if (!config) return INITIAL_REPORT_CONFIG;
 
@@ -118,8 +116,7 @@ export function MemorizedReportDialog({
   const [isLoading, setIsLoading] = useState(false)
   const [reportName, setReportName] = useState("")
   const [reportConfig, setReportConfig] = useState<ReportConfiguration>(INITIAL_REPORT_CONFIG)
-  
-  // UPDATED: Default is now TRUE
+
   const [showSelectedOnly, setShowSelectedOnly] = useState(true);
 
   const fetchReports = useCallback(async () => {
@@ -147,11 +144,9 @@ export function MemorizedReportDialog({
     } else {
       setSelectedReport(null);
       setIsEditing(false);
-      setShowSelectedOnly(true); // Reset to true on open
+      setShowSelectedOnly(true);
     }
   }, [open, fetchReports, department]);
-
-  // --- Actions ---
 
   const handleCreateNew = () => {
     setSelectedReport(null);
@@ -185,9 +180,10 @@ export function MemorizedReportDialog({
     if (!reportName.trim() || !department) return;
     setIsLoading(true);
     try {
+      const finalConfig = getFinalConfiguration(reportConfig);
       const reportData = {
         name: reportName,
-        configuration: reportConfig,
+        configuration: finalConfig,
         department_id: department.id,
       };
 
@@ -230,62 +226,124 @@ export function MemorizedReportDialog({
 
   const handleApply = () => {
     if (selectedReport) {
+      const finalConfig = getFinalConfiguration(reportConfig);
       onApplyReport({
         ...selectedReport,
-        configuration: normalizeConfiguration(reportConfig)
+        configuration: finalConfig,
+        sessionIncludedFields: Array.from(includedFields) // Pass session-only fields
       });
       onOpenChange(false);
     }
   };
 
-  // --- Toggle Logic (Updated for Independence) ---
+  // State to track which fields are included in the report (separate from default visibility)
+  const [includedFields, setIncludedFields] = useState<Set<string>>(new Set());
+  
+  useEffect(() => {
+    if (reportConfig?.taskFields) {
+      console.log('Initializing included fields from reportConfig:', reportConfig.taskFields);
+      // Include ALL fields from the configuration (both default and non-default)
+      const included = new Set(reportConfig.taskFields.map(f => f.id));
+      console.log('Setting included fields:', Array.from(included));
+      setIncludedFields(included);
+    }
+  }, [selectedReport?.id]); // Only reset when the selected report changes, not when toggling edit mode
 
-  const toggleTaskField = (fieldId: string, type: 'include' | 'default') => {
+  const isTaskFieldIncluded = useCallback((fieldId: string) => {
+    return includedFields.has(fieldId);
+  }, [includedFields]);
+
+  const toggleTaskFieldInclude = useCallback((fieldId: string) => {
+    console.log('Toggling field:', fieldId, 'Current included fields:', Array.from(includedFields));
+    setIncludedFields(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(fieldId)) {
+        newSet.delete(fieldId);
+      } else {
+        newSet.add(fieldId);
+      }
+      console.log('New included fields:', Array.from(newSet));
+      return newSet;
+    });
+  }, [includedFields]);
+
+  // Get the final configuration - ONLY save fields marked as default (isDefault: true)
+  // Fields that are included but not default are session-only
+  const getFinalConfiguration = (config: ReportConfiguration): ReportConfiguration => {
+    // Only save fields that are marked as default (isDefault: true)
+    // Fields that are included but not default should NOT be persisted to database
+    const fieldsToSave = config.taskFields.filter(f => f.isDefault === true);
+    
+    console.log('Getting final configuration. Included fields (session):', Array.from(includedFields));
+    console.log('Fields to save (default only):', fieldsToSave);
+    
+    return {
+      ...config,
+      taskFields: fieldsToSave
+    };
+  };
+
+  const toggleTaskFieldDefault = useCallback((fieldId: string) => {
     setReportConfig(prev => {
       const current = prev.taskFields || [];
       const exists = current.find(f => f.id === fieldId);
       let newFields = [...current];
 
-      if (type === 'include') {
-        if (exists) {
-          // Unchecking Report Table removes it
-          newFields = newFields.filter(f => f.id !== fieldId);
-        } else {
-          // Checking Report Table adds it (default false)
-          newFields.push({ id: fieldId, isDefault: false });
-        }
-      } else if (type === 'default') {
-        if (exists) {
-          // Toggle default state
-          newFields = newFields.map(f => f.id === fieldId ? { ...f, isDefault: !f.isDefault } : f);
-        } else {
-          // Checking Default on an item that isn't included adds it AND sets default true
-          newFields.push({ id: fieldId, isDefault: true });
-        }
+      if (exists) {
+        // Toggle isDefault flag
+        newFields = newFields.map(f => 
+          f.id === fieldId ? { ...f, isDefault: !f.isDefault } : f
+        );
+      } else {
+        // Add with default visibility on
+        newFields.push({ id: fieldId, isDefault: true });
       }
+      
       return { ...prev, taskFields: newFields };
     });
-  };
 
-  const toggleStageDate = (stageId: string, type: 'include' | 'default') => {
+    // Make sure the field is included when toggling default
+    setIncludedFields(prev => {
+      if (!prev.has(fieldId)) {
+        const newSet = new Set(prev);
+        newSet.add(fieldId);
+        return newSet;
+      }
+      return prev;
+    });
+  }, []);
+
+  const toggleStageDateInclude = (stageId: string) => {
     setReportConfig(prev => {
       const newStages = { ...prev.stages };
-      if (!newStages[stageId]) newStages[stageId] = { isStageDateSelected: false, isStageDateDefault: false, documents: {} };
-      
-      if (type === 'include') {
-        newStages[stageId].isStageDateSelected = !newStages[stageId].isStageDateSelected;
+      if (!newStages[stageId]) {
+        newStages[stageId] = { isStageDateSelected: true, isStageDateDefault: false, documents: {} };
       } else {
-        newStages[stageId].isStageDateDefault = !newStages[stageId].isStageDateDefault;
-        // If enabling default, ensure it's selected
-        if(newStages[stageId].isStageDateDefault) {
-            newStages[stageId].isStageDateSelected = true;
-        }
+        newStages[stageId].isStageDateSelected = !newStages[stageId].isStageDateSelected;
       }
-
-      // Cleanup
+      
+      // Clean up if nothing selected
       if (!newStages[stageId].isStageDateSelected && Object.keys(newStages[stageId].documents).length === 0) {
         delete newStages[stageId];
       }
+      
+      return { ...prev, stages: newStages };
+    });
+  };
+
+  const toggleStageDateDefault = (stageId: string) => {
+    setReportConfig(prev => {
+      const newStages = { ...prev.stages };
+      if (!newStages[stageId]) {
+        newStages[stageId] = { isStageDateSelected: true, isStageDateDefault: true, documents: {} };
+      } else {
+        newStages[stageId].isStageDateDefault = !newStages[stageId].isStageDateDefault;
+        // If setting as default, must be included
+        if (newStages[stageId].isStageDateDefault) {
+          newStages[stageId].isStageDateSelected = true;
+        }
+      }
+      
       return { ...prev, stages: newStages };
     });
   };
@@ -293,7 +351,9 @@ export function MemorizedReportDialog({
   const toggleDocument = (stageId: string, kycId: string) => {
     setReportConfig(prev => {
       const newStages = JSON.parse(JSON.stringify(prev.stages));
-      if (!newStages[stageId]) newStages[stageId] = { isStageDateSelected: false, isStageDateDefault: false, documents: {} };
+      if (!newStages[stageId]) {
+        newStages[stageId] = { isStageDateSelected: false, isStageDateDefault: false, documents: {} };
+      }
       
       if (newStages[stageId].documents[kycId]) {
         delete newStages[stageId].documents[kycId];
@@ -301,39 +361,56 @@ export function MemorizedReportDialog({
         newStages[stageId].documents[kycId] = { fields: [] };
       }
       
+      // Clean up if nothing selected
       if (!newStages[stageId].isStageDateSelected && Object.keys(newStages[stageId].documents).length === 0) {
         delete newStages[stageId];
       }
+      
       return { ...prev, stages: newStages };
     });
   };
 
-  const toggleDocField = (stageId: string, kycId: string, fieldId: string, type: 'include' | 'default') => {
+  const toggleDocFieldInclude = (stageId: string, kycId: string, fieldId: string) => {
     setReportConfig(prev => {
       const newStages = JSON.parse(JSON.stringify(prev.stages));
       if (!newStages[stageId]?.documents[kycId]) return prev;
 
       const currentFields = newStages[stageId].documents[kycId].fields;
       const exists = currentFields.find((f: any) => f.id === fieldId);
-      let newFields = [...currentFields];
 
-      if (type === 'include') {
-        if (exists) newFields = newFields.filter((f: any) => f.id !== fieldId);
-        else newFields.push({ id: fieldId, isDefault: false });
-      } else if (type === 'default') {
-        if (exists) {
-            newFields = newFields.map((f: any) => f.id === fieldId ? { ...f, isDefault: !f.isDefault } : f);
-        } else {
-            newFields.push({ id: fieldId, isDefault: true });
-        }
+      if (exists) {
+        // Remove field
+        newStages[stageId].documents[kycId].fields = currentFields.filter((f: any) => f.id !== fieldId);
+      } else {
+        // Add field with default off
+        newStages[stageId].documents[kycId].fields.push({ id: fieldId, isDefault: false });
       }
       
-      newStages[stageId].documents[kycId].fields = newFields;
       return { ...prev, stages: newStages };
     });
   };
 
-  // --- Rendering ---
+  const toggleDocFieldDefault = (stageId: string, kycId: string, fieldId: string) => {
+    setReportConfig(prev => {
+      const newStages = JSON.parse(JSON.stringify(prev.stages));
+      if (!newStages[stageId]?.documents[kycId]) return prev;
+
+      const currentFields = newStages[stageId].documents[kycId].fields;
+      const exists = currentFields.find((f: any) => f.id === fieldId);
+
+      if (exists) {
+        // Toggle default
+        newStages[stageId].documents[kycId].fields = currentFields.map((f: any) => 
+          f.id === fieldId ? { ...f, isDefault: !f.isDefault } : f
+        );
+      } else {
+        // Add field with default on
+        newStages[stageId].documents[kycId].fields.push({ id: fieldId, isDefault: true });
+      }
+      
+      return { ...prev, stages: newStages };
+    });
+  };
 
   const sortedReports = useMemo(() => {
     return [...reports].sort((a, b) => {
@@ -391,44 +468,38 @@ export function MemorizedReportDialog({
 
   const handleEditReport = () => setIsEditing(true);
 
-  // UPDATED: Grid Header with Default First
   const GridHeader = () => (
     <div className="grid grid-cols-12 gap-2 px-2 py-1 bg-slate-100 text-xs font-semibold text-slate-600 rounded mb-2 sticky top-0 z-10">
       <div className="col-span-8">Column Name</div>
       <div className="col-span-2 text-center">Default</div>
-      <div className="col-span-2 text-center">Report Table</div>
+      <div className="col-span-2 text-center">Include</div>
     </div>
   );
 
-  // UPDATED: Grid Row with Default First and Independent Checkboxes
   const GridRow = ({ label, isIncluded, isDefault, onToggleInclude, onToggleDefault, depth = 0 }: any) => (
     <div className="grid grid-cols-12 gap-2 py-1.5 items-center hover:bg-slate-50 rounded px-2 transition-colors">
       <div className="col-span-8 flex items-center gap-2">
         <span style={{ marginLeft: `${depth * 12}px` }} className="text-sm truncate" title={label}>{label}</span>
       </div>
-      {/* Default Column First */}
       <div className="col-span-2 flex justify-center">
         <Checkbox 
           checked={isDefault} 
           onCheckedChange={onToggleDefault}
-          // Disabled prop removed
         />
       </div>
-      {/* Report Table Column Second */}
       <div className="col-span-2 flex justify-center">
         <Checkbox 
-            checked={isIncluded} 
-            onCheckedChange={onToggleInclude} 
+          checked={isIncluded} 
+          onCheckedChange={onToggleInclude} 
         />
       </div>
     </div>
   );
 
   const renderReportEditor = () => {
-    // Filter Logic
     const filteredTaskFields = tableHeaders.filter(field => {
         if(!showSelectedOnly) return true;
-        return reportConfig.taskFields?.some(f => f.id === field.id);
+        return includedFields.has(field.id);
     });
 
     const filteredStages = sortedStages.filter(stage => {
@@ -445,7 +516,9 @@ export function MemorizedReportDialog({
         <div className="flex justify-between items-center mb-4 pb-4 border-b">
           <div>
             <h3 className="text-lg font-semibold text-slate-800">{selectedReport ? "Edit Report" : "New Report"}</h3>
-            <p className="text-xs text-slate-500">Configure columns and their default visibility.</p>
+            <p className="text-xs text-slate-500">
+              <strong>Default:</strong> Visible when report loads. <strong>Include:</strong> Available in report.
+            </p>
           </div>
           <div className="flex items-center gap-2">
              <div className="flex items-center space-x-2 bg-slate-100 px-3 py-1.5 rounded-md border border-slate-200">
@@ -456,7 +529,7 @@ export function MemorizedReportDialog({
                 />
                 <Label htmlFor="showSelectedOnly" className="text-xs cursor-pointer font-medium text-slate-700 flex items-center gap-1">
                     <Filter className="h-3 w-3" />
-                    Show Selected Only
+                    Show Included Only
                 </Label>
              </div>
              <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)}><X className="mr-2 h-4 w-4"/> Cancel</Button>
@@ -485,15 +558,16 @@ export function MemorizedReportDialog({
                     </AccordionTrigger>
                     <AccordionContent className="pt-1 pb-4">
                       {filteredTaskFields.map(field => {
+                        const isIncluded = isTaskFieldIncluded(field.id);
                         const config = reportConfig.taskFields?.find(f => f.id === field.id);
                         return (
                           <GridRow 
                             key={field.id}
                             label={field.label}
-                            isIncluded={!!config}
+                            isIncluded={isIncluded}
                             isDefault={!!config?.isDefault}
-                            onToggleInclude={() => toggleTaskField(field.id, 'include')}
-                            onToggleDefault={() => toggleTaskField(field.id, 'default')}
+                            onToggleInclude={() => toggleTaskFieldInclude(field.id)}
+                            onToggleDefault={() => toggleTaskFieldDefault(field.id)}
                             depth={1}
                           />
                         );
@@ -522,8 +596,8 @@ export function MemorizedReportDialog({
                                 label={`${stage.name} - Completion Date`}
                                 isIncluded={!!stageConfig?.isStageDateSelected}
                                 isDefault={!!stageConfig?.isStageDateDefault}
-                                onToggleInclude={() => toggleStageDate(stage.id, 'include')}
-                                onToggleDefault={() => toggleStageDate(stage.id, 'default')}
+                                onToggleInclude={() => toggleStageDateInclude(stage.id)}
+                                onToggleDefault={() => toggleStageDateDefault(stage.id)}
                                 depth={1}
                                 />
                             )}
@@ -559,8 +633,8 @@ export function MemorizedReportDialog({
                                                 label={field.fieldName}
                                                 isIncluded={!!fieldConfig}
                                                 isDefault={!!fieldConfig?.isDefault}
-                                                onToggleInclude={() => toggleDocField(stage.id, doc.kycId, field.id, 'include')}
-                                                onToggleDefault={() => toggleDocField(stage.id, doc.kycId, field.id, 'default')}
+                                                onToggleInclude={() => toggleDocFieldInclude(stage.id, doc.kycId, field.id)}
+                                                onToggleDefault={() => toggleDocFieldDefault(stage.id, doc.kycId, field.id)}
                                                 depth={2}
                                             />
                                             );
@@ -586,7 +660,7 @@ export function MemorizedReportDialog({
     <div className="flex flex-col h-full">
       <div className="mb-4">
         <h3 className="text-lg font-semibold text-slate-800">{selectedReport?.name}</h3>
-        <p className="text-sm text-slate-500">Read-only preview of columns.</p>
+        <p className="text-sm text-slate-500">Read-only preview of report configuration.</p>
       </div>
 
       <div className="border rounded-md flex-1 flex flex-col min-h-0">
@@ -600,8 +674,8 @@ export function MemorizedReportDialog({
                 return (
                   <div key={f.id} className="grid grid-cols-12 text-sm py-1 border-b border-dashed border-slate-100 last:border-0">
                     <div className="col-span-8 text-slate-700">{header?.label || f.id}</div>
-                    <div className="col-span-2 text-center text-green-600">{f.isDefault ? "Yes" : "-"}</div>
-                    <div className="col-span-2 text-center font-bold text-blue-600">Yes</div>
+                    <div className="col-span-2 text-center text-green-600">{f.isDefault ? "✓" : "-"}</div>
+                    <div className="col-span-2 text-center font-bold text-blue-600">✓</div>
                   </div>
                 )
               })}
@@ -616,8 +690,8 @@ export function MemorizedReportDialog({
                    {stageConfig.isStageDateSelected && (
                      <div className="grid grid-cols-12 text-sm py-1 border-b border-dashed border-slate-100">
                         <div className="col-span-8 text-slate-700 pl-2">Completion Date</div>
-                        <div className="col-span-2 text-center text-green-600">{stageConfig.isStageDateDefault ? "Yes" : "-"}</div>
-                        <div className="col-span-2 text-center font-bold text-blue-600">Yes</div>
+                        <div className="col-span-2 text-center text-green-600">{stageConfig.isStageDateDefault ? "✓" : "-"}</div>
+                        <div className="col-span-2 text-center font-bold text-blue-600">✓</div>
                      </div>
                    )}
                    {Object.entries(stageConfig.documents).map(([kycId, docConfig]) => {
@@ -629,8 +703,8 @@ export function MemorizedReportDialog({
                           {docConfig.fields.map(f => (
                              <div key={f.id} className="grid grid-cols-12 text-sm py-1">
                                 <div className="col-span-8 text-slate-700">{kycDoc.fields?.find((field: any) => field.id === f.id)?.fieldName || f.id}</div>
-                                <div className="col-span-2 text-center text-green-600">{f.isDefault ? "Yes" : "-"}</div>
-                                <div className="col-span-2 text-center font-bold text-blue-600">Yes</div>
+                                <div className="col-span-2 text-center text-green-600">{f.isDefault ? "✓" : "-"}</div>
+                                <div className="col-span-2 text-center font-bold text-blue-600">✓</div>
                              </div>
                           ))}
                         </div>

@@ -16,7 +16,8 @@ import {
   DotSquare,
   MoreHorizontal,
   CheckCircle2,
-  XCircle
+  XCircle,
+  Columns // Imported for the button
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -63,6 +64,7 @@ import {
 } from "../tasks/utils/taskManagerData";
 import { fetchDepartments } from "../departments/departments/database";
 import { MemorizedReportDialog } from "./MemorizedReportDialog";
+import { ColumnVisibilityDialog } from "./ColumnVisibilityDialog"; // Import the new component
 
 // Extend jsPDF types
 declare module 'jspdf' {
@@ -136,7 +138,6 @@ const safeRender = (content: any) => {
 };
 
 export default function ReportsPage() {
-  // ... (State variables and useEffects remain unchanged) ...
   // --- State ---
   const [activeReport, setActiveReport] = useState<any | null>(null);
   const [availableReports, setAvailableReports] = useState<any[]>([]);
@@ -170,7 +171,11 @@ export default function ReportsPage() {
   const [itemsPerPage, setItemsPerPage] = useState(100);
   const [expandedSections, setExpandedSections] = useState(() => new Set(['task_details']));
 
-  // --- NEW: State for toggling stage doc columns ---
+  // --- Column Visibility State ---
+  const [isColVisOpen, setIsColVisOpen] = useState(false);
+  const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>([]);
+  
+  // --- State for toggling stage doc columns (Inline Expansion) ---
   const [expandedStageColumns, setExpandedStageColumns] = useState<Set<string>>(new Set());
 
   const toggleStageColumns = useCallback((stageId: string) => {
@@ -238,6 +243,17 @@ export default function ReportsPage() {
     initReports();
   }, []);
 
+  useEffect(() => {
+  // When switching reports or on initial load, clear session fields
+  if (activeReport && !activeReport.sessionIncludedFields) {
+    // This ensures we only show default fields on page load
+    setActiveReport(prev => ({
+      ...prev!,
+      sessionIncludedFields: prev!.configuration.taskFields?.map(f => f.id) || []
+    }));
+  }
+}, [activeReport?.id]);
+
   const refreshData = useCallback(async () => {
     if (!activeReport) return;
     setLoading(true);
@@ -291,10 +307,12 @@ export default function ReportsPage() {
 
   const handleSelectReport = (report: any) => {
     setActiveReport(report);
+    // When selecting a new report, we reset manual expansions
+    setExpandedStageColumns(new Set()); 
     setIsReportDialogOpen(false);
   };
 
-  // --- 3. Filtering & Sorting Logic --- (Same as original)
+  // --- 3. Filtering & Sorting Logic ---
   const activeDepartment = useMemo(() =>
     departments.find(d => d.id.toString() === activeDeptId),
     [departments, activeDeptId]);
@@ -394,7 +412,7 @@ export default function ReportsPage() {
       .filter(Boolean);
   }, [allDocuments]);
 
-  // --- 5. Applicability Helpers --- (Same as original)
+  // --- 5. Applicability Helpers ---
   const isStageApplicableToTask = useCallback((stage: any, task: any): boolean => {
     if (!task || !stage || !departments?.length) return true;
     try {
@@ -445,318 +463,328 @@ export default function ReportsPage() {
 
   // --- 6. Render Logic ---
   const renderCellValue = (task, col) => {
-    // ==================================================================================
-    // ⬇️⬇️⬇️ UPDATED SECTION: STAGE DATE WITH COLOR CODED VISUALS ⬇️⬇️⬇️
-    // ==================================================================================
+    // ... (Your existing render logic for stage_date, extracted_field, task) ...
+    // Note: I am not modifying this logic, just ensuring it's called correctly.
     if (col.type === 'stage_date') {
-      const stage = stages.find(s => s.id === col.stageId);
-      if (!stage) return <span className="text-slate-300">-</span>;
-      if (!isStageApplicableToTask(stage, task)) return <span className="text-sm text-gray-300 italic">N/A</span>;
-
-      // Current stage Check
-      const currentStageStatus = getCurrentStageStatus(task, stages, departments, allDocuments);
-      const currentStage = stages.find(s => s.name === currentStageStatus?.stageName);
-      if (currentStage?.order_num !== undefined && stage.order_num > currentStage.order_num) {
-        return <span className="text-slate-300">-</span>;
-      }
-
-      const stageData = task.stages?.[col.stageId];
-      const estimatedMinutes = stage.estimated_time;
-
-      // --- 1. CALCULATE EFFECTIVE START TIME ---
-      let effectiveStartTime = task.created_at ? parseDateString(task.created_at) : null;
-      const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-      const currentStageIndex = sortedStages.findIndex(s => s.id === col.stageId);
-
-      if (currentStageIndex > 0) {
-        const prevStage = sortedStages[currentStageIndex - 1];
-        const prevStageData = task.stages?.[prevStage.id];
-        if (prevStageData) {
-          let docDate = null;
-          if (prevStage.documents?.length > 0) {
-            const allLinkedDocs = prevStage.documents.flatMap(docConfig => {
-              if (!isDocumentApplicable(docConfig, task)) return [];
-              return getDocumentForTaskStage(task, { ...prevStage, documents: [docConfig] });
-            }).filter(d => d && !d.indicator);
-
-            if (allLinkedDocs.length > 0) {
-              allLinkedDocs.forEach(linkedDoc => {
-                const details = linkedDoc.extracted_details || {};
-                const kycDoc = kycDocuments.get(linkedDoc.kyc_id || linkedDoc.document_id);
-                if (kycDoc?.fields) {
-                  const dateFields = kycDoc.fields
+        const stage = stages.find(s => s.id === col.stageId);
+        if (!stage) return <span className="text-slate-300">-</span>;
+        if (!isStageApplicableToTask(stage, task)) return <span className="text-sm text-gray-300 italic">N/A</span>;
+  
+        // Current stage Check
+        const currentStageStatus = getCurrentStageStatus(task, stages, departments, allDocuments);
+        const currentStage = stages.find(s => s.name === currentStageStatus?.stageName);
+        if (currentStage?.order_num !== undefined && stage.order_num > currentStage.order_num) {
+          return <span className="text-slate-300">-</span>;
+        }
+  
+        const stageData = task.stages?.[col.stageId];
+        const estimatedMinutes = stage.estimated_time;
+  
+        // --- 1. CALCULATE EFFECTIVE START TIME ---
+        let effectiveStartTime = task.created_at ? parseDateString(task.created_at) : null;
+        const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
+        const currentStageIndex = sortedStages.findIndex(s => s.id === col.stageId);
+  
+        if (currentStageIndex > 0) {
+          const prevStage = sortedStages[currentStageIndex - 1];
+          const prevStageData = task.stages?.[prevStage.id];
+          if (prevStageData) {
+            let docDate = null;
+            if (prevStage.documents?.length > 0) {
+              const allLinkedDocs = prevStage.documents.flatMap(docConfig => {
+                if (!isDocumentApplicable(docConfig, task)) return [];
+                return getDocumentForTaskStage(task, { ...prevStage, documents: [docConfig] });
+              }).filter(d => d && !d.indicator);
+  
+              if (allLinkedDocs.length > 0) {
+                allLinkedDocs.forEach(linkedDoc => {
+                  const details = linkedDoc.extracted_details || {};
+                  const kycDoc = kycDocuments.get(linkedDoc.kyc_id || linkedDoc.document_id);
+                  if (kycDoc?.fields) {
+                    const dateFields = kycDoc.fields
+                      .filter((field: any) => field.fieldType === 'date' || field.type === 'date')
+                      .map((field: any) => field.fieldName || field.name || '')
+                      .filter(Boolean);
+                    for (const field of dateFields) {
+                      const parsedDate = parseDateString(details[field]);
+                      if (parsedDate && (!docDate || parsedDate > docDate)) docDate = parsedDate;
+                    }
+                  }
+                });
+              }
+            }
+            if (docDate) effectiveStartTime = docDate;
+            else if (prevStageData.date) effectiveStartTime = parseDateString(prevStageData.date);
+            else if (prevStageData.completedAt) effectiveStartTime = parseDateString(prevStageData.completedAt);
+            else if (prevStageData.status === 'skipped' && prevStageData.skippedAt) effectiveStartTime = parseDateString(prevStageData.skippedAt);
+          }
+        }
+        if (!effectiveStartTime && task.date_initiated) effectiveStartTime = parseDateString(task.date_initiated);
+  
+  
+        // --- 2. HANDLE SKIPPED STATUS ---
+        if (stageData?.status === 'skipped') {
+          const reason = stageData?.reason || 'No reason provided';
+          const skippedAt = stageData?.skippedAt ? parseDateString(stageData.skippedAt) : null;
+          return (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="flex items-center gap-1.5 text-xs text-amber-600 font-medium cursor-help">
+                  <AlertCircle className="h-3.5 w-3.5" /> Skipped
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="bg-amber-50 text-amber-900 border-amber-200">
+                <div className="text-xs text-left space-y-1">
+                  <p><span className="font-semibold">Reason:</span> {reason}</p>
+                  {skippedAt && <p><span className="font-semibold">Date:</span> {formatDateTimeForDisplay(skippedAt)}</p>}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          );
+        }
+  
+        // --- 3. DETERMINE COMPLETION DATE ---
+        let completionDateStr = stageData?.date;
+        if (stage.documents?.length > 0) {
+          const allLinkedDocs = stage.documents.flatMap(docConfig => {
+            if (!isDocumentApplicable(docConfig, task)) return [];
+            return getDocumentForTaskStage(task, { ...stage, documents: [docConfig] });
+          }).filter(d => d && !d.indicator);
+  
+          if (allLinkedDocs.length > 0) {
+            let validDates = [];
+            allLinkedDocs.forEach(linkedDoc => {
+              const details = linkedDoc.extracted_details || {};
+              const kycDoc = kycDocuments.get(linkedDoc.kyc_id || linkedDoc.document_id);
+              if (kycDoc?.fields) {
+                const dateFieldsToCheck = kycDoc.fields
                     .filter((field: any) => field.fieldType === 'date' || field.type === 'date')
                     .map((field: any) => field.fieldName || field.name || '')
                     .filter(Boolean);
-                  for (const field of dateFields) {
-                    const parsedDate = parseDateString(details[field]);
-                    if (parsedDate && (!docDate || parsedDate > docDate)) docDate = parsedDate;
-                  }
+  
+                for (const field of dateFieldsToCheck) {
+                  const parsed = parseDateString(details[field]);
+                  if (parsed) { validDates.push(parsed); break; }
                 }
-              });
-            }
-          }
-          if (docDate) effectiveStartTime = docDate;
-          else if (prevStageData.date) effectiveStartTime = parseDateString(prevStageData.date);
-          else if (prevStageData.completedAt) effectiveStartTime = parseDateString(prevStageData.completedAt);
-          else if (prevStageData.status === 'skipped' && prevStageData.skippedAt) effectiveStartTime = parseDateString(prevStageData.skippedAt);
-        }
-      }
-      if (!effectiveStartTime && task.date_initiated) effectiveStartTime = parseDateString(task.date_initiated);
-
-
-      // --- 2. HANDLE SKIPPED STATUS ---
-      if (stageData?.status === 'skipped') {
-        const reason = stageData?.reason || 'No reason provided';
-        const skippedAt = stageData?.skippedAt ? parseDateString(stageData.skippedAt) : null;
-        return (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="flex items-center gap-1.5 text-xs text-amber-600 font-medium cursor-help">
-                <AlertCircle className="h-3.5 w-3.5" /> Skipped
-              </span>
-            </TooltipTrigger>
-            <TooltipContent className="bg-amber-50 text-amber-900 border-amber-200">
-              <div className="text-xs text-left space-y-1">
-                <p><span className="font-semibold">Reason:</span> {reason}</p>
-                {skippedAt && <p><span className="font-semibold">Date:</span> {formatDateTimeForDisplay(skippedAt)}</p>}
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        );
-      }
-
-      // --- 3. DETERMINE COMPLETION DATE ---
-      let completionDateStr = stageData?.date;
-      if (stage.documents?.length > 0) {
-        const allLinkedDocs = stage.documents.flatMap(docConfig => {
-          if (!isDocumentApplicable(docConfig, task)) return [];
-          return getDocumentForTaskStage(task, { ...stage, documents: [docConfig] });
-        }).filter(d => d && !d.indicator);
-
-        if (allLinkedDocs.length > 0) {
-          let validDates = [];
-          allLinkedDocs.forEach(linkedDoc => {
-            const details = linkedDoc.extracted_details || {};
-            const kycDoc = kycDocuments.get(linkedDoc.kyc_id || linkedDoc.document_id);
-            if (kycDoc?.fields) {
-              const dateFieldsToCheck = kycDoc.fields
-                  .filter((field: any) => field.fieldType === 'date' || field.type === 'date')
-                  .map((field: any) => field.fieldName || field.name || '')
-                  .filter(Boolean);
-
-              for (const field of dateFieldsToCheck) {
-                const parsed = parseDateString(details[field]);
-                if (parsed) { validDates.push(parsed); break; }
               }
+            });
+            if (validDates.length > 0) {
+              validDates.sort((a, b) => b.getTime() - a.getTime());
+              completionDateStr = validDates[0];
             }
-          });
-          if (validDates.length > 0) {
-            validDates.sort((a, b) => b.getTime() - a.getTime());
-            completionDateStr = validDates[0];
           }
         }
-      }
-      if (!completionDateStr && stageData?.status === 'completed' && stageData?.completedAt) {
-        completionDateStr = stageData.completedAt;
-      }
-      const completionDate = parseDateString(completionDateStr);
-
-
-      // --- 4. SCENARIO A: STAGE IS COMPLETED ---
-      if (completionDate) {
-        let isCompletedOverdue = false;
-        let durationTakenText = 'N/A';
-
-        if (effectiveStartTime && estimatedMinutes && estimatedMinutes > 0) {
-          const durationMs = completionDate.getTime() - effectiveStartTime.getTime();
-          const durationMinutes = Math.floor(durationMs / (1000 * 60));
-          isCompletedOverdue = durationMinutes > estimatedMinutes;
-          durationTakenText = formatDuration(durationMinutes);
+        if (!completionDateStr && stageData?.status === 'completed' && stageData?.completedAt) {
+          completionDateStr = stageData.completedAt;
         }
-
-        // Color coding for completion
-        const textColorClass = isCompletedOverdue ? "text-amber-600" : "text-emerald-600";
-        const icon = isCompletedOverdue ? <Clock className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />;
-        const borderColorClass = isCompletedOverdue ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-100";
-
+        const completionDate = parseDateString(completionDateStr);
+  
+  
+        // --- 4. SCENARIO A: STAGE IS COMPLETED ---
+        if (completionDate) {
+          let isCompletedOverdue = false;
+          let durationTakenText = 'N/A';
+  
+          if (effectiveStartTime && estimatedMinutes && estimatedMinutes > 0) {
+            const durationMs = completionDate.getTime() - effectiveStartTime.getTime();
+            const durationMinutes = Math.floor(durationMs / (1000 * 60));
+            isCompletedOverdue = durationMinutes > estimatedMinutes;
+            durationTakenText = formatDuration(durationMinutes);
+          }
+  
+          // Color coding for completion
+          const textColorClass = isCompletedOverdue ? "text-amber-600" : "text-emerald-600";
+          const icon = isCompletedOverdue ? <Clock className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />;
+          const borderColorClass = isCompletedOverdue ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-100";
+  
+          return (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className={`flex items-center gap-1.5 font-semibold text-xs ${textColorClass} cursor-default`}>
+                  {icon}
+                  <span>{formatDateForDisplay(completionDate)}</span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md`}>
+                <div className="space-y-2 p-1">
+                  <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
+                    <span className={`font-bold ${textColorClass}`}>{isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time"}</span>
+                  </div>
+                  <div className="text-xs space-y-1">
+                      <div className="flex justify-between gap-4"><span className="text-slate-500">Completed:</span> <span>{formatDateTimeForDisplay(completionDate)}</span></div>
+                      <div className="flex justify-between gap-4"><span className="text-slate-500">Duration:</span> <span>{durationTakenText}</span></div>
+                      {estimatedMinutes > 0 && (
+                          <div className="flex justify-between gap-4"><span className="text-slate-500">Allowed:</span> <span>{formatDuration(estimatedMinutes)}</span></div>
+                      )}
+                  </div>
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          );
+        }
+  
+        // --- 5. SCENARIO B: STAGE IS IN PROGRESS ---
+        if (!effectiveStartTime) return <span className="text-slate-300">-</span>;
+  
+        const timeStatus = getTimeStatus(effectiveStartTime, estimatedMinutes);
+        const isOverdue = timeStatus?.isOverdue || false;
+        
+        // Color coding for In Progress
+        const textColorClass = isOverdue ? "text-red-600" : "text-blue-600";
+        const icon = isOverdue ? <AlertTriangle className="h-3.5 w-3.5" /> : <Timer className="h-3.5 w-3.5" />;
+        const borderColorClass = isOverdue ? "border-red-200 bg-red-50" : "border-blue-200 bg-blue-50";
+  
         return (
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className={`flex items-center gap-1.5 font-semibold text-xs ${textColorClass} cursor-default`}>
+              <div className={`flex items-center gap-1.5 font-medium text-xs ${textColorClass} cursor-default`}>
                 {icon}
-                <span>{formatDateForDisplay(completionDate)}</span>
+                <span>{timeStatus?.formattedElapsed}</span>
               </div>
             </TooltipTrigger>
             <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md`}>
               <div className="space-y-2 p-1">
-                <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
-                  <span className={`font-bold ${textColorClass}`}>{isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time"}</span>
-                </div>
-                <div className="text-xs space-y-1">
-                    <div className="flex justify-between gap-4"><span className="text-slate-500">Completed:</span> <span>{formatDateTimeForDisplay(completionDate)}</span></div>
-                    <div className="flex justify-between gap-4"><span className="text-slate-500">Duration:</span> <span>{durationTakenText}</span></div>
-                    {estimatedMinutes > 0 && (
-                        <div className="flex justify-between gap-4"><span className="text-slate-500">Allowed:</span> <span>{formatDuration(estimatedMinutes)}</span></div>
-                    )}
-                </div>
+                  <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
+                    <span className={`font-bold ${textColorClass}`}>{isOverdue ? "In Progress (Overdue)" : "In Progress (On Track)"}</span>
+                  </div>
+                  <div className="text-xs space-y-1">
+                      <div className="flex justify-between gap-4"><span className="text-slate-500">Started:</span> <span>{formatDateTimeForDisplay(effectiveStartTime)}</span></div>
+                      {estimatedMinutes > 0 && (
+                          <>
+                              <div className="flex justify-between gap-4">
+                                  <span className="text-slate-500">Remaining:</span>
+                                  <span className={isOverdue ? 'font-bold text-red-600' : 'text-green-600'}>
+                                      {isOverdue ? `Overdue by ${timeStatus?.formattedOverdue}` : timeStatus?.formattedRemaining}
+                                  </span>
+                              </div>
+                              <div className="flex justify-between gap-4"><span className="text-slate-500">Estimate:</span> <span>{formatDuration(estimatedMinutes)}</span></div>
+                          </>
+                      )}
+                  </div>
               </div>
             </TooltipContent>
           </Tooltip>
         );
       }
-
-      // --- 5. SCENARIO B: STAGE IS IN PROGRESS ---
-      if (!effectiveStartTime) return <span className="text-slate-300">-</span>;
-
-      const timeStatus = getTimeStatus(effectiveStartTime, estimatedMinutes);
-      const isOverdue = timeStatus?.isOverdue || false;
-      
-      // Color coding for In Progress
-      const textColorClass = isOverdue ? "text-red-600" : "text-blue-600";
-      const icon = isOverdue ? <AlertTriangle className="h-3.5 w-3.5" /> : <Timer className="h-3.5 w-3.5" />;
-      const borderColorClass = isOverdue ? "border-red-200 bg-red-50" : "border-blue-200 bg-blue-50";
-
-      return (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <div className={`flex items-center gap-1.5 font-medium text-xs ${textColorClass} cursor-default`}>
-              {icon}
-              <span>{timeStatus?.formattedElapsed}</span>
-            </div>
-          </TooltipTrigger>
-          <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md`}>
-            <div className="space-y-2 p-1">
-                <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
-                  <span className={`font-bold ${textColorClass}`}>{isOverdue ? "In Progress (Overdue)" : "In Progress (On Track)"}</span>
-                </div>
-                <div className="text-xs space-y-1">
-                    <div className="flex justify-between gap-4"><span className="text-slate-500">Started:</span> <span>{formatDateTimeForDisplay(effectiveStartTime)}</span></div>
-                    {estimatedMinutes > 0 && (
-                        <>
-                            <div className="flex justify-between gap-4">
-                                <span className="text-slate-500">Remaining:</span>
-                                <span className={isOverdue ? 'font-bold text-red-600' : 'text-green-600'}>
-                                    {isOverdue ? `Overdue by ${timeStatus?.formattedOverdue}` : timeStatus?.formattedRemaining}
-                                </span>
-                            </div>
-                            <div className="flex justify-between gap-4"><span className="text-slate-500">Estimate:</span> <span>{formatDuration(estimatedMinutes)}</span></div>
-                        </>
-                    )}
-                </div>
-            </div>
-          </TooltipContent>
-        </Tooltip>
-      );
-    }
-
-    // ... (Extracted fields and task fields logic remain the same) ...
-    if (col.type === 'extracted_field') {
-      const stage = stages.find(s => s.id === col.stageId);
-      if (!stage) return <span className="text-slate-300">-</span>;
-      if (!isStageApplicableToTask(stage, task)) return <span className="text-sm text-gray-300 italic">N/A</span>;
-
-      if (col.isAutoAdded) {
-        let foundValue = null;
-        let foundDoc = null;
-        for (const stageDocInfo of (stage.documents || [])) {
-          if (!isDocumentApplicable(stageDocInfo, task)) continue;
-          const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
-          if (!linked || linked.indicator) continue;
-          const val = linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
-          if (val) { foundValue = val; foundDoc = linked; break; }
+  
+      // ... (Extracted fields and task fields logic remain the same) ...
+      if (col.type === 'extracted_field') {
+        const stage = stages.find(s => s.id === col.stageId);
+        if (!stage) return <span className="text-slate-300">-</span>;
+        if (!isStageApplicableToTask(stage, task)) return <span className="text-sm text-gray-300 italic">N/A</span>;
+  
+        if (col.isAutoAdded) {
+          let foundValue = null;
+          let foundDoc = null;
+          for (const stageDocInfo of (stage.documents || [])) {
+            if (!isDocumentApplicable(stageDocInfo, task)) continue;
+            const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
+            if (!linked || linked.indicator) continue;
+            const val = linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
+            if (val) { foundValue = val; foundDoc = linked; break; }
+          }
+          if (!foundDoc) return <span className="text-red-500 text-xs font-bold">Missing</span>;
+          const isOld = foundDoc.created_at && task.created_at && new Date(foundDoc.created_at) < new Date(task.created_at);
+          const display = col.fieldType === 'Date' ? formatDateForDisplay(foundValue) : foundValue;
+          return <span className={`text-xs ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || '-'}</span>;
         }
-        if (!foundDoc) return <span className="text-red-500 text-xs font-bold">Missing</span>;
-        const isOld = foundDoc.created_at && task.created_at && new Date(foundDoc.created_at) < new Date(task.created_at);
-        const display = col.fieldType === 'Date' ? formatDateForDisplay(foundValue) : foundValue;
+  
+        const stageDocInfo = stage?.documents?.find((d) => d.kycId === col.kycId);
+        if (!stageDocInfo) return <span className="text-slate-300">-</span>;
+        if (!isDocumentApplicable(stageDocInfo, task)) return <span className="text-sm text-gray-300 italic">N/A</span>;
+        const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
+        if (!linked) return <span className="text-red-500 text-xs font-bold">Missing</span>;
+  
+        if (linked.indicator) return <span className="inline-flex items-center rounded-md bg-red-50 text-red-600 border border-red-200 text-[10px] px-1.5 py-0.5">Indicator</span>;
+        const val = linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
+        const isOld = linked.created_at && task.created_at && new Date(linked.created_at) < new Date(task.created_at);
+        const display = col.fieldType === 'Date' ? formatDateForDisplay(val) : val;
+  
         return <span className={`text-xs ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || '-'}</span>;
       }
-
-      const stageDocInfo = stage?.documents?.find((d) => d.kycId === col.kycId);
-      if (!stageDocInfo) return <span className="text-slate-300">-</span>;
-      if (!isDocumentApplicable(stageDocInfo, task)) return <span className="text-sm text-gray-300 italic">N/A</span>;
-      const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
-      if (!linked) return <span className="text-red-500 text-xs font-bold">Missing</span>;
-
-      if (linked.indicator) return <span className="inline-flex items-center rounded-md bg-red-50 text-red-600 border border-red-200 text-[10px] px-1.5 py-0.5">Indicator</span>;
-      const val = linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
-      const isOld = linked.created_at && task.created_at && new Date(linked.created_at) < new Date(task.created_at);
-      const display = col.fieldType === 'Date' ? formatDateForDisplay(val) : val;
-
-      return <span className={`text-xs ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || '-'}</span>;
-    }
-
-    if (col.type === 'task') {
-       return getCellContent(
-         departments,
-         task,
-         col.field,
-         enhancedTasksData,
-         taskDependants,
-         new Set(), // No expansion tracking in reports
-         companies,
-         getTaskHierarchy,
-         getStaffName,
-         getEnhancedImmigrationStatusWrapper,
-         getCurrentStageStatusWrapper,
-         (t) => renderImmigrationStatusCell(t, getEnhancedImmigrationStatusWrapper, new Set(), () => {}),
-         (t) => renderCurrentStageStatusCell(t, getCurrentStageStatusWrapper),
-         () => {}, () => {}, () => {} // No-op callbacks for interactions
-       );
-    }
-    return <span className="text-slate-300">-</span>;
+  
+      if (col.type === 'task') {
+         return getCellContent(
+           departments,
+           task,
+           col.field,
+           enhancedTasksData,
+           taskDependants,
+           new Set(), // No expansion tracking in reports
+           companies,
+           getTaskHierarchy,
+           getStaffName,
+           getEnhancedImmigrationStatusWrapper,
+           getCurrentStageStatusWrapper,
+           (t) => renderImmigrationStatusCell(t, getEnhancedImmigrationStatusWrapper, new Set(), () => {}),
+           (t) => renderCurrentStageStatusCell(t, getCurrentStageStatusWrapper),
+           () => {}, () => {}, () => {} // No-op callbacks for interactions
+         );
+      }
+      return <span className="text-slate-300">-</span>;
   };
 
   const toggleSection = (id) => setExpandedSections(p => {
     const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n;
   });
 
-  // --- 7. Configuration Building --- (Same as original)
-  const columns = useMemo(() => {
-    if (!activeReport || !stages.length) return [];
-    
-    // Helper to get labels from constants if available
-    const getLabel = (id: any) => {
-        const constantHeader = ENHANCED_TABLE_HEADERS_IMMIGRATION.find(h => h.id === id);
-        if (constantHeader) return constantHeader.label;
-        
-        if (typeof id !== 'string') return String(id || '').toUpperCase();
-        return id.replace(/_/g, ' ').toUpperCase();
-    };
+const columns = useMemo(() => {
+  if (!activeReport || !stages.length) return [];
+  
+  const getLabel = (id: any) => {
+    const constantHeader = ENHANCED_TABLE_HEADERS_IMMIGRATION.find(h => h.id === id);
+    if (constantHeader) return constantHeader.label;
+    if (typeof id !== 'string') return String(id || '').toUpperCase();
+    return id.replace(/_/g, ' ').toUpperCase();
+  };
 
-    const cols: any[] = [];
-    activeReport.configuration?.taskFields?.forEach((fieldItem: any) => {
-      // Fix for "Expected string id" error: Extract id if fieldItem is an object
-      const fieldId = typeof fieldItem === 'string' ? fieldItem : fieldItem?.id;
-      if (!fieldId) return;
-      
-      cols.push({ id: `task_${fieldId}`, label: getLabel(fieldId), type: 'task', field: fieldId });
+  const cols: any[] = [];
+  const fieldsToDisplay = activeReport.sessionIncludedFields || 
+    activeReport.configuration?.taskFields?.map(f => f.id) || [];
+  
+  // Add task fields - only once
+  fieldsToDisplay.forEach((fieldId: string) => {
+    if (!fieldId) return;
+    cols.push({ 
+      id: `task_${fieldId}`,  // Add 'task_' prefix to ensure uniqueness
+      label: getLabel(fieldId), 
+      type: 'task', 
+      field: fieldId 
     });
+  });
 
-    const activeStageIds = Object.keys(activeReport.configuration?.stages || {});
-    stages.filter(s => activeStageIds.includes(s.id)).forEach(stage => {
-      const isApplicable = isStageApplicableToCurrentFilter(stage.id);
-      if (!isApplicable) return;
-
+  // Add stage columns
+  const activeStageIds = Object.keys(activeReport.configuration?.stages || {});
+  stages
+    .filter(s => activeStageIds.includes(s.id))
+    .filter(s => isStageApplicableToCurrentFilter(s.id))
+    .forEach(stage => {
       const config = activeReport.configuration.stages[stage.id];
       const isSpecialStage = SPECIAL_STAGE_IDS.includes(stage.id);
       const hasDocuments = config.documents && Object.keys(config.documents).length > 0;
       const shouldShowDateColumn = config.isStageDateSelected || hasDocuments;
 
+      // Add stage date column if needed
       if (shouldShowDateColumn) {
-        cols.push({
-          id: `stage_date_${stage.id}`,
-          label: `${stage.name} (Date)`,
-          type: 'stage_date',
-          stageId: stage.id,
-          stageName: stage.name,
-          hasSubColumns: hasDocuments
-        });
+        const dateColId = `stage_${stage.id}_date`;
+        if (!cols.some(c => c.id === dateColId)) {
+          cols.push({
+            id: dateColId, 
+            label: `${stage.name} (Date)`,
+            type: 'stage_date',
+            stageId: stage.id,
+            stageName: stage.name,
+            hasSubColumns: hasDocuments
+          });
+        }
       }
 
+      // Add document fields if expanded
       if (hasDocuments && expandedStageColumns.has(stage.id)) {
         if (isSpecialStage) {
+          // Handle special stage fields (WEF/TO)
           let wefAdded = false, toAdded = false;
+          
           for (const [kycId] of Object.entries(config.documents)) {
             if (wefAdded && toAdded) break;
             const kycDoc = kycDocuments.get(kycId);
@@ -765,57 +793,109 @@ export default function ReportsPage() {
             if (!wefAdded) {
               const wefField = kycDoc.fields?.find((f: any) => {
                 const name = (f.name || f.fieldName || '').toLowerCase();
-                return name === 'with_effect_from' || f.isEffectiveFrom === true || name.includes('effect_from') || name.includes('effective_from');
+                return name === 'with_effect_from' || f.isEffectiveFrom === true || 
+                       name.includes('effect_from') || name.includes('effective_from');
               });
+              
               if (wefField) {
-                cols.push({ id: `field_${stage.id}_wef`, label: `${stage.name} - WEF`, type: 'extracted_field', stageId: stage.id, kycId, fieldId: wefField.id || wefField.name, fieldName: wefField.name || wefField.fieldName, fieldType: wefField.type || wefField.fieldType || 'date', isAutoAdded: true });
+                const fieldId = wefField.id || wefField.name;
+                const colId = `stage_${stage.id}_${kycId}_${fieldId}`;
+                if (!cols.some(c => c.id === colId)) {
+                  cols.push({ 
+                    id: colId, 
+                    label: `${stage.name} - WEF`,
+                    type: 'extracted_field', 
+                    stageId: stage.id, 
+                    kycId, 
+                    fieldId, 
+                    fieldName: wefField.name || wefField.fieldName, 
+                    fieldType: wefField.type || wefField.fieldType || 'date', 
+                    isAutoAdded: true 
+                  });
+                }
                 wefAdded = true;
               }
             }
+
             if (!toAdded) {
               const toField = kycDoc.fields?.find((f: any) => {
                 const name = (f.name || f.fieldName || '').toLowerCase();
-                return name === 'expiry_date' || f.isEffectiveTo === true || name.includes('expiry') || name.includes('effective_to');
+                return name === 'expiry_date' || f.isEffectiveTo === true || 
+                       name.includes('expiry') || name.includes('effective_to');
               });
+              
               if (toField) {
-                cols.push({
-                  id: `field_${stage.id}_to`,
-                  label: `${stage.name} - TO`,
-                  type: 'extracted_field',
-                  stageId: stage.id,
-                  kycId,
-                  fieldId: toField.id || toField.name,
-                  fieldName: toField.name || toField.fieldName,
-                  fieldType: toField.type || toField.fieldType || 'date',
-                  isAutoAdded: true
-                });
+                const fieldId = toField.id || toField.name;
+                const colId = `stage_${stage.id}_${kycId}_${fieldId}`;
+                if (!cols.some(c => c.id === colId)) {
+                  cols.push({
+                    id: colId,
+                    label: `${stage.name} - TO`,
+                    type: 'extracted_field',
+                    stageId: stage.id,
+                    kycId,
+                    fieldId,
+                    fieldName: toField.name || toField.fieldName,
+                    fieldType: toField.type || toField.fieldType || 'date',
+                    isAutoAdded: true
+                  });
+                }
                 toAdded = true;
               }
             }
           }
-        }
-        if (!isSpecialStage) {
+        } else {
+          // Handle regular document fields
           Object.entries(config.documents).forEach(([kycId, docConfig]: [string, any]) => {
             const kycDoc = kycDocuments.get(kycId);
             if (!kycDoc) return;
-            docConfig.fields?.forEach((fieldId: any) => {
+            
+            (docConfig.fields || []).forEach((fieldId: any) => {
               const field = kycDoc.fields?.find((f: any) => f.id === fieldId);
               if (field) {
-                cols.push({ id: `field_${stage.id}_${kycId}_${fieldId}`, label: `${kycDoc.display_name || kycDoc.name} - ${field.fieldName || field.name}`, type: 'extracted_field', stageId: stage.id, kycId, fieldId, fieldName: field.fieldName || field.name, fieldType: field.fieldType || field.type });
+                const colId = `stage_${stage.id}_${kycId}_${fieldId}`;
+                if (!cols.some(c => c.id === colId)) {
+                  cols.push({ 
+                    id: colId, 
+                    label: `${kycDoc.display_name || kycDoc.name} - ${field.fieldName || field.name}`, 
+                    type: 'extracted_field', 
+                    stageId: stage.id, 
+                    kycId, 
+                    fieldId, 
+                    fieldName: field.fieldName || field.name, 
+                    fieldType: field.fieldType || field.type 
+                  });
+                }
               }
             });
           });
         }
       }
     });
-    return cols;
-  }, [activeReport, stages, kycDocuments, isStageApplicableToCurrentFilter, expandedStageColumns]);
+
+  return cols;
+}, [activeReport, stages, kycDocuments, isStageApplicableToCurrentFilter, expandedStageColumns]);
+  useEffect(() => {
+    if (columns.length > 0) {
+      setVisibleColumnIds(prev => {
+        const newIds = columns.map(c => c.id);
+        const combined = new Set([...prev, ...newIds]);
+        return Array.from(combined);
+      });
+    }
+  }, [columns]);
+
+  // --- New: Filtered Columns for Rendering ---
+  const filteredColumns = useMemo(() => {
+    return columns.filter(c => visibleColumnIds.includes(c.id));
+  }, [columns, visibleColumnIds]);
+
 
   const sortedTasks = useMemo(() => {
-    if (!sortConfig || !columns.length) return searchedTasks;
+    if (!sortConfig || !filteredColumns.length) return searchedTasks;
     const sorted = [...searchedTasks];
     sorted.sort((a, b) => {
-      const colDef = columns.find(c => c.id === sortConfig.key);
+      const colDef = filteredColumns.find(c => c.id === sortConfig.key);
       if (!colDef) return 0;
       const aValue = getSortableValue(a, colDef);
       const bValue = getSortableValue(b, colDef);
@@ -824,7 +904,7 @@ export default function ReportsPage() {
       return 0;
     });
     return sorted;
-  }, [searchedTasks, sortConfig, columns]);
+  }, [searchedTasks, sortConfig, filteredColumns]);
 
   const handleSort = (columnId: string) => {
     setSortConfig(current => {
@@ -842,12 +922,12 @@ export default function ReportsPage() {
   }, [sortedTasks, currentPage, itemsPerPage]);
 
   const columnGroups = useMemo(() => {
-    if (!columns.length) return [];
+    if (!filteredColumns.length) return [];
     const groups = [];
-    const taskCols = columns.filter(c => c.type === 'task');
+    const taskCols = filteredColumns.filter(c => c.type === 'task');
     if (taskCols.length) groups.push({ id: 'task_info', label: 'Task Details', span: taskCols.length });
     const stageMap = new Map();
-    columns.filter(c => c.type !== 'task').forEach(col => {
+    filteredColumns.filter(c => c.type !== 'task').forEach(col => {
       if (!stageMap.has(col.stageId)) stageMap.set(col.stageId, { id: col.stageId, label: '', count: 0 });
       const group = stageMap.get(col.stageId);
       const stageName = stages.find(s => s.id === col.stageId)?.name || 'Stage Info';
@@ -856,22 +936,22 @@ export default function ReportsPage() {
     });
     stageMap.forEach(g => groups.push({ id: g.id, label: g.label, span: g.count }));
     return groups;
-  }, [columns, stages]);
+  }, [filteredColumns, stages]);
 
   const transposedRows = useMemo(() => {
     if (!activeReport) return [];
     const rows = [];
     rows.push({ type: 'section_header', id: 'task_details', label: 'Task Details', icon: Briefcase });
     if (expandedSections.has('task_details')) {
-      columns.filter(c => c.type === 'task').forEach(c => rows.push({ ...c, isSubRow: true }));
+      filteredColumns.filter(c => c.type === 'task').forEach(c => rows.push({ ...c, isSubRow: true }));
     }
-    const stageGroups = new Set(columns.filter(c => c.type !== 'task').map(c => c.stageId));
+    const stageGroups = new Set(filteredColumns.filter(c => c.type !== 'task').map(c => c.stageId));
     stageGroups.forEach(stageId => {
       const stage = stages.find(s => s.id === stageId);
       if (!stage) return;
       rows.push({ type: 'section_header', id: stage.id, label: stage.name, icon: stage.icon || Briefcase });
       if (expandedSections.has(stage.id)) {
-        columns.filter(c => c.stageId === stageId).forEach(c => {
+        filteredColumns.filter(c => c.stageId === stageId).forEach(c => {
           let label = c.label;
           if (c.type === 'stage_date') label = "Completion Date";
           if (c.type === 'extracted_field') label = c.label.split(' - ')[1] || c.label;
@@ -880,16 +960,16 @@ export default function ReportsPage() {
       }
     });
     return rows;
-  }, [activeReport, columns, expandedSections, stages]);
+  }, [activeReport, filteredColumns, expandedSections, stages]);
 
   const handleExport = async (type: 'excel' | 'pdf') => {
     if (type === 'excel') {
       const wb = new ExcelJS.Workbook();
       const ws = wb.addWorksheet('Report');
-      const headerRow = columns.map(c => c.label);
+      const headerRow = filteredColumns.map(c => c.label);
       ws.addRow(['Task ID', ...headerRow]);
       filteredTasks.forEach(t => {
-        const row = [t.id, ...columns.map(c => {
+        const row = [t.id, ...filteredColumns.map(c => {
           if (c.type === 'task') {
              // Use Raw value for export
              return getRawCellValue(
@@ -939,7 +1019,7 @@ export default function ReportsPage() {
             onApplyReport={handleSelectReport}
             tableHeaders={ENHANCED_TABLE_HEADERS_IMMIGRATION}
           />
-
+          
           <div className="h-8 w-px bg-slate-200" />
 
           <div>
@@ -951,6 +1031,29 @@ export default function ReportsPage() {
         </div>
 
         <div className="flex items-center gap-3">
+          {activeReport && (
+             <>
+                <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="flex items-center gap-2 bg-slate-50"
+                    onClick={() => setIsColVisOpen(true)}
+                >
+                    <Columns className="h-4 w-4 text-slate-500" />
+                    <span className="hidden sm:inline">Columns</span>
+                </Button>
+                <ColumnVisibilityDialog 
+                    open={isColVisOpen}
+                    onOpenChange={setIsColVisOpen}
+                    stages={stages}
+                    kycDocuments={kycDocuments}
+                    tableHeaders={ENHANCED_TABLE_HEADERS_IMMIGRATION}
+                    visibleColumns={visibleColumnIds}
+                    onApply={setVisibleColumnIds}
+                />
+             </>
+          )}
+
           {activeReport && (
             <div className="relative w-64 hidden md:block">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
@@ -1119,7 +1222,7 @@ export default function ReportsPage() {
                   {/* Column Header Row */}
                   <TableRow className="bg-blue-500 hover:bg-blue-500">
                     <TableHead className={`${INDEX_WIDTH_CLASS} border-b border-r bg-blue-600 text-white sticky left-0 z-40 text-center font-semibold text-xs`}>#</TableHead>
-                    {columns.map(col => (
+                    {filteredColumns.map(col => (
                       <TableHead
                         key={col.id}
                         onClick={() => handleSort(col.id)}
@@ -1161,7 +1264,7 @@ export default function ReportsPage() {
                       <TableCell className={`${INDEX_WIDTH_CLASS} sticky left-0 z-20 ${idx % 2 === 0 ? 'bg-white' : 'bg-blue-50'} group-hover:bg-blue-100 border-r border-b border-gray-100 font-medium text-xs text-center text-slate-700`}>
                         {(currentPage - 1) * itemsPerPage + idx + 1}
                       </TableCell>
-                      {columns.map(col => (
+                      {filteredColumns.map(col => (
                         <TableCell key={col.id} className={`${COLUMN_WIDTH_CLASS} border-b border-r border-gray-100 p-3 text-xs align-middle`}>
                           <div className="truncate w-full">
                             {safeRender(renderCellValue(task, col))}
@@ -1171,7 +1274,7 @@ export default function ReportsPage() {
                     </TableRow>
                   )) : (
                     <TableRow>
-                      <TableCell colSpan={columns.length + 1} className="h-48 text-center bg-white">
+                      <TableCell colSpan={filteredColumns.length + 1} className="h-48 text-center bg-white">
                         <div className="flex flex-col items-center justify-center text-slate-400">
                           <Briefcase className="h-10 w-10 mb-2 opacity-20" />
                           <p className="text-sm font-medium">No matching tasks found</p>
