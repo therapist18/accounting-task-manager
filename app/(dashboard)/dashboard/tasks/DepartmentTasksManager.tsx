@@ -1199,9 +1199,6 @@ export default function DepartmentTasksManager({
 
       // Handle extracted data if provided
       if (extractedData && Object.keys(extractedData).length > 0) {
-        stageUpdate.extractedData = extractedData;
-        stageUpdate.extracted_at = timestamp;
-
         // Save extracted data to the document if documentId is provided
         if (documentId) {
           const { error: docError } = await supabase

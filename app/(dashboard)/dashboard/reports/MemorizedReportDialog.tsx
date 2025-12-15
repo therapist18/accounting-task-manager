@@ -195,6 +195,7 @@ export function MemorizedReportDialog({
       fetchReports();
     }
   }, [open, fetchReports, department]);
+  
   useEffect(() => {
     setSelectedReport(null);
     setReportName("");

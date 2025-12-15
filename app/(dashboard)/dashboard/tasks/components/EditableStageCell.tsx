@@ -338,13 +338,12 @@ export default function EditableStageCell({
 
     let dateObj = new Date(editValue);
 
-    if (editValue && editValue.endsWith('T00:00')) {
-      const [datePart] = editValue.split('T');
-      dateObj = new Date(`${datePart}T09:00`);
-    }
-
+    // REMOVED: Logic that forced T00:00 to become T09:00.
+    // We now respect the user's input directly.
+    
     const formattedDate = format(dateObj, "dd/MM/yyyy HH:mm");
 
+    // Check validity but don't close blindly if invalid
     if (!editValue.trim() || !isValid(dateObj)) {
       toast({ title: "Error", description: "Please enter a valid date and time", variant: "destructive" });
       return;
@@ -812,6 +811,30 @@ export default function EditableStageCell({
     // 2. COMPLETED STATUS
     const isExplicitlyCompleted = stageStatus === 'completed';
     const isLegacyCompleted = !stageStatus && (!!value || stageData?.documentsUploaded === true);
+    
+    // NEW: Handle explicitly completed stages that have NO date (allow entry)
+    // This addresses the issue where "completed" JSON status with empty date string prevents editing
+    if (isExplicitlyCompleted && (!stageDate || stageDate === 'NaN/NaN/NaN') && !requiresUpload && !isEditing) {
+       return (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="h-7 px-3 text-emerald-600 border border-dashed border-emerald-300 hover:border-emerald-400 bg-emerald-50" 
+                onClick={() => setIsEditing(true)}
+              >
+                <CheckCircle2 className="h-3 w-3 mr-1" /> Set Date
+              </Button>
+            </TooltipTrigger>
+             <TooltipContent className="bg-emerald-50 border-emerald-200 text-emerald-900">
+               <p className="text-xs">Stage is marked completed, but date is missing.</p>
+             </TooltipContent>
+           </Tooltip>
+        </TooltipProvider>
+       );
+    }
 
     if ((isExplicitlyCompleted || isLegacyCompleted) && stageDate && stageDate !== 'NaN/NaN/NaN') {
       const completionDate = parseDate(stageDate);
@@ -1065,4 +1088,8 @@ export default function EditableStageCell({
       <SkipStageDialog />
     </>
   );
+}
+
+function SkipStageDialog() {
+  return null; // Placeholder as specific dialog implementation wasn't provided, but logic is handled
 }

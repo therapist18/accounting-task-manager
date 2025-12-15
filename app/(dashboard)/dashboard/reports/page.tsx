@@ -557,14 +557,9 @@ export default function ReportsPage() {
 
                   for (const field of dateFields) {
                     const fieldValue = details[field];
-                    console.log(`[renderCellValue] Checking field '${field}' with value:`, fieldValue);
-
-                    const parsedDate = parseDateString(fieldValue);
-                    console.log(`[renderCellValue] Parsed date:`, parsedDate);
-
-                    if (parsedDate && (!docDate || parsedDate > docDate)) {
-                      console.log(`[renderCellValue] New latest docDate:`, parsedDate);
-                      docDate = parsedDate;
+                                    const parsedDate = parseDateString(fieldValue);
+                                      if (parsedDate && (!docDate || parsedDate > docDate)) {
+                     docDate = parsedDate;
                     }
                   }
                 }
@@ -575,7 +570,6 @@ export default function ReportsPage() {
           if (docDate) {
             effectiveStartTime = docDate;
           } else if (prevStageData.date) {
-            console.log(`[renderCellValue] Using previous stage date:`, prevStageData.date);
             effectiveStartTime = parseDateString(prevStageData.date);
           } else if (prevStageData.completedAt) {
             effectiveStartTime = parseDateString(prevStageData.completedAt);
@@ -644,25 +638,17 @@ export default function ReportsPage() {
           if (validDates.length > 0) {
             validDates.sort((a, b) => b.getTime() - a.getTime());
             completionDateStr = validDates[0]; // Use latest document date
-          } else {
-            console.log(`[renderCellValue] No valid dates found in document fields`);
-          }
-        } else {
-          console.log(`[renderCellValue] No linked documents with extracted details found`);
-        }
+          } 
+        } 
       }
       // PRIORITY 2: If no document dates, use manually entered stage date
       if (!completionDateStr && stageData?.date) {
         completionDateStr = stageData.date;
-      } else if (!completionDateStr) {
-        console.log(`[renderCellValue] No stageData.date available`);
-      }
+      } 
       // PRIORITY 3: Final fallback to completedAt timestamp
       if (!completionDateStr && stageData?.status === 'completed' && stageData?.completedAt) {
         completionDateStr = stageData.completedAt;
-      } else if (!completionDateStr && stageData?.status === 'completed') {
-        console.log(`[renderCellValue] Stage marked as completed but no completedAt timestamp`);
-      }
+      } 
       const completionDate = parseDateString(completionDateStr);
       if (completionDate) {
         let isCompletedOverdue = false;
@@ -703,14 +689,10 @@ export default function ReportsPage() {
       }
       // --- 5. SCENARIO B: STAGE IS IN PROGRESS ---
       if (!effectiveStartTime) {
-        console.log(`[renderCellValue] No effectiveStartTime available, cannot determine status`);
         return <span className="text-slate-300">-</span>;
       }
-      console.log(`[renderCellValue] Stage is in progress, effectiveStartTime:`, effectiveStartTime);
       const timeStatus = getTimeStatus(effectiveStartTime, estimatedMinutes);
       const isOverdue = timeStatus?.isOverdue || false;
-      console.log(`[renderCellValue] Time status:`, timeStatus, `, isOverdue:`, isOverdue);
-      // Rest of the in-progress rendering logic remains the same
       const textColorClass = isOverdue ? "text-red-600" : "text-blue-600";
       const icon = isOverdue ? <AlertTriangle className="h-3.5 w-3.5" /> : <Timer className="h-3.5 w-3.5" />;
       const borderColorClass = isOverdue ? "border-red-200 bg-red-50" : "border-blue-200 bg-blue-50";
