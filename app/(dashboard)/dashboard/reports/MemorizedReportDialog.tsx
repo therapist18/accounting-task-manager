@@ -3,7 +3,7 @@
 
 "use client"
 
-import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
+import React, { useState, useMemo, useCallback, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -13,9 +13,13 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
-import { Loader2, Plus, Pencil, Trash2, X, Save, Star, Filter } from "lucide-react"
+import { 
+  Loader2, Plus, Minus, Pencil, Trash2, X, Save, Star, Filter, 
+  Table as TableIcon, ChevronsUpDown, ChevronUp 
+} from "lucide-react"
 import type { Department, KycDocument } from "../utils/taskManagerData"
 import { ENHANCED_TABLE_HEADERS_IMMIGRATION } from "../tasks/overall-view/tableUtils"
+import { cn } from "@/lib/utils"
 
 type FieldConfig = {
   id: string;
@@ -44,7 +48,7 @@ export type MemorizedReport = {
   configuration: ReportConfiguration;
   department_id: number;
   is_favorite?: boolean;
-  sessionIncludedFields?: string[]; // Fields included in this session (not persisted)
+  sessionIncludedFields?: string[];
 };
 
 interface MemorizedReportDialogProps {
@@ -117,10 +121,55 @@ export function MemorizedReportDialog({
   const [reportName, setReportName] = useState("")
   const [reportConfig, setReportConfig] = useState<ReportConfiguration>(INITIAL_REPORT_CONFIG)
   
-  // State to track which fields are included in the report (separate from default visibility)
+  // State to track which fields are included in the report
   const [includedFields, setIncludedFields] = useState<Set<string>>(new Set());
   
   const [showSelectedOnly, setShowSelectedOnly] = useState(true);
+
+  // State for Expand/Collapse All
+  const [expandedSections, setExpandedSections] = useState<string[]>(['task-details']);
+  const [allExpanded, setAllExpanded] = useState(false);
+  
+  // Generate a unique ID for each section
+  const getSectionId = useCallback((title: string) => {
+    return title.toLowerCase().replace(/\s+/g, '-');
+  }, []);
+  
+  // Get all section IDs
+  const getAllSectionIds = useCallback(() => {
+    return [
+      'task-details',
+      ...stages.map(stage => getSectionId(stage.name))
+    ];
+  }, [stages, getSectionId]);
+  
+  // Toggle all sections expanded/collapsed
+  const toggleAllSections = useCallback(() => {
+    if (allExpanded) {
+      setExpandedSections([]);
+    } else {
+      setExpandedSections(getAllSectionIds());
+    }
+    setAllExpanded(!allExpanded);
+  }, [allExpanded, getAllSectionIds]);
+  
+  // Toggle a single section
+  const toggleSection = useCallback((sectionId: string) => {
+    setExpandedSections(prev => {
+      const newState = prev.includes(sectionId)
+        ? prev.filter(id => id !== sectionId)
+        : [...prev, sectionId];
+      // Update allExpanded state based on whether all sections are expanded
+      const allSectionIds = getAllSectionIds();
+      setAllExpanded(newState.length === allSectionIds.length);
+      return newState;
+    });
+  }, [getAllSectionIds]);
+  
+  // Collapse all sections
+  const handleCollapseAll = useCallback(() => {
+    toggleAllSections(false);
+  }, [toggleAllSections]);
 
   const fetchReports = useCallback(async () => {
     if (!department) return;
@@ -141,23 +190,23 @@ export function MemorizedReportDialog({
     }
   }, [department]);
 
-  // EFFECT 1: Fetch reports when dialog opens. 
-  // FIX: REMOVED the "else" block that was resetting state on close.
   useEffect(() => {
     if (open && department) {
       fetchReports();
     }
   }, [open, fetchReports, department]);
-
-  // EFFECT 2: Reset state ONLY when department changes.
   useEffect(() => {
     setSelectedReport(null);
     setReportName("");
     setReportConfig(INITIAL_REPORT_CONFIG);
-    setIncludedFields(new Set(['applicant_name'])); // Default reset
+    setIncludedFields(new Set(['applicant_name']));
     setIsEditing(false);
     setShowSelectedOnly(true);
   }, [department?.id]);
+
+  useEffect(() => {
+    setExpandedSections(['task-details']);
+  }, []);
 
   const handleCreateNew = () => {
     setSelectedReport(null);
@@ -166,22 +215,19 @@ export function MemorizedReportDialog({
     setIncludedFields(new Set(['applicant_name'])); 
     setIsEditing(true);
     setShowSelectedOnly(true);
+    setExpandedSections(['task-details']);
   };
 
   const handleSelectReport = (report: MemorizedReport) => {
     const config = normalizeConfiguration(report.configuration);
-    
     setSelectedReport(report);
     setReportName(report.name);
     setReportConfig(config);
-    
-    // When manually selecting a report from the list, we load its saved defaults.
-    // This overwrites any previous session fields, which is expected behavior when switching reports.
     const included = new Set(config.taskFields.map(f => f.id));
     setIncludedFields(included);
-    
     setIsEditing(false);
     setShowSelectedOnly(true);
+    setExpandedSections(['task-details']);
   };
 
   const handleToggleFavorite = async (e: React.MouseEvent, report: MemorizedReport) => {
@@ -211,29 +257,21 @@ export function MemorizedReportDialog({
       let savedReportData;
 
       if (selectedReport && selectedReport.id) {
-        // Update existing
         const { data, error } = await supabase.from('tm_memorized_reports').update(reportData).eq('id', selectedReport.id).select().single();
         if (error) throw error;
         savedReportData = data;
         toast({ title: "Success", description: "Report updated." });
       } else {
-        // Create new
         const { data, error } = await supabase.from('tm_memorized_reports').insert(reportData).select().single();
         if (error) throw error;
         savedReportData = data;
         toast({ title: "Success", description: "Report created." });
       }
 
-      // FIX: Update the selected report reference to the saved one, 
-      // but DO NOT reset 'includedFields'. Keep the user's current session selections.
       const normalizedSavedConfig = normalizeConfiguration(savedReportData.configuration);
-      
       setSelectedReport(savedReportData);
       setReportName(savedReportData.name);
-      
-      // Update config to match DB (defaults), but UI checkboxes for "Include" are driven by 'includedFields' state
       setReportConfig(normalizedSavedConfig); 
-      
       setIsEditing(false);
       await fetchReports();
       
@@ -268,7 +306,6 @@ export function MemorizedReportDialog({
       onApplyReport({
         ...selectedReport,
         configuration: finalConfig,
-        // Pass the session-only fields which are currently in state
         sessionIncludedFields: Array.from(includedFields) 
       });
       onOpenChange(false);
@@ -291,7 +328,6 @@ export function MemorizedReportDialog({
     });
   }, [includedFields]);
 
-  // Get the final configuration - ONLY save fields marked as default (isDefault: true)
   const getFinalConfiguration = (config: ReportConfiguration): ReportConfiguration => {
     const fieldsToSave = config.taskFields.filter(f => f.isDefault === true);
     return {
@@ -307,19 +343,15 @@ export function MemorizedReportDialog({
       let newFields = [...current];
 
       if (exists) {
-        // Toggle isDefault flag
         newFields = newFields.map(f => 
           f.id === fieldId ? { ...f, isDefault: !f.isDefault } : f
         );
       } else {
-        // Add with default visibility on
         newFields.push({ id: fieldId, isDefault: true });
       }
-      
       return { ...prev, taskFields: newFields };
     });
 
-    // Make sure the field is included when toggling default
     setIncludedFields(prev => {
       if (!prev.has(fieldId)) {
         const newSet = new Set(prev);
@@ -338,11 +370,9 @@ export function MemorizedReportDialog({
       } else {
         newStages[stageId].isStageDateSelected = !newStages[stageId].isStageDateSelected;
       }
-      
       if (!newStages[stageId].isStageDateSelected && Object.keys(newStages[stageId].documents).length === 0) {
         delete newStages[stageId];
       }
-      
       return { ...prev, stages: newStages };
     });
   };
@@ -358,7 +388,6 @@ export function MemorizedReportDialog({
           newStages[stageId].isStageDateSelected = true;
         }
       }
-      
       return { ...prev, stages: newStages };
     });
   };
@@ -379,7 +408,6 @@ export function MemorizedReportDialog({
       if (!newStages[stageId].isStageDateSelected && Object.keys(newStages[stageId].documents).length === 0) {
         delete newStages[stageId];
       }
-      
       return { ...prev, stages: newStages };
     });
   };
@@ -397,7 +425,6 @@ export function MemorizedReportDialog({
       } else {
         newStages[stageId].documents[kycId].fields.push({ id: fieldId, isDefault: false });
       }
-      
       return { ...prev, stages: newStages };
     });
   };
@@ -417,7 +444,6 @@ export function MemorizedReportDialog({
       } else {
         newStages[stageId].documents[kycId].fields.push({ id: fieldId, isDefault: true });
       }
-      
       return { ...prev, stages: newStages };
     });
   };
@@ -434,14 +460,16 @@ export function MemorizedReportDialog({
 
   const renderReportList = () => (
     <div className="flex flex-col gap-2 h-full">
-      <Button onClick={handleCreateNew} className="w-full mb-2"><Plus className="mr-2 h-4 w-4" /> Create New Report</Button>
+      <Button onClick={handleCreateNew} className="w-full mb-2 bg-slate-800 hover:bg-slate-700"><Plus className="mr-2 h-4 w-4" /> Create New Report</Button>
       <ScrollArea className="flex-1 pr-4 -mr-4">
         <div className="space-y-1">
           {sortedReports.map(report => (
             <div 
               key={report.id} 
-              className={`group flex items-center justify-between p-2 rounded-md cursor-pointer border border-transparent transition-all
-                ${selectedReport?.id === report.id ? 'bg-blue-50 border-blue-200 shadow-sm' : 'hover:bg-slate-50 hover:border-slate-200'}`} 
+              className={`group flex items-center justify-between p-2 rounded-md cursor-pointer border transition-all
+                ${selectedReport?.id === report.id 
+                  ? 'bg-blue-50 border-blue-200 shadow-sm' 
+                  : 'border-transparent hover:bg-slate-50 hover:border-slate-200'}`} 
               onClick={() => handleSelectReport(report)}
             >
               <div className="flex items-center gap-2 overflow-hidden">
@@ -478,65 +506,115 @@ export function MemorizedReportDialog({
 
   const handleEditReport = () => setIsEditing(true);
 
-  const GridHeader = () => (
-    <div className="grid grid-cols-12 gap-2 px-2 py-1 bg-slate-100 text-xs font-semibold text-slate-600 rounded mb-2 sticky top-0 z-10">
-      <div className="col-span-8">Column Name</div>
-      <div className="col-span-2 text-center">Default</div>
-      <div className="col-span-2 text-center">Include</div>
+  // --- UI COMPONENTS ---
+
+  const TableHeader = () => (
+    <div className="grid grid-cols-12 gap-0 border-b border-slate-200 bg-slate-100 text-xs font-semibold text-slate-700 sticky top-0 z-20 shadow-sm">
+      <div className="col-span-8 px-4 py-3 border-r border-slate-200">Field / Category</div>
+      <div className="col-span-2 px-2 py-3 border-r border-slate-200 text-center bg-green-50/50 text-green-700">Default</div>
+      <div className="col-span-2 px-2 py-3 text-center bg-blue-50/50 text-blue-700">Reports Table</div>
     </div>
   );
 
-  const GridRow = ({ 
+  const TableRow = ({ 
     label, 
     isIncluded, 
     isDefault, 
     onToggleInclude, 
     onToggleDefault, 
     depth = 0, 
-    isSessionOnly = false
+    isSessionOnly = false,
+    className = "",
+    icon = null,
+    readOnly = false
   }: {
-    label: string;
-    isIncluded: boolean;
-    isDefault: boolean;
-    onToggleInclude: () => void;
-    onToggleDefault: () => void;
+    label: React.ReactNode;
+    isIncluded?: boolean;
+    isDefault?: boolean;
+    onToggleInclude?: () => void;
+    onToggleDefault?: () => void;
     depth?: number;
     isSessionOnly?: boolean;
+    hasChildren?: boolean;
+    className?: string;
+    icon?: React.ReactNode;
+    readOnly?: boolean;
   }) => (
-    <div className="grid grid-cols-12 gap-2 py-1.5 items-center hover:bg-slate-50 rounded px-2 transition-colors">
-      <div className="col-span-6 flex items-center gap-2">
-        <span 
-          style={{ marginLeft: `${depth * 12}px` }} 
-          className={`text-sm truncate ${isSessionOnly ? 'text-blue-600' : ''}`} 
-          title={label}
-        >
-          {label}
-          {isSessionOnly && ' (Session Only)'}
-        </span>
+    <div className={cn(
+      "grid grid-cols-12 gap-0 border-b border-slate-100 items-stretch text-sm transition-colors bg-white hover:bg-slate-50", 
+      className
+    )}>
+      {/* Label Column */}
+      <div className="col-span-8 flex items-center border-r border-slate-100 py-2">
+        <div style={{ width: `${depth * 24}px` }} className="shrink-0 h-full border-r border-dashed border-slate-100 mr-2 opacity-50" />
+        <div className="flex items-center gap-2 px-2 min-w-0">
+          {icon}
+          <span className={cn("truncate font-medium", isSessionOnly ? "text-blue-600" : "text-slate-700")}>
+            {label}
+            {isSessionOnly && <span className="text-xs text-blue-500 font-normal ml-1">(Session Only)</span>}
+          </span>
+        </div>
       </div>
-      <div className="col-span-3 flex justify-center">
-        <Checkbox 
-          checked={isDefault} 
-          onCheckedChange={onToggleDefault}
-          disabled={isSessionOnly}
-          aria-label={`Default visibility for ${label}`}
-        />
+      
+      {/* Default Checkbox Column */}
+      <div className="col-span-2 flex items-center justify-center border-r border-slate-100 bg-slate-50/30 py-2">
+        {(onToggleDefault || readOnly) && (
+          <Checkbox 
+            checked={isDefault} 
+            onCheckedChange={onToggleDefault}
+            disabled={readOnly || isSessionOnly}
+            className="data-[state=checked]:bg-green-600 data-[state=checked]:border-green-600 disabled:opacity-50"
+          />
+        )}
       </div>
-      <div className="col-span-3 flex justify-center">
-        <Checkbox 
-          checked={isIncluded} 
-          onCheckedChange={onToggleInclude}
-          aria-label={`Include ${label} in report`}
-        />
+
+      {/* Reports Table Checkbox Column */}
+      <div className="col-span-2 flex items-center justify-center bg-slate-50/30 py-2">
+        {(onToggleInclude || readOnly) && (
+          <Checkbox 
+            checked={isIncluded} 
+            onCheckedChange={onToggleInclude}
+            disabled={readOnly}
+            className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 disabled:opacity-50"
+          />
+        )}
       </div>
     </div>
   );
+
+  const ExpandableRow = React.memo(({ title, children }: { title: string, children: React.ReactNode }) => {
+    const sectionId = getSectionId(title);
+    
+    return (
+      <AccordionItem value={sectionId} className="border-b border-slate-200 last:border-0">
+        <AccordionTrigger 
+          className="w-full py-0 hover:no-underline group bg-slate-50/80 [&>svg]:hidden"
+          onClick={() => toggleSection(sectionId)}
+        >
+          <div className="grid grid-cols-12 w-full gap-0 text-left">
+            <div className="col-span-12 px-4 py-2.5 flex justify-between items-center gap-2">
+              <span className="font-bold text-slate-800 text-sm">{title}</span>
+              <div className="h-5 w-5 rounded border border-slate-300 bg-white flex items-center justify-center text-slate-500 shadow-sm transition-colors group-hover:border-blue-400 group-hover:text-blue-600">
+                <Plus className="h-3 w-3 group-data-[state=open]:hidden" />
+                <Minus className="h-3 w-3 hidden group-data-[state=open]:block" />
+              </div>
+            </div>
+          </div>
+        </AccordionTrigger>
+        <AccordionContent className="p-0 animate-in slide-in-from-top-1 data-[state=closed]:animate-out data-[state=closed]:slide-out-to-top-1">
+          {children}
+        </AccordionContent>
+      </AccordionItem>
+    );
+  });
 
   const renderReportEditor = () => {
     const filteredTaskFields = tableHeaders.filter(field => {
         if(!showSelectedOnly) return true;
         return includedFields.has(field.id);
     });
+
+    // Use the component-level functions
 
     const filteredStages = sortedStages.filter(stage => {
         if(!showSelectedOnly) return true;
@@ -548,16 +626,36 @@ export function MemorizedReportDialog({
     });
 
     return (
-      <div className="flex flex-col h-full">
-        <div className="flex justify-between items-center mb-4 pb-4 border-b">
+      <div className="flex flex-col h-full bg-white">
+        <div className="flex justify-between items-center mb-4 pb-4 border-b px-1">
           <div>
-            <h3 className="text-lg font-semibold text-slate-800">{selectedReport ? "Edit Report" : "New Report"}</h3>
+            <h3 className="text-lg font-bold text-slate-900">{selectedReport ? "Edit Report" : "New Report"}</h3>
             <p className="text-xs text-slate-500">
-              <strong>Default:</strong> Visible when report loads. <strong>Include:</strong> Available in report.
+              Configure fields. <strong>Default</strong> = Saved to DB. <strong>Reports Table</strong> = Temporary session visibility.
             </p>
           </div>
           <div className="flex items-center gap-2">
-             <div className="flex items-center space-x-2 bg-slate-100 px-3 py-1.5 rounded-md border border-slate-200">
+             <Button 
+                variant="outline" 
+                size="sm" 
+                className="h-8 px-2 text-xs flex items-center gap-1" 
+                onClick={toggleAllSections}
+                title={allExpanded ? 'Collapse All' : 'Expand All'}
+             >
+                {allExpanded ? (
+                  <>
+                    <ChevronUp className="h-3 w-3" />
+                    <span>Collapse All</span>
+                  </>
+                ) : (
+                  <>
+                    <ChevronsUpDown className="h-3 w-3" />
+                    <span>Expand All</span>
+                  </>
+                )}
+             </Button>
+             
+             <div className="flex items-center space-x-2 bg-slate-100 px-3 py-1.5 rounded-md border border-slate-200 ml-2">
                 <Checkbox 
                     id="showSelectedOnly" 
                     checked={showSelectedOnly} 
@@ -575,31 +673,31 @@ export function MemorizedReportDialog({
         <div className="space-y-4 flex-1 flex flex-col min-h-0">
           <div className="space-y-1">
             <Label htmlFor="reportName">Report Name</Label>
-            <Input id="reportName" value={reportName} onChange={(e) => setReportName(e.target.value)} placeholder="e.g., Management Overview" />
+            <Input id="reportName" value={reportName} onChange={(e) => setReportName(e.target.value)} placeholder="e.g., Management Overview" className="max-w-md" />
           </div>
 
-          <div className="flex-1 flex flex-col min-h-0 border rounded-md">
-            <div className="p-3 bg-slate-50 border-b">
-              <h4 className="font-medium text-sm text-slate-700">Column Configuration</h4>
-            </div>
-            <div className="p-2 border-b"><GridHeader /></div>
+          <div className="flex-1 flex flex-col min-h-0 border rounded-lg shadow-sm overflow-hidden bg-white">
+            <TableHeader />
             
-            <ScrollArea className="flex-1 p-2">
-              <Accordion type="multiple" className="w-full" defaultValue={['task-fields']}>
+            <ScrollArea className="flex-1">
+              <Accordion 
+                type="multiple" 
+                className="w-full divide-y divide-slate-200" 
+                value={expandedSections}
+                onValueChange={(value) => {
+                  setExpandedSections(value);
+                }}
+              >
                 
                 {filteredTaskFields.length > 0 && (
-                  <AccordionItem value="task-fields" className="border-b-0">
-                    <AccordionTrigger className="py-2 hover:no-underline hover:bg-slate-50 px-2 rounded">
-                      <span className="font-semibold text-sm">Task Details</span>
-                    </AccordionTrigger>
-                    <AccordionContent className="pt-1 pb-4">
+                  <ExpandableRow key="task-details-section" title="Task Details">
                       {filteredTaskFields.map(field => {
                         const isIncluded = isTaskFieldIncluded(field.id);
                         const config = reportConfig.taskFields?.find(f => f.id === field.id);
                         const isSessionOnly = isIncluded && !config?.isDefault;
                         
                         return (
-                          <GridRow 
+                          <TableRow 
                             key={field.id}
                             label={field.label}
                             isIncluded={isIncluded}
@@ -611,11 +709,9 @@ export function MemorizedReportDialog({
                           />
                         );
                       })}
-                    </AccordionContent>
-                  </AccordionItem>
+                  </ExpandableRow>
                 )}
 
-                {/* Stages and Documents rendering */}
                 {filteredStages.map(stage => {
                     const stageConfig = reportConfig.stages?.[stage.id];
                     const filteredDocs = (stage.documents || []).filter((doc: any) => {
@@ -625,20 +721,20 @@ export function MemorizedReportDialog({
 
                     if(showSelectedOnly && !stageConfig?.isStageDateSelected && filteredDocs.length === 0) return null;
 
+                    // Create a unique key using the stage ID and a counter to ensure uniqueness
+                    const stageKey = `stage-${stage.id}-${stages.findIndex(s => s.id === stage.id)}`;  
+
                     return (
-                        <AccordionItem key={stage.id} value={`stage-${stage.id}`} className="border-b-0">
-                        <AccordionTrigger className="py-2 hover:no-underline hover:bg-slate-50 px-2 rounded">
-                            <span className="font-semibold text-sm">{stage.name}</span>
-                        </AccordionTrigger>
-                        <AccordionContent className="pt-1 pb-4 space-y-2">
+                        <ExpandableRow key={stageKey} title={stage.name}>
                             {(!showSelectedOnly || stageConfig?.isStageDateSelected) && (
-                                <GridRow 
-                                label={`${stage.name} - Completion Date`}
-                                isIncluded={!!stageConfig?.isStageDateSelected}
-                                isDefault={!!stageConfig?.isStageDateDefault}
-                                onToggleInclude={() => toggleStageDateInclude(stage.id)}
-                                onToggleDefault={() => toggleStageDateDefault(stage.id)}
-                                depth={1}
+                                <TableRow 
+                                  label="Stage Completion Date"
+                                  isIncluded={!!stageConfig?.isStageDateSelected}
+                                  isDefault={!!stageConfig?.isStageDateDefault}
+                                  onToggleInclude={() => toggleStageDateInclude(stage.id)}
+                                  onToggleDefault={() => toggleStageDateDefault(stage.id)}
+                                  depth={1}
+                                  className="bg-slate-50/50 italic text-slate-600"
                                 />
                             )}
 
@@ -648,45 +744,55 @@ export function MemorizedReportDialog({
                             const isDocActive = !!stageConfig?.documents?.[doc.kycId];
                             
                             return (
-                                <div key={`${stage.id}-${doc.kycId}`} className="mt-2">
-                                <div className="flex items-center gap-2 py-1 px-2 ml-4 bg-slate-50/50 rounded">
-                                    <Checkbox 
-                                        id={`doc-${stage.id}-${doc.kycId}`} 
-                                        checked={isDocActive} 
-                                        onCheckedChange={() => toggleDocument(stage.id, doc.kycId)}
-                                    />
-                                    <Label htmlFor={`doc-${stage.id}-${doc.kycId}`} className="text-xs font-semibold text-slate-700 cursor-pointer">
-                                        {kycDoc.display_name || kycDoc.name}
-                                    </Label>
-                                </div>
-
-                                {isDocActive && (
-                                    <div className="mt-1 ml-2 border-l-2 border-slate-100 pl-2">
-                                        {kycDoc.fields?.map((field: any) => {
-                                            const docConfig = stageConfig?.documents?.[doc.kycId];
-                                            const fieldConfig = docConfig?.fields.find((f: any) => f.id === field.id);
-                                            if(showSelectedOnly && !fieldConfig) return null;
-
-                                            return (
-                                            <GridRow
-                                                key={`${stage.id}-${doc.kycId}-${field.id}`}
-                                                label={field.fieldName}
-                                                isIncluded={!!fieldConfig}
-                                                isDefault={!!fieldConfig?.isDefault}
-                                                onToggleInclude={() => toggleDocFieldInclude(stage.id, doc.kycId, field.id)}
-                                                onToggleDefault={() => toggleDocFieldDefault(stage.id, doc.kycId, field.id)}
-                                                depth={2}
-                                                isSessionOnly={!!fieldConfig && !fieldConfig.isDefault}
+                                <div key={`doc-${stage.id}-${doc.kycId}-${Math.random().toString(36).substr(2, 9)}`} className="group/doc">
+                                  {/* Document Header Row */}
+                                  <div className="grid grid-cols-12 gap-0 border-b border-slate-100 items-stretch text-sm hover:bg-slate-50">
+                                      <div className="col-span-8 flex items-center border-r border-slate-100 py-2">
+                                          <div style={{ width: `24px` }} className="shrink-0 h-full border-r border-dashed border-slate-100 mr-2 opacity-50" />
+                                          <div className="flex items-center gap-2 px-2 py-1 w-full">
+                                            <Checkbox 
+                                                id={`doc-${stage.id}-${doc.kycId}`} 
+                                                checked={isDocActive} 
+                                                onCheckedChange={() => toggleDocument(stage.id, doc.kycId)}
                                             />
-                                            );
-                                        })}
-                                    </div>
-                                )}
+                                            <Label htmlFor={`doc-${stage.id}-${doc.kycId}`} className="cursor-pointer font-semibold text-slate-700 flex-1 truncate">
+                                                {kycDoc.display_name || kycDoc.name}
+                                            </Label>
+                                          </div>
+                                      </div>
+                                      {/* Spacers for doc row */}
+                                      <div className="col-span-2 border-r border-slate-100 bg-slate-50/30"></div>
+                                      <div className="col-span-2 bg-slate-50/30"></div>
+                                  </div>
+
+                                  {/* Document Fields */}
+                                  {isDocActive && (
+                                      <div className="bg-slate-50/30">
+                                          {kycDoc.fields?.map((field: any) => {
+                                              const docConfig = stageConfig?.documents?.[doc.kycId];
+                                              const fieldConfig = docConfig?.fields.find((f: any) => f.id === field.id);
+                                              if(showSelectedOnly && !fieldConfig) return null;
+
+                                              return (
+                                              <TableRow
+                                                  key={`field-${stage.id}-${doc.kycId}-${field.id}-${Math.random().toString(36).substr(2, 4)}`}
+                                                  label={field.fieldName}
+                                                  isIncluded={!!fieldConfig}
+                                                  isDefault={!!fieldConfig?.isDefault}
+                                                  onToggleInclude={() => toggleDocFieldInclude(stage.id, doc.kycId, field.id)}
+                                                  onToggleDefault={() => toggleDocFieldDefault(stage.id, doc.kycId, field.id)}
+                                                  depth={2}
+                                                  isSessionOnly={!!fieldConfig && !fieldConfig.isDefault}
+                                                  className="bg-white"
+                                              />
+                                              );
+                                          })}
+                                      </div>
+                                  )}
                                 </div>
                             );
                             })}
-                        </AccordionContent>
-                        </AccordionItem>
+                        </ExpandableRow>
                     );
                 })}
               </Accordion>
@@ -697,152 +803,125 @@ export function MemorizedReportDialog({
     );
   };
 
-const renderReportViewer = () => {
-  // Get all included fields (both default and session-only)
-  const allIncludedFields = new Set([
-    ...(reportConfig.taskFields?.map(f => f.id) || []),
-    ...Array.from(includedFields)
-  ]);
+  const renderReportViewer = () => {
+    const allIncludedFields = new Set([
+      ...(reportConfig.taskFields?.map(f => f.id) || []),
+      ...Array.from(includedFields)
+    ]);
+  
+    return (
+      <div className="flex flex-col h-full">
+        <div className="mb-4">
+          <h3 className="text-lg font-bold text-slate-900">{selectedReport?.name}</h3>
+          <p className="text-sm text-slate-500">Read-only preview.</p>
+        </div>
+  
+        <div className="border rounded-lg shadow-sm flex-1 flex flex-col min-h-0 overflow-hidden bg-white">
+          <TableHeader />
+          <ScrollArea className="flex-1">
+             {/* Flattened View for Viewer using the same TableRow component */}
+             <div className="divide-y divide-slate-100">
+                <div className="bg-slate-50 px-4 py-2 font-bold text-xs uppercase text-slate-500 tracking-wider">Task Fields</div>
+                {Array.from(allIncludedFields).map(fieldId => {
+                  const fieldConfig = reportConfig.taskFields?.find(f => f.id === fieldId);
+                  const header = tableHeaders.find(h => h.id === fieldId);
+                  const isSessionOnly = !fieldConfig?.isDefault;
+                  return (
+                     <TableRow 
+                        key={fieldId}
+                        label={header?.label || fieldId}
+                        isIncluded={true} 
+                        isDefault={!!fieldConfig?.isDefault}
+                        isSessionOnly={isSessionOnly}
+                        depth={0}
+                        readOnly={true}
+                     />
+                  )
+                })}
 
-  return (
-    <div className="flex flex-col h-full">
-      <div className="mb-4">
-        <h3 className="text-lg font-semibold text-slate-800">{selectedReport?.name}</h3>
-        <p className="text-sm text-slate-500">Read-only preview of report configuration.</p>
-      </div>
+                {Object.entries(reportConfig.stages).map(([stageId, stageConfig]) => {
+                  const stage = stages.find(s => s.id === stageId);
+                  if (!stage) return null;
+                  return (
+                    <div key={stageId}>
+                       <div className="bg-slate-50 px-4 py-2 font-bold text-xs uppercase text-slate-500 tracking-wider border-t border-slate-200">{stage.name}</div>
+                       {stageConfig.isStageDateSelected && (
+                          <TableRow 
+                            label="Completion Date" 
+                            isIncluded={true} 
+                            isDefault={stageConfig.isStageDateDefault} 
+                            depth={0} 
+                            readOnly={true}
+                          />
+                       )}
+                       {Object.entries(stageConfig.documents).map(([kycId, docConfig]) => {
+                          const kycDoc = kycDocuments.get(kycId);
+                          const docFields = docConfig.fields || [];
+                          if(!kycDoc) return null;
 
-      <div className="border rounded-md flex-1 flex flex-col min-h-0">
-        <div className="p-2 border-b bg-slate-50"><GridHeader /></div>
-        <ScrollArea className="flex-1 p-4">
-          <div className="space-y-4">
-            <div>
-              <h4 className="font-semibold text-sm mb-2 text-blue-700">Task Fields</h4>
-              {Array.from(allIncludedFields).map(fieldId => {
-                const fieldConfig = reportConfig.taskFields?.find(f => f.id === fieldId);
-                const header = tableHeaders.find(h => h.id === fieldId);
-                const isSessionOnly = !fieldConfig?.isDefault;
-                
-                return (
-                  <div 
-                    key={fieldId} 
-                    className={`grid grid-cols-12 text-sm py-1 border-b border-dashed border-slate-100 last:border-0 ${
-                      isSessionOnly ? 'text-blue-600' : 'text-slate-700'
-                    }`}
-                  >
-                    <div className="col-span-8 flex items-center gap-1">
-                      {header?.label || fieldId}
-                      {isSessionOnly && <span className="text-xs text-blue-500">(Session Only)</span>}
-                    </div>
-                    <div className="col-span-2 text-center">
-                      {fieldConfig?.isDefault ? (
-                        <span className="text-green-600">✓</span>
-                      ) : (
-                        <span className="text-slate-300">-</span>
-                      )}
-                    </div>
-                    <div className="col-span-2 text-center font-bold text-blue-600">✓</div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {Object.entries(reportConfig.stages).map(([stageId, stageConfig]) => {
-              const stage = stages.find(s => s.id === stageId);
-              if (!stage) return null;
-              return (
-                <div key={stageId} className="pt-2">
-                  <h4 className="font-semibold text-sm mb-2 text-blue-700">{stage.name}</h4>
-                  {stageConfig.isStageDateSelected && (
-                    <div className="grid grid-cols-12 text-sm py-1 border-b border-dashed border-slate-100">
-                      <div className="col-span-8 text-slate-700 pl-2">Completion Date</div>
-                      <div className="col-span-2 text-center text-green-600">{stageConfig.isStageDateDefault ? "✓" : "-"}</div>
-                      <div className="col-span-2 text-center font-bold text-blue-600">✓</div>
-                    </div>
-                  )}
-                  {Object.entries(stageConfig.documents).map(([kycId, docConfig]) => {
-                    const kycDoc = kycDocuments.get(kycId);
-                    if (!kycDoc) return null;
-                    
-                    // Get all document fields (both default and session-only)
-                    const docFields = new Set([
-                      ...(docConfig.fields?.map((f: any) => f.id) || [])
-                    ]);
-                    
-                    return (
-                      <div key={kycId} className="mt-2 pl-4 border-l-2 border-slate-100 ml-1">
-                        <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
-                          {kycDoc.display_name || kycDoc.name}
-                        </h5>
-                        {Array.from(docFields).map(fieldId => {
-                          const fieldConfig = docConfig.fields.find((f: any) => f.id === fieldId);
-                          const fieldInfo = kycDoc.fields?.find((f: any) => f.id === fieldId);
-                          const isSessionOnly = !fieldConfig?.isDefault;
-                          
                           return (
-                            <div 
-                              key={fieldId} 
-                              className={`grid grid-cols-12 text-sm py-1 ${
-                                isSessionOnly ? 'text-blue-600' : 'text-slate-700'
-                              }`}
-                            >
-                              <div className="col-span-8 flex items-center gap-1">
-                                {fieldInfo?.fieldName || fieldId}
-                                {isSessionOnly && <span className="text-xs text-blue-500">(Session Only)</span>}
+                            <React.Fragment key={kycId}>
+                              <div className="px-4 py-1.5 bg-slate-50/50 text-xs font-semibold text-slate-600 border-t border-slate-100 pl-8">
+                                {kycDoc.display_name || kycDoc.name}
                               </div>
-                              <div className="col-span-2 text-center">
-                                {fieldConfig?.isDefault ? (
-                                  <span className="text-green-600">✓</span>
-                                ) : (
-                                  <span className="text-slate-300">-</span>
-                                )}
-                              </div>
-                              <div className="col-span-2 text-center font-bold text-blue-600">✓</div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </div>
-        </ScrollArea>
+                              {docFields.map((field: any) => {
+                                 const fieldInfo = kycDoc.fields?.find((f: any) => f.id === field.id);
+                                 return (
+                                   <TableRow 
+                                      key={field.id}
+                                      label={fieldInfo?.fieldName || field.id}
+                                      isIncluded={true}
+                                      isDefault={field.isDefault}
+                                      isSessionOnly={!field.isDefault}
+                                      depth={1}
+                                      readOnly={true}
+                                   />
+                                 )
+                              })}
+                            </React.Fragment>
+                          )
+                       })}
+                    </div>
+                  );
+                })}
+             </div>
+          </ScrollArea>
+        </div>
       </div>
-    </div>
-  );
-};
+    );
+  };
+
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl h-[80vh] grid grid-cols-3 gap-0 p-0 overflow-hidden">
-        <div className="col-span-1 border-r bg-slate-50/50 p-4 flex flex-col h-full overflow-hidden">
-          <DialogHeader className="mb-4">
+      <DialogContent className="max-w-6xl h-[85vh] grid grid-cols-12 gap-0 p-0 overflow-hidden bg-slate-50">
+        <div className="col-span-3 border-r bg-white p-4 flex flex-col h-full overflow-hidden">
+          <DialogHeader className="mb-4 px-1">
             <DialogTitle>Saved Reports</DialogTitle>
             <DialogDescription>Manage your customized report views.</DialogDescription>
           </DialogHeader>
           {isLoading && !isEditing ? <div className="flex-1 flex items-center justify-center"><Loader2 className="animate-spin text-blue-500"/></div> : renderReportList()}
         </div>
 
-        <div className="col-span-2 p-6 flex flex-col h-full bg-white overflow-hidden">
+        <div className="col-span-9 p-6 flex flex-col h-full overflow-hidden">
           <div className="flex-1 min-h-0 mb-4 overflow-hidden flex flex-col">
             {isEditing ? renderReportEditor() : selectedReport ? renderReportViewer() : (
               <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                <div className="p-4 bg-slate-50 rounded-full mb-4"><Star className="h-8 w-8 text-slate-300"/></div>
-                <p className="font-medium">Select a report to view details</p>
+                <div className="p-6 bg-white shadow-sm rounded-full mb-4"><TableIcon className="h-10 w-10 text-slate-200"/></div>
+                <p className="font-semibold text-lg text-slate-600">Select a report to view details</p>
                 <p className="text-sm">Or create a new one to get started.</p>
               </div>
             )}
           </div>
           
-          <DialogFooter className="mt-auto pt-4 border-t">
+          <DialogFooter className="mt-auto pt-4 border-t bg-slate-50 -mx-6 -mb-6 p-6">
             {isEditing ? (
-              <Button onClick={handleSaveReport} disabled={isLoading || !reportName.trim()} className="w-full sm:w-auto">
+              <Button onClick={handleSaveReport} disabled={isLoading || !reportName.trim()} className="w-full sm:w-auto bg-green-600 hover:bg-green-700">
                 {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Save className="mr-2 h-4 w-4"/>} 
-                Save Report Configuration
+                Save Configuration
               </Button>
             ) : selectedReport ? (
-              <Button onClick={handleApply} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700">
+              <Button onClick={handleApply} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 shadow-sm">
                 Apply This Report
               </Button>
             ) : null}
