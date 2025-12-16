@@ -1,5 +1,6 @@
 "use client"
-import { supabase } from '@/utils/supabase/client'
+import supabase from './client'
+
 import { Department, Stage, Subdepartment, Task, TaskStage, User } from './database.types'
 
 // Users
