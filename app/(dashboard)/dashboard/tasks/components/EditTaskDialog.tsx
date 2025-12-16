@@ -434,98 +434,118 @@ export function EditTaskDialog({
     }
   };
 
-  const handleSave = async () => {
-    setLoading(true);
-    try {
-        // 1. Calculate the job_level JSON object based on current hierarchy selection
-        // This matches the EnquiryDialog logic
-        const jobLevel = {
-            level: formData.subclass_id ? 4 : 
-                   formData.class_id ? 3 : 
-                   formData.subdepartment_id ? 2 : 
-                   formData.department_id ? 1 : null,
-            class_id: formData.class_id ? parseInt(formData.class_id, 10) : null,
-            subclass_id: formData.subclass_id ? parseInt(formData.subclass_id, 10) : null,
-            department_id: formData.department_id ? parseInt(formData.department_id, 10) : null,
-            subdepartment_id: formData.subdepartment_id ? parseInt(formData.subdepartment_id, 10) : null
-        };
+const handleSave = async () => {
+  setLoading(true);
+  try {
+    // 1. Calculate the job_level JSON object based on current hierarchy selection
+    const jobLevel = {
+      level: formData.subclass_id ? 4 : 
+             formData.class_id ? 3 : 
+             formData.subdepartment_id ? 2 : 
+             formData.department_id ? 1 : null,
+      class_id: formData.class_id ? parseInt(formData.class_id, 10) : null,
+      subclass_id: formData.subclass_id ? parseInt(formData.subclass_id, 10) : null,
+      department_id: formData.department_id ? parseInt(formData.department_id, 10) : null,
+      subdepartment_id: formData.subdepartment_id ? parseInt(formData.subdepartment_id, 10) : null
+    };
 
-      const updateData = {
-        // Basic Information
-        applicant_name: formData.applicant_name.trim(),
-        job_description: formData.job_description.trim(),
-        status: formData.status,
-        renewal_status: formData.renewal_status || null,
-        nationality: formData.nationality.trim() || null,
-        date_of_birth: formData.date_of_birth || null,
-        
-        // Department Hierarchy (Parsed as Integers)
-        department_id: formData.department_id ? parseInt(formData.department_id, 10) : null,
-        subdepartment_id: formData.subdepartment_id ? parseInt(formData.subdepartment_id, 10) : null,
-        class_id: formData.class_id ? parseInt(formData.class_id, 10) : null,
-        subclass_id: formData.subclass_id ? parseInt(formData.subclass_id, 10) : null,
-        
-        // Job Level JSON
-        job_level: jobLevel,
+    // 2. Find the staff members
+    const officer = officers.find(o => o.id.toString() === formData.officer_id);
+    const taskManager = users.find(u => u.id.toString() === formData.task_manager_id);
+    const taskAssistant = users.find(u => u.id.toString() === formData.task_assistant_id);
 
-        // Staff Assignment (Handle 'none' strings)
-        task_manager_id: formData.task_manager_id && formData.task_manager_id !== 'none' ? parseInt(formData.task_manager_id, 10) : null,
-        officer_id: formData.officer_id && formData.officer_id !== 'none' ? parseInt(formData.officer_id, 10) : null,
-        task_assistant_id: formData.task_assistant_id && formData.task_assistant_id !== 'none' ? parseInt(formData.task_assistant_id, 10) : null,
-        
-        // Case Details
-        r_number: formData.r_number.trim() || null,
-        principal_member_name: formData.principal_member_name.trim() || null,
-        applicant_type: formData.applicant_type || null,
-        principal_member: formData.principal_member,
-        account_used: formData.account_used.trim() || null,
-        batch: formData.batch.trim() || null,
-        applied_by: formData.applied_by.trim() || null,
-        understudy: formData.understudy.trim() || null,
-        company_id: formData.company_id && formData.company_id !== 'none' ? parseInt(formData.company_id, 10) : null,
-        
-        // Dates
-        date_initiated: formData.date_initiated || null,
-        
-        // Stages
-        stages: taskStages,
-        
-        updated_at: new Date().toISOString()
-      };
-      
-      if (!updateData.applicant_name || !updateData.job_description) {
-        toast({ 
-          title: "Validation Error", 
-          description: "Applicant Name and Job Description are required.", 
-          variant: "destructive" 
-        });
-        setLoading(false);
-        return;
-      }
+    // 3. Format staff data
+    const staffData = {
+      officer: officer ? {
+        id: officer.id,
+        name: officer.name || officer.full_name || `${officer.first_name} ${officer.last_name}`.trim(),
+        email: officer.email
+      } : null,
+      task_manager: taskManager ? {
+        id: taskManager.id,
+        name: taskManager.name || taskManager.full_name || `${taskManager.first_name} ${taskManager.last_name}`.trim(),
+        email: taskManager.email
+      } : null,
+      task_assistant: taskAssistant ? {
+        id: taskAssistant.id,
+        name: taskAssistant.name || taskAssistant.full_name || `${taskAssistant.first_name} ${taskAssistant.last_name}`.trim(),
+        email: taskAssistant.email
+      } : null
+    };
 
-      const { data, error } = await supabase
-        .from('tm_tasks')
-        .update(updateData)
-        .eq('id', task.id)
-        .select()
-        .single();
+    const updateData = {
+      // Basic Information
+      applicant_name: formData.applicant_name.trim(),
+      job_description: formData.job_description.trim(),
+      renewal_status: formData.renewal_status || null,
       
-      if (error) throw error;
+      // Department Hierarchy (Parsed as Integers)
+      department_id: formData.department_id ? parseInt(formData.department_id, 10) : null,
+      subdepartment_id: formData.subdepartment_id ? parseInt(formData.subdepartment_id, 10) : null,
+      class_id: formData.class_id ? parseInt(formData.class_id, 10) : null,
+      subclass_id: formData.subclass_id ? parseInt(formData.subclass_id, 10) : null,
       
-      onTaskUpdate(data);
-      toast({ title: "Success", description: "Task updated successfully." });
-      onOpenChange(false);
-    } catch (error) {
-      console.error('Error updating task:', error);
+      // Job Level JSON
+      job_level: jobLevel,
+
+      // Staff Assignment (Handle 'none' strings)
+      task_manager_id: formData.task_manager_id && formData.task_manager_id !== 'none' ? parseInt(formData.task_manager_id, 10) : null,
+      officer_id: formData.officer_id && formData.officer_id !== 'none' ? parseInt(formData.officer_id, 10) : null,
+      task_assistant_id: formData.task_assistant_id && formData.task_assistant_id !== 'none' ? parseInt(formData.task_assistant_id, 10) : null,
+            principal_member_name: formData.principal_member_name.trim() || null,
+      applicant_type: formData.applicant_type || null,
+      principal_member: formData.principal_member,
+      account_used: formData.account_used.trim() || null,
+      batch: formData.batch.trim() || null,
+      applied_by: formData.applied_by.trim() || null,
+      understudy: formData.understudy.trim() || null,
+      company_id: formData.company_id && formData.company_id !== 'none' ? parseInt(formData.company_id, 10) : null,
+            updated_at: new Date().toISOString()
+    };
+    
+    if (!updateData.applicant_name || !updateData.job_description) {
       toast({ 
-        title: "Error", 
-        description: `Failed to update task: ${error.message}`, 
+        title: "Validation Error", 
+        description: "Applicant Name and Job Description are required.", 
         variant: "destructive" 
       });
-    } finally {
       setLoading(false);
+      return;
     }
-  };
+
+    const { data, error } = await supabase
+      .from('tm_tasks')
+      .update(updateData)
+      .eq('id', task.id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    // Include the staff data in the task update
+    const updatedTask = {
+      ...data,
+      staff: staffData
+    };
+    
+    onTaskUpdate(updatedTask);
+    toast({ 
+      title: "Success", 
+      description: "Task updated successfully.",
+      variant: "default"
+    });
+    onOpenChange(false);
+  } catch (error) {
+    console.error('Error updating task:', error);
+    toast({ 
+      title: "Error", 
+      description: `Failed to update task: ${error.message}`, 
+      variant: "destructive" 
+    });
+  } finally {
+    setLoading(false);
+  }
+};
 
   if (!task) return null;
 
