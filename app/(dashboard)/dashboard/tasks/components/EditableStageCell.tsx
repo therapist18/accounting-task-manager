@@ -195,71 +195,71 @@ export default function EditableStageCell({
     return true;
   }, [linkedDocument, task]);
 
- const stageDate = useMemo(() => {
-  const dateFields = [
-    'application_date', 'date', 'upload_date', 'created_date',
-    'date_and_time', 'date_and_time_generated', 'invoice_date_and_time', 'With_Effect_From',
-    'Expiry_Date', 'Date_of_Issue'
-  ];
-  const stageData = task?.stages?.[stage.id];
-  const hasDocumentsUploaded = stageData?.documentsUploaded !== undefined && stageData?.documentsUploaded !== null;
-  console.log('stageDate calculation - task:', {
-    stageId: stage.id,
-    stageName: stage.name,
-    stageData,
-    hasDocumentsUploaded,
-    requiresUpload,
-    hasLinkedDocument
-  });
-  // For completed stages without a document, return empty string to allow manual date entry
-  if (stageData?.status === 'completed' && !hasLinkedDocument) {
-    console.log('Returning stageData.date (completed stage):', stageData.date);
-    return stageData.date || '';
-  }
-  // Check for document dates first
-  if ((requiresUpload || hasDocumentsUploaded) && hasLinkedDocument) {
-    console.log('Checking document for dates...', {
-      hasExtractedDetails: !!linkedDocument?.extracted_details,
-      hasExtractedData: !!linkedDocument?.extracted_data
+  const stageDate = useMemo(() => {
+    const dateFields = [
+      'application_date', 'date', 'upload_date', 'created_date',
+      'date_and_time', 'date_and_time_generated', 'invoice_date_and_time', 'With_Effect_From',
+      'Expiry_Date', 'Date_of_Issue'
+    ];
+    const stageData = task?.stages?.[stage.id];
+    const hasDocumentsUploaded = stageData?.documentsUploaded !== undefined && stageData?.documentsUploaded !== null;
+    console.log('stageDate calculation - task:', {
+      stageId: stage.id,
+      stageName: stage.name,
+      stageData,
+      hasDocumentsUploaded,
+      requiresUpload,
+      hasLinkedDocument
     });
-    // Check extracted_details for dates
-    if (linkedDocument.extracted_details) {
-      console.log('Checking extracted_details for date fields...');
-      const extractedDate = findDateInObject(linkedDocument.extracted_details, dateFields);
-      if (extractedDate) {
-        console.log('Found date in extracted_details:', extractedDate);
-        return extractedDate;
+    // For completed stages without a document, return empty string to allow manual date entry
+    if (stageData?.status === 'completed' && !hasLinkedDocument) {
+      console.log('Returning stageData.date (completed stage):', stageData.date);
+      return stageData.date || '';
+    }
+    // Check for document dates first
+    if ((requiresUpload || hasDocumentsUploaded) && hasLinkedDocument) {
+      console.log('Checking document for dates...', {
+        hasExtractedDetails: !!linkedDocument?.extracted_details,
+        hasExtractedData: !!linkedDocument?.extracted_data
+      });
+      // Check extracted_details for dates
+      if (linkedDocument.extracted_details) {
+        console.log('Checking extracted_details for date fields...');
+        const extractedDate = findDateInObject(linkedDocument.extracted_details, dateFields);
+        if (extractedDate) {
+          console.log('Found date in extracted_details:', extractedDate);
+          return extractedDate;
+        }
       }
-    }
-    // Check extracted_data for dates
-    if (linkedDocument.extracted_data) {
-      console.log('Checking extracted_data for date fields...');
-      const extractedDate = findDateInObject(linkedDocument.extracted_data, dateFields);
-      if (extractedDate) {
-        console.log('Found date in extracted_data:', extractedDate);
-        return extractedDate;
+      // Check extracted_data for dates
+      if (linkedDocument.extracted_data) {
+        console.log('Checking extracted_data for date fields...');
+        const extractedDate = findDateInObject(linkedDocument.extracted_data, dateFields);
+        if (extractedDate) {
+          console.log('Found date in extracted_data:', extractedDate);
+          return extractedDate;
+        }
       }
+      // If we get here, no date was found in the document
+      const hasAnyDateField = dateFields.some(field =>
+        (linkedDocument.extracted_details && field in linkedDocument.extracted_details) ||
+        (linkedDocument.extracted_data && field in linkedDocument.extracted_data)
+      );
+      if (!hasAnyDateField && stageData?.completedAt) {
+        console.log('Using completedAt as fallback date:', stageData.completedAt);
+        return stageData.completedAt;
+      }
+      console.log('No date found in document');
+      return '';
     }
-    // If we get here, no date was found in the document
-    const hasAnyDateField = dateFields.some(field =>
-      (linkedDocument.extracted_details && field in linkedDocument.extracted_details) ||
-      (linkedDocument.extracted_data && field in linkedDocument.extracted_data)
-    );
-    if (!hasAnyDateField && stageData?.completedAt) {
-      console.log('Using completedAt as fallback date:', stageData.completedAt);
-      return stageData.completedAt;
+    // For non-document stages, use the value prop if available
+    if (!requiresUpload && !hasDocumentsUploaded && value) {
+      console.log('Using value prop as date:', value);
+      return typeof value === 'string' ? value : '';
     }
-    console.log('No date found in document');
+    console.log('No date found, returning empty string');
     return '';
-  }
-  // For non-document stages, use the value prop if available
-  if (!requiresUpload && !hasDocumentsUploaded && value) {
-    console.log('Using value prop as date:', value);
-    return typeof value === 'string' ? value : '';
-  }
-  console.log('No date found, returning empty string');
-  return '';
-}, [hasLinkedDocument, linkedDocument, requiresUpload, value, task, stage.id, stage.name]);
+  }, [hasLinkedDocument, linkedDocument, requiresUpload, value, task, stage.id, stage.name]);
 
   const isStageApplicable = useMemo(() => isStageApplicableToTask(stage, task, departments), [stage, task, departments]);
 
@@ -308,102 +308,82 @@ export default function EditableStageCell({
     }
   }, [isEditing]);
 
-useEffect(() => {
-  if (stageDate && stageDate !== 'NaN/NaN/NaN') {
-    console.log('Setting editValue for stageDate:', stageDate);
-    
-    // First try to parse as dd/MM/yyyy HH:mm
-    let parsedDate = parse(stageDate, 'dd/MM/yyyy HH:mm', new Date());
-    
-    // If that fails, try MM/dd/yyyy HH:mm
-    if (!isValid(parsedDate)) {
-      parsedDate = parse(stageDate, 'MM/dd/yyyy HH:mm', new Date());
-    }
-    
-    // If that fails, try parsing as a Date object directly
-    if (!isValid(parsedDate)) {
-      parsedDate = new Date(stageDate);
-    }
+  useEffect(() => {
+    if (stageDate && stageDate !== 'NaN/NaN/NaN') {
+      let parsedDate = parse(stageDate, 'dd/MM/yyyy HH:mm', new Date());
 
-    // If we have a valid date, format it for the input
-    if (isValid(parsedDate)) {
-      const formattedDate = format(parsedDate, "yyyy-MM-dd'T'HH:mm");
-      console.log('Formatted date for input:', formattedDate);
-      setEditValue(formattedDate);
+      if (!isValid(parsedDate)) {
+        parsedDate = parse(stageDate, 'MM/dd/yyyy HH:mm', new Date());
+      }
+
+      if (!isValid(parsedDate)) {
+        parsedDate = new Date(stageDate);
+      }
+
+      if (isValid(parsedDate)) {
+        const formattedDate = format(parsedDate, "yyyy-MM-dd'T'HH:mm");
+        setEditValue(formattedDate);
+      } else {
+        setEditValue(stageDate);
+      }
     } else {
-      console.log('Invalid date, using raw value:', stageDate);
-      setEditValue(stageDate);
+      setEditValue('');
     }
-  } else {
-    console.log('No valid stageDate, setting empty string');
-    setEditValue('');
-  }
-}, [stageDate]);
+  }, [stageDate]);
 
-const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string): string => {
-  console.log('formatDateDisplay - input:', { dateStr, status, skippedAt });
-  
-  if (status === 'skipped') {
-    if (skippedAt) {
-      try {
-        const date = new Date(skippedAt);
-        if (isValid(date)) {
-          const formatted = format(date, 'dd/MM/yyyy HH:mm');
-          console.log('formatDateDisplay - formatted skipped date:', formatted);
-          return `Skipped (${formatted})`;
+  const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string): string => {
+    if (status === 'skipped') {
+      if (skippedAt) {
+        try {
+          const date = new Date(skippedAt);
+          if (isValid(date)) {
+            const formatted = format(date, 'dd/MM/yyyy HH:mm');
+            return `Skipped (${formatted})`;
+          }
+        } catch (e) {
+          console.error('Error formatting skipped date:', e);
         }
-      } catch (e) {
-        console.error('Error formatting skipped date:', e);
+      }
+      return 'Skipped';
+    }
+
+    if (!dateStr) {
+      return '';
+    }
+
+    const desiredFormatRegex = /^\d{2}\/\d{2}\/\d{4}( \d{2}:\d{2})?$/;
+    if (desiredFormatRegex.test(dateStr)) {
+      return dateStr;
+    }
+
+    // Then try to parse as ISO 8601
+    try {
+      const date = new Date(dateStr);
+      if (isValid(date)) {
+        const formatted = format(date, 'dd/MM/yyyy HH:mm');
+        return formatted;
+      }
+    } catch (e) {
+      console.log('formatDateDisplay - ISO 8601 parse failed, trying other formats');
+    }
+
+    // Try parsing with explicit formats
+    const formats = [
+      'MM/dd/yyyy HH:mm',
+      'MM/dd/yyyy',
+      'yyyy-MM-dd',
+      'dd-MM-yyyy'
+    ];
+
+    for (const fmt of formats) {
+      const parsed = parse(dateStr, fmt, new Date());
+      if (isValid(parsed)) {
+        const formatted = format(parsed, 'dd/MM/yyyy HH:mm');
+        return formatted;
       }
     }
-    return 'Skipped';
-  }
-
-  if (!dateStr) {
-    console.log('formatDateDisplay - empty date string');
-    return '';
-  }
-
-  // First check if it's already in the desired format (dd/MM/yyyy HH:mm)
-  const desiredFormatRegex = /^\d{2}\/\d{2}\/\d{4}( \d{2}:\d{2})?$/;
-  if (desiredFormatRegex.test(dateStr)) {
-    console.log('formatDateDisplay - already in desired format, returning as-is');
     return dateStr;
-  }
-
-  // Then try to parse as ISO 8601
-  try {
-    const date = new Date(dateStr);
-    if (isValid(date)) {
-      const formatted = format(date, 'dd/MM/yyyy HH:mm');
-      console.log('formatDateDisplay - parsed as ISO 8601:', { input: dateStr, output: formatted });
-      return formatted;
-    }
-  } catch (e) {
-    console.log('formatDateDisplay - ISO 8601 parse failed, trying other formats');
-  }
-
-  // Try parsing with explicit formats
-  const formats = [
-    'MM/dd/yyyy HH:mm',
-    'MM/dd/yyyy',
-    'yyyy-MM-dd',
-    'dd-MM-yyyy'
-  ];
-
-  for (const fmt of formats) {
-    const parsed = parse(dateStr, fmt, new Date());
-    if (isValid(parsed)) {
-      const formatted = format(parsed, 'dd/MM/yyyy HH:mm');
-      console.log(`formatDateDisplay - parsed with ${fmt}:`, { input: dateStr, output: formatted });
-      return formatted;
-    }
-  }
-
-  // If all else fails, return the original string
-  console.log('formatDateDisplay - could not parse date, returning as-is:', dateStr);
-  return dateStr;
-};
+  };
 
   const handleSave = useCallback(async (isSkipped = false, skipReason = '', valueOverride?: string) => {
     if (!onSave) {
@@ -426,10 +406,7 @@ const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string)
     }
 
     try {
-      // Use the override value if provided, otherwise fallback to state
       let dateToSave = valueOverride !== undefined ? valueOverride : editValue;
-
-      // Don't set a default date if completely empty, require user input
       if (!dateToSave) {
         toast({
           title: "Error",
@@ -440,9 +417,6 @@ const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string)
       }
 
       let dateObj: Date;
-
-      // Fix: Handle Date-only inputs (YYYY-MM-DD) by appending default time 00:00
-      // This solves the issue where users pick a date but no time
       if (/^\d{4}-\d{2}-\d{2}$/.test(dateToSave)) {
         dateToSave = `${dateToSave}T00:00`;
         dateObj = new Date(dateToSave);
@@ -738,9 +712,7 @@ const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string)
   }, []);
 
   const buildPreviewDocumentsData = useCallback(async (documents: any[]) => {
-    console.log('buildPreviewDocumentsData called with documents:', documents); // Debug log
     if (!documents || documents.length === 0) {
-      console.log('No documents provided to buildPreviewDocumentsData'); // Debug log
       return [];
     }
 
@@ -748,35 +720,17 @@ const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string)
 
     for (const doc of documents) {
       try {
-        console.log('Processing document:', doc.id || doc.document_id, doc); // Debug log
         const kycDoc = await fetchKycDocumentData(doc.document_id || doc.id);
-        console.log('Fetched KYC doc:', kycDoc); // Debug log
-
         if (!kycDoc) {
-          console.warn('No KYC document found for ID:', doc.document_id || doc.id); // Debug log
           continue;
         }
-
         const filePath = doc.file_path || doc.download_url || doc.url || doc.document_url;
-        console.log('File path:', filePath); // Debug log
-
         const fileUrl = filePath ?
           (filePath.startsWith('http') ? filePath : `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${filePath}`)
           : null;
-
-        console.log('File URL:', fileUrl); // Debug log
-
         const fileName = doc.file_name || filePath?.split('/').pop() || 'document.pdf';
         const documentType = doc.type || kycDoc.document_type || 'document';
         const documentName = kycDoc.display_name || kycDoc.name || doc.name || doc.document_name || 'Document';
-
-        console.log('Creating preview data with:', { // Debug log
-          documentId: doc.id,
-          documentName,
-          fileUrl,
-          fileName,
-          documentType
-        });
 
         const previewData = {
           documentId: doc.id,
@@ -798,7 +752,6 @@ const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string)
         };
 
         previewDocuments.push(previewData);
-        console.log('Added preview data for document:', doc.id); // Debug log
       } catch (error) {
         console.error(`Error building preview data for document ${doc.id}:`, error);
       }

@@ -859,17 +859,31 @@ const saveAllDocuments = useCallback(async () => {
           let insertedDoc;
           if (file) {
             
-            // --- NEW: Sanitize Extracted Data to remove UUID keys ---
+            // Clean up extracted data to remove UUID keys and use field names only
             const rawDetails = docData.extractedData || {};
-            const cleanedDetails = Object.entries(rawDetails).reduce((acc, [key, value]) => {
-              // Check if key is a UUID (approximate regex)
+            const cleanedDetails = {};
+            
+            // First, find all valid field names from the document configuration
+            const validFields = new Set();
+            const docConfig = applicableDocuments.find(d => d.id === docId);
+            if (docConfig?.fields) {
+              const collectFieldNames = (fields) => {
+                fields.forEach(field => {
+                  if (field.name) validFields.add(field.name);
+                  if (field.fields) collectFieldNames(field.fields);
+                  if (field.arrayConfig?.fields) collectFieldNames(field.arrayConfig.fields);
+                });
+              };
+              collectFieldNames(docConfig.fields);
+            }
+            
+            // Only include fields that are in our valid fields list or don't look like UUIDs
+            Object.entries(rawDetails).forEach(([key, value]) => {
               const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key);
-              if (!isUUID) {
-                acc[key] = value;
+              if (validFields.has(key) || !isUUID) {
+                cleanedDetails[key] = value;
               }
-              return acc;
-            }, {} as Record<string, any>);
-            // --------------------------------------------------------
+            });
 
             const { data: newDoc, error: insertError } = await supabase
               .from('acc_portal_directors_documents')
