@@ -1227,35 +1227,199 @@ export default function ReportsPage() {
     return rows;
   }, [activeReport, filteredColumns, expandedSections, stages]);
 
-  const handleExport = async (type: 'excel' | 'pdf') => {
+const handleExport = async (type: 'excel' | 'pdf') => {
     if (type === 'excel') {
       const wb = new ExcelJS.Workbook();
       const ws = wb.addWorksheet('Report');
-      const headerRow = filteredColumns.map(c => c.label);
-      ws.addRow(['Task ID', ...headerRow]);
-      filteredTasks.forEach(t => {
-        const row = [t.id, ...filteredColumns.map(c => {
-          if (c.type === 'task') {
-            // Use Raw value for export
-            return getRawCellValue(
-              departments, t, c.field, enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper
-            );
+
+      // --- 1. Freeze the Header Row ---
+      ws.views = [
+        { state: 'frozen', xSplit: 0, ySplit: 1 }
+      ];
+
+      // --- Helper to extract clean text data for export ---
+      const getExportCellValue = (task: any, col: any) => {
+        if (col.type === 'task') {
+          return getRawCellValue(
+            departments, task, col.field, enhancedTasksData, companies, 
+            getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper
+          );
+        }
+
+        if (col.type === 'stage_date') {
+          const stage = stages.find(s => s.id === col.stageId);
+          if (!stage) return '-';
+          
+          // CHANGE 1: Return 'Unallocated' instead of 'N/A'
+          if (!isStageApplicableToTask(stage, task)) return 'Unallocated';
+
+          const stageData = task.stages?.[col.stageId];
+
+          if (stageData?.status === 'skipped') return `Skipped: ${stageData.reason || ''}`;
+
+          let completionDateStr = null;
+          // Priority 1: Documents
+          if (stage.documents?.length > 0) {
+            const allLinkedDocs = stage.documents.flatMap((docConfig: any) => {
+              if (!isDocumentApplicable(docConfig, task)) return [];
+              return getDocumentForTaskStage(task, { ...stage, documents: [docConfig] });
+            }).filter((d: any) => d && !d.indicator);
+
+            if (allLinkedDocs.length > 0) {
+              let validDates: Date[] = [];
+              allLinkedDocs.forEach((linkedDoc: any) => {
+                const details = linkedDoc.extracted_details || {};
+                const kycDoc = kycDocuments.get(linkedDoc.kyc_id || linkedDoc.document_id);
+                if (kycDoc?.fields) {
+                  const dateFields = kycDoc.fields
+                    .filter((field: any) => isLikelyDateField(field.fieldName || field.name || '', details[field.fieldName || field.name]))
+                    .map((field: any) => field.fieldName || field.name).filter(Boolean);
+                  dateFields.forEach((field: string) => {
+                    const parsed = parseDateString(details[field]);
+                    if (parsed) validDates.push(parsed);
+                  });
+                }
+              });
+              if (validDates.length > 0) {
+                validDates.sort((a, b) => b.getTime() - a.getTime());
+                completionDateStr = validDates[0];
+              }
+            }
           }
-          const content = renderCellValue(t, c);
-          if (React.isValidElement(content)) {
-            if (content.props && content.props.children) return content.props.children;
-            return '-';
+          // Priority 2: Manual / Priority 3: Timestamp
+          if (!completionDateStr && stageData?.date) completionDateStr = stageData.date;
+          if (!completionDateStr && stageData?.status === 'completed' && stageData?.completedAt) completionDateStr = stageData.completedAt;
+
+          const completionDate = parseDateString(completionDateStr);
+          if (completionDate) return formatDateForDisplay(completionDate);
+          
+          let effectiveStartTime = task.created_at ? parseDateString(task.created_at) : null;
+          
+          // CHANGE 2: If In Progress, return '-'
+          if(stageData?.status === 'in_progress' || (effectiveStartTime && !completionDate)) return "-";
+
+          return '-';
+        }
+
+        if (col.type === 'extracted_field') {
+          const stage = stages.find(s => s.id === col.stageId);
+          if (!stage) return '-';
+          
+          // CHANGE 1: Return 'Unallocated' instead of 'N/A'
+          if (!isStageApplicableToTask(stage, task)) return 'Unallocated';
+          
+          let foundValue = null;
+          let foundDoc = null;
+          const docsToSearch = col.isAutoAdded 
+            ? (stage.documents || [])
+            : [stage?.documents?.find((d: any) => d.kycId === col.kycId)].filter(Boolean);
+
+          for (const stageDocInfo of docsToSearch) {
+            if (!isDocumentApplicable(stageDocInfo, task)) continue;
+            const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
+            if (!linked || linked.indicator) continue;
+            const val = linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
+            if (val) { foundValue = val; foundDoc = linked; break; }
           }
-          return typeof content === 'object' ? JSON.stringify(content).substring(0, 50) : content;
-        })];
-        ws.addRow(row);
+          if (!foundDoc) return col.isAutoAdded ? 'Missing' : '-';
+          if (foundDoc.indicator) return 'Indicator';
+          return col.fieldType === 'Date' ? formatDateForDisplay(foundValue) : foundValue;
+        }
+        return '';
+      };
+
+      // --- 2. Define Columns with Fixed Widths ---
+      ws.columns = [
+        { header: 'Task ID', key: 'id', width: 10 },
+        ...filteredColumns.map(col => ({
+          header: col.label,
+          key: col.id,
+          width: 30 
+        }))
+      ];
+
+      // --- 3. Style Header Row ---
+      const headerRow = ws.getRow(1);
+      headerRow.height = 30; 
+      headerRow.eachCell((cell) => {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FF2563EB' }, // Blue-600
+        };
+        cell.font = {
+          color: { argb: 'FFFFFFFF' }, // White
+          bold: true,
+          size: 11
+        };
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        cell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        };
       });
+
+      // --- 4. Add Data Rows with Alternating Colors ---
+      filteredTasks.forEach((task, index) => {
+        const rowData = [
+          task.id,
+          ...filteredColumns.map(col => {
+            const val = getExportCellValue(task, col);
+            return val === null || val === undefined ? '' : String(val);
+          })
+        ];
+        
+        const row = ws.addRow(rowData);
+        
+        // Alternating Background Colors (White vs Light Blue)
+        const isOddRow = index % 2 !== 0; 
+        const rowBackgroundColor = isOddRow ? 'FFEFF6FF' : 'FFFFFFFF'; 
+
+        row.eachCell((cell, colNumber) => {
+          // Apply Background
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: rowBackgroundColor }
+          };
+
+          // CHANGE 3: Logic for Text Color (Red for Unallocated)
+          const isUnallocated = cell.value === 'Unallocated';
+
+          cell.font = {
+            color: { argb: isUnallocated ? 'FFFF0000' : 'FF000000' }, // Red if Unallocated, else Black
+            bold: isUnallocated // Optional: make Unallocated bold
+          };
+
+          // Apply Alignment 
+          // CHANGE 4: wrapText: false (Unwrap long text)
+          cell.alignment = { 
+            vertical: 'middle', 
+            horizontal: colNumber === 1 ? 'center' : 'left',
+            wrapText: false // Disabled wrapping to keep single line height
+          };
+
+          // Apply Border
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFCBD5E1' } }, 
+            left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+            bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+            right: { style: 'thin', color: { argb: 'FFCBD5E1' } }
+          };
+        });
+      });
+
+      // --- Generate Download ---
       const buffer = await wb.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `Report_${activeReport.name}.xlsx`;
+      link.download = `Report_${activeReport.name}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`;
       link.click();
+    } else {
+       toast({ title: "Coming Soon", description: "PDF export is being upgraded." });
     }
   };
 

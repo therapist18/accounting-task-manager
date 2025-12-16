@@ -494,16 +494,16 @@ export function EnquiryDialog({
                 applicant_type: applicantType,
                 applicant_name: selectedIndividual.full_name,
                 date_initiated: formData.enquiry_date,
-             job_level: {
-    level: formData.subclass_id ? 4 : 
-           formData.class_id ? 3 : 
-           formData.subdepartment_id ? 2 : 
-           formData.department_id ? 1 : null,
-    class_id: formData.class_id || null,
-    subclass_id: formData.subclass_id || null,
-    department_id: formData.department_id ? parseInt(formData.department_id) : null,
-    subdepartment_id: formData.subdepartment_id ? parseInt(formData.subdepartment_id) : null
-},
+                job_level: {
+                    level: formData.subclass_id ? 4 :
+                        formData.class_id ? 3 :
+                            formData.subdepartment_id ? 2 :
+                                formData.department_id ? 1 : null,
+                    class_id: formData.class_id || null,
+                    subclass_id: formData.subclass_id || null,
+                    department_id: formData.department_id ? parseInt(formData.department_id) : null,
+                    subdepartment_id: formData.subdepartment_id ? parseInt(formData.subdepartment_id) : null
+                },
                 // Relations
                 principal_member: applicantType === 'dependant' ? formData.principal_member_id : selectedIndividual.id,
                 company_id: selectedCompany || null,
