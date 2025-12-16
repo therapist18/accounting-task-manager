@@ -186,38 +186,56 @@ export default function EditableStageCell({
     return true;
   }, [linkedDocument, task]);
 
-  const stageDate = useMemo(() => {
-    const dateFields = [
-      'application_date', 'date', 'upload_date', 'created_date',
-      'date_and_time','date_and_time_generated', 'invoice_date_and_time', 'With_Effect_From',
-      'Expiry_Date', 'Date_of_Issue'
-    ];
+const stageDate = useMemo(() => {
+  const dateFields = [
+    'application_date', 'date', 'upload_date', 'created_date',
+    'date_and_time','date_and_time_generated', 'invoice_date_and_time', 'With_Effect_From',
+    'Expiry_Date', 'Date_of_Issue'
+  ];
 
-    const stageData = task?.stages?.[stage.id];
-    const hasDocumentsUploaded = stageData?.documentsUploaded !== undefined && stageData?.documentsUploaded !== null;
+  const stageData = task?.stages?.[stage.id];
+  const hasDocumentsUploaded = stageData?.documentsUploaded !== undefined && stageData?.documentsUploaded !== null;
 
-    // PRIORITY 1: Document stages - use extracted dates
-    if ((requiresUpload || hasDocumentsUploaded) && hasLinkedDocument) {
-      if (linkedDocument.extracted_details) {
-        const extractedDate = findDateInObject(linkedDocument.extracted_details, dateFields);
-        if (extractedDate) return extractedDate;
-      }
-
-      if (linkedDocument.extracted_data) {
-        const extractedDate = findDateInObject(linkedDocument.extracted_data, dateFields);
-        if (extractedDate) return extractedDate;
-      }
-
-      return '';
+  // Check for document dates first
+  if ((requiresUpload || hasDocumentsUploaded) && hasLinkedDocument) {
+    // Check extracted_details for dates
+    if (linkedDocument.extracted_details) {
+      const extractedDate = findDateInObject(linkedDocument.extracted_details, dateFields);
+      if (extractedDate) return extractedDate;
     }
 
-    // PRIORITY 2: Non-document stages - use completion date from value prop
-    if (!requiresUpload && !hasDocumentsUploaded && value) {
-      return typeof value === 'string' ? value : '';
+    // Check extracted_data for dates
+    if (linkedDocument.extracted_data) {
+      const extractedDate = findDateInObject(linkedDocument.extracted_data, dateFields);
+      if (extractedDate) return extractedDate;
     }
 
+    // If we get here, no date was found in the document
+    // Only use completedAt if the document has no date fields at all
+    const hasAnyDateField = dateFields.some(field => 
+      (linkedDocument.extracted_details && field in linkedDocument.extracted_details) ||
+      (linkedDocument.extracted_data && field in linkedDocument.extracted_data)
+    );
+
+    if (!hasAnyDateField && stageData?.completedAt) {
+      return stageData.completedAt;
+    }
+    
     return '';
-  }, [hasLinkedDocument, linkedDocument, requiresUpload, value, task, stage.id, stage.name]);
+  }
+
+  // For non-document stages, use the value prop if available
+  if (!requiresUpload && !hasDocumentsUploaded && value) {
+    return typeof value === 'string' ? value : '';
+  }
+  
+  // Only use completedAt as a last resort if no other date is available
+  if (stageData?.completedAt) {
+    return stageData.completedAt;
+  }
+
+  return '';
+}, [hasLinkedDocument, linkedDocument, requiresUpload, value, task, stage.id, stage.name]);
 
   const isStageApplicable = useMemo(() => isStageApplicableToTask(stage, task, departments), [stage, task, departments]);
 
@@ -280,41 +298,58 @@ export default function EditableStageCell({
     }
   }, [stageDate]);
 
-  const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string): string => {
-    if (status === 'skipped') {
-      if (skippedAt) {
-        try {
-          const date = new Date(skippedAt);
-          if (isValid(date)) {
-            return `Skipped (${format(date, 'dd/MM/yyyy HH:mm')})`;
-          }
-        } catch (e) {
-          console.error('Error formatting skipped date:', e);
+const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string): string => {
+  if (status === 'skipped') {
+    if (skippedAt) {
+      try {
+        const date = new Date(skippedAt);
+        if (isValid(date)) {
+          return `Skipped (${format(date, 'dd/MM/yyyy HH:mm')})`;
         }
-      }
-      return 'Skipped';
-    }
-
-    if (!dateStr) return '';
-
-    const dateTimeFormats = [
-      "yyyy-MM-dd'T'HH:mm",
-      'dd/MM/yyyy HH:mm',
-      'yyyy-MM-dd',
-      'dd/MM/yyyy',
-      'MM/dd/yyyy',
-      'dd-MM-yyyy'
-    ];
-
-    for (const formatStr of dateTimeFormats) {
-      const parsedDate = parse(dateStr, formatStr, new Date());
-      if (isValid(parsedDate)) {
-        return format(parsedDate, 'dd/MM/yyyy HH:mm');
+      } catch (e) {
+        console.error('Error formatting skipped date:', e);
       }
     }
+    return 'Skipped';
+  }
 
+  if (!dateStr) return '';
+
+  // First check if it's already in the desired format (dd/MM/yyyy HH:mm)
+  const ddMMyyyyHHmmRegex = /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/;
+  if (ddMMyyyyHHmmRegex.test(dateStr)) {
     return dateStr;
-  };
+  }
+
+  // Then try to parse as ISO 8601
+  try {
+    const date = new Date(dateStr);
+    if (isValid(date)) {
+      return format(date, 'dd/MM/yyyy HH:mm');
+    }
+  } catch (e) {
+    // Continue to other formats if ISO parsing fails
+  }
+
+  // Then try other common formats
+  const dateTimeFormats = [
+    "yyyy-MM-dd'T'HH:mm",
+    'dd/MM/yyyy HH:mm',
+    'yyyy-MM-dd',
+    'dd/MM/yyyy',
+    'MM/dd/yyyy',
+    'dd-MM-yyyy'
+  ];
+
+  for (const formatStr of dateTimeFormats) {
+    const parsedDate = parse(dateStr, formatStr, new Date());
+    if (isValid(parsedDate)) {
+      return format(parsedDate, 'dd/MM/yyyy HH:mm');
+    }
+  }
+
+  return dateStr;
+};
 
   const handleSave = useCallback(async (isSkipped = false, skipReason = '') => {
     if (!onSave) {
