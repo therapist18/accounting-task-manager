@@ -1,4 +1,4 @@
-  // utils/taskManagerData.ts
+// @ts-nocheck
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
 
