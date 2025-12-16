@@ -1,7 +1,17 @@
 // @ts-nocheck
 "use client"
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+
+// Helper function to sanitize filenames for Supabase Storage
+const sanitizeFilename = (filename: string): string => {
+  // Clean the filename by removing special characters and normalizing
+  return filename
+    .replace(/[~`!@#$%^&*+=\[\]\\';,{}|":<>?]/g, '')
+    .replace(/\s+/g, '_')
+    .toLowerCase();
+};
+
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -803,7 +813,8 @@ const saveAllDocuments = useCallback(async () => {
           let documentId = docData.id || '';
 
           if (file) {
-            filePath = `individual-documents/${task.individual_id}/${docConfig.kycId}/${file.name}`;
+            const sanitizedFilename = sanitizeFilename(file.name);
+            filePath = `individual-documents/${task.individual_id}/${docConfig.kycId}/${sanitizedFilename}`;
 
             const { error: uploadError } = await supabase.storage
               .from('kyc-documents')
