@@ -2,16 +2,6 @@
 "use client"
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-
-// Helper function to sanitize filenames for Supabase Storage
-const sanitizeFilename = (filename: string): string => {
-  // Clean the filename by removing special characters and normalizing
-  return filename
-    .replace(/[~`!@#$%^&*+=\[\]\\';,{}|":<>?]/g, '')
-    .replace(/\s+/g, '_')
-    .toLowerCase();
-};
-
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -20,15 +10,20 @@ import { Loader2, Send, FileText, MessageSquare, Star, Eye, Check } from "lucide
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { toast } from "@/hooks/use-toast"
-import { supabase } from "@/lib/supabase/client"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { format, parseISO } from "date-fns"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { UploadModal } from "@/app/generic-components/UploadModal"
 import { v4 as uuidv4 } from 'uuid'
 import { performExtraction } from '@/lib/extractionUtils'
+import supabase from "@/lib/supabase/client";
 
-// --- Helper Functions ---
+const sanitizeFilename = (filename: string): string => {
+  return filename
+    .replace(/[~`!@#$%^&*+=\[\]\\';,{}|":<>?]/g, '')
+    .replace(/\s+/g, '_')
+    .toLowerCase();
+};
 
 const transformKycFields = (fields: any[]): any[] => {
   if (!Array.isArray(fields)) return []
