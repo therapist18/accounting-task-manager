@@ -17,7 +17,8 @@ import {
   MoreHorizontal,
   CheckCircle2,
   XCircle,
-  Columns // Imported for the button
+  Columns, // Imported for the button
+  User, // For officer filtern
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -85,7 +86,7 @@ const INDEX_WIDTH_CLASS = "w-[60px] min-w-[60px] max-w-[60px]";
 
 const parseDateString = (dateInput: any): Date | null => {
   if (!dateInput) return null;
-  
+
   // If it's already a Date object, return it
   if (dateInput instanceof Date) {
     return isValid(dateInput) ? dateInput : null;
@@ -113,7 +114,7 @@ const parseDateString = (dateInput: any): Date | null => {
   } catch (e) {
     // Continue to other formats if ISO parsing fails
   }
-  
+
   // Then try other common formats
   const dateFormats = [
     "yyyy-MM-dd'T'HH:mm",
@@ -124,29 +125,29 @@ const parseDateString = (dateInput: any): Date | null => {
     'dd/MM/yyyy HH:mm:ss',
     'yyyy-MM-dd HH:mm:ss'
   ];
-  
+
   for (const formatStr of dateFormats) {
     const parsedDate = parse(dateInput, formatStr, new Date());
     if (isValid(parsedDate)) {
       return parsedDate;
     }
   }
-  
+
   return null;
 };
 
 const formatDateForDisplay = (date: any): string => {
   if (!date) return '-';
-  
+
   // First check if it's already in the desired format (dd/MM/yyyy)
   const ddMMyyyyRegex = /^\d{2}\/\d{2}\/\d{4}$/;
   if (typeof date === 'string' && ddMMyyyyRegex.test(date)) {
     return date;
   }
-  
+
   const d = parseDateString(date);
   if (!d) return '-';
-  
+
   try {
     return format(d, 'dd/MM/yyyy');
   } catch (e) {
@@ -157,16 +158,16 @@ const formatDateForDisplay = (date: any): string => {
 
 const formatDateTimeForDisplay = (date: any): string => {
   if (!date) return '-';
-  
+
   // First check if it's already in the desired format (dd/MM/yyyy HH:mm)
   const ddMMyyyyHHmmRegex = /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/;
   if (typeof date === 'string' && ddMMyyyyHHmmRegex.test(date)) {
     return date;
   }
-  
+
   const d = parseDateString(date);
   if (!d) return '-';
-  
+
   try {
     return format(d, 'dd/MM/yyyy HH:mm');
   } catch (e) {
@@ -220,6 +221,10 @@ export default function ReportsPage() {
   const [activeSubDeptId, setActiveSubDeptId] = useState<string>("all");
   const [activeStatus, setActiveStatus] = useState<string>("wip");
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedOfficers, setSelectedOfficers] = useState<string[]>([]);
+  const [allOfficers, setAllOfficers] = useState<{ id: string, name: string, email: string }[]>([]);
+  const [availableOfficers, setAvailableOfficers] = useState<{ id: string, name: string, email: string }[]>([]);
+  const [isOfficerDropdownOpen, setIsOfficerDropdownOpen] = useState(false);
 
   // Sort State
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
@@ -287,11 +292,34 @@ export default function ReportsPage() {
           setActiveReport(reports[0]);
         }
 
-        // Fetch Users for Staff Name resolution
+        // Fetch Users for Staff Name resolution and officer filtering
         const { data: users } = await supabase.from('tm_users').select('*');
         const usersMap = new Map();
         users?.forEach(u => usersMap.set(u.id, u));
         setTmUsers(usersMap);
+
+        // Set all officers for filtering
+        const officerUsers = users?.filter(u => u.role === 'officer') || [];
+        console.log('Fetched officer users:', {
+          totalUsers: users?.length || 0,
+          officerCount: officerUsers.length,
+          officers: officerUsers.map(o => ({
+            id: o.id,
+            name: o.name,
+            email: o.email,
+            dept: o.department_id,
+            rawDepartmentId: o.department_id,
+            deptType: typeof o.department_id
+          }))
+        });
+
+        const formattedOfficers = officerUsers.map(o => ({
+          id: o.id.toString(),
+          name: o.name || o.email.split('@')[0],
+          email: o.email,
+          rawDepartmentId: o.department_id // Keep original department_id for debugging
+        }));
+        setAllOfficers(formattedOfficers);
 
       } catch (err) {
         console.error("❌ Failed to fetch reports:", err);
@@ -313,6 +341,77 @@ export default function ReportsPage() {
       }));
     }
   }, [activeReport?.id]);
+
+  // --- 3. Filtering & Sorting Logic ---
+  const activeDepartment = useMemo(() =>
+    departments.find(d => d.id.toString() === activeDeptId),
+    [departments, activeDeptId]);
+
+  const activeSubDepartments = useMemo(() =>
+    activeDepartment?.tm_subdepartments || [],
+    [activeDepartment]);
+
+  // Update available officers when department OR sub-department changes
+  useEffect(() => {
+    if (!activeDeptId) {
+      setAvailableOfficers([]);
+      setSelectedOfficers([]);
+      return;
+    }
+
+    // A Set to store unique IDs of officers who are allowed to be shown
+    const allowedOfficerIds = new Set<string>();
+
+    // Helper: Add officers from a sub-department's history
+    const collectFromHistory = (subDept: any) => {
+      if (!subDept?.officer_history) return;
+      
+      subDept.officer_history.forEach((h: any) => {
+        // Only add if there is NO end_date (meaning they are currently active)
+        if (h.id && !h.end_date) {
+          allowedOfficerIds.add(h.id.toString());
+        }
+      });
+    };
+
+    // SCENARIO 1: Specific Sub-department Selected
+    if (activeSubDeptId && activeSubDeptId !== 'all') {
+      const currentSubDept = activeSubDepartments.find(s => s.id.toString() === activeSubDeptId.toString());
+      collectFromHistory(currentSubDept);
+    } 
+    
+    // SCENARIO 2: "All" Sub-departments (Department View)
+    else {
+      // 1. Gather active officers from ALL sub-departments in this department
+      activeSubDepartments.forEach(sub => collectFromHistory(sub));
+
+      // 2. ALSO include anyone who is explicitly assigned to this Department in tm_users
+      // (This covers officers who might not be in a sub-dept history yet but belong here)
+      allOfficers.forEach(o => {
+        if (o.rawDepartmentId && o.rawDepartmentId.toString() === activeDeptId.toString()) {
+          allowedOfficerIds.add(o.id.toString());
+        }
+      });
+    }
+
+    // Final Step: Filter the master list against our allowed IDs
+    const finalOfficers = allOfficers.filter(o => allowedOfficerIds.has(o.id.toString()));
+
+    console.log('Officer Filter Calculation:', {
+      mode: activeSubDeptId === 'all' ? 'Department (All)' : 'Sub-Department',
+      idsFoundInHistory: Array.from(allowedOfficerIds),
+      finalCount: finalOfficers.length
+    });
+
+    setAvailableOfficers(finalOfficers);
+
+    // Cleanup: Remove selected officers if they are no longer in the list
+    setSelectedOfficers(prev => {
+      const availableIds = finalOfficers.map(o => o.id);
+      return prev.filter(id => availableIds.includes(id));
+    });
+
+  }, [activeDeptId, activeSubDeptId, allOfficers, activeSubDepartments]);
 
   const refreshData = useCallback(async () => {
     if (!activeReport) return;
@@ -372,20 +471,27 @@ export default function ReportsPage() {
     setIsReportDialogOpen(false);
   };
 
-  // --- 3. Filtering & Sorting Logic ---
-  const activeDepartment = useMemo(() =>
-    departments.find(d => d.id.toString() === activeDeptId),
-    [departments, activeDeptId]);
-
-  const activeSubDepartments = useMemo(() =>
-    activeDepartment?.tm_subdepartments || [],
-    [activeDepartment]);
-
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
+      // 1. Hierarchy Filters
       if (activeDeptId && task.department_id?.toString() !== activeDeptId) return false;
       if (activeSubDeptId !== 'all' && task.subdepartment_id?.toString() !== activeSubDeptId) return false;
 
+      // 2. Officer Filter (Refined)
+      if (selectedOfficers.length > 0) {
+        // We check two fields: 
+        // 'officer_id' (specific role assignment)
+        // 'assigned_to' (generic task ownership)
+        const officerId = task.officer_id?.toString();
+        const assignedId = task.assigned_to?.toString();
+
+        const isMatch = (officerId && selectedOfficers.includes(officerId)) ||
+          (assignedId && selectedOfficers.includes(assignedId));
+
+        if (!isMatch) return false;
+      }
+
+      // 3. Status Filter
       const isWriteUpCompleted = task.status === 'write_up_completed';
       const isEndorsed = task.status === 'endorsed';
       const isCompleted = isWriteUpCompleted || isEndorsed || ['completed', 'archived'].includes(task.status);
@@ -393,9 +499,10 @@ export default function ReportsPage() {
       if (activeStatus === 'wip' && isCompleted) return false;
       if (activeStatus === 'write_up_completed' && !isWriteUpCompleted) return false;
       if (activeStatus === 'endorsed' && !isEndorsed) return false;
+
       return true;
     });
-  }, [tasks, activeDeptId, activeSubDeptId, activeStatus]);
+  }, [tasks, activeDeptId, activeSubDeptId, activeStatus, selectedOfficers]);
 
   const searchedTasks = useMemo(() => {
     if (!searchQuery) return filteredTasks;
@@ -678,9 +785,18 @@ export default function ReportsPage() {
           allLinkedDocs.forEach(linkedDoc => {
             const details = linkedDoc.extracted_details || {};
             const kycDoc = kycDocuments.get(linkedDoc.kyc_id || linkedDoc.document_id);
+
             if (kycDoc?.fields) {
               const dateFieldsToCheck = kycDoc.fields
-                .filter((field: any) => field.fieldType === 'date' || field.type === 'date')
+                .filter((field: any) => {
+                  // Check if field is explicitly marked as date type
+                  if (field.fieldType === 'date' || field.type === 'date') return true;
+
+                  // Check if field name suggests it's a date field
+                  const fieldName = field.fieldName || field.name || '';
+                  const value = details[fieldName];
+                  return isLikelyDateField(fieldName, value);
+                })
                 .map((field: any) => field.fieldName || field.name || '')
                 .filter(Boolean);
 
@@ -698,17 +814,17 @@ export default function ReportsPage() {
           if (validDates.length > 0) {
             validDates.sort((a, b) => b.getTime() - a.getTime());
             completionDateStr = validDates[0]; // Use latest document date
-          } 
-        } 
+          }
+        }
       }
       // PRIORITY 2: If no document dates, use manually entered stage date
       if (!completionDateStr && stageData?.date) {
         completionDateStr = stageData.date;
-      } 
+      }
       // PRIORITY 3: Final fallback to completedAt timestamp
       if (!completionDateStr && stageData?.status === 'completed' && stageData?.completedAt) {
         completionDateStr = stageData.completedAt;
-      } 
+      }
       const completionDate = parseDateString(completionDateStr);
       if (completionDate) {
         let isCompletedOverdue = false;
@@ -722,10 +838,10 @@ export default function ReportsPage() {
         const textColorClass = isCompletedOverdue ? "text-amber-600" : "text-emerald-600";
         const icon = isCompletedOverdue ? <Clock className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />;
         const borderColorClass = isCompletedOverdue ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-100";
-        
+
         // Only show completed statuses that are either "Completed On Time" or "Completed (Overdue)"
         const statusText = isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time";
-        
+
         if (!showTimeStatuses) {
           return (
             <div className={`flex items-center gap-1.5 font-semibold text-xs ${textColorClass}`}>
@@ -734,7 +850,7 @@ export default function ReportsPage() {
             </div>
           );
         }
-        
+
         return (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -764,17 +880,17 @@ export default function ReportsPage() {
       if (!effectiveStartTime) {
         return <span className="text-slate-300">-</span>;
       }
-      
+
       if (!showTimeStatuses) {
         return <span className="text-slate-300">-</span>;
       }
-      
+
       const timeStatus = getTimeStatus(effectiveStartTime, estimatedMinutes);
       const isOverdue = timeStatus?.isOverdue || false;
       const textColorClass = isOverdue ? "text-red-600" : "text-blue-600";
       const icon = isOverdue ? <AlertTriangle className="h-3.5 w-3.5" /> : <Timer className="h-3.5 w-3.5" />;
       const borderColorClass = isOverdue ? "border-red-200 bg-red-50" : "border-blue-200 bg-blue-50";
-      
+
       return (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -1180,28 +1296,107 @@ export default function ReportsPage() {
             <h1 className="text-lg font-bold text-slate-800 flex items-center gap-2">
               {activeReport ? activeReport.name : "Select a Report"}
             </h1>
-            {activeReport && <p className="text-xs text-slate-500 hidden md:block">{activeReport.description || "Generated Report View"}</p>}
+            {activeReport && (
+              <p className="text-xs text-slate-500 hidden md:block">
+                {activeReport.description || "Generated Report View"}
+              </p>
+            )}
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          {activeReport && (
-            <div className="relative w-64 hidden md:block">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-              <Input
-                placeholder="Search name, ID, or company..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 h-9 text-xs bg-white border-slate-200 focus:border-blue-400 focus:ring-blue-100"
-              />
-            </div>
-          )}
+        <div className="flex items-center space-x-4">
+          {/* Officer Filter */}
+          <div className="relative">
+            <DropdownMenu open={isOfficerDropdownOpen} onOpenChange={setIsOfficerDropdownOpen}>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="flex items-center space-x-2"
+                  onClick={() => setIsOfficerDropdownOpen(!isOfficerDropdownOpen)}
+                  disabled={!activeDeptId}
+                >
+                  <User className="h-4 w-4" />
+                  <span>
+                    {selectedOfficers.length > 0
+                      ? `${selectedOfficers.length} selected`
+                      : activeSubDeptId !== 'all'
+                        ? "Filter Sub-dept Officers" // Context: Sub-department
+                        : activeDeptId
+                          ? "Filter Dept Officers"   // Context: Department
+                          : "Select department first"}
+                  </span>
+                  <ChevronDown className="h-4 w-4 opacity-50" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-64 p-2 max-h-80 overflow-y-auto">
+                {!activeDeptId ? (
+                  <div className="px-2 py-1.5 text-sm text-gray-500">Please select a department first</div>
+                ) : availableOfficers.length === 0 ? (
+                  <div className="px-2 py-1.5 text-sm text-gray-500">
+                    No officers found in this department
+                    <div className="text-xs text-gray-400 mt-1">
+                      Department ID: {activeDeptId}, Total officers: {allOfficers.length}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {availableOfficers.map((officer) => (
+                      <div key={officer.id} className="flex items-center space-x-2 p-1.5 hover:bg-gray-100 rounded">
+                        <input
+                          type="checkbox"
+                          id={`officer-${officer.id}`}
+                          checked={selectedOfficers.includes(officer.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedOfficers([...selectedOfficers, officer.id]);
+                            } else {
+                              setSelectedOfficers(selectedOfficers.filter(id => id !== officer.id));
+                            }
+                          }}
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <label htmlFor={`officer-${officer.id}`} className="text-sm text-gray-700">
+                          {officer.name} 
+                        </label>
+                      </div>
+                    ))}
+                    <div className="border-t border-gray-200 mt-2 pt-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start text-sm"
+                        onClick={() => setSelectedOfficers([])}
+                        disabled={selectedOfficers.length === 0}
+                      >
+                        Clear selection
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
+          {/* Search Input */}
+          <div className="relative w-64 hidden md:block">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+            <Input
+              placeholder="Search name, ID, or company..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 h-9 text-xs bg-white border-slate-200 focus:border-blue-400 focus:ring-blue-100"
+            />
+          </div>
 
           {activeReport && (
             <Tabs value={view} onValueChange={(v) => setView(v as any)} className="hidden md:block">
               <TabsList className="grid w-[160px] grid-cols-2 h-9 bg-slate-100">
-                <TabsTrigger value="standard" className="gap-2 text-xs"><Rows className="h-3 w-3" /> Rows</TabsTrigger>
-                <TabsTrigger value="transposed" className="gap-2 text-xs"><LayoutGrid className="h-3 w-3" /> Cols</TabsTrigger>
+                <TabsTrigger value="standard" className="gap-2 text-xs">
+                  <Rows className="h-3 w-3" /> Rows
+                </TabsTrigger>
+                <TabsTrigger value="transposed" className="gap-2 text-xs">
+                  <LayoutGrid className="h-3 w-3" /> Cols
+                </TabsTrigger>
               </TabsList>
             </Tabs>
           )}
