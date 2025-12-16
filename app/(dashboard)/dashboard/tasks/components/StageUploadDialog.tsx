@@ -170,32 +170,6 @@ const DocumentTabPanel = ({
   const [messageText, setMessageText] = useState("");
   const [isConverting, setIsConverting] = useState(false);
   const [generatedFile, setGeneratedFile] = useState<File | null>(null);
-  const [previewState, setPreviewState] = useState<{
-    isOpen: boolean;
-    fileUrl: string;
-    fileName: string;
-    extractedData: { [key: string]: any };
-    fields: any[];
-  }>({
-    isOpen: false,
-    fileUrl: '',
-    fileName: '',
-    extractedData: {},
-    fields: []
-  });
-
-  const [uploadedDocs, setUploadedDocs] = useState<{ [key: string]: Array<{
-    id: string;
-    file: File;
-    fileUrl: string;
-    extractedData: { [key: string]: any };
-    status: string;
-    fileName?: string;
-    validationStatus?: 'pending' | 'valid' | 'warning' | 'error';
-    validationMessage?: string;
-    selectedDocTypeId?: string;
-    isEditing?: boolean;
-  }>}>({});
 
   // Sync with locked state
   useEffect(() => {
@@ -208,20 +182,7 @@ const DocumentTabPanel = ({
   const documentName = kycData?.display_name || kycData?.name || doc.name || 'Document';
   const inputType = doc.inputType || (doc.isSpecial ? 'file' : 'both');
 
-  // Clean up blob URLs on unmount
-  useEffect(() => {
-    return () => {
-      Object.values(uploadedDocs).forEach(docs => {
-        docs.forEach(doc => {
-          if (doc.fileUrl) {
-            URL.revokeObjectURL(doc.fileUrl);
-          }
-        });
-      });
-    };
-  }, [uploadedDocs]);
-
-  // Convert Text to PDF and handle upload
+  // Convert Text to PDF and pass to UploadModal
   const handleConvertAndUpload = async () => {
     if (!messageText.trim()) return;
     setIsConverting(true);
@@ -242,114 +203,19 @@ const DocumentTabPanel = ({
       const blob = await response.blob();
       const fileName = `${documentName.replace(/\s+/g, '_')}_${Date.now()}.pdf`;
       const file = new File([blob], fileName, { type: 'application/pdf' });
-      const fileUrl = URL.createObjectURL(blob);
       
-      // Create a new document object
-      const docId = `doc-${uuidv4()}`;
-      const newDoc = {
-        id: docId,
-        file,
-        fileUrl,
-        fileName,
-        extractedData: {},
-        status: 'pending',
-        validationStatus: 'pending' as const,
-        validationMessage: 'Processing...',
-        selectedDocTypeId: doc.kycId,
-        isEditing: false
-      };
-
-      // Add to uploaded docs
-      setUploadedDocs(prev => ({
-        ...prev,
-        [doc.kycId]: [...(prev[doc.kycId] || []), newDoc]
-      }));
-
-      // Perform extraction
-      try {
-        // Ensure we have the correct fields for extraction
-        const fieldsToExtract = activeDocFields || doc.fields || [];
-        
-        const extractionResult = await performExtraction(
-          fileUrl,
-          fieldsToExtract,
-          documentName,
-          (progress) => console.log('Extraction progress:', progress),
-          fileName,
-          doc.kycId
-        );
-
-        // Update with extracted data
-        setUploadedDocs(prev => {
-          const updated = { ...prev };
-          if (updated[doc.kycId]) {
-            updated[doc.kycId] = updated[doc.kycId].map(d => 
-              d.id === docId ? {
-                ...d,
-                extractedData: extractionResult.extractedData || {},
-                status: 'valid',
-                validationStatus: 'valid',
-                validationMessage: 'Extraction complete'
-              } : d
-            );
-          }
-          return updated;
-        });
-
-        // Show preview with extracted data
-        setPreviewState({
-          isOpen: true,
-          fileUrl,
-          fileName,
-          extractedData: extractionResult.extractedData || {},
-          fields: activeDocFields || doc.fields || []
-        });
-
-        // Notify parent component
-        if (onUploadSuccess) {
-          onUploadSuccess({
-            file,
-            extractedData: extractionResult.extractedData || {},
-            kycId: doc.kycId,
-            name: doc.name
-          }, doc);
-        }
-
-        // Clear the message
-        setMessageText('');
-        toast({
-          title: 'Success',
-          description: 'Document processed successfully',
-        });
-      } catch (error) {
-        console.error('Extraction error:', error);
-        toast({
-          title: 'Error',
-          description: 'Document processed but extraction failed',
-          variant: 'destructive',
-        });
-        
-        // Update status to show error
-        setUploadedDocs(prev => {
-          const updated = { ...prev };
-          if (updated[doc.kycId]) {
-            updated[doc.kycId] = updated[doc.kycId].map(d => 
-              d.id === docId ? {
-                ...d,
-                status: 'error',
-                validationStatus: 'error',
-                validationMessage: 'Extraction failed'
-              } : d
-            );
-          }
-          return updated;
-        });
-      }
+      // Set the generated file - UploadModal will handle extraction and preview
+      setGeneratedFile(file);
+      
+      toast({
+        title: 'Success',
+        description: 'PDF generated successfully. Review the document below.',
+      });
     } catch (error) {
       console.error('Conversion error:', error);
       toast({
         title: 'Error',
-        description: error.message || 'Failed to process document',
+        description: error.message || 'Failed to convert text to PDF',
         variant: 'destructive',
       });
     } finally {
@@ -358,8 +224,11 @@ const DocumentTabPanel = ({
   };
 
   const handlePendingChange = useCallback((docs: any[]) => {
+    console.log('[DocumentTabPanel] handlePendingChange called:', docs);
     if (docs && docs.length > 0) {
       const activeDoc = docs[0];
+      console.log('[DocumentTabPanel] Active doc:', activeDoc);
+      
       if (activeDoc.file) {
         const payload = {
           file: activeDoc.file,
@@ -367,6 +236,7 @@ const DocumentTabPanel = ({
           kycId: doc.kycId,
           name: doc.name
         };
+        console.log('[DocumentTabPanel] Calling onUploadSuccess with payload:', payload);
         onUploadSuccess(payload, doc);
       }
     }
@@ -462,7 +332,7 @@ const DocumentTabPanel = ({
         </div>
       ) : !useExisting && (
         <>
-          {/* File Upload Component - Always rendered, receives generated file if available */}
+          {/* File Upload Component - Receives generated file if available */}
           {activeDocFields ? (
             <UploadModal
               documentName={documentName}
@@ -484,7 +354,7 @@ const DocumentTabPanel = ({
               hideSaveButton={true}
               onPendingChange={handlePendingChange}
               
-              // NEW PROPS: Pass generated file to trigger modal logic
+              // Pass generated file to trigger modal logic
               externalFile={generatedFile}
               onExternalFileClear={() => setGeneratedFile(null)}
               
@@ -530,36 +400,6 @@ const DocumentTabPanel = ({
           )}
         </>
       )}
-      {/* Preview Dialog */}
-      <Dialog open={previewState.isOpen} onOpenChange={(open) => setPreviewState(prev => ({ ...prev, isOpen: open }))}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Document Preview: {previewState.fileName}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <ExtractionPreview
-              documentName={previewState.fileName}
-              fileUrl={previewState.fileUrl}
-              fileName={previewState.fileName}
-              extractedData={previewState.extractedData}
-              fields={previewState.fields}
-              onDataChange={(field, value) => {
-                // Handle data changes if needed
-                console.log(`Field ${field} updated to:`, value);
-              }}
-              onSave={async (data) => {
-                // Handle save action
-                toast({
-                  title: 'Success',
-                  description: 'Document data saved successfully',
-                });
-                setPreviewState(prev => ({ ...prev, isOpen: false }));
-              }}
-              showSaveButton={true}
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };
@@ -828,6 +668,8 @@ const saveAllDocuments = useCallback(async () => {
       for (const [docId, docData] of Object.entries(pendingDocuments)) {
         if (!docData) continue;
 
+        console.log(`[saveAllDocuments] Processing doc ${docId}:`, docData);
+
         const docConfig = applicableDocuments.find(doc => doc.id === docId);
         if (!docConfig) {
           console.warn(`Document config not found for ID: ${docId}`);
@@ -859,31 +701,50 @@ const saveAllDocuments = useCallback(async () => {
           let insertedDoc;
           if (file) {
             
-            // Clean up extracted data to remove UUID keys and use field names only
+            // Clean up extracted data logic
             const rawDetails = docData.extractedData || {};
+            console.log(`[saveAllDocuments] Raw extracted details for ${docId}:`, rawDetails);
+            
             const cleanedDetails = {};
             
-            // First, find all valid field names from the document configuration
-            const validFields = new Set();
-            const docConfig = applicableDocuments.find(d => d.id === docId);
-            if (docConfig?.fields) {
-              const collectFieldNames = (fields) => {
-                fields.forEach(field => {
-                  if (field.name) validFields.add(field.name);
-                  if (field.fields) collectFieldNames(field.fields);
-                  if (field.arrayConfig?.fields) collectFieldNames(field.arrayConfig.fields);
-                });
-              };
-              collectFieldNames(docConfig.fields);
+            // Build map of ID -> Name to resolve UUID keys
+            const fieldIdToName = new Map();
+            const validFieldNames = new Set();
+            
+            const collectFieldInfo = (fields) => {
+              if (!Array.isArray(fields)) return;
+              fields.forEach(field => {
+                if (field.id && field.name) fieldIdToName.set(field.id, field.name);
+                if (field.name) validFieldNames.add(field.name);
+                
+                if (field.fields) collectFieldInfo(field.fields);
+                if (field.arrayConfig?.fields) collectFieldInfo(field.arrayConfig.fields);
+              });
+            };
+
+            // FIX: Use docFieldsMap instead of docConfig.fields to ensure we have the full field definitions
+            const fullDocFields = docFieldsMap[docId];
+            if (fullDocFields) {
+               collectFieldInfo(fullDocFields);
             }
             
-            // Only include fields that are in our valid fields list or don't look like UUIDs
+            // Map the data
             Object.entries(rawDetails).forEach(([key, value]) => {
-              const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key);
-              if (validFields.has(key) || !isUUID) {
+              // Case 1: Key is a UUID that maps to a Field Name
+              if (fieldIdToName.has(key)) {
+                cleanedDetails[fieldIdToName.get(key)] = value;
+              }
+              // Case 2: Key is already a valid Field Name
+              else if (validFieldNames.has(key)) {
+                cleanedDetails[key] = value;
+              }
+              // Case 3: Key is not a UUID (allow custom metadata fields or non-config fields)
+              else if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)) {
                 cleanedDetails[key] = value;
               }
             });
+            
+            console.log(`[saveAllDocuments] Cleaned details for ${docId}:`, cleanedDetails);
 
             const { data: newDoc, error: insertError } = await supabase
               .from('acc_portal_directors_documents')
@@ -1050,28 +911,41 @@ const saveAllDocuments = useCallback(async () => {
       setIsSaving(false);
       console.groupEnd();
     }
-  }, [stage, task, pendingDocuments, linkedDocuments, selectedSourceDocs, onTaskAction, onOpenChange, applicableDocuments, lockedDocuments]);
+  }, [stage, task, pendingDocuments, linkedDocuments, selectedSourceDocs, onTaskAction, onOpenChange, applicableDocuments, lockedDocuments, docFieldsMap]);
+  
   const handleUploadSuccess = useCallback((newDocument: any, originatingDoc: any) => {
-    if (!originatingDoc?.id) return;
+    console.log('[StageUploadDialog] handleUploadSuccess called:', { newDocument, originatingDoc });
+    
+    if (!originatingDoc?.id) {
+      console.warn('[StageUploadDialog] No originating doc ID');
+      return;
+    }
 
     setPendingDocuments(prev => {
       // Only update if the document is new or changed
       const existingDoc = prev[originatingDoc.id];
-      if (existingDoc && JSON.stringify(existingDoc) === JSON.stringify({
+      
+      const newPendingDoc = {
         ...newDocument,
         kycId: originatingDoc.kycId,
         name: originatingDoc.name
-      })) {
+      };
+      
+      console.log('[StageUploadDialog] Updating pending doc:', {
+        docId: originatingDoc.id,
+        existingDoc,
+        newPendingDoc,
+        extractedData: newDocument.extractedData
+      });
+      
+      if (existingDoc && JSON.stringify(existingDoc) === JSON.stringify(newPendingDoc)) {
+        console.log('[StageUploadDialog] No change needed');
         return prev; // No change needed
       }
 
       return {
         ...prev,
-        [originatingDoc.id]: {
-          ...newDocument,
-          kycId: originatingDoc.kycId,
-          name: originatingDoc.name
-        }
+        [originatingDoc.id]: newPendingDoc
       };
     });
   }, []);

@@ -67,7 +67,8 @@ interface UploadModalProps {
   dropdowns?: DropdownConfig[];
   selectedDocumentId?: string;
   companyAssetId?: string;
-  // New props for multi-document type support
+   externalFile?: File | null;
+  onExternalFileClear?: () => void;
   documentTypes?: Array<{ id: string; name: string; display_name?: string; fields?: any[] }>;
   allowMultipleTypes?: boolean;
   // Table and field configuration
@@ -479,6 +480,8 @@ export function UploadModal({
   companyAssetId,
   documentTypes,
   allowMultipleTypes = false,
+  externalFile,
+  onExternalFileClear,
   targetTable = 'acc_portal_kyc_uploads',
   idFieldName = 'company_id',
   documentIdFieldName = 'kyc_document_id',
@@ -491,8 +494,6 @@ export function UploadModal({
   showTitle = true,
   hideSaveButton = false,
 }: UploadModalProps) {
-  // Store uploaded documents by document type ID
-  // State to track form data for each document
   const [formData, setFormData] = useState<Record<string, Record<string, any>>>(() => {
     console.log('[UploadModal] Initializing formData state');
     return {};
@@ -510,7 +511,6 @@ export function UploadModal({
     selectedDocTypeId?: string;
     isEditing?: boolean;
   }>>>(() => {
-    // Initialize with empty arrays for each document type if available
     if (documentTypes?.length) {
       const initial: Record<string, any[]> = {};
       documentTypes.forEach(docType => {
@@ -534,22 +534,26 @@ export function UploadModal({
     onClose: null as (() => void) | null
   });
 
-  // Blob URL cleanup using useRef to maintain stability across renders
   const blobUrlsRef = useRef<Set<string>>(new Set());
 
-  // Helper to add urls
   const addBlobUrl = useCallback((url: string) => {
     if (blobUrlsRef.current) {
       blobUrlsRef.current.add(url);
     }
   }, []);
 
-  // FIXED: Cleanup ONLY on unmount. 
-  // Dependency array is EMPTY []. This prevents revokeObjectURL from running
-  // when state updates (like extraction finishing), which was causing ERR_FILE_NOT_FOUND.
+useEffect(() => {
+  if (externalFile) {
+    console.log('[UploadModal] External file received:', externalFile.name);
+    handleFileUpload([externalFile]);
+    if (onExternalFileClear) {
+      onExternalFileClear();
+    }
+  }
+}, [externalFile]);
+
   useEffect(() => {
     return () => {
-      // Clean up all blob URLs when component unmounts
       if (blobUrlsRef.current) {
         blobUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
         blobUrlsRef.current.clear();
@@ -557,7 +561,6 @@ export function UploadModal({
     };
   }, []);
 
-  // Multi-type support: Available document types for selection
   const availableDocTypes = useMemo(() => {
     if (allowMultipleTypes && documentTypes && documentTypes.length > 0) {
       return documentTypes;
@@ -565,7 +568,6 @@ export function UploadModal({
     return selectedDoc ? [selectedDoc] : [];
   }, [allowMultipleTypes, documentTypes, selectedDoc]);
 
-  // SAFE: Only update if selectedDoc ID actually changes or content differs significantly
   useEffect(() => {
     if (selectedDoc && selectedDoc?.id !== finalSelectedDoc?.id) {
       setFinalSelectedDoc(selectedDoc);
