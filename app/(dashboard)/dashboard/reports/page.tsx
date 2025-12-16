@@ -90,8 +90,23 @@ const parseDateString = (dateInput: any): Date | null => {
   if (dateInput instanceof Date) {
     return isValid(dateInput) ? dateInput : null;
   }
-  
-  // First try to parse as ISO 8601
+
+  // First check if it's already in the desired format (dd/MM/yyyy or dd/MM/yyyy HH:mm)
+  const ddMMyyyyHHmmRegex = /^(\d{2})\/(\d{2})\/(\d{4})(?: (\d{2}):(\d{2}))?$/;
+  const match = String(dateInput).match(ddMMyyyyHHmmRegex);
+  if (match) {
+    const [_, day, month, year, hours, minutes] = match;
+    const date = new Date(
+      parseInt(year),
+      parseInt(month) - 1,
+      parseInt(day),
+      hours ? parseInt(hours) : 0,
+      minutes ? parseInt(minutes) : 0
+    );
+    if (isValid(date)) return date;
+  }
+
+  // Then try to parse as ISO 8601
   try {
     const date = new Date(dateInput);
     if (isValid(date)) return date;
@@ -103,7 +118,6 @@ const parseDateString = (dateInput: any): Date | null => {
   const dateFormats = [
     "yyyy-MM-dd'T'HH:mm",
     'dd/MM/yyyy HH:mm',
-    'yyyy-MM-dd',
     'dd/MM/yyyy',
     'MM/dd/yyyy',
     'dd-MM-yyyy',
@@ -141,7 +155,6 @@ const formatDateForDisplay = (date: any): string => {
   }
 };
 
-// Helper to display Date AND Time
 const formatDateTimeForDisplay = (date: any): string => {
   if (!date) return '-';
   
@@ -216,6 +229,7 @@ export default function ReportsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(100);
   const [expandedSections, setExpandedSections] = useState(() => new Set(['task_details']));
+  const [showTimeStatuses, setShowTimeStatuses] = useState(false);
 
   // --- Column Visibility State ---
   const [isColVisOpen, setIsColVisOpen] = useState(false);
@@ -603,9 +617,9 @@ export default function ReportsPage() {
 
                   for (const field of dateFields) {
                     const fieldValue = details[field];
-                                    const parsedDate = parseDateString(fieldValue);
-                                      if (parsedDate && (!docDate || parsedDate > docDate)) {
-                     docDate = parsedDate;
+                    const parsedDate = parseDateString(fieldValue);
+                    if (parsedDate && (!docDate || parsedDate > docDate)) {
+                      docDate = parsedDate;
                     }
                   }
                 }
@@ -708,6 +722,19 @@ export default function ReportsPage() {
         const textColorClass = isCompletedOverdue ? "text-amber-600" : "text-emerald-600";
         const icon = isCompletedOverdue ? <Clock className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />;
         const borderColorClass = isCompletedOverdue ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-100";
+        
+        // Only show completed statuses that are either "Completed On Time" or "Completed (Overdue)"
+        const statusText = isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time";
+        
+        if (!showTimeStatuses) {
+          return (
+            <div className={`flex items-center gap-1.5 font-semibold text-xs ${textColorClass}`}>
+              {icon}
+              <span>{formatDateForDisplay(completionDate)}</span>
+            </div>
+          );
+        }
+        
         return (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -719,7 +746,7 @@ export default function ReportsPage() {
             <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md`}>
               <div className="space-y-2 p-1">
                 <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
-                  <span className={`font-bold ${textColorClass}`}>{isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time"}</span>
+                  <span className={`font-bold ${textColorClass}`}>{statusText}</span>
                 </div>
                 <div className="text-xs space-y-1">
                   <div className="flex justify-between gap-4"><span className="text-slate-500">Completed:</span> <span>{formatDateTimeForDisplay(completionDate)}</span></div>
@@ -737,11 +764,17 @@ export default function ReportsPage() {
       if (!effectiveStartTime) {
         return <span className="text-slate-300">-</span>;
       }
+      
+      if (!showTimeStatuses) {
+        return <span className="text-slate-300">-</span>;
+      }
+      
       const timeStatus = getTimeStatus(effectiveStartTime, estimatedMinutes);
       const isOverdue = timeStatus?.isOverdue || false;
       const textColorClass = isOverdue ? "text-red-600" : "text-blue-600";
       const icon = isOverdue ? <AlertTriangle className="h-3.5 w-3.5" /> : <Timer className="h-3.5 w-3.5" />;
       const borderColorClass = isOverdue ? "border-red-200 bg-red-50" : "border-blue-200 bg-blue-50";
+      
       return (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -753,10 +786,15 @@ export default function ReportsPage() {
           <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md`}>
             <div className="space-y-2 p-1">
               <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
-                <span className={`font-bold ${textColorClass}`}>{isOverdue ? "In Progress (Overdue)" : "In Progress (On Track)"}</span>
+                <span className={`font-bold ${textColorClass}`}>
+                  {isOverdue ? "In Progress (Overdue)" : "In Progress (On Track)"}
+                </span>
               </div>
               <div className="text-xs space-y-1">
-                <div className="flex justify-between gap-4"><span className="text-slate-500">Started:</span> <span>{formatDateTimeForDisplay(effectiveStartTime)}</span></div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-slate-500">Started:</span>
+                  <span>{formatDateTimeForDisplay(effectiveStartTime)}</span>
+                </div>
                 {estimatedMinutes > 0 && (
                   <>
                     <div className="flex justify-between gap-4">
@@ -765,7 +803,10 @@ export default function ReportsPage() {
                         {isOverdue ? `Overdue by ${timeStatus?.formattedOverdue}` : timeStatus?.formattedRemaining}
                       </span>
                     </div>
-                    <div className="flex justify-between gap-4"><span className="text-slate-500">Estimate:</span> <span>{formatDuration(estimatedMinutes)}</span></div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-slate-500">Estimate:</span>
+                      <span>{formatDuration(estimatedMinutes)}</span>
+                    </div>
                   </>
                 )}
               </div>
@@ -982,6 +1023,7 @@ export default function ReportsPage() {
 
     return cols;
   }, [activeReport, stages, kycDocuments, isStageApplicableToCurrentFilter, expandedStageColumns]);
+
   useEffect(() => {
     if (columns.length > 0) {
       setVisibleColumnIds(prev => {
@@ -1103,6 +1145,11 @@ export default function ReportsPage() {
 
   if (reportLoading) return <div className="h-screen flex items-center justify-center bg-slate-50"><Loader2 className="h-10 w-10 animate-spin text-blue-600" /></div>;
 
+  // Toggle time status visibility
+  const toggleTimeStatuses = () => {
+    setShowTimeStatuses(prev => !prev);
+  };
+
   return (
     <div className="flex flex-col h-screen bg-slate-50/50">
       {/* 1. TOP HEADER */}
@@ -1174,6 +1221,16 @@ export default function ReportsPage() {
               <DropdownMenuItem onClick={() => toast({ title: "Coming Soon", description: "PDF export is being upgraded." })}>PDF (.pdf)</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={toggleTimeStatuses}
+            className="h-8"
+          >
+            <Clock3 className="h-4 w-4 mr-2" />
+            {showTimeStatuses ? 'Hide Time Status' : 'Show Time Status'}
+          </Button>
         </div>
       </header>
 
@@ -1377,13 +1434,13 @@ export default function ReportsPage() {
                     <TableHead className="sticky left-0 z-40 w-[280px] min-w-[280px] bg-blue-800 text-white border-r border-blue-600 font-bold text-sm p-4">
                       Fields / Tasks →
                     </TableHead>
-                    {paginatedTasks.map((task, idx) => (
+                    {paginatedTasks.map((task) => (
                       <TableHead
                         key={task.id}
                         className={`${COLUMN_WIDTH_CLASS} text-center bg-blue-700 text-white border-r border-blue-600 font-semibold text-xs py-3 px-2`}
                       >
                         <div className="flex flex-col gap-1 w-full">
-                          <span className="font-bold opacity-80">#{(currentPage - 1) * itemsPerPage + idx + 1}</span>
+                          <span className="font-bold opacity-80">#{(currentPage - 1) * itemsPerPage + paginatedTasks.indexOf(task) + 1}</span>
                           <span className="truncate block w-full text-sm" title={task.applicant_name}>
                             {task.applicant_name}
                           </span>
@@ -1412,7 +1469,9 @@ export default function ReportsPage() {
                             <div className="flex items-center justify-between px-4 py-2">
                               <div className="flex items-center gap-3">
                                 {Icon && <Icon className="h-5 w-5 text-slate-600" />}
-                                <span className="font-bold text-slate-700 text-base">{row.label}</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-slate-700 text-base">{row.label}</span>
+                                </div>
                               </div>
                               <div className="text-slate-600">
                                 {expandedSections.has(row.id) ?

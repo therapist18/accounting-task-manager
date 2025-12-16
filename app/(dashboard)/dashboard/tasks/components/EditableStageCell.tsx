@@ -82,17 +82,25 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[] = [])
 };
 
 const findDateInObject = (obj: any, dateFields: string[]): string | null => {
-  if (!obj || typeof obj !== 'object') return null;
-
+  if (!obj || typeof obj !== 'object') {
+    console.log('findDateInObject: Invalid input object');
+    return null;
+  }
   for (const key in obj) {
     if (dateFields.includes(key) && typeof obj[key] === 'string') {
+      console.log(`findDateInObject: Found date field '${key}' with value '${obj[key]}'`);
       return obj[key];
     }
     if (typeof obj[key] === 'object') {
+      console.log(`findDateInObject: Checking nested object for date fields...`);
       const nestedDate = findDateInObject(obj[key], dateFields);
-      if (nestedDate) return nestedDate;
+      if (nestedDate) {
+        console.log(`findDateInObject: Found nested date: ${nestedDate}`);
+        return nestedDate;
+      }
     }
   }
+  console.log('findDateInObject: No date fields found');
   return null;
 };
 
@@ -187,55 +195,69 @@ export default function EditableStageCell({
     return true;
   }, [linkedDocument, task]);
 
-const stageDate = useMemo(() => {
+ const stageDate = useMemo(() => {
   const dateFields = [
     'application_date', 'date', 'upload_date', 'created_date',
-    'date_and_time','date_and_time_generated', 'invoice_date_and_time', 'With_Effect_From',
+    'date_and_time', 'date_and_time_generated', 'invoice_date_and_time', 'With_Effect_From',
     'Expiry_Date', 'Date_of_Issue'
   ];
-
   const stageData = task?.stages?.[stage.id];
   const hasDocumentsUploaded = stageData?.documentsUploaded !== undefined && stageData?.documentsUploaded !== null;
-
+  console.log('stageDate calculation - task:', {
+    stageId: stage.id,
+    stageName: stage.name,
+    stageData,
+    hasDocumentsUploaded,
+    requiresUpload,
+    hasLinkedDocument
+  });
   // For completed stages without a document, return empty string to allow manual date entry
   if (stageData?.status === 'completed' && !hasLinkedDocument) {
-    return stageData.date || ''; // This will be empty initially, allowing user input
+    console.log('Returning stageData.date (completed stage):', stageData.date);
+    return stageData.date || '';
   }
-
   // Check for document dates first
   if ((requiresUpload || hasDocumentsUploaded) && hasLinkedDocument) {
+    console.log('Checking document for dates...', {
+      hasExtractedDetails: !!linkedDocument?.extracted_details,
+      hasExtractedData: !!linkedDocument?.extracted_data
+    });
     // Check extracted_details for dates
     if (linkedDocument.extracted_details) {
+      console.log('Checking extracted_details for date fields...');
       const extractedDate = findDateInObject(linkedDocument.extracted_details, dateFields);
-      if (extractedDate) return extractedDate;
+      if (extractedDate) {
+        console.log('Found date in extracted_details:', extractedDate);
+        return extractedDate;
+      }
     }
-
     // Check extracted_data for dates
     if (linkedDocument.extracted_data) {
+      console.log('Checking extracted_data for date fields...');
       const extractedDate = findDateInObject(linkedDocument.extracted_data, dateFields);
-      if (extractedDate) return extractedDate;
+      if (extractedDate) {
+        console.log('Found date in extracted_data:', extractedDate);
+        return extractedDate;
+      }
     }
-
     // If we get here, no date was found in the document
-    // Only use completedAt if the document has no date fields at all
-    const hasAnyDateField = dateFields.some(field => 
+    const hasAnyDateField = dateFields.some(field =>
       (linkedDocument.extracted_details && field in linkedDocument.extracted_details) ||
       (linkedDocument.extracted_data && field in linkedDocument.extracted_data)
     );
-
     if (!hasAnyDateField && stageData?.completedAt) {
+      console.log('Using completedAt as fallback date:', stageData.completedAt);
       return stageData.completedAt;
     }
-    
+    console.log('No date found in document');
     return '';
   }
-
   // For non-document stages, use the value prop if available
   if (!requiresUpload && !hasDocumentsUploaded && value) {
+    console.log('Using value prop as date:', value);
     return typeof value === 'string' ? value : '';
   }
-  
-  // Default to empty string to allow manual entry
+  console.log('No date found, returning empty string');
   return '';
 }, [hasLinkedDocument, linkedDocument, requiresUpload, value, task, stage.id, stage.name]);
 
@@ -288,37 +310,47 @@ const stageDate = useMemo(() => {
 
 useEffect(() => {
   if (stageDate && stageDate !== 'NaN/NaN/NaN') {
-    let parsedDate: Date | null = null;
+    console.log('Setting editValue for stageDate:', stageDate);
     
-    // First try to parse as dd/MM/yyyy
-    if (stageDate.includes('/')) {
-      const [day, month, year] = stageDate.split('/').map(Number);
-      parsedDate = new Date(year, month - 1, day);
+    // First try to parse as dd/MM/yyyy HH:mm
+    let parsedDate = parse(stageDate, 'dd/MM/yyyy HH:mm', new Date());
+    
+    // If that fails, try MM/dd/yyyy HH:mm
+    if (!isValid(parsedDate)) {
+      parsedDate = parse(stageDate, 'MM/dd/yyyy HH:mm', new Date());
     }
     
-    // If that fails, try ISO format
-    if (!parsedDate || !isValid(parsedDate)) {
-      parsedDate = parse(stageDate, "yyyy-MM-dd'T'HH:mm", new Date());
+    // If that fails, try parsing as a Date object directly
+    if (!isValid(parsedDate)) {
+      parsedDate = new Date(stageDate);
     }
-    
+
     // If we have a valid date, format it for the input
-    if (parsedDate && isValid(parsedDate)) {
-      setEditValue(format(parsedDate, "yyyy-MM-dd'T'HH:mm"));
+    if (isValid(parsedDate)) {
+      const formattedDate = format(parsedDate, "yyyy-MM-dd'T'HH:mm");
+      console.log('Formatted date for input:', formattedDate);
+      setEditValue(formattedDate);
     } else {
-      setEditValue(stageDate); // Fallback to the raw value
+      console.log('Invalid date, using raw value:', stageDate);
+      setEditValue(stageDate);
     }
   } else {
+    console.log('No valid stageDate, setting empty string');
     setEditValue('');
   }
 }, [stageDate]);
 
 const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string): string => {
+  console.log('formatDateDisplay - input:', { dateStr, status, skippedAt });
+  
   if (status === 'skipped') {
     if (skippedAt) {
       try {
         const date = new Date(skippedAt);
         if (isValid(date)) {
-          return `Skipped (${format(date, 'dd/MM/yyyy HH:mm')})`;
+          const formatted = format(date, 'dd/MM/yyyy HH:mm');
+          console.log('formatDateDisplay - formatted skipped date:', formatted);
+          return `Skipped (${formatted})`;
         }
       } catch (e) {
         console.error('Error formatting skipped date:', e);
@@ -327,11 +359,15 @@ const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string)
     return 'Skipped';
   }
 
-  if (!dateStr) return '';
+  if (!dateStr) {
+    console.log('formatDateDisplay - empty date string');
+    return '';
+  }
 
   // First check if it's already in the desired format (dd/MM/yyyy HH:mm)
-  const ddMMyyyyHHmmRegex = /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/;
-  if (ddMMyyyyHHmmRegex.test(dateStr)) {
+  const desiredFormatRegex = /^\d{2}\/\d{2}\/\d{4}( \d{2}:\d{2})?$/;
+  if (desiredFormatRegex.test(dateStr)) {
+    console.log('formatDateDisplay - already in desired format, returning as-is');
     return dateStr;
   }
 
@@ -339,127 +375,131 @@ const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string)
   try {
     const date = new Date(dateStr);
     if (isValid(date)) {
-      return format(date, 'dd/MM/yyyy HH:mm');
+      const formatted = format(date, 'dd/MM/yyyy HH:mm');
+      console.log('formatDateDisplay - parsed as ISO 8601:', { input: dateStr, output: formatted });
+      return formatted;
     }
   } catch (e) {
-    // Continue to other formats if ISO parsing fails
+    console.log('formatDateDisplay - ISO 8601 parse failed, trying other formats');
   }
 
-  // Then try other common formats
-  const dateTimeFormats = [
-    "yyyy-MM-dd'T'HH:mm",
-    'dd/MM/yyyy HH:mm',
-    'yyyy-MM-dd',
-    'dd/MM/yyyy',
+  // Try parsing with explicit formats
+  const formats = [
+    'MM/dd/yyyy HH:mm',
     'MM/dd/yyyy',
+    'yyyy-MM-dd',
     'dd-MM-yyyy'
   ];
 
-  for (const formatStr of dateTimeFormats) {
-    const parsedDate = parse(dateStr, formatStr, new Date());
-    if (isValid(parsedDate)) {
-      return format(parsedDate, 'dd/MM/yyyy HH:mm');
+  for (const fmt of formats) {
+    const parsed = parse(dateStr, fmt, new Date());
+    if (isValid(parsed)) {
+      const formatted = format(parsed, 'dd/MM/yyyy HH:mm');
+      console.log(`formatDateDisplay - parsed with ${fmt}:`, { input: dateStr, output: formatted });
+      return formatted;
     }
   }
 
+  // If all else fails, return the original string
+  console.log('formatDateDisplay - could not parse date, returning as-is:', dateStr);
   return dateStr;
 };
 
-const handleSave = useCallback(async (isSkipped = false, skipReason = '', valueOverride?: string) => {
-  if (!onSave) {
-    toast({ title: "Error", description: "Save handler not available", variant: "destructive" });
-    return;
-  }
-
-  if (isSkipped) {
-    await onSave(stage.id, task.id, '', {
-      ...(linkedDocument?.extracted_details || {}),
-      status: 'skipped',
-      skippedAt: new Date().toISOString(),
-      skippedBy: 'userId',
-      reason: skipReason || selectedSkipReason || 'Not specified',
-    });
-    setIsEditing(false);
-    setIsSkipDialogOpen(false);
-    toast({ title: "Success", description: "Stage marked as skipped" });
-    return;
-  }
-
-  try {
-    // Use the override value if provided, otherwise fallback to state
-    let dateToSave = valueOverride !== undefined ? valueOverride : editValue;
-
-    // Don't set a default date if completely empty, require user input
-    if (!dateToSave) {
-      toast({
-        title: "Error",
-        description: "Please select a date",
-        variant: "destructive"
-      });
+  const handleSave = useCallback(async (isSkipped = false, skipReason = '', valueOverride?: string) => {
+    if (!onSave) {
+      toast({ title: "Error", description: "Save handler not available", variant: "destructive" });
       return;
     }
 
-    let dateObj: Date;
-
-    // Fix: Handle Date-only inputs (YYYY-MM-DD) by appending default time 00:00
-    // This solves the issue where users pick a date but no time
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dateToSave)) {
-      dateToSave = `${dateToSave}T00:00`;
-      dateObj = new Date(dateToSave);
-    } 
-    // If date and time are provided (YYYY-MM-DDTHH:MM)
-    else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(dateToSave)) {
-      dateObj = new Date(dateToSave);
-    } 
-    // If date and partial time (YYYY-MM-DDTHH)
-    else if (/^\d{4}-\d{2}-\d{2}T\d{2}$/.test(dateToSave)) {
-      dateToSave = `${dateToSave}:00`;
-      dateObj = new Date(dateToSave);
-    } 
-    // Fallback: try to parse as is
-    else {
-      dateObj = new Date(dateToSave);
+    if (isSkipped) {
+      await onSave(stage.id, task.id, '', {
+        ...(linkedDocument?.extracted_details || {}),
+        status: 'skipped',
+        skippedAt: new Date().toISOString(),
+        skippedBy: 'userId',
+        reason: skipReason || selectedSkipReason || 'Not specified',
+      });
+      setIsEditing(false);
+      setIsSkipDialogOpen(false);
+      toast({ title: "Success", description: "Stage marked as skipped" });
+      return;
     }
 
-    // Check if the date is valid
-    if (isNaN(dateObj.getTime())) {
-      throw new Error('Invalid date');
+    try {
+      // Use the override value if provided, otherwise fallback to state
+      let dateToSave = valueOverride !== undefined ? valueOverride : editValue;
+
+      // Don't set a default date if completely empty, require user input
+      if (!dateToSave) {
+        toast({
+          title: "Error",
+          description: "Please select a date",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      let dateObj: Date;
+
+      // Fix: Handle Date-only inputs (YYYY-MM-DD) by appending default time 00:00
+      // This solves the issue where users pick a date but no time
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateToSave)) {
+        dateToSave = `${dateToSave}T00:00`;
+        dateObj = new Date(dateToSave);
+      }
+      // If date and time are provided (YYYY-MM-DDTHH:MM)
+      else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(dateToSave)) {
+        dateObj = new Date(dateToSave);
+      }
+      // If date and partial time (YYYY-MM-DDTHH)
+      else if (/^\d{4}-\d{2}-\d{2}T\d{2}$/.test(dateToSave)) {
+        dateToSave = `${dateToSave}:00`;
+        dateObj = new Date(dateToSave);
+      }
+      // Fallback: try to parse as is
+      else {
+        dateObj = new Date(dateToSave);
+      }
+
+      // Check if the date is valid
+      if (isNaN(dateObj.getTime())) {
+        throw new Error('Invalid date');
+      }
+
+      // Format the date as DD/MM/YYYY HH:mm
+      const day = String(dateObj.getDate()).padStart(2, '0');
+      const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const year = dateObj.getFullYear();
+      const hours = String(dateObj.getHours()).padStart(2, '0');
+      const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+
+      const formattedDate = `${day}/${month}/${year} ${hours}:${minutes}`;
+
+      console.log('Saving date:', formattedDate);
+
+      setIsLoading(true);
+      await onSave(stage.id, task.id, formattedDate, {
+        ...(linkedDocument?.extracted_details || {}),
+        status: 'completed',
+      });
+
+      setIsEditing(false);
+      toast({
+        title: "Success",
+        description: "Date saved successfully"
+      });
+
+    } catch (error) {
+      console.error('Error saving date:', error, 'Input value:', valueOverride || editValue);
+      toast({
+        title: "Error",
+        description: `Please enter a valid date (current value: "${valueOverride || editValue}")`,
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
     }
-
-    // Format the date as DD/MM/YYYY HH:mm
-    const day = String(dateObj.getDate()).padStart(2, '0');
-    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-    const year = dateObj.getFullYear();
-    const hours = String(dateObj.getHours()).padStart(2, '0');
-    const minutes = String(dateObj.getMinutes()).padStart(2, '0');
-    
-    const formattedDate = `${day}/${month}/${year} ${hours}:${minutes}`;
-    
-    console.log('Saving date:', formattedDate);
-
-    setIsLoading(true);
-    await onSave(stage.id, task.id, formattedDate, {
-      ...(linkedDocument?.extracted_details || {}),
-      status: 'completed',
-    });
-
-    setIsEditing(false);
-    toast({
-      title: "Success",
-      description: "Date saved successfully"
-    });
-
-  } catch (error) {
-    console.error('Error saving date:', error, 'Input value:', valueOverride || editValue);
-    toast({
-      title: "Error",
-      description: `Please enter a valid date (current value: "${valueOverride || editValue}")`,
-      variant: "destructive"
-    });
-  } finally {
-    setIsLoading(false);
-  }
-}, [editValue, onSave, stage.id, task.id, linkedDocument, selectedSkipReason]);
+  }, [editValue, onSave, stage.id, task.id, linkedDocument, selectedSkipReason]);
 
   const checkPreviousStages = useCallback(async () => {
     if (!task.stages || !stages || stages.length === 0) return true;
@@ -641,21 +681,21 @@ const handleSave = useCallback(async (isSkipped = false, skipReason = '', valueO
       setEditValue('');
     }
   }, [stageDate]);
-const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    const inputValue = inputRef.current?.value || '';
-    
-    // Update state for UI consistency
-    setEditValue(inputValue);
-    
-    // Pass inputValue directly to handleSave to ensure the latest value is used
-    // This fixes the "No date selected" error
-    handleSave(false, '', inputValue);
-  } else if (e.key === 'Escape') {
-    handleCancel();
-  }
-}, [handleSave, handleCancel]);
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const inputValue = inputRef.current?.value || '';
+
+      // Update state for UI consistency
+      setEditValue(inputValue);
+
+      // Pass inputValue directly to handleSave to ensure the latest value is used
+      // This fixes the "No date selected" error
+      handleSave(false, '', inputValue);
+    } else if (e.key === 'Escape') {
+      handleCancel();
+    }
+  }, [handleSave, handleCancel]);
 
   const handleDocumentUpload = useCallback(() => {
     onDocumentUpload?.(task, stage);
@@ -906,25 +946,25 @@ const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     const isExplicitlyCompleted = stageStatus === 'completed';
     const isLegacyCompleted = !stageStatus && (!!value || stageData?.documentsUploaded === true);
     if (isExplicitlyCompleted && (!stageDate || stageDate === 'NaN/NaN/NaN') && !requiresUpload && !isEditing) {
-       return (
+      return (
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="h-7 px-3 text-emerald-600 border border-dashed border-emerald-300 hover:border-emerald-400 bg-emerald-50" 
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-3 text-emerald-600 border border-dashed border-emerald-300 hover:border-emerald-400 bg-emerald-50"
                 onClick={() => setIsEditing(true)}
               >
                 <CheckCircle2 className="h-3 w-3 mr-1" /> Set Date
               </Button>
             </TooltipTrigger>
-             <TooltipContent className="bg-emerald-50 border-emerald-200 text-emerald-900">
-               <p className="text-xs">Stage is marked completed, but date is missing.</p>
-             </TooltipContent>
-           </Tooltip>
+            <TooltipContent className="bg-emerald-50 border-emerald-200 text-emerald-900">
+              <p className="text-xs">Stage is marked completed, but date is missing.</p>
+            </TooltipContent>
+          </Tooltip>
         </TooltipProvider>
-       );
+      );
     }
 
     if ((isExplicitlyCompleted || isLegacyCompleted) && stageDate && stageDate !== 'NaN/NaN/NaN' && !isEditing) {
@@ -934,7 +974,7 @@ const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
 
       if (completionDate && effectiveStartTime && stage.estimated_time) {
         // ... (Keep existing duration calculation logic) ...
-         const start = parseDate(effectiveStartTime instanceof Date ? effectiveStartTime.toISOString() : effectiveStartTime);
+        const start = parseDate(effectiveStartTime instanceof Date ? effectiveStartTime.toISOString() : effectiveStartTime);
         if (start) {
           const durationMs = completionDate.getTime() - start.getTime();
           const durationMinutes = Math.floor(durationMs / (1000 * 60));
@@ -953,10 +993,10 @@ const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
             <TooltipTrigger asChild>
               <div
                 className={`flex items-center gap-1.5 font-semibold text-xs ${textColorClass} cursor-pointer hover:underline select-none`}
-                onClick={(e) => { 
-                  e.stopPropagation(); 
+                onClick={(e) => {
+                  e.stopPropagation();
                   // Keep single click for manual stages
-                  if (!requiresUpload) setIsEditing(true); 
+                  if (!requiresUpload) setIsEditing(true);
                 }}
                 // ADDED: Double click handler to force edit mode
                 onDoubleClick={(e) => {
@@ -977,11 +1017,11 @@ const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
                 </div>
                 <div className="text-xs space-y-1">
                   <div className="flex justify-between gap-4">
-                    <span className="text-slate-500">Completed:</span> 
+                    <span className="text-slate-500">Completed:</span>
                     <span>{formatDateDisplay(stageDate)}</span>
                   </div>
                   <div className="flex justify-between gap-4">
-                    <span className="text-slate-500">Duration:</span> 
+                    <span className="text-slate-500">Duration:</span>
                     <span>{completionDuration}</span>
                   </div>
                   {isCompletedOverdue && <p className="text-amber-600 font-bold">Overdue</p>}
@@ -995,16 +1035,16 @@ const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
       );
     }
 
-// 3. EDIT MODE (Active input)
-    if (isEditing ) {
-      
+    // 3. EDIT MODE (Active input)
+    if (isEditing) {
+
       // -- Helper Functions for value splitting --
       const getCurrentDate = () => {
         if (!editValue) return '';
         try {
           // If it's already an ISO string with T
           if (editValue.includes('T')) return editValue.split('T')[0];
-          
+
           // If it's another format, try parsing
           const parsed = parseDate(editValue);
           return parsed ? format(parsed, 'yyyy-MM-dd') : '';
@@ -1015,9 +1055,9 @@ const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
         if (!editValue) return '00:00';
         try {
           if (editValue.includes('T')) {
-             const t = editValue.split('T')[1];
-             // Ensure we only get HH:mm even if seconds exist
-             return t ? t.substring(0, 5) : '00:00';
+            const t = editValue.split('T')[1];
+            // Ensure we only get HH:mm even if seconds exist
+            return t ? t.substring(0, 5) : '00:00';
           }
           const parsed = parseDate(editValue);
           return parsed ? format(parsed, 'HH:mm') : '00:00';
@@ -1052,7 +1092,7 @@ const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
         <div className="flex items-center gap-2">
           {/* Composite Input Container - Looks like a single shadcn Input */}
           <div className="flex items-center h-8 rounded-md border border-input bg-background px-2 py-1 text-sm ring-offset-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
-            
+
             {/* Date Part */}
             <input
               id={`date-part-${stage.id}`}
@@ -1062,9 +1102,9 @@ const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
               autoFocus
               onKeyDown={handleKeyDownComposite}
               onChange={(e) => {
-                 // Optional: Live update state if needed, though we read from DOM on save for speed
-                 const t = (document.getElementById(`time-part-${stage.id}`) as HTMLInputElement)?.value || '00:00';
-                 setEditValue(`${e.target.value}T${t}`);
+                // Optional: Live update state if needed, though we read from DOM on save for speed
+                const t = (document.getElementById(`time-part-${stage.id}`) as HTMLInputElement)?.value || '00:00';
+                setEditValue(`${e.target.value}T${t}`);
               }}
             />
 
@@ -1080,29 +1120,29 @@ const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
               className="bg-transparent border-none p-0 h-full focus:outline-none focus:ring-0 text-sm text-slate-600 w-[70px]"
               onKeyDown={handleKeyDownComposite}
               onChange={(e) => {
-                 const d = (document.getElementById(`date-part-${stage.id}`) as HTMLInputElement)?.value || '';
-                 setEditValue(`${d}T${e.target.value}`);
+                const d = (document.getElementById(`date-part-${stage.id}`) as HTMLInputElement)?.value || '';
+                setEditValue(`${d}T${e.target.value}`);
               }}
             />
           </div>
 
           {/* Action Buttons */}
           <div className="flex items-center gap-0.5">
-            <Button 
-              size="sm" 
-              variant="ghost" 
-              className="h-7 w-7 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50" 
-              onClick={handleCompositeSave} 
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+              onClick={handleCompositeSave}
               disabled={isLoading}
               title="Save Date"
             >
               <Check className="h-4 w-4" />
             </Button>
-            <Button 
-              size="sm" 
-              variant="ghost" 
-              className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50" 
-              onClick={handleCancel} 
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+              onClick={handleCancel}
               disabled={isLoading}
               title="Cancel"
             >

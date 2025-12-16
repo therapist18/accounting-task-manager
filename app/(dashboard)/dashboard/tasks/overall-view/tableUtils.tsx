@@ -96,15 +96,25 @@ export const STATS_HEADERS = [
   { id: 'stats_na', label: 'N/A Stages', default: false },
 ];
 
-// --- Helper Functions ---
-
-export const parseDate = (dateStr: string): Date | null => {
+export const parseDate = (dateStr: string | Date): Date | null => {
   if (!dateStr) return null;
-  // If it's already a date object
+  
+  // If it's already a Date object
   if (dateStr instanceof Date) {
     return isValid(dateStr) ? dateStr : null;
   }
 
+  // If it's already in dd/MM/yyyy format, parse it directly
+  const dateRegex = /^(\d{2})\/(\d{2})\/(\d{4})$/;
+  const match = dateStr.match(dateRegex);
+  
+  if (match) {
+    const [_, day, month, year] = match;
+    const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    return isValid(date) ? date : null;
+  }
+
+  // Try other date formats
   for (const fmt of DATE_FORMATS) {
     const parsed = parse(dateStr, fmt, new Date());
     if (isValid(parsed)) {
@@ -112,6 +122,7 @@ export const parseDate = (dateStr: string): Date | null => {
     }
   }
 
+  // Last resort: try native Date parsing
   const parsed = new Date(dateStr);
   return isValid(parsed) ? parsed : null;
 };

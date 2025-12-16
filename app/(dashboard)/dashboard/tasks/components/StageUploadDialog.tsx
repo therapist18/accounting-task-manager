@@ -29,9 +29,11 @@ const transformKycFields = (fields: any[]): any[] => {
   if (!Array.isArray(fields)) return []
   return fields.map((field: any) => {
     const isArray = field.type === 'array' || field.isArray === true
+    const fieldName = field.name || field.fieldName || '';
     const transformedField: any = {
-      id: field.id || field.fieldName || '',
-      fieldName: field.name || field.fieldName || '',
+      id: field.id || fieldName,  // Keep the ID for internal reference
+      fieldName: fieldName,       // Use the name as the primary identifier
+      name: fieldName,            // Ensure name is set for consistency
       description: field.description || '',
       isRequired: field.isRequired !== false,
       fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
@@ -50,20 +52,50 @@ const transformKycFields = (fields: any[]): any[] => {
 
 const processExtractedData = (data: any, fields: any[]): any => {
   if (!data || typeof data !== 'object') return data;
-  const result = { ...data };
+  
+  // Create a new object to store the processed data
+  const result: Record<string, any> = {};
+  
+  // First, handle all fields to ensure we process them in the correct order
   fields.forEach(field => {
-    const fieldId = field.id || field.fieldName;
-    if (field.isArray && Array.isArray(result[fieldId])) {
-      result[fieldId] = result[fieldId].map((item: any) => {
-        if (field.arrayConfig?.fields) {
-          return processExtractedData(item, field.arrayConfig.fields);
-        }
-        return item;
-      });
-    } else if (typeof result[fieldId] === 'object' && result[fieldId] !== null) {
-      result[fieldId] = processExtractedData(result[fieldId], field.fields || []);
+    const fieldId = field.id;
+    const fieldName = field.name || field.fieldName;
+    
+    if (!fieldName) return; // Skip if no valid field name
+    
+    // Check if the data exists with either ID or name as key
+    const value = data[fieldId] !== undefined ? data[fieldId] : 
+                 data[fieldName] !== undefined ? data[fieldName] : 
+                 undefined;
+    
+    if (value !== undefined) {
+      // Process nested objects and arrays
+      if (field.isArray && Array.isArray(value)) {
+        result[fieldName] = value.map((item: any) => {
+          if (field.arrayConfig?.fields) {
+            return processExtractedData(item, field.arrayConfig.fields);
+          }
+          return item;
+        });
+      } else if (typeof value === 'object' && value !== null) {
+        result[fieldName] = processExtractedData(value, field.fields || []);
+      } else {
+        result[fieldName] = value;
+      }
     }
   });
+  
+  // Copy any remaining fields that weren't in our field definitions
+  Object.entries(data).forEach(([key, value]) => {
+    // Skip if we've already processed this field
+    if (!(key in result)) {
+      // Only copy if it's not an ID-based key
+      if (!fields.some(f => f.id === key)) {
+        result[key] = value;
+      }
+    }
+  });
+  
   return result;
 };
 
@@ -826,12 +858,25 @@ const saveAllDocuments = useCallback(async () => {
 
           let insertedDoc;
           if (file) {
+            
+            // --- NEW: Sanitize Extracted Data to remove UUID keys ---
+            const rawDetails = docData.extractedData || {};
+            const cleanedDetails = Object.entries(rawDetails).reduce((acc, [key, value]) => {
+              // Check if key is a UUID (approximate regex)
+              const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key);
+              if (!isUUID) {
+                acc[key] = value;
+              }
+              return acc;
+            }, {} as Record<string, any>);
+            // --------------------------------------------------------
+
             const { data: newDoc, error: insertError } = await supabase
               .from('acc_portal_directors_documents')
               .insert([{
                 director_id: task.individual_id,
                 document_id: docConfig.kycId,
-                extracted_details: docData.extractedData || {},
+                extracted_details: cleanedDetails,
                 status: 'active',
                 file_path: filePath,
                 created_at: currentDate,
