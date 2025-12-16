@@ -33,7 +33,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { format, parseISO, isValid } from "date-fns";
+import { format, parse, parseISO, isValid } from "date-fns";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase/client";
@@ -84,34 +84,80 @@ const COLUMN_WIDTH_CLASS = "w-[180px] min-w-[180px] max-w-[180px]";
 const INDEX_WIDTH_CLASS = "w-[60px] min-w-[60px] max-w-[60px]";
 
 const parseDateString = (dateInput: any): Date | null => {
-  return parseDate(dateInput instanceof Date ? dateInput.toISOString() : dateInput);
+  if (!dateInput) return null;
+  
+  // If it's already a Date object, return it
+  if (dateInput instanceof Date) {
+    return isValid(dateInput) ? dateInput : null;
+  }
+  
+  // First try to parse as ISO 8601
+  try {
+    const date = new Date(dateInput);
+    if (isValid(date)) return date;
+  } catch (e) {
+    // Continue to other formats if ISO parsing fails
+  }
+  
+  // Then try other common formats
+  const dateFormats = [
+    "yyyy-MM-dd'T'HH:mm",
+    'dd/MM/yyyy HH:mm',
+    'yyyy-MM-dd',
+    'dd/MM/yyyy',
+    'MM/dd/yyyy',
+    'dd-MM-yyyy',
+    'dd/MM/yyyy HH:mm:ss',
+    'yyyy-MM-dd HH:mm:ss'
+  ];
+  
+  for (const formatStr of dateFormats) {
+    const parsedDate = parse(dateInput, formatStr, new Date());
+    if (isValid(parsedDate)) {
+      return parsedDate;
+    }
+  }
+  
+  return null;
 };
 
 const formatDateForDisplay = (date: any): string => {
+  if (!date) return '-';
+  
+  // First check if it's already in the desired format (dd/MM/yyyy)
+  const ddMMyyyyRegex = /^\d{2}\/\d{2}\/\d{4}$/;
+  if (typeof date === 'string' && ddMMyyyyRegex.test(date)) {
+    return date;
+  }
+  
   const d = parseDateString(date);
   if (!d) return '-';
+  
   try {
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-    return `${day}/${month}/${year}`;
+    return format(d, 'dd/MM/yyyy');
   } catch (e) {
+    console.error('Error formatting date:', e);
     return '-';
   }
 };
 
-// NEW: Helper to display Date AND Time
+// Helper to display Date AND Time
 const formatDateTimeForDisplay = (date: any): string => {
+  if (!date) return '-';
+  
+  // First check if it's already in the desired format (dd/MM/yyyy HH:mm)
+  const ddMMyyyyHHmmRegex = /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/;
+  if (typeof date === 'string' && ddMMyyyyHHmmRegex.test(date)) {
+    return date;
+  }
+  
   const d = parseDateString(date);
   if (!d) return '-';
+  
   try {
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-    const hours = String(d.getHours()).padStart(2, '0');
-    const minutes = String(d.getMinutes()).padStart(2, '0');
-    return `${day}/${month}/${year} ${hours}:${minutes}`;
+    return format(d, 'dd/MM/yyyy HH:mm');
   } catch (e) {
+    console.error('Error formatting date time:', e);
     return '-';
   }
 };

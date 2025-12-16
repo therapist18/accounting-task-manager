@@ -26,6 +26,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { DialogTrigger } from "@radix-ui/react-dialog"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 interface EditableStageCellProps {
   stage: any
@@ -196,6 +197,11 @@ const stageDate = useMemo(() => {
   const stageData = task?.stages?.[stage.id];
   const hasDocumentsUploaded = stageData?.documentsUploaded !== undefined && stageData?.documentsUploaded !== null;
 
+  // For completed stages without a document, return empty string to allow manual date entry
+  if (stageData?.status === 'completed' && !hasLinkedDocument) {
+    return stageData.date || ''; // This will be empty initially, allowing user input
+  }
+
   // Check for document dates first
   if ((requiresUpload || hasDocumentsUploaded) && hasLinkedDocument) {
     // Check extracted_details for dates
@@ -229,11 +235,7 @@ const stageDate = useMemo(() => {
     return typeof value === 'string' ? value : '';
   }
   
-  // Only use completedAt as a last resort if no other date is available
-  if (stageData?.completedAt) {
-    return stageData.completedAt;
-  }
-
+  // Default to empty string to allow manual entry
   return '';
 }, [hasLinkedDocument, linkedDocument, requiresUpload, value, task, stage.id, stage.name]);
 
@@ -284,19 +286,31 @@ const stageDate = useMemo(() => {
     }
   }, [isEditing]);
 
-  useEffect(() => {
-    if (stageDate && stageDate !== 'NaN/NaN/NaN') {
-      let parsedDate = parse(stageDate, "yyyy-MM-dd'T'HH:mm", new Date());
-      if (!isValid(parsedDate)) {
-        parsedDate = parse(stageDate, 'dd/MM/yyyy', new Date());
-      }
-      if (isValid(parsedDate)) {
-        setEditValue(format(parsedDate, "yyyy-MM-dd'T'HH:mm"));
-      }
-    } else {
-      setEditValue('');
+useEffect(() => {
+  if (stageDate && stageDate !== 'NaN/NaN/NaN') {
+    let parsedDate: Date | null = null;
+    
+    // First try to parse as dd/MM/yyyy
+    if (stageDate.includes('/')) {
+      const [day, month, year] = stageDate.split('/').map(Number);
+      parsedDate = new Date(year, month - 1, day);
     }
-  }, [stageDate]);
+    
+    // If that fails, try ISO format
+    if (!parsedDate || !isValid(parsedDate)) {
+      parsedDate = parse(stageDate, "yyyy-MM-dd'T'HH:mm", new Date());
+    }
+    
+    // If we have a valid date, format it for the input
+    if (parsedDate && isValid(parsedDate)) {
+      setEditValue(format(parsedDate, "yyyy-MM-dd'T'HH:mm"));
+    } else {
+      setEditValue(stageDate); // Fallback to the raw value
+    }
+  } else {
+    setEditValue('');
+  }
+}, [stageDate]);
 
 const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string): string => {
   if (status === 'skipped') {
@@ -351,62 +365,101 @@ const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string)
   return dateStr;
 };
 
-  const handleSave = useCallback(async (isSkipped = false, skipReason = '') => {
-    if (!onSave) {
-      toast({ title: "Error", description: "Save handler not available", variant: "destructive" });
-      return;
-    }
+const handleSave = useCallback(async (isSkipped = false, skipReason = '', valueOverride?: string) => {
+  if (!onSave) {
+    toast({ title: "Error", description: "Save handler not available", variant: "destructive" });
+    return;
+  }
 
-    if (isSkipped) {
-      await onSave(stage.id, task.id, '', {
-        ...(linkedDocument?.extracted_details || {}),
-        status: 'skipped',
-        skippedAt: new Date().toISOString(),
-        skippedBy: 'userId',
-        reason: skipReason || selectedSkipReason || 'Not specified',
-      });
-      setIsEditing(false);
-      setIsSkipDialogOpen(false);
-      toast({ title: "Success", description: "Stage marked as skipped" });
-      return;
-    }
+  if (isSkipped) {
+    await onSave(stage.id, task.id, '', {
+      ...(linkedDocument?.extracted_details || {}),
+      status: 'skipped',
+      skippedAt: new Date().toISOString(),
+      skippedBy: 'userId',
+      reason: skipReason || selectedSkipReason || 'Not specified',
+    });
+    setIsEditing(false);
+    setIsSkipDialogOpen(false);
+    toast({ title: "Success", description: "Stage marked as skipped" });
+    return;
+  }
 
-    let dateObj = new Date(editValue);
+  try {
+    // Use the override value if provided, otherwise fallback to state
+    let dateToSave = valueOverride !== undefined ? valueOverride : editValue;
 
-    // REMOVED: Logic that forced T00:00 to become T09:00.
-    // We now respect the user's input directly.
-    
-    const formattedDate = format(dateObj, "dd/MM/yyyy HH:mm");
-
-    // Check validity but don't close blindly if invalid
-    if (!editValue.trim() || !isValid(dateObj)) {
-      toast({ title: "Error", description: "Please enter a valid date and time", variant: "destructive" });
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      await onSave(stage.id, task.id, formattedDate, {
-        ...(linkedDocument?.extracted_details || {}),
-        status: 'completed',
-      });
-
-      setIsEditing(false);
-      toast({
-        title: "Success",
-        description: "Date saved successfully"
-      });
-    } catch (error) {
-      console.error('Save error:', error);
+    // Don't set a default date if completely empty, require user input
+    if (!dateToSave) {
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to save",
+        description: "Please select a date",
         variant: "destructive"
       });
-    } finally {
-      setIsLoading(false);
+      return;
     }
-  }, [editValue, onSave, stage.id, task.id, linkedDocument, selectedSkipReason]);
+
+    let dateObj: Date;
+
+    // Fix: Handle Date-only inputs (YYYY-MM-DD) by appending default time 00:00
+    // This solves the issue where users pick a date but no time
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateToSave)) {
+      dateToSave = `${dateToSave}T00:00`;
+      dateObj = new Date(dateToSave);
+    } 
+    // If date and time are provided (YYYY-MM-DDTHH:MM)
+    else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(dateToSave)) {
+      dateObj = new Date(dateToSave);
+    } 
+    // If date and partial time (YYYY-MM-DDTHH)
+    else if (/^\d{4}-\d{2}-\d{2}T\d{2}$/.test(dateToSave)) {
+      dateToSave = `${dateToSave}:00`;
+      dateObj = new Date(dateToSave);
+    } 
+    // Fallback: try to parse as is
+    else {
+      dateObj = new Date(dateToSave);
+    }
+
+    // Check if the date is valid
+    if (isNaN(dateObj.getTime())) {
+      throw new Error('Invalid date');
+    }
+
+    // Format the date as DD/MM/YYYY HH:mm
+    const day = String(dateObj.getDate()).padStart(2, '0');
+    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const year = dateObj.getFullYear();
+    const hours = String(dateObj.getHours()).padStart(2, '0');
+    const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+    
+    const formattedDate = `${day}/${month}/${year} ${hours}:${minutes}`;
+    
+    console.log('Saving date:', formattedDate);
+
+    setIsLoading(true);
+    await onSave(stage.id, task.id, formattedDate, {
+      ...(linkedDocument?.extracted_details || {}),
+      status: 'completed',
+    });
+
+    setIsEditing(false);
+    toast({
+      title: "Success",
+      description: "Date saved successfully"
+    });
+
+  } catch (error) {
+    console.error('Error saving date:', error, 'Input value:', valueOverride || editValue);
+    toast({
+      title: "Error",
+      description: `Please enter a valid date (current value: "${valueOverride || editValue}")`,
+      variant: "destructive"
+    });
+  } finally {
+    setIsLoading(false);
+  }
+}, [editValue, onSave, stage.id, task.id, linkedDocument, selectedSkipReason]);
 
   const checkPreviousStages = useCallback(async () => {
     if (!task.stages || !stages || stages.length === 0) return true;
@@ -588,15 +641,21 @@ const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string)
       setEditValue('');
     }
   }, [stageDate]);
-
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      handleSave();
-    } else if (e.key === 'Escape') {
-      handleCancel();
-    }
-  }, [handleSave, handleCancel]);
+const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const inputValue = inputRef.current?.value || '';
+    
+    // Update state for UI consistency
+    setEditValue(inputValue);
+    
+    // Pass inputValue directly to handleSave to ensure the latest value is used
+    // This fixes the "No date selected" error
+    handleSave(false, '', inputValue);
+  } else if (e.key === 'Escape') {
+    handleCancel();
+  }
+}, [handleSave, handleCancel]);
 
   const handleDocumentUpload = useCallback(() => {
     onDocumentUpload?.(task, stage);
@@ -846,9 +905,6 @@ const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string)
     // 2. COMPLETED STATUS
     const isExplicitlyCompleted = stageStatus === 'completed';
     const isLegacyCompleted = !stageStatus && (!!value || stageData?.documentsUploaded === true);
-    
-    // NEW: Handle explicitly completed stages that have NO date (allow entry)
-    // This addresses the issue where "completed" JSON status with empty date string prevents editing
     if (isExplicitlyCompleted && (!stageDate || stageDate === 'NaN/NaN/NaN') && !requiresUpload && !isEditing) {
        return (
         <TooltipProvider>
@@ -871,13 +927,14 @@ const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string)
        );
     }
 
-    if ((isExplicitlyCompleted || isLegacyCompleted) && stageDate && stageDate !== 'NaN/NaN/NaN') {
+    if ((isExplicitlyCompleted || isLegacyCompleted) && stageDate && stageDate !== 'NaN/NaN/NaN' && !isEditing) {
       const completionDate = parseDate(stageDate);
       let isCompletedOverdue = false;
       let completionDuration = 'N/A';
 
       if (completionDate && effectiveStartTime && stage.estimated_time) {
-        const start = parseDate(effectiveStartTime instanceof Date ? effectiveStartTime.toISOString() : effectiveStartTime);
+        // ... (Keep existing duration calculation logic) ...
+         const start = parseDate(effectiveStartTime instanceof Date ? effectiveStartTime.toISOString() : effectiveStartTime);
         if (start) {
           const durationMs = completionDate.getTime() - start.getTime();
           const durationMinutes = Math.floor(durationMs / (1000 * 60));
@@ -886,7 +943,6 @@ const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string)
         }
       }
 
-      // ** COLOR & ICON LOGIC for COMPLETED (Matches ReportsPage) **
       const textColorClass = isCompletedOverdue ? "text-amber-600" : "text-emerald-600";
       const icon = isCompletedOverdue ? <Clock className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />;
       const borderColorClass = isCompletedOverdue ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-100";
@@ -896,8 +952,17 @@ const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string)
           <Tooltip>
             <TooltipTrigger asChild>
               <div
-                className={`flex items-center gap-1.5 font-semibold text-xs ${textColorClass} cursor-pointer hover:underline`}
-                onClick={(e) => { e.stopPropagation(); if (!requiresUpload) setIsEditing(true); }}
+                className={`flex items-center gap-1.5 font-semibold text-xs ${textColorClass} cursor-pointer hover:underline select-none`}
+                onClick={(e) => { 
+                  e.stopPropagation(); 
+                  // Keep single click for manual stages
+                  if (!requiresUpload) setIsEditing(true); 
+                }}
+                // ADDED: Double click handler to force edit mode
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  setIsEditing(true);
+                }}
               >
                 {icon}
                 <span>{formatDateDisplay(stageDate)}</span>
@@ -906,12 +971,22 @@ const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string)
             <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md`}>
               <div className="space-y-2 p-1">
                 <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
-                  <span className={`font-bold ${textColorClass}`}>{isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time"}</span>
+                  <span className={`font-bold ${textColorClass}`}>
+                    {isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time"}
+                  </span>
                 </div>
                 <div className="text-xs space-y-1">
-                  <div className="flex justify-between gap-4"><span className="text-slate-500">Completed:</span> <span>{formatDateDisplay(stageDate)}</span></div>
-                  <div className="flex justify-between gap-4"><span className="text-slate-500">Duration:</span> <span>{completionDuration}</span></div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Completed:</span> 
+                    <span>{formatDateDisplay(stageDate)}</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Duration:</span> 
+                    <span>{completionDuration}</span>
+                  </div>
                   {isCompletedOverdue && <p className="text-amber-600 font-bold">Overdue</p>}
+                  {/* Added hint for user */}
+                  <p className="text-[10px] text-slate-400 pt-1 italic border-t border-slate-200 mt-1">Double-click to edit date</p>
                 </div>
               </div>
             </TooltipContent>
@@ -920,13 +995,120 @@ const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string)
       );
     }
 
-    // 3. EDIT MODE (Active input)
-    if (isEditing && !requiresUpload) {
+// 3. EDIT MODE (Active input)
+    if (isEditing ) {
+      
+      // -- Helper Functions for value splitting --
+      const getCurrentDate = () => {
+        if (!editValue) return '';
+        try {
+          // If it's already an ISO string with T
+          if (editValue.includes('T')) return editValue.split('T')[0];
+          
+          // If it's another format, try parsing
+          const parsed = parseDate(editValue);
+          return parsed ? format(parsed, 'yyyy-MM-dd') : '';
+        } catch (e) { return ''; }
+      };
+
+      const getCurrentTime = () => {
+        if (!editValue) return '00:00';
+        try {
+          if (editValue.includes('T')) {
+             const t = editValue.split('T')[1];
+             // Ensure we only get HH:mm even if seconds exist
+             return t ? t.substring(0, 5) : '00:00';
+          }
+          const parsed = parseDate(editValue);
+          return parsed ? format(parsed, 'HH:mm') : '00:00';
+        } catch (e) { return '00:00'; }
+      };
+
+      const datePart = getCurrentDate();
+      const timePart = getCurrentTime();
+
+      const handleCompositeSave = () => {
+        const dateInput = document.getElementById(`date-part-${stage.id}`) as HTMLInputElement;
+        const timeInput = document.getElementById(`time-part-${stage.id}`) as HTMLInputElement;
+
+        const d = dateInput?.value || datePart;
+        const t = timeInput?.value || '00:00';
+
+        if (!d) {
+          toast({ title: "Error", description: "Please select a date", variant: "destructive" });
+          return;
+        }
+
+        // Combine and save
+        handleSave(false, '', `${d}T${t}`);
+      };
+
+      const handleKeyDownComposite = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') handleCompositeSave();
+        if (e.key === 'Escape') handleCancel();
+      };
+
       return (
-        <div className="flex items-center gap-2 min-w-[150px]">
-          <Input ref={inputRef} type="datetime-local" value={editValue} onChange={(e) => setEditValue(e.target.value)} onKeyDown={handleKeyDown} onBlur={handleSave} className="text-sm h-7" disabled={isLoading} step="60" />
-          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-green-600" onClick={handleSave} disabled={isLoading}><Check className="h-3 w-3" /></Button>
-          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-red-600" onClick={handleCancel} disabled={isLoading}><X className="h-3 w-3" /></Button>
+        <div className="flex items-center gap-2">
+          {/* Composite Input Container - Looks like a single shadcn Input */}
+          <div className="flex items-center h-8 rounded-md border border-input bg-background px-2 py-1 text-sm ring-offset-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
+            
+            {/* Date Part */}
+            <input
+              id={`date-part-${stage.id}`}
+              type="date"
+              defaultValue={datePart}
+              className="bg-transparent border-none p-0 h-full focus:outline-none focus:ring-0 text-sm font-medium text-slate-900 w-[110px]"
+              autoFocus
+              onKeyDown={handleKeyDownComposite}
+              onChange={(e) => {
+                 // Optional: Live update state if needed, though we read from DOM on save for speed
+                 const t = (document.getElementById(`time-part-${stage.id}`) as HTMLInputElement)?.value || '00:00';
+                 setEditValue(`${e.target.value}T${t}`);
+              }}
+            />
+
+            {/* Visual Separator */}
+            <span className="text-slate-300 mx-1">|</span>
+
+            {/* Time Part - Defaults to 00:00 visually */}
+            <Clock3 className="h-3 w-3 text-slate-400 mr-1.5" />
+            <input
+              id={`time-part-${stage.id}`}
+              type="time"
+              defaultValue={timePart}
+              className="bg-transparent border-none p-0 h-full focus:outline-none focus:ring-0 text-sm text-slate-600 w-[70px]"
+              onKeyDown={handleKeyDownComposite}
+              onChange={(e) => {
+                 const d = (document.getElementById(`date-part-${stage.id}`) as HTMLInputElement)?.value || '';
+                 setEditValue(`${d}T${e.target.value}`);
+              }}
+            />
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex items-center gap-0.5">
+            <Button 
+              size="sm" 
+              variant="ghost" 
+              className="h-7 w-7 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50" 
+              onClick={handleCompositeSave} 
+              disabled={isLoading}
+              title="Save Date"
+            >
+              <Check className="h-4 w-4" />
+            </Button>
+            <Button 
+              size="sm" 
+              variant="ghost" 
+              className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50" 
+              onClick={handleCancel} 
+              disabled={isLoading}
+              title="Cancel"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       );
     }
