@@ -8,7 +8,6 @@ import { PlusCircle, FileText, Loader2, Settings, ChevronRight, Trash2 } from "l
 import { toast } from "@/components/ui/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { ScrollArea } from "@/components/ui/scroll-area"
-// --- MODIFICATION: Import Tabs components and Badge for the new UI ---
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -22,8 +21,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 
-import { DepartmentSidebar } from "../../departments/main-shared-components/department-sidebar"
-import { fetchDepartments } from "../../departments/departments/database"
+import { DepartmentSidebar } from "../departments/main-shared-components/department-sidebar"
+import { fetchDepartments } from "../departments/departments/database"
 import DocumentTemplateManager from "./document-template-manager"
 
 // --- Main Page Component ---
@@ -56,6 +55,7 @@ export default function LettersPage() {
     performInitialLoad();
   }, []);
 
+  // Legacy string ID for fetching requirements (assuming requirements table still uses string ID)
   const constructedClassId = useMemo(() => {
     if (!selectedClass && !selectedSubclass) return null;
     return selectedSubclass ?
@@ -63,11 +63,50 @@ export default function LettersPage() {
       `${selectedSubdepartment}_${selectedClass}`;
   }, [selectedSubdepartment, selectedClass, selectedSubclass]);
 
+  // --- MODIFICATION: Construct the job_level JSON object ---
+  const jobLevelObject = useMemo(() => {
+    // Helper to ensure we store numbers if the IDs are numeric strings
+    const parseId = (id: string) => {
+      if (!id) return null;
+      const num = Number(id);
+      return isNaN(num) ? id : num;
+    };
+
+    const deptId = parseId(selectedDepartment);
+    const subDeptId = parseId(selectedSubdepartment);
+    const classId = parseId(selectedClass);
+    const subclassId = parseId(selectedSubclass);
+
+    if (subclassId) {
+      return {
+        level: 4,
+        department_id: deptId,
+        subdepartment_id: subDeptId,
+        class_id: classId,
+        subclass_id: subclassId
+      };
+    }
+    
+    if (classId) {
+      return {
+        level: 3,
+        department_id: deptId,
+        subdepartment_id: subDeptId,
+        class_id: classId,
+        subclass_id: null
+      };
+    }
+
+    // Handle Dept/Subdept levels if needed, though UI seems to block at Class level
+    return null;
+  }, [selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
+
+
   // --- Fetch Template Types based on Sidebar Selection ---
   useEffect(() => {
     const fetchLetterTypesForClass = async () => {
-      const activeClassId = selectedSubclass || selectedClass;
-      if (!activeClassId || !selectedSubdepartment) {
+      // We still use the constructedClassId for requirements as that table likely uses the string format
+      if (!constructedClassId) {
         setLetterTypes([]);
         setSelectedLetter(null);
         return;
@@ -121,7 +160,7 @@ export default function LettersPage() {
     };
 
     fetchLetterTypesForClass();
-  }, [selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass, constructedClassId]);
+  }, [constructedClassId]);
 
 
   // --- Event Handlers for Sidebar ---
@@ -134,8 +173,6 @@ export default function LettersPage() {
   const handleTemplateUpdate = () => setTemplateVersion(v => v + 1);
 
   const handleCreateNewTemplate = () => {
-    // When creating, we want the dialog to start fresh. 
-    // We pass the selected letter but no initial templates.
     setEditingTemplate(null);
     setTemplateDialogOpen(true);
   };
@@ -215,8 +252,11 @@ export default function LettersPage() {
                 <TemplateDisplayArea
                   key={`${selectedLetter.id}-${templateVersion}`}
                   selectedLetter={selectedLetter}
+                  // --- MODIFICATION: Pass the job_level object for fetching ---
+                  jobLevel={jobLevelObject}
                   onCreateNew={() => handleCreateNewTemplate()}
                   onEdit={handleEditTemplate}
+                  templateVersion={templateVersion}
                 />
               ) : (
                 <Card className="h-full flex items-center justify-center">
@@ -237,8 +277,8 @@ export default function LettersPage() {
           isOpen={templateDialogOpen}
           onClose={closeTemplateDialog}
           onTemplateUpdate={handleTemplateUpdate}
-          classId={constructedClassId}
-          // Pass the specific template to edit, or an empty array if creating new
+          // --- MODIFICATION: Pass the job_level object ---
+          jobLevel={jobLevelObject}
           initialTemplates={editingTemplate ? [editingTemplate] : []}
         />
       )}
@@ -246,7 +286,7 @@ export default function LettersPage() {
   );
 }
 
-// --- NEW COMPONENT: A reusable card for displaying a single template ---
+// ... TemplateCard component remains the same ...
 function TemplateCard({ template, onEdit, onDelete }) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -335,41 +375,83 @@ function TemplateCard({ template, onEdit, onDelete }) {
   );
 }
 
-
-// --- HEAVILY MODIFIED: This component now uses Tabs to display templates ---
-function TemplateDisplayArea({ selectedLetter, onCreateNew, onEdit, templateVersion }) {
-  const [templates, setTemplates] = useState<any[]>([]);
+function TemplateDisplayArea({ selectedLetter, onCreateNew, onEdit, templateVersion, jobLevel }) {
+  const [allTemplates, setAllTemplates] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // 1. Fetch ALL templates for this document (Ignore job_level filtering here)
   useEffect(() => {
     const fetchTemplates = async () => {
       if (!selectedLetter) return;
       setIsLoading(true);
       try {
+        // Query strictly by document_id to avoid JSON syntax errors
         const { data, error } = await supabase
           .from('acc_portal_templates')
           .select('*')
           .eq('document_id', selectedLetter.id)
           .order('file_name', { ascending: true });
+
         if (error) throw error;
-        setTemplates(data || []);
+        setAllTemplates(data || []);
       } catch (error) {
-        console.error(`Error fetching templates for ${selectedLetter.id}:`, error);
+        console.error(`Error fetching templates:`, error);
+        toast({ 
+          title: "Error Loading Templates", 
+          description: "Could not fetch templates.", 
+          variant: "destructive" 
+        });
       } finally {
         setIsLoading(false);
       }
     };
     fetchTemplates();
-  }, [selectedLetter, templateVersion]);
+  }, [selectedLetter, templateVersion]); // Removed jobLevel dependency here
 
-  // --- MODIFICATION: Memoized logic to categorize templates for the tabs ---
+  // 2. Filter Client-Side (Robust against Array vs Object storage)
+  const filteredTemplates = useMemo(() => {
+    if (!jobLevel) return allTemplates;
+
+    return allTemplates.filter(t => {
+      let tJobs = t.job_level;
+
+      // Handle cases where it might be a JSON string (due to DB column type)
+      if (typeof tJobs === 'string') {
+        try { tJobs = JSON.parse(tJobs); } catch { return false; }
+      }
+
+      // Ensure we are comparing against an Array
+      if (!Array.isArray(tJobs)) {
+        // If stored as a single object, wrap it
+        tJobs = tJobs ? [tJobs] : [];
+      }
+
+      // Check if ANY job_level in the template's array matches the selected jobLevel
+      return tJobs.some((job: any) => 
+        job.level === jobLevel.level &&
+        job.department_id === jobLevel.department_id &&
+        job.subdepartment_id === jobLevel.subdepartment_id &&
+        job.class_id === jobLevel.class_id &&
+        // Handle potential nulls in subclass_id comparison
+        (job.subclass_id === jobLevel.subclass_id || (!job.subclass_id && !jobLevel.subclass_id))
+      );
+    });
+  }, [allTemplates, jobLevel]);
+
+  // 3. Categorize for Tabs
   const categorizedTemplates = useMemo(() => {
-    const categorized = { all: templates, uncategorized: [] };
+    const categorized = { all: filteredTemplates, uncategorized: [] };
     const tabs = new Set<string>();
 
-    templates.forEach(template => {
-      if (Array.isArray(template.entity_types) && template.entity_types.length > 0) {
-        template.entity_types.forEach(type => {
+    filteredTemplates.forEach(template => {
+      let entityTypes = template.entity_types;
+      // Handle stringified JSON if necessary
+      if (typeof entityTypes === 'string') {
+        try { entityTypes = JSON.parse(entityTypes); } catch {}
+      }
+
+      if (Array.isArray(entityTypes) && entityTypes.length > 0) {
+        entityTypes.forEach(type => {
           tabs.add(type);
           if (!categorized[type]) categorized[type] = [];
           categorized[type].push(template);
@@ -381,7 +463,7 @@ function TemplateDisplayArea({ selectedLetter, onCreateNew, onEdit, templateVers
 
     const sortedTabs = Array.from(tabs).sort();
     return { tabs: sortedTabs, categorized };
-  }, [templates]);
+  }, [filteredTemplates]);
 
   return (
     <Card className="h-full flex flex-col">
@@ -397,8 +479,7 @@ function TemplateDisplayArea({ selectedLetter, onCreateNew, onEdit, templateVers
       <CardContent className="flex-1 overflow-hidden">
         {isLoading ? (
           <div className="flex justify-center items-center h-full"><Loader2 className="h-6 w-6 animate-spin" /></div>
-        ) : templates.length > 0 ? (
-          // --- MODIFICATION: Replaced simple list with a Tabs component ---
+        ) : filteredTemplates.length > 0 ? (
           <Tabs defaultValue="all" className="flex flex-col h-full">
             <TabsList>
               <TabsTrigger value="all">All</TabsTrigger>
@@ -419,24 +500,9 @@ function TemplateDisplayArea({ selectedLetter, onCreateNew, onEdit, templateVers
                       template={template} 
                       onEdit={onEdit}
                       onDelete={async (templateId) => {
-                        try {
-                          const { error } = await supabase
-                            .from('acc_portal_templates')
-                            .delete()
-                            .eq('id', templateId);
-
-                          if (error) throw error;
-                          
-                          // Refresh templates after deletion
-                          setTemplateVersion(v => v + 1);
-                          toast({
-                            title: 'Success',
-                            description: 'Template deleted successfully',
-                          });
-                        } catch (error) {
-                          console.error('Error deleting template:', error);
-                          throw error;
-                        }
+                        await supabase.from('acc_portal_templates').delete().eq('id', templateId);
+                        setAllTemplates(prev => prev.filter(p => p.id !== templateId)); // Optimistic update
+                        toast({ title: 'Success', description: 'Template deleted' });
                       }}
                     />
                   ))}
@@ -449,28 +515,15 @@ function TemplateDisplayArea({ selectedLetter, onCreateNew, onEdit, templateVers
                         template={template} 
                         onEdit={onEdit}
                         onDelete={async (templateId) => {
-                          try {
-                            const { error } = await supabase
-                              .from('acc_portal_templates')
-                              .delete()
-                              .eq('id', templateId);
-
-                            if (error) throw error;
-                            
-                            setTemplateVersion(v => v + 1);
-                            toast({
-                              title: 'Success',
-                              description: 'Template deleted successfully',
-                            });
-                          } catch (error) {
-                            console.error('Error deleting template:', error);
-                            throw error;
-                          }
+                          await supabase.from('acc_portal_templates').delete().eq('id', templateId);
+                          setAllTemplates(prev => prev.filter(p => p.id !== templateId));
+                          toast({ title: 'Success', description: 'Template deleted' });
                         }}
                       />
                     ))}
                   </TabsContent>
                 ))}
+                {/* Uncategorized Tab Content */}
                 {categorizedTemplates.categorized.uncategorized.length > 0 && (
                   <TabsContent value="uncategorized">
                     {categorizedTemplates.categorized.uncategorized.map(template => (
@@ -479,23 +532,9 @@ function TemplateDisplayArea({ selectedLetter, onCreateNew, onEdit, templateVers
                         template={template} 
                         onEdit={onEdit}
                         onDelete={async (templateId) => {
-                          try {
-                            const { error } = await supabase
-                              .from('acc_portal_templates')
-                              .delete()
-                              .eq('id', templateId);
-
-                            if (error) throw error;
-                            
-                            setTemplateVersion(v => v + 1);
-                            toast({
-                              title: 'Success',
-                              description: 'Template deleted successfully',
-                            });
-                          } catch (error) {
-                            console.error('Error deleting template:', error);
-                            throw error;
-                          }
+                          await supabase.from('acc_portal_templates').delete().eq('id', templateId);
+                          setAllTemplates(prev => prev.filter(p => p.id !== templateId));
+                          toast({ title: 'Success', description: 'Template deleted' });
                         }}
                       />
                     ))}
@@ -508,7 +547,9 @@ function TemplateDisplayArea({ selectedLetter, onCreateNew, onEdit, templateVers
           <div className="h-full flex items-center justify-center text-center border-2 border-dashed rounded-lg">
             <div>
               <h3 className="text-lg font-medium">No Templates Found</h3>
-              <p className="text-sm text-muted-foreground mt-1">Get started by creating the first template.</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                No templates match the current selection.
+              </p>
             </div>
           </div>
         )}

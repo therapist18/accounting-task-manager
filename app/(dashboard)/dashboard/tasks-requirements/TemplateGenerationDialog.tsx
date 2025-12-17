@@ -200,8 +200,8 @@ export default function TemplateGenerationDialog({
         }
     }, [isOpen, template, availableTemplates]);
 
-    const populateContent = useCallback((data, placeholders, styles) => {
-        if (!selectedTemplate ?.content || !placeholders) return '';
+    const populateContent = useCallback((data, placeholders, styles, forPreview = true) => {
+        if (!selectedTemplate?.content || !placeholders) return '';
         let content = selectedTemplate.content;
 
         placeholders.forEach(placeholder => {
@@ -214,20 +214,39 @@ export default function TemplateGenerationDialog({
                         maxWidth: '100%',
                         textAlign: 'center'
                     };
-                    const imageHtml = `
-                        <div style="text-align: ${style.textAlign || 'center'};">
-                            <img src="${value}" alt="${placeholder.name}" style="max-width: ${style.maxWidth || '100%'}; height: auto; display: inline-block;" />
-                        </div>
-                    `;
+                    
+                    // For Word documents, we need to handle images differently in the preview vs download
+                    const isWordDoc = selectedTemplate.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+                    
+                    let imageHtml = '';
+                    
+                    if (isWordDoc && !forPreview) {
+                        // For Word document generation, use a placeholder that will be replaced during docx generation
+                        imageHtml = `[IMAGE:${placeholder.name}]`;
+                    } else {
+                        // For preview and HTML exports, use the actual image
+                        imageHtml = `
+                            <div style="text-align: ${style.textAlign || 'center'};">
+                                <img src="${value}" alt="${placeholder.name}" style="max-width: ${style.maxWidth || '100%'}; height: auto; display: inline-block;" />
+                            </div>
+                        `;
+                    }
+                    
                     content = content.replace(regex, imageHtml);
                 } else {
-                    // For text, replace newlines with <br> for proper HTML rendering
-                    const formattedValue = String(value).replace(/\n/g, '<br />');
+                    // For text, replace newlines with appropriate line breaks
+                    const formattedValue = forPreview 
+                        ? String(value).replace(/\n/g, '<br />')  // <br> for HTML preview
+                        : String(value).replace(/\n/g, '</w:t><w:br/><w:t>');  // Word line breaks for docx
                     content = content.replace(regex, formattedValue);
                 }
-            } else {
+            } else if (forPreview) {
+                // Only show placeholders in preview mode
                 const indicatorHtml = `<span style="border: 1px dashed #e0e0e0; background-color: #fafafa; color: #b0b0b0; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.85em; display: inline-block;">[${placeholder.name}]</span>`;
                 content = content.replace(regex, indicatorHtml);
+            } else {
+                // For final document, replace missing values with empty string
+                content = content.replace(regex, '');
             }
         });
         return content;
@@ -386,11 +405,9 @@ export default function TemplateGenerationDialog({
             setManuallyEditedFields(new Set());
             setImageStyles(initialImageStyles);
 
-            if (selectedTemplate.file_type === 'text/html') {
-                setPreviewContent(populateContent(initialFormData, placeholders, initialImageStyles));
-            } else {
-                setPreviewContent('');
-            }
+            // Always generate preview for both HTML and Word documents
+            const preview = populateContent(initialFormData, placeholders, initialImageStyles, true);
+            setPreviewContent(preview);
         }
     }, [isOpen, selectedTemplate, getPlaceholderValue, smartFieldMatch, populateContent]);
 
@@ -424,16 +441,96 @@ export default function TemplateGenerationDialog({
     const generateAndDownload = async (outputType = 'word') => {
         setIsGenerating(true);
         try {
-            const fileName = `${documentName}_${formatDate(new Date(), 'YYYYMMDD')}`;
-
+            const fileName = `${documentName.replace(/[^\w\s-]/g, '')}_${formatDate(new Date(), 'YYYYMMDD')}`;
+            const placeholders = selectedTemplate?.placeholders || [];
+            
+            // Generate content with current form data and styles
+            const content = populateContent(formData, placeholders, imageStyles, false);
+            
             if (outputType === 'word') {
-                const blob = await asBlob(previewContent);
+                // For Word documents, we need to handle images specially
+                let docxContent = content;
+                const imagePlaceholders = [];
+                
+                // Extract image placeholders for Word document
+                placeholders.forEach(p => {
+                    if (p.type === 'image' && formData[p.name]) {
+                        const placeholder = `[IMAGE:${p.name}]`;
+                        if (docxContent.includes(placeholder)) {
+                            imagePlaceholders.push({
+                                placeholder,
+                                imageData: formData[p.name],
+                                style: imageStyles[p.name] || { maxWidth: '100%', textAlign: 'center' }
+                            });
+                        }
+                    }
+                });
+                
+                // For Word documents, we need to use a different approach
+                const { Packer } = await import('docx');
+                const { Document, Paragraph, TextRun, ImageRun, AlignmentType } = await import('docx');
+                
+                // Create paragraphs from content
+                const paragraphs = docxContent.split('\n').map(line => {
+                    // Skip empty lines
+                    if (!line.trim()) return new Paragraph({
+                        children: [new TextRun('')],
+                        spacing: { after: 100 }
+                    });
+                    
+                    // Handle image placeholders
+                    const imageMatch = line.match(/\[IMAGE:([^\]]+)\]/);
+                    if (imageMatch) {
+                        const placeholder = imageMatch[0];
+                        const imageData = imagePlaceholders.find(ip => ip.placeholder === placeholder);
+                        if (imageData) {
+                            const alignment = {
+                                'left': AlignmentType.LEFT,
+                                'center': AlignmentType.CENTER,
+                                'right': AlignmentType.RIGHT
+                            }[imageData.style.textAlign || 'center'];
+                            
+                            return new Paragraph({
+                                children: [
+                                    new ImageRun({
+                                        data: imageData.imageData,
+                                        transformation: {
+                                            width: 400,  // Default width, can be adjusted based on style
+                                            height: 300,
+                                        },
+                                    })
+                                ],
+                                alignment,
+                                spacing: { after: 200 }
+                            });
+                        }
+                    }
+                    
+                    // Regular text paragraph
+                    return new Paragraph({
+                        children: [new TextRun(line)],
+                        spacing: { after: 100 }
+                    });
+                });
+                
+                // Create the document
+                const doc = new Document({
+                    sections: [{
+                        properties: {},
+                        children: paragraphs
+                    }]
+                });
+                
+                // Generate and download the document
+                const blob = await Packer.toBlob(doc);
                 saveAs(blob, `${fileName}.docx`);
+                
             } else if (outputType === 'pdf') {
-                // Dynamically import html2pdf only on client side
+                // For PDF, we can use the preview content with html2pdf
                 const html2pdf = (await import('html2pdf.js')).default;
                 const contentElement = document.createElement('div');
-                contentElement.innerHTML = previewContent;
+                contentElement.innerHTML = populateContent(formData, placeholders, imageStyles, true);
+                
                 const opt = {
                     margin: 0.5,
                     filename: `${fileName}.pdf`,
@@ -441,14 +538,20 @@ export default function TemplateGenerationDialog({
                     html2canvas: { 
                         scale: 2,
                         useCORS: true,
-                        logging: false
+                        logging: false,
+                        allowTaint: true,
+                        letterRendering: true
                     },
                     jsPDF: { 
                         unit: 'in', 
                         format: 'letter', 
-                        orientation: 'portrait' 
+                        orientation: 'portrait'
+                    },
+                    pagebreak: { 
+                        mode: ['avoid-all', 'css', 'legacy'] 
                     }
                 };
+                
                 await html2pdf().set(opt).from(contentElement).save();
             }
 
@@ -462,7 +565,7 @@ export default function TemplateGenerationDialog({
             console.error("Error generating document:", error);
             toast({
                 title: "Generation Failed",
-                description: "An unexpected error occurred while generating the document.",
+                description: error instanceof Error ? error.message : "An unexpected error occurred while generating the document.",
                 variant: "destructive",
             });
         } finally {
@@ -581,12 +684,31 @@ export default function TemplateGenerationDialog({
                     </div>
                     {/* RIGHT PANEL */}
                     <div className="bg-gray-100 dark:bg-gray-900 p-8 overflow-y-auto">
-                        {selectedTemplate?.file_type === 'text/html' ? (
+                        {selectedTemplate?.file_type === 'text/html' || selectedTemplate?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ? (
                             <div className="bg-white h-full shadow-lg rounded-sm p-12 mx-auto" style={{width: '210mm'}}>
-                                <div dangerouslySetInnerHTML={{ __html: previewContent }} className="prose prose-sm max-w-none"/>
+                                <div 
+                                    dangerouslySetInnerHTML={{ __html: previewContent }} 
+                                    className="prose prose-sm max-w-none"
+                                    style={{
+                                        minHeight: '297mm',
+                                        padding: '20mm',
+                                        margin: '0 auto',
+                                        background: 'white',
+                                        boxShadow: '0 0 10px rgba(0,0,0,0.1)'
+                                    }}
+                                />
                             </div>
                         ) : (
-                            <div className="flex items-center justify-center h-full text-center text-muted-foreground"><p>Live preview unavailable for this file type.</p></div>
+                            <div className="flex items-center justify-center h-full text-center text-muted-foreground">
+                                <div className="max-w-md">
+                                    <FileText className="mx-auto h-12 w-12 mb-4 text-gray-400" />
+                                    <h3 className="text-lg font-medium mb-2">Preview Unavailable</h3>
+                                    <p className="text-sm text-gray-500">
+                                        Live preview is not available for this document type. 
+                                        You can still generate and download the document.
+                                    </p>
+                                </div>
+                            </div>
                         )}
                     </div>
                 </div>

@@ -256,7 +256,7 @@ export function RequirementsTable({
         if (docDef && !documentsMap.has(docId)) {
           const itemWithSettings = { ...item, ...docDef, selectionId: item.id };
           let category: 'company' | 'individual' | 'letter' = 'individual';
-          if (docDef.main_category === 'Letters') {
+          if (docDef.main_category === 'Letters' || docDef.main_category === 'Forms') {
             category = 'letter';
           } else if (docDef.category === 'company-docs') {
             category = 'company';
@@ -275,8 +275,8 @@ export function RequirementsTable({
     return {
       documents: {
         company: allDocs.filter(i => i.category === 'company'),
-        individual: allDocs.filter(i => i.category === 'individual'),
-        letters: allDocs.filter(i => i.category === 'letter'),
+        individual: allDocs.filter(i => i.category === 'individual' && i.document.main_category !== 'Letters' && i.document.main_category !== 'Forms'),
+        letters: allDocs.filter(i => i.document.main_category === 'Letters' || i.document.main_category === 'Forms'),
       }
     };
   }, [filteredGroupedTasks, taskClassRequirements, documents, parseSelectionId]);

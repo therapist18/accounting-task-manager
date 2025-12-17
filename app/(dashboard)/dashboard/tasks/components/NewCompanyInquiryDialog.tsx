@@ -95,7 +95,6 @@ export function NewCompanyInquiryDialog({
 
     // Fetch all companies
     const loadCompanies = useCallback(async () => {
-        console.log('🏢 [LOG] Fetching companies...');
         setLoadingCompanies(true);
         try {
             const { data, error } = await supabase
@@ -105,9 +104,8 @@ export function NewCompanyInquiryDialog({
 
             if (error) throw error;
             setCompanies(data || []);
-            console.log(`✅ [LOG] Found ${data?.length || 0} companies.`);
         } catch (error) {
-            console.error('❌ [LOG] Error fetching companies:', error);
+            console.error('Error fetching companies:', error);
             toast({ title: "Error", description: "Failed to load companies.", variant: "destructive" });
         } finally {
             setLoadingCompanies(false);
@@ -116,7 +114,6 @@ export function NewCompanyInquiryDialog({
 
     // Fetch officials (directors/shareholders) for a given company
     const fetchOfficials = useCallback(async (companyId: number) => {
-        console.log(`👨‍💼 [LOG] Fetching officials for company ID: ${companyId}`);
         setLoadingOfficials(true);
         setOfficials([]);
         setSelectedOfficialIds(new Set());
@@ -132,11 +129,8 @@ export function NewCompanyInquiryDialog({
             (data || []).forEach(individual => {
                 const associations = individual.employment_data?.associations || [];
                 
-                // *** KEY CHANGE HERE ***
-                // Filter associations where company_id (string) matches the selected companyId (number)
-                // and the role is either Director or Shareholder.
                 const relevantAssociations = associations.filter(assoc =>
-                    assoc.company_id?.toString() === companyId.toString() && // Convert both to string for safe comparison
+                    assoc.company_id?.toString() === companyId.toString() && 
                     (assoc.individual_type === 'Director' || assoc.individual_type === 'Shareholder')
                 );
 
@@ -145,26 +139,21 @@ export function NewCompanyInquiryDialog({
                         id: individual.id,
                         full_name: individual.full_name,
                         is_current: relevantAssociation.is_current === true,
-                        role: relevantAssociation.individual_type // Store the role
+                        role: relevantAssociation.individual_type
                     });
                 })
             });
 
-            // Remove duplicates in case an individual is both a Director and Shareholder for the same company
             const uniqueOfficials = Array.from(new Map(associatedOfficials.map(item => [item.id, item])).values());
-
-            console.log(`✅ [LOG] Found ${uniqueOfficials.length} officials for the selected company.`);
             setOfficials(uniqueOfficials);
 
-            // Pre-select active officials
             const activeOfficialIds = uniqueOfficials
                 .filter(d => d.is_current)
                 .map(d => d.id);
             setSelectedOfficialIds(new Set(activeOfficialIds));
-            console.log(`👍 [LOG] Pre-selected ${activeOfficialIds.length} active officials.`);
 
         } catch (error) {
-            console.error('❌ [LOG] Error fetching officials:', error);
+            console.error('Error fetching officials:', error);
             toast({ title: "Error", description: "Failed to load officials for this company.", variant: "destructive" });
         } finally {
             setLoadingOfficials(false);
@@ -180,11 +169,8 @@ export function NewCompanyInquiryDialog({
 
     // Effect to handle department, subdepartment, and class selection
     useEffect(() => {
-                
         if (open) {
             if (selectedDepartmentId) {
-               
-                // Find the selected department, subdepartment, and class
                 const department = propDepartments.find(d => 
                     String(d.id) === String(selectedDepartmentId) || d.id === Number(selectedDepartmentId)
                 );
@@ -193,15 +179,12 @@ export function NewCompanyInquiryDialog({
                 let selectedClass = null;
                 
                 if (department?.tm_subdepartments) {
-                    
                     if (selectedSubdepartmentId) {
                         subdepartment = department.tm_subdepartments.find((sd: any) => 
                             String(sd.id) === String(selectedSubdepartmentId) || sd.id === Number(selectedSubdepartmentId)
                         );
                         
                         if (subdepartment?.classes && selectedClassId) {
-                                                     
-                            // Search in both main classes and their subclasses
                             const findClass = (classes: any[], targetId: string | number): any => {
                                 for (const cls of classes) {
                                     if (String(cls.id) === String(targetId) || cls.id === Number(targetId)) {
@@ -217,7 +200,6 @@ export function NewCompanyInquiryDialog({
                             
                             selectedClass = findClass(subdepartment.classes, selectedClassId);
                              
-                            // If the selected class has subclasses, auto-select the first one
                             if (selectedClass?.subClasses?.length > 0) {
                                 const firstSubclass = selectedClass.subClasses[0];
                                 setFormData(prev => ({
@@ -236,18 +218,14 @@ export function NewCompanyInquiryDialog({
                     }
                 }
                 
-                setFormData(prev => {
-                    const newData = {
-                        ...prev,
-                        department_id: String(selectedDepartmentId),
-                        subdepartment_id: subdepartment ? String(subdepartment.id) : '',
-                        class_id: selectedClass ? String(selectedClass.id) : '',
-                        subclass_id: '' // Reset subclass when class changes
-                    };
-                    return newData;
-                });
-            } else {
-                console.warn('⚠️ [NewCompanyInquiryDialog] No selectedDepartmentId provided');
+                setFormData(prev => ({
+                    ...prev,
+                    department_id: String(selectedDepartmentId),
+                    subdepartment_id: subdepartment ? String(subdepartment.id) : '',
+                    class_id: selectedClass ? String(selectedClass.id) : '',
+                    // Keep subclass if already set by logic above, else empty
+                    subclass_id: prev.class_id === (selectedClass ? String(selectedClass.id) : '') ? prev.subclass_id : ''
+                }));
             }
             
             if (companies.length === 0) {
@@ -261,12 +239,10 @@ export function NewCompanyInquiryDialog({
         if (selectedCompany) {
             fetchOfficials(selectedCompany.id);
         } else {
-            // Clear officials if no company is selected
             setOfficials([]);
             setSelectedOfficialIds(new Set());
         }
     }, [selectedCompany, fetchOfficials]);
-
 
     // Handle form field changes
     const handleChange = useCallback((field: keyof typeof formData, value: any) => {
@@ -304,7 +280,7 @@ export function NewCompanyInquiryDialog({
             else {
                 newState[field] = value;
             }
-                        return { ...newState }; // Return a new object to ensure re-render
+            return { ...newState };
         });
     }, [formData]);
 
@@ -352,138 +328,56 @@ export function NewCompanyInquiryDialog({
         return {
             officers: allOfficers.filter(o => activeOfficerIds.includes(o.id)),
             managers: allUsers.filter(u => activeManagerIds.includes(u.id)),
-            assistants: [] // Determined by manager selection
+            assistants: [] 
         };
     }, []);
 
     useEffect(() => {
-        console.log('🔔 [LOG] useEffect for subdepartment changes triggered');
-        console.log('   [LOG] Open state:', open);
-        console.log('   [LOG] Current subdepartment_id:', formData.subdepartment_id);
-        console.log('   [LOG] Local users count:', localUsers.length);
+        if (!open || !formData.subdepartment_id || localUsers.length === 0) return;
         
-        if (!open || !formData.subdepartment_id || localUsers.length === 0) {
-            console.log('   [LOG] Early return - conditions not met:', {
-                isOpen: open,
-                hasSubdepartment: !!formData.subdepartment_id,
-                hasLocalUsers: localUsers.length > 0
-            });
-            return;
-        }
-        
-        console.log('   [LOG] Finding department with ID:', formData.department_id);
         const dept = departments.find(d => d.id.toString() === formData.department_id);
-        console.log('   [LOG] Found department:', dept ? dept.name : 'Not found');
-        
-        if (dept?.tm_subdepartments) {
-            console.log('   [LOG] Available subdepartments in department:', 
-                dept.tm_subdepartments.map((s: any) => ({ id: s.id, name: s.name })));
-        }
-        
         const subdept = dept?.tm_subdepartments?.find((s: any) => s.id.toString() === formData.subdepartment_id);
-        console.log('   [LOG] Found subdepartment:', subdept ? subdept.name : 'Not found');
         
         if (subdept) {
-            console.log('   [LOG] Finding active staff for subdepartment...');
             const activeStaff = findActiveStaffForSubdept(subdept, localUsers, localOfficers);
-            console.log('   [LOG] Found active staff:', {
-                officers: activeStaff.officers.length,
-                managers: activeStaff.managers.length,
-                assistants: activeStaff.assistants.length
-            });
-            
             setAvailableOfficers(activeStaff.officers);
             setAvailableManagers(activeStaff.managers);
             setAvailableAssistants([]);
             setFormData(prev => ({ ...prev, officer_id: '', task_manager_id: '', task_assistant_id: '' }));
-        } else {
-            console.log('❌ [LOG] No matching subdepartment found');
         }
     }, [open, formData.subdepartment_id, localUsers, localOfficers, departments, formData.department_id, findActiveStaffForSubdept]);
 
     useEffect(() => {
-        if (!formData.task_manager_id) {
+        if (!open || !formData.task_manager_id || localUsers.length === 0) {
             setAvailableAssistants([]);
             return;
         }
-        console.log('🔔 [LOG] useEffect for task manager changes triggered');
-        console.log('   [LOG] Open state:', open);
-        console.log('   [LOG] Current task_manager_id:', formData.task_manager_id);
-        console.log('   [LOG] Local users count:', localUsers.length);
         
-        if (!open || !formData.task_manager_id || localUsers.length === 0) {
-            console.log('   [LOG] Early return - conditions not met:', {
-                isOpen: open,
-                hasTaskManager: !!formData.task_manager_id,
-                hasLocalUsers: localUsers.length > 0
-            });
-            return;
-        }
-        
-        console.log('   [LOG] Finding department with ID:', formData.department_id);
         const dept = departments.find(d => d.id.toString() === formData.department_id);
-        console.log('   [LOG] Found department:', dept ? dept.name : 'Not found');
-        
-        if (dept?.tm_subdepartments) {
-            console.log('   [LOG] Available subdepartments in department:', 
-                dept.tm_subdepartments.map((s: any) => ({ id: s.id, name: s.name })));
-        }
-        
         const subdept = dept?.tm_subdepartments?.find((s: any) => s.id.toString() === formData.subdepartment_id);
-        console.log('   [LOG] Found subdepartment:', subdept ? subdept.name : 'Not found');
         
         if (subdept) {
-            console.log('   [LOG] Finding assistants for task manager...');
             const assistantsForManager = subdept.assistant_history?.filter(a => !a.end_date && a.manager_id?.toString() === formData.task_manager_id).map(a => a.id) || [];
-            console.log('   [LOG] Found assistants:', assistantsForManager);
-            
             setAvailableAssistants(localUsers.filter(user => assistantsForManager.includes(user.id)));
-        } else {
-            console.log('❌ [LOG] No matching subdepartment found');
         }
     }, [formData.task_manager_id, formData.subdepartment_id, departments, localUsers, formData.department_id]);
 
     const availableSubdepartments = useMemo(() => {
-        console.log('🔍 [LOG] Calculating availableSubdepartments...');
-        console.log('   [LOG] Current department_id:', formData.department_id);
-        console.log('   [LOG] Available departments:', departments.map(d => ({ id: d.id, name: d.name })));
-        
-        if (!formData.department_id) {
-            console.log('   [LOG] No department selected, returning empty array');
-            return [];
-        }
-        
+        if (!formData.department_id) return [];
         const dept = departments.find(d => 
             String(d.id) === String(formData.department_id) || d.id === Number(formData.department_id)
         );
-        const subdepts = dept?.tm_subdepartments || [];
-        
-        console.log('   [LOG] Found department:', dept ? dept.name : 'Not found');
-        console.log('   [LOG] Available subdepartments:', subdepts.map((s: any) => ({ id: s.id, name: s.name })));
-        
-        return subdepts;
+        return dept?.tm_subdepartments || [];
     }, [departments, formData.department_id]);
 
-    // Get main classes (without subclasses)
     const availableClasses = useMemo(() => {
         if (!formData.subdepartment_id) return [];
         const subdept = availableSubdepartments.find(s => 
             String(s.id) === String(formData.subdepartment_id) || s.id === Number(formData.subdepartment_id)
         );
-        console.log('   [LOG] Found subdepartment for classes:', subdept ? subdept.name : 'Not found');
-        
-        const mainClasses = subdept?.classes?.filter(cls => !cls.parentId) || [];
-        
-        console.log('   [LOG] Available main classes:', mainClasses.map((c: any) => ({
-            id: c.id,
-            name: c.name,
-            hasSubclasses: c.subClasses?.length > 0
-        })));
-        
-        return mainClasses;
+        return subdept?.classes?.filter(cls => !cls.parentId) || [];
     }, [availableSubdepartments, formData.subdepartment_id]);
     
-    // Get subclasses for the selected class
     const availableSubclasses = useMemo(() => {
         if (!formData.class_id) return [];
         
@@ -493,7 +387,6 @@ export function NewCompanyInquiryDialog({
         
         if (!subdept?.classes) return [];
         
-        // Find the selected class and return its subclasses
         const findClass = (classes: any[]): any[] => {
             for (const cls of classes) {
                 if (String(cls.id) === String(formData.class_id) || cls.id === Number(formData.class_id)) {
@@ -507,24 +400,15 @@ export function NewCompanyInquiryDialog({
             return [];
         };
         
-        const subclasses = findClass(subdept.classes);
-        console.log('   [LOG] Available subclasses:', subclasses.map((c: any) => ({
-            id: c.id,
-            name: c.name
-        })));
-        
-        return subclasses;
+        return findClass(subdept.classes);
     }, [availableSubdepartments, formData.subdepartment_id, formData.class_id]);
     
     // Auto-select the first subclass when they become available
     useEffect(() => {
         if (formData.class_id && availableSubclasses.length > 0 && !formData.subclass_id) {
-            console.log('   [LOG] Auto-selecting first subclass:', availableSubclasses[0].name);
             handleChange('subclass_id', availableSubclasses[0].id.toString());
         }
     }, [availableSubclasses, formData.class_id, formData.subclass_id]);
-    // --- End of Reused Logic ---
-
 
     const handleOfficialSelection = (officialId: number) => {
         setSelectedOfficialIds(prev => {
@@ -540,12 +424,8 @@ export function NewCompanyInquiryDialog({
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        console.log('🔹 [NewCompanyInquiryDialog] Form submitted');
-        console.log('   [NewCompanyInquiryDialog] Selected company:', selectedCompany);
-        console.log('   [NewCompanyInquiryDialog] Form data:', formData);
         
         if (!selectedCompany) {
-            console.error('❌ [NewCompanyInquiryDialog] No company selected');
             toast({ title: "Validation Error", description: "Please select a company.", variant: "destructive" });
             return;
         }
@@ -553,12 +433,12 @@ export function NewCompanyInquiryDialog({
             toast({ title: "Validation Error", description: "Please select at least one official.", variant: "destructive" });
             return;
         }
+
         setLoading(true);
-        console.log("🚀 [LOG] Creating company enquiry...");
 
         try {
             const now = new Date();
-            const enquiryStageId = '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa'; // Static ID for "Enquiry" stage
+            const enquiryStageId = '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa'; 
             const initialStages = {
                 [enquiryStageId]: {
                     date: format(now, 'dd/MM/yyyy'),
@@ -576,38 +456,62 @@ export function NewCompanyInquiryDialog({
                 };
             });
 
+            // 1. Calculate Job Level
+            const jobLevel = {
+                level: formData.subclass_id ? 4 :
+                       formData.class_id ? 3 :
+                       formData.subdepartment_id ? 2 :
+                       formData.department_id ? 1 : null,
+                department_id: formData.department_id ? parseInt(formData.department_id) : null,
+                subdepartment_id: formData.subdepartment_id ? parseInt(formData.subdepartment_id) : null,
+                class_id: formData.class_id ? parseInt(formData.class_id) : null,
+                subclass_id: formData.subclass_id ? parseInt(formData.subclass_id) : null
+            };
+
+            // 2. Prepare Staff Data
+            const officer = localOfficers.find(o => o.id.toString() === formData.officer_id);
+            const manager = localUsers.find(m => m.id.toString() === formData.task_manager_id);
+            const assistant = localUsers.find(a => a.id.toString() === formData.task_assistant_id);
+            // 3. Construct Task Object
             const taskToCreate = {
                 job_description: formData.job_description || '',
                 status: 'enquiry',
                 renewal_status: taskType,
-                department_id: formData.department_id,
-                subdepartment_id: formData.subdepartment_id,
+                // Parse IDs as integers
+                department_id: formData.department_id ? parseInt(formData.department_id) : null,
+                subdepartment_id: formData.subdepartment_id ? parseInt(formData.subdepartment_id) : null,
+                class_id: formData.class_id ? parseInt(formData.class_id) : null,
+                subclass_id: formData.subclass_id ? parseInt(formData.subclass_id) : null,
+                
                 applicant_type: 'company',
-                class_id: formData.class_id || null,
-                subclass_id: formData.subclass_id || null,
                 date_initiated: new Date(formData.enquiry_date),
                 applicant_name: selectedCompany.company_name,
                 company_id: selectedCompany.id,
+                
+                // IDs
+                officer_id: formData.officer_id && formData.officer_id !== 'none' ? parseInt(formData.officer_id) : null,
+                task_manager_id: formData.task_manager_id && formData.task_manager_id !== 'none' ? parseInt(formData.task_manager_id) : null,
+                task_assistant_id: formData.task_assistant_id && formData.task_assistant_id !== 'none' ? parseInt(formData.task_assistant_id) : null,
+                
+                // JSON Fields
                 stages: initialStages,
-                officer_id: formData.officer_id || null,
-                task_manager_id: formData.task_manager_id || null,
-                task_assistant_id: formData.task_assistant_id || null,
-                directors_details: directorsDetails
+                directors_details: directorsDetails,
+                job_level: jobLevel,
+              
+         
             };
 
-            console.log(`📦 [LOG] Submitting task to Supabase.`);
             const { data, error } = await supabase.from('tm_tasks').insert([taskToCreate]).select();
 
             if (error) throw error;
 
-            console.log('✅ [LOG] Enquiry created successfully!', data);
             toast({ title: 'Success', description: `Enquiry for ${selectedCompany.company_name} created successfully.` });
             onEnquiryCreated(data);
             resetForm();
             onOpenChange(false);
 
         } catch (error) {
-            console.error('❌ [LOG] Error creating enquiry:', error);
+            console.error('Error creating enquiry:', error);
             toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to create enquiry', variant: 'destructive' });
         } finally {
             setLoading(false);
@@ -615,13 +519,6 @@ export function NewCompanyInquiryDialog({
     };
 
     const resetForm = () => {
-        console.log("🧹 [NewCompanyInquiryDialog] Resetting form");
-        console.log('   [NewCompanyInquiryDialog] Current state before reset:', { 
-            selectedCompany, 
-            officials, 
-            selectedOfficialIds: Array.from(selectedOfficialIds),
-            formData 
-        });
         setSelectedCompany(null);
         setOfficials([]);
         setSelectedOfficialIds(new Set());
@@ -789,13 +686,8 @@ export function NewCompanyInquiryDialog({
                                             <Select 
                                                 value={formData.class_id} 
                                                 onValueChange={(v) => {
-                                                    // When class changes, update class and auto-select first subclass if available
                                                     handleChange('class_id', v);
-                                                    
-                                                    // Find the selected class
                                                     const selectedClass = availableClasses.find(c => c.id.toString() === v);
-                                                    
-                                                    // If class has subclasses, auto-select the first one
                                                     if (selectedClass?.subClasses?.length > 0) {
                                                         handleChange('subclass_id', selectedClass.subClasses[0].id.toString());
                                                     } else {

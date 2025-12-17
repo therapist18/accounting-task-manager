@@ -11,10 +11,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-// --- MODIFICATION: Import Popover and Command for the Master Field Picker ---
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Loader2, PlusCircle, Trash2, FileText, Pencil, Save, RefreshCw, ChevronDown, Check, ChevronsUpDown, Link2, X, Search, View } from "lucide-react";
+import { Loader2, PlusCircle, Trash2, FileText, Pencil, Save, RefreshCw, ChevronDown, Check, ChevronsUpDown, Link2, X, Search, View, Download } from "lucide-react";
+import { DocxLivePreview } from "@/components/DocxLivePreview";
 import { DocumentTemplate as BaseDocumentTemplate } from "./types";
 import { TableHeader, Table, TableBody, TableCell, TableHead, TableRow } from "@/components/ui/table";
 import supabase from "@/lib/supabase/client";
@@ -24,30 +24,36 @@ import { Textarea } from "@/components/ui/textarea";
 import Docxtemplater from "docxtemplater";
 import PizZip from "pizzip";
 import InspectModule from 'docxtemplater/js/inspect-module';
+import { renderAsync } from "docx-preview";
 
 type EntityType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependent' | 'employee';
 
-// --- MODIFICATION: The entity_type field is now an array to support multi-select ---
 interface DocumentTemplate extends BaseDocumentTemplate {
   content?: string;
   isDirty?: boolean;
-  entity_types?: EntityType[]; // This is for the overall template
+  entity_types?: EntityType[];
 }
 
-// --- MODIFICATION: JobField interface to hold master field data ---
 interface JobField {
   id: number;
   field_key: string;
   label: string;
 }
 
+// --- MODIFICATION: Updated props to accept jobLevel object instead of string classId ---
 interface DocumentTemplateManagerProps {
   document: { id: string; name: string; display_name?: string; };
   initialTemplates?: DocumentTemplate[];
   isOpen: boolean;
   onClose: () => void;
   onTemplateUpdate: () => void;
-  classId?: string;
+  jobLevel?: {
+    level: number;
+    department_id?: number | null;
+    subdepartment_id?: number | null;
+    class_id?: number | null;
+    subclass_id?: number | null;
+  } | null;
 }
 
 const PLACEHOLDER_TYPES = [
@@ -56,20 +62,18 @@ const PLACEHOLDER_TYPES = [
 ];
 
 const ENTITY_TYPES: { value: EntityType; label: string }[] = [
-    { value: 'company', label: 'Company' }, { value: 'principal', label: 'Principal' },
-    { value: 'director', label: 'Director' }, { value: 'shareholder', label: 'Shareholder' },
-    { value: 'dependent', label: 'Dependent' }, { value: 'employee', label: 'Employee' },
+  { value: 'company', label: 'Company' }, { value: 'principal', label: 'Principal' },
+  { value: 'director', label: 'Director' }, { value: 'shareholder', label: 'Shareholder' },
+  { value: 'dependent', label: 'Dependent' }, { value: 'employee', label: 'Employee' },
 ];
 
-// --- MODIFICATION: Placeholder type now includes master_field_id and its own entity_type ---
 type Placeholder = {
   id: string; name: string; description?: string; type: 'text' | 'number' | 'date' | 'select' | 'array';
   required: boolean; options?: string[];
-  entity_type: EntityType; // Which entity this placeholder belongs to
-  master_field_ids?: number[]; // Array of linked master field IDs
+  entity_type: EntityType;
+  master_field_ids?: number[];
 };
 
-// --- MODIFICATION: Updated component for picking multiple master fields ---
 function MasterFieldPicker({
   masterFields,
   selectedFieldIds = [],
@@ -87,7 +91,7 @@ function MasterFieldPicker({
   const [search, setSearch] = useState('');
   const selectedFields = useMemo(() =>
     masterFields.filter(f => selectedFieldIds.includes(f.id)),
-  [masterFields, selectedFieldIds]);
+    [masterFields, selectedFieldIds]);
 
   const filteredFields = useMemo(() => {
     if (!search) return masterFields;
@@ -169,7 +173,6 @@ function MasterFieldPicker({
         )}
       </div>
 
-      {/* Selected fields chips */}
       {selectedFields.length > 0 && (
         <div className="flex flex-wrap gap-2 mt-2">
           {selectedFields.map(field => (
@@ -198,14 +201,14 @@ function MasterFieldPicker({
   );
 }
 
-export default function DocumentTemplateManager({ document, isOpen, onClose,initialTemplates, onTemplateUpdate, classId }: DocumentTemplateManagerProps) {
+// --- MODIFICATION: Destructure jobLevel instead of classId ---
+export default function DocumentTemplateManager({ document, isOpen, onClose, initialTemplates, onTemplateUpdate, jobLevel }: DocumentTemplateManagerProps) {
   const { toast } = useToast();
   const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
   const [currentTemplateIndex, setCurrentTemplateIndex] = useState<number | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isPlaceholderFormOpen, setIsPlaceholderFormOpen] = useState(false);
   const [isEditingPlaceholder, setIsEditingPlaceholder] = useState<number | null>(null);
-  // --- MODIFICATION: Default state for a new placeholder ---
   const [newPlaceholder, setNewPlaceholder] = useState<{
     name: string;
     description: string;
@@ -228,15 +231,47 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   const fileInputRef = useRef<HTMLInputElement>(null);
   const currentTemplate = (currentTemplateIndex !== null && templates[currentTemplateIndex]) ? templates[currentTemplateIndex] : null;
   const masterFieldMap = useMemo(() => new Map(masterFields.map(f => [f.id, f.label])), [masterFields]);
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+  const [docPreviewUrl, setDocPreviewUrl] = useState<string | null>(null);
 
-  // --- MODIFICATION: State for managing horizontal panel visibility ---
   const [panelsVisible, setPanelsVisible] = useState({
     left: true,
     middle: true,
     right: true,
   });
 
-  // --- MODIFICATION: Handler to toggle panel visibility, preventing the last panel from being hidden ---
+  // Update the document preview effect
+  useEffect(() => {
+    const loadDocumentPreview = async () => {
+      if (!currentTemplate?.file_path) {
+        setDocPreviewUrl(null);
+        return;
+      }
+
+      try {
+        // Get the public URL for the file
+        const { data: { publicUrl } } = supabase.storage
+          .from('templates')
+          .getPublicUrl(currentTemplate.file_path);
+
+        // Use the public URL in the Office Online Viewer
+        const viewerUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(publicUrl)}`;
+        setDocPreviewUrl(viewerUrl);
+
+      } catch (error) {
+        console.error('Error loading document:', error);
+        setDocPreviewUrl(null);
+        toast({
+          title: 'Preview Error',
+          description: 'Could not load document preview. The file may not be accessible.',
+          variant: 'destructive'
+        });
+      }
+    };
+
+    loadDocumentPreview();
+  }, [currentTemplate?.file_path]);
+
   const togglePanel = (panel: 'left' | 'middle' | 'right') => {
     const currentlyVisibleCount = Object.values(panelsVisible).filter(Boolean).length;
     if (currentlyVisibleCount === 1 && panelsVisible[panel]) {
@@ -246,7 +281,6 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
     setPanelsVisible(prev => ({ ...prev, [panel]: !prev[panel] }));
   };
 
-  // --- MODIFICATION: useMemo hook to calculate dynamic grid classes based on panel visibility ---
   const panelClasses = useMemo(() => {
     const { left, middle, right } = panelsVisible;
     const visibleCount = [left, middle, right].filter(Boolean).length;
@@ -254,7 +288,7 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
     if (visibleCount === 3) return { left: 'col-span-3', middle: 'col-span-5', right: 'col-span-4' };
     if (visibleCount === 2) {
       if (!left) return { left: 'hidden', middle: 'col-span-7', right: 'col-span-5' };
-      if (!middle) return { left: 'hidden', middle: 'hidden', right: 'col-span-12' }; // Corrected logic
+      if (!middle) return { left: 'hidden', middle: 'hidden', right: 'col-span-12' };
       if (!right) return { left: 'col-span-4', middle: 'col-span-8', right: 'hidden' };
     }
     if (visibleCount === 1) {
@@ -262,7 +296,6 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
       if (middle) return { left: 'hidden', middle: 'col-span-12', right: 'hidden' };
       if (right) return { left: 'hidden', middle: 'hidden', right: 'col-span-12' };
     }
-    // Fallback for no panels, though togglePanel prevents this
     return { left: 'hidden', middle: 'hidden', right: 'hidden' };
   }, [panelsVisible]);
 
@@ -281,7 +314,6 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
     );
   }, [currentTemplate?.placeholders, placeholderSearch, masterFieldMap]);
 
-  // --- MODIFICATION: Fetch master fields when the dialog opens ---
   const fetchMasterFields = async () => {
     try {
       const { data, error } = await supabase.from('tm_job_fields').select('id, field_key, label').order('label');
@@ -295,7 +327,7 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
 
   useEffect(() => {
     if (isOpen) {
-      fetchMasterFields(); // Fetch master fields on open
+      fetchMasterFields();
       const initialData = initialTemplates?.map(t => ({
         ...t,
         name: t.file_name,
@@ -310,82 +342,79 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   }, [isOpen, initialTemplates]);
 
   const extractPlaceholders = async (source: { type: 'file', content: File } | { type: 'text', content: string }): Promise<string[]> => {
-    // ... (no changes in this function)
     setIsProcessing(true);
-      try {
-          const matches = new Set<string>();
-          if (source.type === 'file') {
-              const arrayBuffer = await source.content.arrayBuffer();
-              const zip = new PizZip(arrayBuffer);
-              const inspectModule = new InspectModule();
-              new Docxtemplater(zip, { modules: [inspectModule] });
-              const tags = inspectModule.getAllTags();
-              Object.keys(tags).forEach(tag => matches.add(tag));
-          } else {
-              if (typeof window === 'undefined' || !source.content) return [];
-              const parser = new DOMParser();
-              const doc = parser.parseFromString(source.content, 'text/html');
-              const textToParse = doc.body.textContent || '';
-              const placeholderRegex = /\{+([^{}]+?)\}+/g;
-              let match;
-              while ((match = placeholderRegex.exec(textToParse)) !== null) {
-                  if (match[1]) matches.add(match[1].trim());
-              }
-          }
-          return Array.from(matches);
-      } catch (error) {
-          console.error('Error extracting placeholders:', error);
-          toast({ title: 'Template Analysis Failed', description: 'Could not read placeholders.', variant: 'destructive' });
-          return [];
-      } finally {
-          setIsProcessing(false);
+    try {
+      const matches = new Set<string>();
+      if (source.type === 'file') {
+        const arrayBuffer = await source.content.arrayBuffer();
+        const zip = new PizZip(arrayBuffer);
+        const inspectModule = new InspectModule();
+        new Docxtemplater(zip, { modules: [inspectModule] });
+        const tags = inspectModule.getAllTags();
+        Object.keys(tags).forEach(tag => matches.add(tag));
+      } else {
+        if (typeof window === 'undefined' || !source.content) return [];
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(source.content, 'text/html');
+        const textToParse = doc.body.textContent || '';
+        const placeholderRegex = /\{+([^{}]+?)\}+/g;
+        let match;
+        while ((match = placeholderRegex.exec(textToParse)) !== null) {
+          if (match[1]) matches.add(match[1].trim());
+        }
       }
+      return Array.from(matches);
+    } catch (error) {
+      console.error('Error extracting placeholders:', error);
+      toast({ title: 'Template Analysis Failed', description: 'Could not read placeholders.', variant: 'destructive' });
+      return [];
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const autoGeneratePlaceholders = (extracted: string[]): Placeholder[] => extracted.map((name, index) => {
-      const isImage = name.startsWith('%') && name.endsWith('%');
-      const cleanName = isImage ? name.substring(1, name.length - 1) : name;
-      return {
-        id: `auto_${Date.now()}_${index}`,
-        name: cleanName,
-        description: ``,
-        type: isImage ? 'image' : 'text',
-        required: true,
-        entity_type: 'principal',
-        master_field_ids: []
-      };
+    const isImage = name.startsWith('%') && name.endsWith('%');
+    const cleanName = isImage ? name.substring(1, name.length - 1) : name;
+    return {
+      id: `auto_${Date.now()}_${index}`,
+      name: cleanName,
+      description: ``,
+      type: isImage ? 'image' : 'text',
+      required: true,
+      entity_type: 'principal',
+      master_field_ids: []
+    };
   });
 
   const mergePlaceholders = (existingPlaceholders: Placeholder[], extractedNames: string[]): Placeholder[] => {
-      // ... (logic needs to be updated to preserve new fields)
-      const existingMap = new Map(existingPlaceholders.map(p => [p.name, p]));
-      const updatedPlaceholders: Placeholder[] = [];
-      const processedNames = new Set<string>();
-      for (const name of extractedNames) {
-          const isImageTag = name.startsWith('%') && name.endsWith('%');
-          const cleanName = isImageTag ? name.substring(1, name.length - 1) : name;
-          if (processedNames.has(cleanName)) continue;
-          const existingPlaceholder = existingMap.get(cleanName);
-          if (existingPlaceholder) {
-            updatedPlaceholders.push(existingPlaceholder);
-          } else {
-            updatedPlaceholders.push({
-                id: `auto_${Date.now()}_${updatedPlaceholders.length}`,
-                name: cleanName,
-                description: '',
-                type: isImageTag ? 'image' : 'text',
-                required: true,
-                entity_type: 'principal',
-                master_field_id: undefined
-            });
-          }
-          processedNames.add(cleanName);
+    const existingMap = new Map(existingPlaceholders.map(p => [p.name, p]));
+    const updatedPlaceholders: Placeholder[] = [];
+    const processedNames = new Set<string>();
+    for (const name of extractedNames) {
+      const isImageTag = name.startsWith('%') && name.endsWith('%');
+      const cleanName = isImageTag ? name.substring(1, name.length - 1) : name;
+      if (processedNames.has(cleanName)) continue;
+      const existingPlaceholder = existingMap.get(cleanName);
+      if (existingPlaceholder) {
+        updatedPlaceholders.push(existingPlaceholder);
+      } else {
+        updatedPlaceholders.push({
+          id: `auto_${Date.now()}_${updatedPlaceholders.length}`,
+          name: cleanName,
+          description: '',
+          type: isImageTag ? 'image' : 'text',
+          required: true,
+          entity_type: 'principal',
+          master_field_ids: []
+        });
       }
-      return updatedPlaceholders;
+      processedNames.add(cleanName);
+    }
+    return updatedPlaceholders;
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    // ... (no changes in this function)
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.type !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return toast({ title: 'Invalid file type', variant: 'destructive' });
@@ -395,7 +424,6 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   };
 
   const addNewFileTemplate = (file: File, extractedPlaceholders: string[]) => {
-    // ... (no changes in this function)
     const tempId = `temp_file_${Date.now()}`;
     const newTemplate: DocumentTemplate = {
       id: tempId, document_id: document.id,
@@ -403,7 +431,7 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
       file_name: file.name, file_type: file.type, file_size: file.size,
       placeholders: autoGeneratePlaceholders(extractedPlaceholders),
       created_at: new Date().toISOString(),
-      entity_types: [], // Default to an empty array
+      entity_types: [],
     };
     setTemplateFiles(prev => new Map(prev.set(tempId, file)));
     const updatedTemplates = [...templates, newTemplate];
@@ -413,14 +441,13 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   };
 
   const addNewTextTemplate = () => {
-    // ... (no changes in this function)
     const tempId = `temp_text_${Date.now()}`;
     const newTemplate: DocumentTemplate = {
       id: tempId, document_id: document.id,
       name: `New Text Template ${templates.filter(t => t.content !== undefined).length + 1}`,
       content: '<p>Start writing your template here...</p>', file_type: 'text/html',
       placeholders: [], created_at: new Date().toISOString(),
-      entity_types: [], // Default to an empty array
+      entity_types: [],
     };
     const updatedTemplates = [...templates, newTemplate];
     setTemplates(updatedTemplates);
@@ -428,7 +455,6 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   };
 
   const handleEditorChange = (html: string) => {
-    // ... (no changes in this function)
     if (currentTemplateIndex === null) return;
     const updatedTemplates = [...templates];
     updatedTemplates[currentTemplateIndex].content = html;
@@ -437,7 +463,6 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   };
 
   const handleTemplateNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // ... (no changes in this function)
     if (currentTemplateIndex === null) return;
     const updatedTemplates = [...templates];
     updatedTemplates[currentTemplateIndex].name = e.target.value;
@@ -445,7 +470,6 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   };
 
   const handleEntityTypeToggle = (entityType: EntityType) => {
-    // ... (no changes in this function)
     if (currentTemplateIndex === null) return;
     const updatedTemplates = [...templates];
     const currentTypes = updatedTemplates[currentTemplateIndex].entity_types || [];
@@ -457,7 +481,6 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   };
 
   const handleRescanPlaceholders = async () => {
-    // ... (no changes in this function)
     if (!currentTemplate || currentTemplate.content === undefined) return;
     const extracted = await extractPlaceholders({ type: 'text', content: currentTemplate.content });
     const updatedTemplates = [...templates];
@@ -471,7 +494,6 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   const handleEditorBlur = () => { if (currentTemplate?.isDirty) handleRescanPlaceholders(); };
 
   const savePlaceholder = () => {
-    // --- MODIFICATION: Save new placeholder fields ---
     if (!newPlaceholder.name.trim() || currentTemplateIndex === null) return;
     const updatedTemplates = [...templates];
     const targetTemplate = updatedTemplates[currentTemplateIndex];
@@ -500,7 +522,6 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
     setTemplates(updatedTemplates);
     setIsPlaceholderFormOpen(false);
 
-    // Reset the form with proper default values
     setNewPlaceholder({
       name: '',
       description: '',
@@ -508,10 +529,6 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
       required: true,
       entity_type: 'principal',
       master_field_ids: [],
-      date_config: {
-        useCurrentDate: true,
-        format: 'YYYY-MM-DD'
-      }
     });
 
     setIsEditingPlaceholder(null);
@@ -538,16 +555,14 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
     setIsPlaceholderFormOpen(true);
   };
 
-const removePlaceholder = (index: number) => {
-  if (currentTemplateIndex === null) return;
-  const updatedTemplates = [...templates];
-  updatedTemplates[currentTemplateIndex].placeholders = updatedTemplates[currentTemplateIndex].placeholders?.filter((_, i) => i !== index);
-  setTemplates(updatedTemplates);
-};
+  const removePlaceholder = (index: number) => {
+    if (currentTemplateIndex === null) return;
+    const updatedTemplates = [...templates];
+    updatedTemplates[currentTemplateIndex].placeholders = updatedTemplates[currentTemplateIndex].placeholders?.filter((_, i) => i !== index);
+    setTemplates(updatedTemplates);
+  };
 
   const uploadAndSaveAll = async () => {
-    // --- MODIFICATION: The placeholders data will automatically include the new fields ---
-    // No direct changes needed here, as the state already holds the correct structure.
     setIsProcessing(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -562,11 +577,20 @@ const removePlaceholder = (index: number) => {
           filePath = data.path;
         }
 
+        // --- MODIFICATION: Use job_level instead of class_id in the payload ---
         const templateData = {
-          file_name: template.name, document_id: document.id, file_path: filePath,
-          content: template.content, file_type: template.file_type, file_size: template.file_size,
-          placeholders: template.placeholders || [], updated_at: new Date().toISOString(),
-          created_by: user?.id, class_id: classId ? [classId] : undefined,
+          file_name: template.name,
+          document_id: document.id,
+          file_path: filePath,
+          content: template.content,
+          file_type: template.file_type,
+          file_size: template.file_size,
+          placeholders: template.placeholders || [],
+          updated_at: new Date().toISOString(),
+          created_by: user?.id,
+          // Replace class_id with job_level. Using an array to support multiple contexts if needed,
+          // matching the pattern of the legacy class_id array.
+          job_level: jobLevel ? [jobLevel] : [],
           entity_types: template.entity_types || [],
         };
 
@@ -574,7 +598,9 @@ const removePlaceholder = (index: number) => {
         if (template.id.startsWith('temp_')) {
           ({ error } = await supabase.from('acc_portal_templates').insert(templateData));
         } else {
-          ({ error } = await supabase.from('acc_portal_templates').update(templateData).eq('id', template.id));
+          // Exclude created_by from update if you don't want to change ownership
+          const { created_by, ...updateData } = templateData;
+          ({ error } = await supabase.from('acc_portal_templates').update(updateData).eq('id', template.id));
         }
         if (error) throw error;
       }
@@ -591,7 +617,6 @@ const removePlaceholder = (index: number) => {
   };
 
   const deleteTemplate = async (index: number) => {
-    // ... (no changes in this function)
     const templateToDelete = templates[index];
     if (!templateToDelete) return;
     if (!templateToDelete.id.startsWith('temp_')) {
@@ -611,18 +636,45 @@ const removePlaceholder = (index: number) => {
   };
 
   const getTemplatePreviewUrl = (template: DocumentTemplate) => {
-    // ... (no changes in this function)
     if (!template) return '';
     if (template.file_path) {
       const { data } = supabase.storage.from('templates').getPublicUrl(template.file_path);
-      return `https://docs.google.com/gview?url=${data.publicUrl}&embedded=true`;
+      return data.publicUrl;
     }
     const file = templateFiles.get(template.id);
     if (file) {
       const blobUrl = URL.createObjectURL(file);
-      return `https://docs.google.com/gview?url=${blobUrl}&embedded=true`;
+      return blobUrl;
     }
     return '';
+  };
+
+  const handleDownload = async () => {
+    if (!currentTemplate?.file_path) return;
+
+    try {
+      const { data, error } = await supabase.storage
+        .from('templates')
+        .download(currentTemplate.file_path);
+
+      if (error) throw error;
+
+      const url = URL.createObjectURL(data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = currentTemplate.file_name || 'document.docx';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error downloading file:', error);
+      toast({
+        title: 'Download Failed',
+        description: 'Could not download the document. Please try again.',
+        variant: 'destructive'
+      });
+    }
   };
 
   return (
@@ -634,7 +686,6 @@ const removePlaceholder = (index: number) => {
             <DialogDescription>Create and manage templates by uploading a DOCX file or using the rich text editor.</DialogDescription>
           </DialogHeader>
 
-          {/* --- MODIFICATION: Layout control toolbar --- */}
           <div className="flex items-center gap-2 px-6 py-2 border-b border-t">
             <View className="h-4 w-4 text-muted-foreground" />
             <Label className="mr-2">View Panels:</Label>
@@ -644,7 +695,7 @@ const removePlaceholder = (index: number) => {
           </div>
 
           <div className="grid grid-cols-12 gap-6 py-4 flex-1 overflow-y-auto">
-            {/* --- MODIFICATION: Left Panel with dynamic classes --- */}
+            {/* Left Panel */}
             <div className={`${panelClasses.left} flex flex-col gap-6 h-full transition-all duration-300`}>
               <Card>
                 <CardHeader><CardTitle className="text-lg">Add New Template</CardTitle></CardHeader>
@@ -681,7 +732,7 @@ const removePlaceholder = (index: number) => {
               </Card>
             </div>
 
-            {/* --- MODIFICATION: Middle Panel with dynamic classes --- */}
+            {/* Middle Panel */}
             <div className={`${panelClasses.middle} h-full transition-all duration-300`}>
               {currentTemplate ? (
                 <Card className="h-full flex flex-col">
@@ -690,120 +741,173 @@ const removePlaceholder = (index: number) => {
                     {currentTemplate.isDirty && (<Button size="sm" onClick={handleRescanPlaceholders}><RefreshCw className="mr-2 h-4 w-4" /> Re-scan</Button>)}
                   </CardHeader>
                   <CardContent className="flex-1 flex flex-col gap-4">
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2"><Label htmlFor="template-name">Template Name</Label><Input id="template-name" value={currentTemplate.name || ''} onChange={handleTemplateNameChange} /></div>
-                        <div className="space-y-2"><Label htmlFor="entity-type">Template For</Label>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="outline" className="w-full justify-between">
-                                <span className="truncate pr-2">
-                                  {currentTemplate.entity_types?.length > 0 ? currentTemplate.entity_types.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(', ') : "Select entities..."}
-                                </span>
-                                <ChevronDown className="h-4 w-4 opacity-50" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent className="w-[--radix-popover-trigger-width]">
-                              {ENTITY_TYPES.map(t => (
-                                <DropdownMenuCheckboxItem key={t.value} checked={currentTemplate.entity_types?.includes(t.value)} onCheckedChange={() => handleEntityTypeToggle(t.value)}>
-                                  {t.label}
-                                </DropdownMenuCheckboxItem>
-                              ))}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
+                    <div className="grid grid-cols-3 flex gap-4">
+                      <div className="space-y-2"><Label htmlFor="template-name">Template Name</Label><Input id="template-name" value={currentTemplate.name || ''} onChange={handleTemplateNameChange} /></div>
+                      <div className="space-y-2"><Label htmlFor="entity-type">Template For</Label>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="outline" className="w-full justify-between">
+                              <span className="truncate pr-2">
+                                {currentTemplate.entity_types?.length > 0 ? currentTemplate.entity_types.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(', ') : "Select entities..."}
+                              </span>
+                              <ChevronDown className="h-4 w-4 opacity-50" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent className="w-[--radix-popover-trigger-width]">
+                            {ENTITY_TYPES.map(t => (
+                              <DropdownMenuCheckboxItem key={t.value} checked={currentTemplate.entity_types?.includes(t.value)} onCheckedChange={() => handleEntityTypeToggle(t.value)}>
+                                {t.label}
+                              </DropdownMenuCheckboxItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                      <div className="flex flex-col items-center justify-between"><Label htmlFor="entity-type"></Label>
+                        {currentTemplate.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleDownload}
+                            className="ml-2"
+                          >
+                            <Download className="h-4 w-4 mr-2" />
+                            Download
+                          </Button>
+                        )}
+                      </div>
                     </div>
                     <div className="space-y-2 flex-1 flex flex-col">
                       <Label>Content</Label>
                       {currentTemplate.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ? (
-                        <div className="w-full h-full border rounded-md"><iframe src={getTemplatePreviewUrl(currentTemplate)} className="w-full h-full" title={currentTemplate.name}></iframe></div>
-                      ) : currentTemplate.content !== undefined ? (
-                        <TemplateEditor key={currentTemplate.id} initialContent={currentTemplate.content} onChange={handleEditorChange} onBlur={handleEditorBlur} className="flex-1" />
+                        <div className="w-full h-full border rounded-md overflow-hidden">
+                          {docPreviewUrl ? (
+                            <iframe
+                              src={docPreviewUrl || ''}
+                              className="w-full h-full border-0"
+                              frameBorder="0"
+                              title="Document Preview"
+                              onError={(e) => {
+                                console.error('Error loading document preview:', e);
+                                setDocPreviewUrl(null);
+                                toast({
+                                  title: 'Preview Error',
+                                  description: 'Could not load document preview. The file may not be accessible or the format is not supported.',
+                                  variant: 'destructive'
+                                });
+                              }}
+                            />
+                          ) : templateFiles.get(currentTemplate.id) ? (
+                            <div className="w-full h-full border rounded-md flex items-center justify-center">
+                              <div className="text-center p-6">
+                                <FileText className="h-12 w-12 mx-auto text-green-500 mb-3" />
+                                <p className="text-sm font-medium text-gray-700">Word Document Uploaded</p>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  {templateFiles.get(currentTemplate.id)?.name || 'Document ready for processing'}
+                                </p>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="h-full w-full flex items-center justify-center">
+                              <div className="text-center p-4">
+                                <FileText className="h-12 w-12 mx-auto text-gray-400 mb-2" />
+                                <p className="text-sm text-gray-500">No document available</p>
+                                <p className="text-xs text-gray-400 mt-1">Upload a document to see preview</p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       ) : (
-                        <div className="p-4 border rounded-md bg-muted text-center h-full flex items-center justify-center"><p className="text-sm text-muted-foreground">Content for .docx files cannot be edited here. <br /> Re-upload to make changes.</p></div>
+                        <TemplateEditor
+                          key={currentTemplate.id}
+                          initialContent={currentTemplate.content || ''}
+                          onChange={handleEditorChange}
+                          onBlur={handleEditorBlur}
+                          className="flex-1"
+                        />
                       )}
                     </div>
                   </CardContent>
                 </Card>
               ) : (
-                 panelsVisible.middle && (
+                panelsVisible.middle && (
                   <div className="h-full flex items-center justify-center text-center border-2 border-dashed rounded-lg">
                     <div><h3 className="text-lg font-medium">No Template Selected</h3><p className="text-sm text-muted-foreground mt-1">Add or select a template to begin editing.</p></div>
                   </div>
-                 )
+                )
               )}
             </div>
 
-            {/* --- MODIFICATION: Right Panel with dynamic classes --- */}
+            {/* Right Panel */}
             <div className={`${panelClasses.right} h-full transition-all duration-300`}>
-             {panelsVisible.right && (
-              <Card className="h-full flex flex-col">
-                <CardHeader>
-                  <div className="flex flex-row items-center justify-between">
-                    <div><CardTitle>Placeholders</CardTitle><CardDescription>Fields for the selected template.</CardDescription></div>
-                    <Button variant="outline" size="sm" onClick={() => setIsPlaceholderFormOpen(true)} disabled={!currentTemplate}><PlusCircle className="mr-2 h-4 w-4" /> Add</Button>
-                  </div>
-                  <div className="relative pt-4">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Search placeholders..."
-                      value={placeholderSearch}
-                      onChange={(e) => setPlaceholderSearch(e.target.value)}
-                      disabled={!currentTemplate || !currentTemplate.placeholders?.length}
-                      className="pl-9"
-                    />
-                  </div>
-                </CardHeader>
-                <CardContent className="flex-1 overflow-y-auto min-h-[400px]">
-                  {currentTemplate?.placeholders?.length > 0 ? (
-                    filteredPlaceholders.length > 0 ? (
-                      <Table className="border max-h-[calc(100vh - 300px)]">
-                        <TableHeader className="bg-gray-100"><TableRow>
-                          <TableHead className="border-r font-bold text-gray-700">Field</TableHead>
-                          <TableHead className="border-r font-bold text-gray-700">Type</TableHead>
-                          <TableHead className="border-r font-bold text-gray-700">Entity</TableHead>
-                          <TableHead className="border-r font-bold text-gray-700">Linked Master Field</TableHead>
-                          <TableHead className="text-right border-r font-bold text-gray-700">Actions</TableHead>
-                        </TableRow></TableHeader>
-                        <TableBody>
-                          {filteredPlaceholders.map((p) => {
-                            const originalIndex = currentTemplate.placeholders.findIndex(orig => orig.id === p.id);
-                            return (
-                              <TableRow key={p.id}>
-                                <TableCell className="border-r"><div className="font-mono text-sm font-medium">{`{${p.name}}`}</div></TableCell>
-                                <TableCell className="border-r"><Badge variant="outline" className="capitalize">{p.type}</Badge></TableCell>
-                                <TableCell className="border-r"><Badge variant="outline" className="capitalize">{p.entity_type}</Badge></TableCell>
-                                <TableCell className="border-r">
-                                  {p.master_field_ids && p.master_field_ids.length > 0 ? (
-                                    <div className="flex flex-wrap gap-1">
-                                      {p.master_field_ids.map((fieldId) => (
-                                        <Badge key={fieldId} variant="secondary" className="font-normal">
-                                          <Link2 className="h-3 w-3 mr-1"/>
-                                          {masterFieldMap.get(fieldId) || `ID: ${fieldId}`}
-                                        </Badge>
-                                      ))}
+              {panelsVisible.right && (
+                <Card className="h-full flex flex-col">
+                  <CardHeader>
+                    <div className="flex flex-row items-center justify-between">
+                      <div><CardTitle>Placeholders</CardTitle><CardDescription>Fields for the selected template.</CardDescription></div>
+                      <Button variant="outline" size="sm" onClick={() => setIsPlaceholderFormOpen(true)} disabled={!currentTemplate}><PlusCircle className="mr-2 h-4 w-4" /> Add</Button>
+                    </div>
+                    <div className="relative pt-4">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search placeholders..."
+                        value={placeholderSearch}
+                        onChange={(e) => setPlaceholderSearch(e.target.value)}
+                        disabled={!currentTemplate || !currentTemplate.placeholders?.length}
+                        className="pl-9"
+                      />
+                    </div>
+                  </CardHeader>
+                  <CardContent className="flex-1 overflow-y-auto min-h-[400px]">
+                    {currentTemplate?.placeholders?.length > 0 ? (
+                      filteredPlaceholders.length > 0 ? (
+                        <Table className="border max-h-[calc(100vh - 300px)]">
+                          <TableHeader className="bg-gray-100"><TableRow>
+                            <TableHead className="border-r font-bold text-gray-700">Field</TableHead>
+                            <TableHead className="border-r font-bold text-gray-700">Type</TableHead>
+                            <TableHead className="border-r font-bold text-gray-700">Entity</TableHead>
+                            <TableHead className="border-r font-bold text-gray-700">Linked Master Field</TableHead>
+                            <TableHead className="text-right border-r font-bold text-gray-700">Actions</TableHead>
+                          </TableRow></TableHeader>
+                          <TableBody>
+                            {filteredPlaceholders.map((p) => {
+                              const originalIndex = currentTemplate.placeholders.findIndex(orig => orig.id === p.id);
+                              return (
+                                <TableRow key={p.id}>
+                                  <TableCell className="border-r"><div className="font-mono text-sm font-medium">{`{${p.name}}`}</div></TableCell>
+                                  <TableCell className="border-r"><Badge variant="outline" className="capitalize">{p.type}</Badge></TableCell>
+                                  <TableCell className="border-r"><Badge variant="outline" className="capitalize">{p.entity_type}</Badge></TableCell>
+                                  <TableCell className="border-r">
+                                    {p.master_field_ids && p.master_field_ids.length > 0 ? (
+                                      <div className="flex flex-wrap gap-1">
+                                        {p.master_field_ids.map((fieldId) => (
+                                          <Badge key={fieldId} variant="secondary" className="font-normal">
+                                            <Link2 className="h-3 w-3 mr-1" />
+                                            {masterFieldMap.get(fieldId) || `ID: ${fieldId}`}
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <Badge variant="outline" className="font-normal text-muted-foreground">Not Linked</Badge>
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <div className="flex justify-end gap-1">
+                                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => editPlaceholder(originalIndex)}><Pencil className="h-3.5 w-3.5" /></Button>
+                                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => removePlaceholder(originalIndex)}><Trash2 className="h-3.5 w-3.5 text-destructive" /></Button>
                                     </div>
-                                  ) : (
-                                    <Badge variant="outline" className="font-normal text-muted-foreground">Not Linked</Badge>
-                                  )}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  <div className="flex justify-end gap-1">
-                                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => editPlaceholder(originalIndex)}><Pencil className="h-3.5 w-3.5" /></Button>
-                                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => removePlaceholder(originalIndex)}><Trash2 className="h-3.5 w-3.5 text-destructive" /></Button>
-                                  </div>
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
-                    ) : (
-                      <div className="text-center p-6 h-full flex items-center justify-center"><p className="text-sm text-muted-foreground">No placeholders match your search.</p></div>
-                    )
-                  ) : ( <div className="text-center p-6 h-full flex items-center justify-center"><p className="text-sm text-muted-foreground">No placeholders found.</p></div>)}
-                </CardContent>
-              </Card>
-             )}
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      ) : (
+                        <div className="text-center p-6 h-full flex items-center justify-center"><p className="text-sm text-muted-foreground">No placeholders match your search.</p></div>
+                      )
+                    ) : (<div className="text-center p-6 h-full flex items-center justify-center"><p className="text-sm text-muted-foreground">No placeholders found.</p></div>)}
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </div>
           <DialogFooter>
@@ -822,28 +926,28 @@ const removePlaceholder = (index: number) => {
           <div className="grid gap-4 py-4">
             <div className="space-y-2">
               <Label htmlFor="name">Name (no spaces, e.g., client_name)</Label>
-              <Input 
-                id="name" 
-                value={newPlaceholder.name} 
-                onChange={(e) => setNewPlaceholder({ ...newPlaceholder, name: e.target.value.replace(/\s+/g, '_') })} 
+              <Input
+                id="name"
+                value={newPlaceholder.name}
+                onChange={(e) => setNewPlaceholder({ ...newPlaceholder, name: e.target.value.replace(/\s+/g, '_') })}
               />
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="description">Description</Label>
-              <Textarea 
-                id="description" 
-                placeholder="A short description for this field" 
-                value={newPlaceholder.description} 
-                onChange={(e) => setNewPlaceholder({ ...newPlaceholder, description: e.target.value })} 
+              <Textarea
+                id="description"
+                placeholder="A short description for this field"
+                value={newPlaceholder.description}
+                onChange={(e) => setNewPlaceholder({ ...newPlaceholder, description: e.target.value })}
               />
             </div>
-            
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="type">Type</Label>
-                <Select 
-                  value={newPlaceholder.type} 
+                <Select
+                  value={newPlaceholder.type}
                   onValueChange={(v) => setNewPlaceholder({ ...newPlaceholder, type: v })}
                 >
                   <SelectTrigger>
@@ -858,11 +962,11 @@ const removePlaceholder = (index: number) => {
                   </SelectContent>
                 </Select>
               </div>
-              
+
               <div className="space-y-2">
                 <Label>Entity</Label>
-                <Select 
-                  value={newPlaceholder.entity_type} 
+                <Select
+                  value={newPlaceholder.entity_type}
                   onValueChange={(v) => setNewPlaceholder({ ...newPlaceholder, entity_type: v })}
                 >
                   <SelectTrigger>
@@ -878,7 +982,7 @@ const removePlaceholder = (index: number) => {
                 </Select>
               </div>
             </div>
-            
+
             {newPlaceholder.type === 'select' && (
               <div className="space-y-2">
                 <Label>Options (one per line)</Label>
@@ -897,7 +1001,7 @@ Option 3"
                 />
               </div>
             )}
-            
+
             <div className="space-y-2">
               <Label>Link to Master Field (Optional)</Label>
               <MasterFieldPicker
@@ -914,7 +1018,7 @@ Option 3"
                 onClear={() => setNewPlaceholder({
                   ...newPlaceholder,
                   master_field_ids: []
-                  })}
+                })}
               />
             </div>
             <div className="flex items-center space-x-2 pt-2"><Checkbox id="required" checked={newPlaceholder.required} onCheckedChange={(c) => setNewPlaceholder({ ...newPlaceholder, required: !!c })} /><Label htmlFor="required">Required field</Label></div>

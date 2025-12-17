@@ -44,8 +44,15 @@ const ToolbarButton = ({ onClick, isActive, tooltip, children }) => (
 export default function TemplateEditor({ initialContent = '', onChange, onBlur, className }: TemplateEditorProps) {
 const editor = useEditor({
     extensions: [
-    StarterKit,
-    Underline,
+    StarterKit.configure({
+      // Disable the underline from StarterKit since we're using our own configuration
+      underline: false
+    }),
+    Underline.configure({
+      HTMLAttributes: {
+        class: 'underline',
+      },
+    }),
     TextAlign.configure({ types: ['heading', 'paragraph'] }),
     Highlight.configure({ multicolor: true }),
     Placeholder.configure({ placeholder: 'Start writing your letter template here…' }),

@@ -795,7 +795,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                     <TableRow className="bg-gray-100 hover:bg-gray-200 cursor-pointer" onClick={() => toggleSectionExpansion('letters')}>
                       <TableCell colSpan={totalColumns} className="px-4 py-2 font-semibold text-gray-700">
                         <div className="flex items-center gap-2">
-                          {expandedSections.letters ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />} Letters
+                          {expandedSections.letters ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />} Letters & Forms
                         </div>
                       </TableCell>
                     </TableRow>

@@ -112,14 +112,9 @@ const navItems = [
     ],
   },
   {
-    category: "Templates",
-    items: [
-      {
-        title: "Letters",
-        href: "/dashboard/templates/letters",
-        icon: FileText,
-      }
-    ],
+    title: "Templates",
+    href: "/dashboard/templates",
+    icon: FileText,
   },
   {
     title: "Master Fields",
