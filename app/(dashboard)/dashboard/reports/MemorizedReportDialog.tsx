@@ -13,9 +13,9 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
-import { 
-  Loader2, Plus, Minus, Pencil, Trash2, X, Save, Star, Filter, 
-  Table as TableIcon, ChevronsUpDown, ChevronUp 
+import {
+  Loader2, Plus, Minus, Pencil, Trash2, X, Save, Star, Filter,
+  Table as TableIcon, ChevronsUpDown, ChevronUp
 } from "lucide-react"
 import type { Department, KycDocument } from "../utils/taskManagerData"
 import { ENHANCED_TABLE_HEADERS_IMMIGRATION } from "../tasks/overall-view/tableUtils"
@@ -27,7 +27,7 @@ type FieldConfig = {
 };
 
 type ReportConfiguration = {
-  taskFields: FieldConfig[]; 
+  taskFields: FieldConfig[];
   stages: {
     [stageId: string]: {
       isStageDateSelected: boolean;
@@ -75,7 +75,7 @@ const normalizeConfiguration = (config: any): ReportConfiguration => {
   };
 
   if (Array.isArray(config.taskFields)) {
-    normalized.taskFields = config.taskFields.map((f: any) => 
+    normalized.taskFields = config.taskFields.map((f: any) =>
       typeof f === 'string' ? { id: f, isDefault: true } : f
     );
   }
@@ -92,7 +92,7 @@ const normalizeConfiguration = (config: any): ReportConfiguration => {
         Object.entries(stageConfig.documents).forEach(([kycId, docConfig]: [string, any]) => {
           let fields: FieldConfig[] = [];
           if (Array.isArray(docConfig.fields)) {
-            fields = docConfig.fields.map((f: any) => 
+            fields = docConfig.fields.map((f: any) =>
               typeof f === 'string' ? { id: f, isDefault: true } : f
             );
           }
@@ -120,21 +120,46 @@ export function MemorizedReportDialog({
   const [isLoading, setIsLoading] = useState(false)
   const [reportName, setReportName] = useState("")
   const [reportConfig, setReportConfig] = useState<ReportConfiguration>(INITIAL_REPORT_CONFIG)
-  
+
   // State to track which fields are included in the report
   const [includedFields, setIncludedFields] = useState<Set<string>>(new Set());
-  
+
   const [showSelectedOnly, setShowSelectedOnly] = useState(true);
+
+  // Count selected fields
+  const countSelectedFields = useCallback(() => {
+    let count = 0;
+
+    // Count task fields
+    count += reportConfig.taskFields.filter(field =>
+      includedFields.has(field.id)
+    ).length;
+
+    // Count stage fields
+    Object.values(reportConfig.stages).forEach(stage => {
+      // Count stage date if selected
+      if (stage.isStageDateSelected) count++;
+
+      // Count document fields
+      Object.values(stage.documents).forEach(doc => {
+        count += doc.fields.filter(field =>
+          includedFields.has(field.id)
+        ).length;
+      });
+    });
+
+    return count;
+  }, [reportConfig, includedFields]);
 
   // State for Expand/Collapse All
   const [expandedSections, setExpandedSections] = useState<string[]>(['task-details']);
   const [allExpanded, setAllExpanded] = useState(false);
-  
+
   // Generate a unique ID for each section
   const getSectionId = useCallback((title: string) => {
     return title.toLowerCase().replace(/\s+/g, '-');
   }, []);
-  
+
   // Get all section IDs
   const getAllSectionIds = useCallback(() => {
     return [
@@ -142,7 +167,7 @@ export function MemorizedReportDialog({
       ...stages.map(stage => getSectionId(stage.name))
     ];
   }, [stages, getSectionId]);
-  
+
   // Toggle all sections expanded/collapsed
   const toggleAllSections = useCallback(() => {
     if (allExpanded) {
@@ -152,7 +177,7 @@ export function MemorizedReportDialog({
     }
     setAllExpanded(!allExpanded);
   }, [allExpanded, getAllSectionIds]);
-  
+
   // Toggle a single section
   const toggleSection = useCallback((sectionId: string) => {
     setExpandedSections(prev => {
@@ -165,7 +190,7 @@ export function MemorizedReportDialog({
       return newState;
     });
   }, [getAllSectionIds]);
-  
+
   // Collapse all sections
   const handleCollapseAll = useCallback(() => {
     toggleAllSections(false);
@@ -195,7 +220,7 @@ export function MemorizedReportDialog({
       fetchReports();
     }
   }, [open, fetchReports, department]);
-  
+
   useEffect(() => {
     setSelectedReport(null);
     setReportName("");
@@ -213,7 +238,7 @@ export function MemorizedReportDialog({
     setSelectedReport(null);
     setReportName("");
     setReportConfig(INITIAL_REPORT_CONFIG);
-    setIncludedFields(new Set(['applicant_name'])); 
+    setIncludedFields(new Set(['applicant_name']));
     setIsEditing(true);
     setShowSelectedOnly(true);
     setExpandedSections(['task-details']);
@@ -246,7 +271,7 @@ export function MemorizedReportDialog({
   const handleSaveReport = async () => {
     if (!reportName.trim() || !department) return;
     setIsLoading(true);
-    
+
     try {
       const finalConfig = getFinalConfiguration(reportConfig);
       const reportData = {
@@ -272,10 +297,10 @@ export function MemorizedReportDialog({
       const normalizedSavedConfig = normalizeConfiguration(savedReportData.configuration);
       setSelectedReport(savedReportData);
       setReportName(savedReportData.name);
-      setReportConfig(normalizedSavedConfig); 
+      setReportConfig(normalizedSavedConfig);
       setIsEditing(false);
       await fetchReports();
-      
+
     } catch (error) {
       console.error(error);
       toast({ title: "Error", description: "Failed to save report.", variant: "destructive" });
@@ -285,7 +310,7 @@ export function MemorizedReportDialog({
   };
 
   const handleDeleteReport = async (reportId: string) => {
-    if(!window.confirm("Are you sure you want to delete this report?")) return;
+    if (!window.confirm("Are you sure you want to delete this report?")) return;
     setIsLoading(true);
     try {
       const { error } = await supabase.from('tm_memorized_reports').delete().eq('id', reportId);
@@ -307,7 +332,7 @@ export function MemorizedReportDialog({
       onApplyReport({
         ...selectedReport,
         configuration: finalConfig,
-        sessionIncludedFields: Array.from(includedFields) 
+        sessionIncludedFields: Array.from(includedFields)
       });
       onOpenChange(false);
     }
@@ -330,11 +355,48 @@ export function MemorizedReportDialog({
   }, [includedFields]);
 
   const getFinalConfiguration = (config: ReportConfiguration): ReportConfiguration => {
-    const fieldsToSave = config.taskFields.filter(f => f.isDefault === true);
-    return {
-      ...config,
-      taskFields: fieldsToSave
+    // Create a new configuration object with the same structure but ordered fields
+    const orderedConfig: ReportConfiguration = {
+      taskFields: [],
+      stages: {}
     };
+
+    // 1. Process task fields in the order they appear in the UI
+    // Filter and order task fields based on includedFields and tableHeaders order
+    const orderedTaskFields = tableHeaders
+      .filter(header => {
+        const field = config.taskFields.find(f => f.id === header.id);
+        return field && field.isDefault === true;
+      })
+      .map(header => {
+        const field = config.taskFields.find(f => f.id === header.id)!;
+        return { id: field.id, isDefault: field.isDefault };
+      });
+
+    orderedConfig.taskFields = orderedTaskFields;
+
+    // 2. Process stages in the order they appear in the UI
+    const orderedStages = { ...config.stages };
+    
+    // Reorder stages based on the original stages order
+    const orderedStageIds = stages.map(stage => stage.id);
+    
+    // Create a new ordered stages object
+    const newStages: ReportConfiguration['stages'] = {};
+    
+    for (const stageId of orderedStageIds) {
+      if (orderedStages[stageId]) {
+        const stage = orderedStages[stageId];
+        newStages[stageId] = {
+          ...stage,
+          documents: { ...stage.documents } // Keep the documents as is for now
+        };
+      }
+    }
+    
+    orderedConfig.stages = newStages;
+
+    return orderedConfig;
   };
 
   const toggleTaskFieldDefault = useCallback((fieldId: string) => {
@@ -344,7 +406,7 @@ export function MemorizedReportDialog({
       let newFields = [...current];
 
       if (exists) {
-        newFields = newFields.map(f => 
+        newFields = newFields.map(f =>
           f.id === fieldId ? { ...f, isDefault: !f.isDefault } : f
         );
       } else {
@@ -399,13 +461,13 @@ export function MemorizedReportDialog({
       if (!newStages[stageId]) {
         newStages[stageId] = { isStageDateSelected: false, isStageDateDefault: false, documents: {} };
       }
-      
+
       if (newStages[stageId].documents[kycId]) {
         delete newStages[stageId].documents[kycId];
       } else {
         newStages[stageId].documents[kycId] = { fields: [] };
       }
-      
+
       if (!newStages[stageId].isStageDateSelected && Object.keys(newStages[stageId].documents).length === 0) {
         delete newStages[stageId];
       }
@@ -439,7 +501,7 @@ export function MemorizedReportDialog({
       const exists = currentFields.find((f: any) => f.id === fieldId);
 
       if (exists) {
-        newStages[stageId].documents[kycId].fields = currentFields.map((f: any) => 
+        newStages[stageId].documents[kycId].fields = currentFields.map((f: any) =>
           f.id === fieldId ? { ...f, isDefault: !f.isDefault } : f
         );
       } else {
@@ -465,18 +527,18 @@ export function MemorizedReportDialog({
       <ScrollArea className="flex-1 pr-4 -mr-4">
         <div className="space-y-1">
           {sortedReports.map(report => (
-            <div 
-              key={report.id} 
+            <div
+              key={report.id}
               className={`group flex items-center justify-between p-2 rounded-md cursor-pointer border transition-all
-                ${selectedReport?.id === report.id 
-                  ? 'bg-blue-50 border-blue-200 shadow-sm' 
-                  : 'border-transparent hover:bg-slate-50 hover:border-slate-200'}`} 
+                ${selectedReport?.id === report.id
+                  ? 'bg-blue-50 border-blue-200 shadow-sm'
+                  : 'border-transparent hover:bg-slate-50 hover:border-slate-200'}`}
               onClick={() => handleSelectReport(report)}
             >
               <div className="flex items-center gap-2 overflow-hidden">
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
+                <Button
+                  variant="ghost"
+                  size="icon"
                   className={`h-6 w-6 shrink-0 ${report.is_favorite ? 'text-amber-400 hover:text-amber-500' : 'text-slate-300 hover:text-amber-400'}`}
                   onClick={(e) => handleToggleFavorite(e, report)}
                 >
@@ -486,14 +548,14 @@ export function MemorizedReportDialog({
                   {report.name}
                 </span>
               </div>
-              
+
               {selectedReport?.id === report.id && (
                 <div className="flex items-center gap-1 opacity-100 transition-opacity">
                   <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-500 hover:text-blue-600" onClick={(e) => { e.stopPropagation(); handleEditReport(); }}>
-                    <Pencil className="h-3.5 w-3.5"/>
+                    <Pencil className="h-3.5 w-3.5" />
                   </Button>
                   <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-500 hover:text-red-600" onClick={(e) => { e.stopPropagation(); handleDeleteReport(report.id); }}>
-                    <Trash2 className="h-3.5 w-3.5"/>
+                    <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               )}
@@ -517,13 +579,13 @@ export function MemorizedReportDialog({
     </div>
   );
 
-  const TableRow = ({ 
-    label, 
-    isIncluded, 
-    isDefault, 
-    onToggleInclude, 
-    onToggleDefault, 
-    depth = 0, 
+  const TableRow = ({
+    label,
+    isIncluded,
+    isDefault,
+    onToggleInclude,
+    onToggleDefault,
+    depth = 0,
     isSessionOnly = false,
     className = "",
     icon = null,
@@ -542,7 +604,7 @@ export function MemorizedReportDialog({
     readOnly?: boolean;
   }) => (
     <div className={cn(
-      "grid grid-cols-12 gap-0 border-b border-slate-100 items-stretch text-sm transition-colors bg-white hover:bg-slate-50", 
+      "grid grid-cols-12 gap-0 border-b border-slate-100 items-stretch text-sm transition-colors bg-white hover:bg-slate-50",
       className
     )}>
       {/* Label Column */}
@@ -556,12 +618,12 @@ export function MemorizedReportDialog({
           </span>
         </div>
       </div>
-      
+
       {/* Default Checkbox Column */}
       <div className="col-span-2 flex items-center justify-center border-r border-slate-100 bg-slate-50/30 py-2">
         {(onToggleDefault || readOnly) && (
-          <Checkbox 
-            checked={isDefault} 
+          <Checkbox
+            checked={isDefault}
             onCheckedChange={onToggleDefault}
             disabled={readOnly || isSessionOnly}
             className="data-[state=checked]:bg-green-600 data-[state=checked]:border-green-600 disabled:opacity-50"
@@ -572,8 +634,8 @@ export function MemorizedReportDialog({
       {/* Reports Table Checkbox Column */}
       <div className="col-span-2 flex items-center justify-center bg-slate-50/30 py-2">
         {(onToggleInclude || readOnly) && (
-          <Checkbox 
-            checked={isIncluded} 
+          <Checkbox
+            checked={isIncluded}
             onCheckedChange={onToggleInclude}
             disabled={readOnly}
             className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 disabled:opacity-50"
@@ -585,10 +647,10 @@ export function MemorizedReportDialog({
 
   const ExpandableRow = React.memo(({ title, children }: { title: string, children: React.ReactNode }) => {
     const sectionId = getSectionId(title);
-    
+
     return (
       <AccordionItem value={sectionId} className="border-b border-slate-200 last:border-0">
-        <AccordionTrigger 
+        <AccordionTrigger
           className="w-full py-0 hover:no-underline group bg-slate-50/80 [&>svg]:hidden"
           onClick={() => toggleSection(sectionId)}
         >
@@ -610,64 +672,49 @@ export function MemorizedReportDialog({
   });
 
   const renderReportEditor = () => {
+    const selectedCount = countSelectedFields();
     const filteredTaskFields = tableHeaders.filter(field => {
-        if(!showSelectedOnly) return true;
-        return includedFields.has(field.id);
+      if (!showSelectedOnly) return true;
+      return includedFields.has(field.id);
     });
 
-    // Use the component-level functions
-
     const filteredStages = sortedStages.filter(stage => {
-        if(!showSelectedOnly) return true;
-        const stageConfig = reportConfig.stages?.[stage.id];
-        if(!stageConfig) return false;
-        if(stageConfig.isStageDateSelected) return true;
-        if(Object.keys(stageConfig.documents).length > 0) return true;
-        return false;
+      if (!showSelectedOnly) return true;
+      const stageConfig = reportConfig.stages?.[stage.id];
+      if (!stageConfig) return false;
+      if (stageConfig.isStageDateSelected) return true;
+      return Object.keys(stageConfig.documents).length > 0;
     });
 
     return (
       <div className="flex flex-col h-full bg-white">
-        <div className="flex justify-between items-center mb-4 pb-4 border-b px-1">
-          <div>
-            <h3 className="text-lg font-bold text-slate-900">{selectedReport ? "Edit Report" : "New Report"}</h3>
-            <p className="text-xs text-slate-500">
-              Configure fields. <strong>Default</strong> = Saved to DB. <strong>Reports Table</strong> = Temporary session visibility.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-             <Button 
+        <div className="mb-4 pb-4 border-b px-1">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-bold text-slate-900">
+                {selectedReport ? `Edit "${selectedReport.name}"` : 'Create New Report'}
+              </h3>
+              <p className="text-sm text-slate-500 mt-1">
+                {selectedCount} {selectedCount === 1 ? 'field' : 'fields'} selected
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="bg-blue-50 text-blue-700 text-sm px-3 py-1.5 rounded-md border border-blue-100">
+                {selectedCount} {selectedCount === 1 ? 'field' : 'fields'} selected
+              </div>
+              <Button 
                 variant="outline" 
                 size="sm" 
-                className="h-8 px-2 text-xs flex items-center gap-1" 
-                onClick={toggleAllSections}
-                title={allExpanded ? 'Collapse All' : 'Expand All'}
-             >
-                {allExpanded ? (
-                  <>
-                    <ChevronUp className="h-3 w-3" />
-                    <span>Collapse All</span>
-                  </>
-                ) : (
-                  <>
-                    <ChevronsUpDown className="h-3 w-3" />
-                    <span>Expand All</span>
-                  </>
-                )}
-             </Button>
-             
-             <div className="flex items-center space-x-2 bg-slate-100 px-3 py-1.5 rounded-md border border-slate-200 ml-2">
-                <Checkbox 
-                    id="showSelectedOnly" 
-                    checked={showSelectedOnly} 
-                    onCheckedChange={(c) => setShowSelectedOnly(!!c)} 
-                />
-                <Label htmlFor="showSelectedOnly" className="text-xs cursor-pointer font-medium text-slate-700 flex items-center gap-1">
-                    <Filter className="h-3 w-3" />
-                    Show Included Only
-                </Label>
-             </div>
-             <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)}><X className="mr-2 h-4 w-4"/> Cancel</Button>
+                className="text-xs h-8 px-3 flex items-center gap-1.5 text-slate-600 hover:bg-slate-100"
+                onClick={() => setShowSelectedOnly(!showSelectedOnly)}
+              >
+                <Filter className="h-3.5 w-3.5" />
+                {showSelectedOnly ? 'Show All' : 'Show Selected'}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)}>
+                <X className="mr-2 h-4 w-4"/> Cancel
+              </Button>
+            </div>
           </div>
         </div>
         
@@ -800,135 +847,135 @@ export function MemorizedReportDialog({
             </ScrollArea>
           </div>
         </div>
-      </div>
+      </div >
     );
-  };
+};
 
-  const renderReportViewer = () => {
-    const allIncludedFields = new Set([
-      ...(reportConfig.taskFields?.map(f => f.id) || []),
-      ...Array.from(includedFields)
-    ]);
-  
-    return (
-      <div className="flex flex-col h-full">
-        <div className="mb-4">
-          <h3 className="text-lg font-bold text-slate-900">{selectedReport?.name}</h3>
-          <p className="text-sm text-slate-500">Read-only preview.</p>
-        </div>
-  
-        <div className="border rounded-lg shadow-sm flex-1 flex flex-col min-h-0 overflow-hidden bg-white">
-          <TableHeader />
-          <ScrollArea className="flex-1">
-             {/* Flattened View for Viewer using the same TableRow component */}
-             <div className="divide-y divide-slate-100">
-                <div className="bg-slate-50 px-4 py-2 font-bold text-xs uppercase text-slate-500 tracking-wider">Task Fields</div>
-                {Array.from(allIncludedFields).map(fieldId => {
-                  const fieldConfig = reportConfig.taskFields?.find(f => f.id === fieldId);
-                  const header = tableHeaders.find(h => h.id === fieldId);
-                  const isSessionOnly = !fieldConfig?.isDefault;
-                  return (
-                     <TableRow 
-                        key={fieldId}
-                        label={header?.label || fieldId}
-                        isIncluded={true} 
-                        isDefault={!!fieldConfig?.isDefault}
-                        isSessionOnly={isSessionOnly}
-                        depth={0}
-                        readOnly={true}
-                     />
-                  )
-                })}
-
-                {Object.entries(reportConfig.stages).map(([stageId, stageConfig]) => {
-                  const stage = stages.find(s => s.id === stageId);
-                  if (!stage) return null;
-                  return (
-                    <div key={stageId}>
-                       <div className="bg-slate-50 px-4 py-2 font-bold text-xs uppercase text-slate-500 tracking-wider border-t border-slate-200">{stage.name}</div>
-                       {stageConfig.isStageDateSelected && (
-                          <TableRow 
-                            label="Completion Date" 
-                            isIncluded={true} 
-                            isDefault={stageConfig.isStageDateDefault} 
-                            depth={0} 
-                            readOnly={true}
-                          />
-                       )}
-                       {Object.entries(stageConfig.documents).map(([kycId, docConfig]) => {
-                          const kycDoc = kycDocuments.get(kycId);
-                          const docFields = docConfig.fields || [];
-                          if(!kycDoc) return null;
-
-                          return (
-                            <React.Fragment key={kycId}>
-                              <div className="px-4 py-1.5 bg-slate-50/50 text-xs font-semibold text-slate-600 border-t border-slate-100 pl-8">
-                                {kycDoc.display_name || kycDoc.name}
-                              </div>
-                              {docFields.map((field: any) => {
-                                 const fieldInfo = kycDoc.fields?.find((f: any) => f.id === field.id);
-                                 return (
-                                   <TableRow 
-                                      key={field.id}
-                                      label={fieldInfo?.fieldName || field.id}
-                                      isIncluded={true}
-                                      isDefault={field.isDefault}
-                                      isSessionOnly={!field.isDefault}
-                                      depth={1}
-                                      readOnly={true}
-                                   />
-                                 )
-                              })}
-                            </React.Fragment>
-                          )
-                       })}
-                    </div>
-                  );
-                })}
-             </div>
-          </ScrollArea>
-        </div>
-      </div>
-    );
-  };
-
+const renderReportViewer = () => {
+  const allIncludedFields = new Set([
+    ...(reportConfig.taskFields?.map(f => f.id) || []),
+    ...Array.from(includedFields)
+  ]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl h-[85vh] grid grid-cols-12 gap-0 p-0 overflow-hidden bg-slate-50">
-        <div className="col-span-3 border-r bg-white p-4 flex flex-col h-full overflow-hidden">
-          <DialogHeader className="mb-4 px-1">
-            <DialogTitle>Saved Reports</DialogTitle>
-            <DialogDescription>Manage your customized report views.</DialogDescription>
-          </DialogHeader>
-          {isLoading && !isEditing ? <div className="flex-1 flex items-center justify-center"><Loader2 className="animate-spin text-blue-500"/></div> : renderReportList()}
+    <div className="flex flex-col h-full">
+      <div className="mb-4">
+        <h3 className="text-lg font-bold text-slate-900">{selectedReport?.name}</h3>
+        <p className="text-sm text-slate-500">Read-only preview.</p>
+      </div>
+
+      <div className="border rounded-lg shadow-sm flex-1 flex flex-col min-h-0 overflow-hidden bg-white">
+        <TableHeader />
+        <ScrollArea className="flex-1">
+          {/* Flattened View for Viewer using the same TableRow component */}
+          <div className="divide-y divide-slate-100">
+            <div className="bg-slate-50 px-4 py-2 font-bold text-xs uppercase text-slate-500 tracking-wider">Task Fields</div>
+            {Array.from(allIncludedFields).map(fieldId => {
+              const fieldConfig = reportConfig.taskFields?.find(f => f.id === fieldId);
+              const header = tableHeaders.find(h => h.id === fieldId);
+              const isSessionOnly = !fieldConfig?.isDefault;
+              return (
+                <TableRow
+                  key={fieldId}
+                  label={header?.label || fieldId}
+                  isIncluded={true}
+                  isDefault={!!fieldConfig?.isDefault}
+                  isSessionOnly={isSessionOnly}
+                  depth={0}
+                  readOnly={true}
+                />
+              )
+            })}
+
+            {Object.entries(reportConfig.stages).map(([stageId, stageConfig]) => {
+              const stage = stages.find(s => s.id === stageId);
+              if (!stage) return null;
+              return (
+                <div key={stageId}>
+                  <div className="bg-slate-50 px-4 py-2 font-bold text-xs uppercase text-slate-500 tracking-wider border-t border-slate-200">{stage.name}</div>
+                  {stageConfig.isStageDateSelected && (
+                    <TableRow
+                      label="Completion Date"
+                      isIncluded={true}
+                      isDefault={stageConfig.isStageDateDefault}
+                      depth={0}
+                      readOnly={true}
+                    />
+                  )}
+                  {Object.entries(stageConfig.documents).map(([kycId, docConfig]) => {
+                    const kycDoc = kycDocuments.get(kycId);
+                    const docFields = docConfig.fields || [];
+                    if (!kycDoc) return null;
+
+                    return (
+                      <React.Fragment key={kycId}>
+                        <div className="px-4 py-1.5 bg-slate-50/50 text-xs font-semibold text-slate-600 border-t border-slate-100 pl-8">
+                          {kycDoc.display_name || kycDoc.name}
+                        </div>
+                        {docFields.map((field: any) => {
+                          const fieldInfo = kycDoc.fields?.find((f: any) => f.id === field.id);
+                          return (
+                            <TableRow
+                              key={field.id}
+                              label={fieldInfo?.fieldName || field.id}
+                              isIncluded={true}
+                              isDefault={field.isDefault}
+                              isSessionOnly={!field.isDefault}
+                              depth={1}
+                              readOnly={true}
+                            />
+                          )
+                        })}
+                      </React.Fragment>
+                    )
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </ScrollArea>
+      </div>
+    </div>
+  );
+};
+
+
+return (
+  <Dialog open={open} onOpenChange={onOpenChange}>
+    <DialogContent className="max-w-6xl h-[85vh] grid grid-cols-12 gap-0 p-0 overflow-hidden bg-slate-50">
+      <div className="col-span-3 border-r bg-white p-4 flex flex-col h-full overflow-hidden">
+        <DialogHeader className="mb-4 px-1">
+          <DialogTitle>Saved Reports</DialogTitle>
+          <DialogDescription>Manage your customized report views.</DialogDescription>
+        </DialogHeader>
+        {isLoading && !isEditing ? <div className="flex-1 flex items-center justify-center"><Loader2 className="animate-spin text-blue-500" /></div> : renderReportList()}
+      </div>
+
+      <div className="col-span-9 p-6 flex flex-col h-full overflow-hidden">
+        <div className="flex-1 min-h-0 mb-4 overflow-hidden flex flex-col">
+          {isEditing ? renderReportEditor() : selectedReport ? renderReportViewer() : (
+            <div className="flex flex-col items-center justify-center h-full text-slate-400">
+              <div className="p-6 bg-white shadow-sm rounded-full mb-4"><TableIcon className="h-10 w-10 text-slate-200" /></div>
+              <p className="font-semibold text-lg text-slate-600">Select a report to view details</p>
+              <p className="text-sm">Or create a new one to get started.</p>
+            </div>
+          )}
         </div>
 
-        <div className="col-span-9 p-6 flex flex-col h-full overflow-hidden">
-          <div className="flex-1 min-h-0 mb-4 overflow-hidden flex flex-col">
-            {isEditing ? renderReportEditor() : selectedReport ? renderReportViewer() : (
-              <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                <div className="p-6 bg-white shadow-sm rounded-full mb-4"><TableIcon className="h-10 w-10 text-slate-200"/></div>
-                <p className="font-semibold text-lg text-slate-600">Select a report to view details</p>
-                <p className="text-sm">Or create a new one to get started.</p>
-              </div>
-            )}
-          </div>
-          
-          <DialogFooter className="mt-auto pt-4 border-t bg-slate-50 -mx-6 -mb-6 p-6">
-            {isEditing ? (
-              <Button onClick={handleSaveReport} disabled={isLoading || !reportName.trim()} className="w-full sm:w-auto bg-green-600 hover:bg-green-700">
-                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Save className="mr-2 h-4 w-4"/>} 
-                Save Configuration
-              </Button>
-            ) : selectedReport ? (
-              <Button onClick={handleApply} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 shadow-sm">
-                Apply This Report
-              </Button>
-            ) : null}
-          </DialogFooter>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
+        <DialogFooter className="mt-auto pt-4 border-t bg-slate-50 -mx-6 -mb-6 p-6">
+          {isEditing ? (
+            <Button onClick={handleSaveReport} disabled={isLoading || !reportName.trim()} className="w-full sm:w-auto bg-green-600 hover:bg-green-700">
+              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+              Save Configuration
+            </Button>
+          ) : selectedReport ? (
+            <Button onClick={handleApply} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 shadow-sm">
+              Apply This Report
+            </Button>
+          ) : null}
+        </DialogFooter>
+      </div>
+    </DialogContent>
+  </Dialog>
+);
 }

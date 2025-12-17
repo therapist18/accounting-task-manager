@@ -61,7 +61,8 @@ export const ENHANCED_TABLE_HEADERS_IMMIGRATION: TableHeader[] = [
   { id: 'id', label: 'Task ID', default: true, width: 'w-20' },
   { id: 'applicant_name', label: 'Applicant Name', default: true, width: 'w-48' },
   { id: 'company_name', label: 'Company Name', default: true, width: 'w-48' },
-  { id: 'job_level', label: 'Job Level', default: true, width: 'w-32' },
+  { id: 'sub_department', label: 'Sub Department', default: true, width: 'w-32' }, // New column
+  { id: 'job_level', label: 'Class', default: true, width: 'w-32' },
   { id: 'renewal_new', label: 'Renewal/New', default: true, width: 'w-28' },
   { id: 'immigration_document_type', label: 'Current Immigration Doc Type', default: false, width: 'w-48' },
   { id: 'immigration_expiry_date', label: 'Current Immigration Expiry Date', default: false, width: 'w-40' },
@@ -98,7 +99,7 @@ export const STATS_HEADERS = [
 
 export const parseDate = (dateStr: string | Date): Date | null => {
   if (!dateStr) return null;
-  
+
   // If it's already a Date object
   if (dateStr instanceof Date) {
     return isValid(dateStr) ? dateStr : null;
@@ -107,7 +108,7 @@ export const parseDate = (dateStr: string | Date): Date | null => {
   // If it's already in dd/MM/yyyy format, parse it directly
   const dateRegex = /^(\d{2})\/(\d{2})\/(\d{4})$/;
   const match = dateStr.match(dateRegex);
-  
+
   if (match) {
     const [_, day, month, year] = match;
     const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
@@ -251,11 +252,38 @@ export const getTimeStatus = (startTime: Date | string | null, estimatedMinutes:
 };
 
 export const calculateDaysRemaining = (expiryDate: Date | null): string => {
-    if (!expiryDate) return '-';
-    const today = startOfToday();
-    const diffTime = expiryDate.getTime() - today.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays.toString();
+  if (!expiryDate) return '-';
+  const today = startOfToday();
+  const diffTime = expiryDate.getTime() - today.getTime();
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  return diffDays.toString();
+};
+
+export const getSubDepartmentDisplay = (task: any, departments: any[]): string => {
+  const jobLevel = task.job_level;
+
+  if (!jobLevel || typeof jobLevel !== 'object' || jobLevel === null) {
+    return 'N/A';
+  }
+
+  try {
+    const department = departments.find(d => d.id == jobLevel.department_id);
+    if (!department) {
+      return 'N/A';
+    }
+
+    const subdepartment = department.tm_subdepartments?.find(
+      (sd: any) => sd.id == jobLevel.subdepartment_id
+    );
+
+    if (jobLevel.subdepartment_id) {
+      return subdepartment?.name || `SubDept ${jobLevel.subdepartment_id}`;
+    }
+
+    return 'N/A';
+  } catch (error) {
+    return 'N/A';
+  }
 };
 
 export const getJobLevelDisplay = (task: any, departments: any[]): string => {
@@ -281,21 +309,18 @@ export const getJobLevelDisplay = (task: any, departments: any[]): string => {
         const classItem = subdepartment.classes.find(
           (c: any) => c.id == jobLevel.class_id
         );
-        if (classItem?.name) return classItem.name;
-        return `Class ${jobLevel.class_id}`;
+        return classItem?.name || `Class ${jobLevel.class_id}`;
       }
 
-      // For level 2 (subdepartment)
-      if (jobLevel.level === 2 && jobLevel.subdepartment_id) {
-        if (subdepartment?.name) return subdepartment.name;
-        return `SubDept ${jobLevel.subdepartment_id}`;
+      // For level 1 (department)
+      if (jobLevel.level === 1) {
+        return department.name || `Dept ${jobLevel.department_id}`;
       }
 
       // Fallback cases
       if (jobLevel.class_id) return `Class ${jobLevel.class_id}`;
       if (jobLevel.subclass_id) return `Subclass ${jobLevel.subclass_id}`;
-      if (jobLevel.subdepartment_id) return `SubDept ${jobLevel.subdepartment_id}`;
-      if (jobLevel.department_id) return `Dept ${jobLevel.department_id}`;
+      return 'N/A';
     } catch (error) {
       console.error('Error processing job level:', error);
     }
@@ -321,24 +346,24 @@ export const formatImmigrationExpiryDate = (task: any, getEnhancedStatus: (task:
 };
 
 export const formatImmigrationDaysToGo = (task: any, getEnhancedStatus: (task: any) => StatusInfo): React.ReactNode => {
-    const statusInfo = getEnhancedStatus(task);
-    if (!statusInfo.date) return '-';
-    
-    // Logic extracted from ReportsPage
-    const days = Math.ceil((statusInfo.date.getTime() - new Date().setHours(0, 0, 0, 0)) / (1000 * 60 * 60 * 24));
-    
-    return (
-        <span className={`font-medium ${days < 0 ? 'text-red-600' : days <= 30 ? 'text-amber-600' : 'text-green-600'}`}>
-            {days} days
-        </span>
-    );
+  const statusInfo = getEnhancedStatus(task);
+  if (!statusInfo.date) return '-';
+
+  // Logic extracted from ReportsPage
+  const days = Math.ceil((statusInfo.date.getTime() - new Date().setHours(0, 0, 0, 0)) / (1000 * 60 * 60 * 24));
+
+  return (
+    <span className={`font-medium ${days < 0 ? 'text-red-600' : days <= 30 ? 'text-amber-600' : 'text-green-600'}`}>
+      {days} days
+    </span>
+  );
 };
 
 export const getRawImmigrationDaysToGo = (task: any, getEnhancedStatus: (task: any) => StatusInfo): string => {
-    const statusInfo = getEnhancedStatus(task);
-    if (!statusInfo.date) return '-9999'; // For sorting
-    const days = Math.ceil((statusInfo.date.getTime() - new Date().setHours(0, 0, 0, 0)) / (1000 * 60 * 60 * 24));
-    return days.toString();
+  const statusInfo = getEnhancedStatus(task);
+  if (!statusInfo.date) return '-9999'; // For sorting
+  const days = Math.ceil((statusInfo.date.getTime() - new Date().setHours(0, 0, 0, 0)) / (1000 * 60 * 60 * 24));
+  return days.toString();
 };
 
 export const getCurrentStageFollowUp = (task: any, getStageStatus: (task: any) => StageStatusInfo): string => {
@@ -529,7 +554,7 @@ export const fetchAndEnhanceIndividuals = async (
       };
       const isApplicant = tasks.some(task => task.individual_id === individual.id);
       if (isApplicant) applicantsMap.set(individual.id, enhancedIndividual);
-      
+
       const isDependant = tasks.some(task =>
         task.dependant_member && Array.isArray(task.dependant_member) && task.dependant_member.some(dep => dep?.id === individual.id)
       );
@@ -561,7 +586,7 @@ export const createEnhancedTaskData = (
       applicant_data: applicantData,
       full_name: applicantData?.full_name || task.full_name,
       nationality: applicantData?.nationality || task.nationality,
-      age: applicantData?.age 
+      age: applicantData?.age
     });
 
     if (task.dependant_member && Array.isArray(task.dependant_member)) {
@@ -805,6 +830,7 @@ export const getCellContent = (
     current_stage_name: getStageStatus(task).stageName || 'N/A',
     current_stage_follow_up: getCurrentStageFollowUp(task, getStageStatus),
     company_name: getCompanyName(task, companies),
+    sub_department: getSubDepartmentDisplay(task, departments),
     job_level: getJobLevelDisplay(task, departments),
     job_description: task.job_description || 'N/A',
     renewal_new: task.renewal_status || 'New',
@@ -867,6 +893,7 @@ export const getRawCellValue = (
     current_stage_status_value: getStageStatus(task).stageStatus || 'N/A',
     current_stage_follow_up: getCurrentStageFollowUp(task, getStageStatus),
     company_name: getCompanyName(task, companies),
+    sub_department: getSubDepartmentDisplay(task, departments),
     job_level: getJobLevelDisplay(task, departments),
     job_description: task.job_description || 'N/A',
     renewal_new: task.renewal_status || 'New',
