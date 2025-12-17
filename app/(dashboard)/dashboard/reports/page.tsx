@@ -4,21 +4,14 @@
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import {
   Loader2, LayoutGrid, Rows, Plus, Minus, Briefcase, FileDown,
-  ChevronDown, ChevronsRight, ChevronsDown, X, FileText, ArrowLeft,
-  List, ChevronLeft, ChevronRight, RefreshCw, Filter, AlertTriangle,
-  Calendar, ShieldCheck, Clock, ArrowUpDown, Search, Timer, AlertCircle,
-  Check, Clock3,
-  DotSquare,
-  MoreHorizontal,
-  CheckCircle2,
-  XCircle,
-  Columns, // Imported for the button
-  User, // For officer filtern
+  ChevronDown, ChevronsRight, ChevronsDown, FileText,
+  ChevronLeft, ChevronRight, RefreshCw, AlertTriangle,
+  Clock, ArrowUpDown, Search, Timer, AlertCircle,
+  CheckCircle2, Clock3, User
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -26,20 +19,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { format, parse, parseISO, isValid } from "date-fns";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { format, parse, isValid } from "date-fns";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase/client";
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
 import ExcelJS from 'exceljs';
 import {
   getCurrentStageStatus,
@@ -52,27 +36,18 @@ import {
   getRawCellValue,
   getTimeStatus,
   formatDuration,
-  parseDate
+  parseDate // Using tableUtils parseDate for consistency with other table views
 } from "../tasks/overall-view/tableUtils";
-import { calculateAge } from "@/lib/utils/utils";
 import {
   fetchTasks,
   fetchStages,
   fetchCompanies,
   fetchAllDocuments,
   fetchAllKycFields,
-  formatDateValue,
 } from "../tasks/utils/taskManagerData";
 import { fetchDepartments } from "../departments/departments/database";
 import { MemorizedReportDialog } from "./MemorizedReportDialog";
-import { ColumnVisibilityDialog } from "./ColumnVisibilityDialog"; // Import the new component
-
-// Extend jsPDF types
-declare module 'jspdf' {
-  interface jsPDF {
-    autoTable: (options: any) => jsPDF;
-  }
-}
+import { calculateStageDate, findDateInObject } from "../tasks/utils/dateUtils";
 
 // Special stage IDs that should always show WEF and TO columns
 const SPECIAL_STAGE_IDS = [
@@ -84,94 +59,35 @@ const SPECIAL_STAGE_IDS = [
 const COLUMN_WIDTH_CLASS = "w-[180px] min-w-[180px] max-w-[180px]";
 const INDEX_WIDTH_CLASS = "w-[60px] min-w-[60px] max-w-[60px]";
 
-const parseDateString = (dateInput: any): Date | null => {
-  if (!dateInput) return null;
-
-  // If it's already a Date object, return it
-  if (dateInput instanceof Date) {
-    return isValid(dateInput) ? dateInput : null;
-  }
-
-  // First check if it's already in the desired format (dd/MM/yyyy or dd/MM/yyyy HH:mm)
-  const ddMMyyyyHHmmRegex = /^(\d{2})\/(\d{2})\/(\d{4})(?: (\d{2}):(\d{2}))?$/;
-  const match = String(dateInput).match(ddMMyyyyHHmmRegex);
-  if (match) {
-    const [_, day, month, year, hours, minutes] = match;
-    const date = new Date(
-      parseInt(year),
-      parseInt(month) - 1,
-      parseInt(day),
-      hours ? parseInt(hours) : 0,
-      minutes ? parseInt(minutes) : 0
-    );
-    if (isValid(date)) return date;
-  }
-
-  // Then try to parse as ISO 8601
-  try {
-    const date = new Date(dateInput);
-    if (isValid(date)) return date;
-  } catch (e) {
-    // Continue to other formats if ISO parsing fails
-  }
-
-  // Then try other common formats
-  const dateFormats = [
-    "yyyy-MM-dd'T'HH:mm",
-    'dd/MM/yyyy HH:mm',
-    'dd/MM/yyyy',
-    'MM/dd/yyyy',
-    'dd-MM-yyyy',
-    'dd/MM/yyyy HH:mm:ss',
-    'yyyy-MM-dd HH:mm:ss'
-  ];
-
-  for (const formatStr of dateFormats) {
-    const parsedDate = parse(dateInput, formatStr, new Date());
-    if (isValid(parsedDate)) {
-      return parsedDate;
-    }
-  }
-
-  return null;
-};
-
+// Helper for display formatting using the standardized parseDate
 const formatDateForDisplay = (date: any): string => {
   if (!date) return '-';
+  
+  // Check if it's already a clean DD/MM/YYYY string
+  if (typeof date === 'string' && /^\d{2}\/\d{2}\/\d{4}$/.test(date)) return date;
 
-  // First check if it's already in the desired format (dd/MM/yyyy)
-  const ddMMyyyyRegex = /^\d{2}\/\d{2}\/\d{4}$/;
-  if (typeof date === 'string' && ddMMyyyyRegex.test(date)) {
-    return date;
-  }
-
-  const d = parseDateString(date);
+  const d = parseDate(date);
   if (!d) return '-';
 
   try {
     return format(d, 'dd/MM/yyyy');
   } catch (e) {
-    console.error('Error formatting date:', e);
     return '-';
   }
 };
 
 const formatDateTimeForDisplay = (date: any): string => {
   if (!date) return '-';
+  
+  // Check if it's already a clean DD/MM/YYYY HH:mm string
+  if (typeof date === 'string' && /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/.test(date)) return date;
 
-  // First check if it's already in the desired format (dd/MM/yyyy HH:mm)
-  const ddMMyyyyHHmmRegex = /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/;
-  if (typeof date === 'string' && ddMMyyyyHHmmRegex.test(date)) {
-    return date;
-  }
-
-  const d = parseDateString(date);
+  const d = parseDate(date);
   if (!d) return '-';
 
   try {
     return format(d, 'dd/MM/yyyy HH:mm');
   } catch (e) {
-    console.error('Error formatting date time:', e);
     return '-';
   }
 };
@@ -237,7 +153,6 @@ export default function ReportsPage() {
   const [showTimeStatuses, setShowTimeStatuses] = useState(false);
 
   // --- Column Visibility State ---
-  const [isColVisOpen, setIsColVisOpen] = useState(false);
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>([]);
 
   // --- State for toggling stage doc columns (Inline Expansion) ---
@@ -300,24 +215,11 @@ export default function ReportsPage() {
 
         // Set all officers for filtering
         const officerUsers = users?.filter(u => u.role === 'officer') || [];
-        console.log('Fetched officer users:', {
-          totalUsers: users?.length || 0,
-          officerCount: officerUsers.length,
-          officers: officerUsers.map(o => ({
-            id: o.id,
-            name: o.name,
-            email: o.email,
-            dept: o.department_id,
-            rawDepartmentId: o.department_id,
-            deptType: typeof o.department_id
-          }))
-        });
-
         const formattedOfficers = officerUsers.map(o => ({
           id: o.id.toString(),
           name: o.name || o.email.split('@')[0],
           email: o.email,
-          rawDepartmentId: o.department_id // Keep original department_id for debugging
+          rawDepartmentId: o.department_id
         }));
         setAllOfficers(formattedOfficers);
 
@@ -334,7 +236,6 @@ export default function ReportsPage() {
   useEffect(() => {
     // When switching reports or on initial load, clear session fields
     if (activeReport && !activeReport.sessionIncludedFields) {
-      // This ensures we only show default fields on page load
       setActiveReport(prev => ({
         ...prev!,
         sessionIncludedFields: prev!.configuration.taskFields?.map(f => f.id) || []
@@ -351,7 +252,7 @@ export default function ReportsPage() {
     activeDepartment?.tm_subdepartments || [],
     [activeDepartment]);
 
-  // Update available officers when department OR sub-department changes
+  // Update available officers
   useEffect(() => {
     if (!activeDeptId) {
       setAvailableOfficers([]);
@@ -359,34 +260,22 @@ export default function ReportsPage() {
       return;
     }
 
-    // A Set to store unique IDs of officers who are allowed to be shown
     const allowedOfficerIds = new Set<string>();
 
-    // Helper: Add officers from a sub-department's history
     const collectFromHistory = (subDept: any) => {
       if (!subDept?.officer_history) return;
-      
       subDept.officer_history.forEach((h: any) => {
-        // Only add if there is NO end_date (meaning they are currently active)
         if (h.id && !h.end_date) {
           allowedOfficerIds.add(h.id.toString());
         }
       });
     };
 
-    // SCENARIO 1: Specific Sub-department Selected
     if (activeSubDeptId && activeSubDeptId !== 'all') {
       const currentSubDept = activeSubDepartments.find(s => s.id.toString() === activeSubDeptId.toString());
       collectFromHistory(currentSubDept);
-    } 
-    
-    // SCENARIO 2: "All" Sub-departments (Department View)
-    else {
-      // 1. Gather active officers from ALL sub-departments in this department
+    } else {
       activeSubDepartments.forEach(sub => collectFromHistory(sub));
-
-      // 2. ALSO include anyone who is explicitly assigned to this Department in tm_users
-      // (This covers officers who might not be in a sub-dept history yet but belong here)
       allOfficers.forEach(o => {
         if (o.rawDepartmentId && o.rawDepartmentId.toString() === activeDeptId.toString()) {
           allowedOfficerIds.add(o.id.toString());
@@ -394,18 +283,9 @@ export default function ReportsPage() {
       });
     }
 
-    // Final Step: Filter the master list against our allowed IDs
     const finalOfficers = allOfficers.filter(o => allowedOfficerIds.has(o.id.toString()));
-
-    console.log('Officer Filter Calculation:', {
-      mode: activeSubDeptId === 'all' ? 'Department (All)' : 'Sub-Department',
-      idsFoundInHistory: Array.from(allowedOfficerIds),
-      finalCount: finalOfficers.length
-    });
-
     setAvailableOfficers(finalOfficers);
 
-    // Cleanup: Remove selected officers if they are no longer in the list
     setSelectedOfficers(prev => {
       const availableIds = finalOfficers.map(o => o.id);
       return prev.filter(id => availableIds.includes(id));
@@ -432,7 +312,6 @@ export default function ReportsPage() {
 
       const safeTasks = Array.isArray(tasksData) ? tasksData : [];
 
-      // Use utility to enhance tasks
       const { enhancedTasksData: enhancedMap, taskDependants: dependantsMap } =
         await enhanceTasksWithIndividualData(safeTasks);
 
@@ -466,32 +345,23 @@ export default function ReportsPage() {
 
   const handleSelectReport = (report: any) => {
     setActiveReport(report);
-    // When selecting a new report, we reset manual expansions
     setExpandedStageColumns(new Set());
     setIsReportDialogOpen(false);
   };
 
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
-      // 1. Hierarchy Filters
       if (activeDeptId && task.department_id?.toString() !== activeDeptId) return false;
       if (activeSubDeptId !== 'all' && task.subdepartment_id?.toString() !== activeSubDeptId) return false;
 
-      // 2. Officer Filter (Refined)
       if (selectedOfficers.length > 0) {
-        // We check two fields: 
-        // 'officer_id' (specific role assignment)
-        // 'assigned_to' (generic task ownership)
         const officerId = task.officer_id?.toString();
         const assignedId = task.assigned_to?.toString();
-
         const isMatch = (officerId && selectedOfficers.includes(officerId)) ||
           (assignedId && selectedOfficers.includes(assignedId));
-
         if (!isMatch) return false;
       }
 
-      // 3. Status Filter
       const isWriteUpCompleted = task.status === 'write_up_completed';
       const isEndorsed = task.status === 'endorsed';
       const isCompleted = isWriteUpCompleted || isEndorsed || ['completed', 'archived'].includes(task.status);
@@ -533,12 +403,11 @@ export default function ReportsPage() {
         const expiryKey = keys.find(k => k.toLowerCase() === 'expiry_date' || k.toLowerCase() === 'valid_until');
         if (expiryKey) expiry = extracted[expiryKey];
       }
-      const d = parseDateString(expiry);
+      const d = parseDate(expiry);
       if (!d) return -9999;
       return d.getTime();
     }
     if (col.type === 'task') {
-      // Use raw cell value from tableUtils for accurate sorting of enhanced fields
       return getRawCellValue(
         departments,
         task,
@@ -552,7 +421,7 @@ export default function ReportsPage() {
     }
     if (col.type === 'stage_date') {
       const d = task.stages?.[col.stageId]?.date;
-      return d ? parseDateString(d)?.getTime() || 0 : 0;
+      return d ? parseDate(d)?.getTime() || 0 : 0;
     }
     return '';
   };
@@ -627,132 +496,61 @@ export default function ReportsPage() {
     return true;
   }, [activeSubDeptId, activeSubDepartments]);
 
-  const isLikelyDateField = (fieldName: string, value: any): boolean => {
-    if (!value) return false;
-
-    // Common date field name patterns
-    const dateFieldPatterns = [
-      /date/i,
-      /_date$/i,
-      /_at$/i,
-      /time$/i,
-      /timestamp/i,
-      /expir/i,
-      /valid/i,
-      /issued/i,
-      /created/i,
-      /modified/i,
-      /updated/i
-    ];
-    // Check if field name matches any date patterns
-    if (dateFieldPatterns.some(pattern => pattern.test(fieldName))) {
-      return true;
-    }
-    // Check if the value matches common date patterns
-    if (typeof value === 'string') {
-      // Common date patterns: YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY, etc.
-      const datePatterns = [
-        /^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?)?$/, // YYYY-MM-DD [HH:MM[:SS]]
-        /^\d{2}\/\d{2}\/\d{4}( \d{2}:\d{2}(:\d{2})?)?$/, // DD/MM/YYYY [HH:MM[:SS]]
-        /^\d{2}-\d{2}-\d{4}( \d{2}:\d{2}(:\d{2})?)?$/, // DD-MM-YYYY [HH:MM[:SS]]
-        /^\d{1,2}\/\d{1,2}\/\d{4}( \d{1,2}:\d{2}(:\d{2})?)?$/, // M/D/YYYY [H:MM[:SS]]
-        /^\d{1,2}-\d{1,2}-\d{4}( \d{1,2}:\d{2}(:\d{2})?)?$/, // M-D-YYYY [H:MM[:SS]]
-        /^\d{4}\/\d{2}\/\d{2}( \d{2}:\d{2}(:\d{2})?)?$/, // YYYY/MM/DD [HH:MM[:SS]]
-        /^\d{8}( \d{6})?$/, // YYYYMMDD [HHMMSS]
-        /^\d{14}$/, // YYYYMMDDHHMMSS
-      ];
-      return datePatterns.some(pattern => pattern.test(value));
-    }
-    return false;
-  };
-
   const renderCellValue = (task, col) => {
     if (col.type === 'stage_date') {
       const stage = stages.find(s => s.id === col.stageId);
-
-      if (!stage) {
-        return <span className="text-slate-300">-</span>;
-      }
+      if (!stage) return <span className="text-slate-300">-</span>;
 
       if (!isStageApplicableToTask(stage, task)) {
         return <span className="text-sm text-gray-300 italic">N/A</span>;
       }
-      // Current stage Check
+      
       const currentStageStatus = getCurrentStageStatus(task, stages, departments, allDocuments);
       const currentStage = stages.find(s => s.name === currentStageStatus?.stageName);
 
       if (currentStage?.order_num !== undefined && stage.order_num > currentStage.order_num) {
         return <span className="text-slate-300">-</span>;
       }
+      
       const stageData = task.stages?.[col.stageId];
       const estimatedMinutes = stage.estimated_time;
+      
       // --- 1. CALCULATE EFFECTIVE START TIME ---
-      let effectiveStartTime = task.created_at ? parseDateString(task.created_at) : null;
+      let effectiveStartTime = task.created_at ? parseDate(task.created_at) : null;
       const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
       const currentStageIndex = sortedStages.findIndex(s => s.id === col.stageId);
+      
       if (currentStageIndex > 0) {
         const prevStage = sortedStages[currentStageIndex - 1];
         const prevStageData = task.stages?.[prevStage.id];
+        
         if (prevStageData) {
-          let docDate = null;
-          if (prevStage.documents?.length > 0) {
-            const allLinkedDocs = prevStage.documents.flatMap(docConfig => {
-              if (!isDocumentApplicable(docConfig, task)) {
-                return [];
-              }
-              return getDocumentForTaskStage(task, { ...prevStage, documents: [docConfig] });
-            }).filter(d => d && !d.indicator);
-
-            if (allLinkedDocs.length > 0) {
-              allLinkedDocs.forEach(linkedDoc => {
-                const details = linkedDoc.extracted_details || {};
-                const kycDoc = kycDocuments.get(linkedDoc.kyc_id || linkedDoc.document_id);
-
-                if (kycDoc?.fields) {
-                  const dateFields = kycDoc.fields
-                    .filter((field: any) => {
-                      // Check if field is explicitly marked as date type
-                      if (field.fieldType === 'date' || field.type === 'date') return true;
-
-                      // Check if field name suggests it's a date field
-                      const fieldName = field.fieldName || field.name || '';
-                      const value = details[fieldName];
-                      return isLikelyDateField(fieldName, value);
-                    })
-                    .map((field: any) => field.fieldName || field.name || '')
-                    .filter(Boolean);
-
-                  for (const field of dateFields) {
-                    const fieldValue = details[field];
-                    const parsedDate = parseDateString(fieldValue);
-                    if (parsedDate && (!docDate || parsedDate > docDate)) {
-                      docDate = parsedDate;
-                    }
-                  }
-                }
-              });
-            }
-          }
-
-          if (docDate) {
-            effectiveStartTime = docDate;
-          } else if (prevStageData.date) {
-            effectiveStartTime = parseDateString(prevStageData.date);
-          } else if (prevStageData.completedAt) {
-            effectiveStartTime = parseDateString(prevStageData.completedAt);
+          // Check previous stage completion time/date to use as start time
+          const prevCompletionDateStr = calculateStageDate(
+            prevStage,
+            prevStageData,
+            getDocumentForTaskStage(task, prevStage)[0], // Use first doc as proxy
+            kycDocuments.get(getDocumentForTaskStage(task, prevStage)[0]?.document_id)?.fields,
+            null,
+            false
+          );
+          
+          if (prevCompletionDateStr) {
+             effectiveStartTime = parseDate(prevCompletionDateStr);
           } else if (prevStageData.status === 'skipped' && prevStageData.skippedAt) {
-            effectiveStartTime = parseDateString(prevStageData.skippedAt);
+             effectiveStartTime = parseDate(prevStageData.skippedAt);
           }
         }
       }
 
       if (!effectiveStartTime && task.date_initiated) {
-        effectiveStartTime = parseDateString(task.date_initiated);
+        effectiveStartTime = parseDate(task.date_initiated);
       }
 
+      // --- 2. CHECK SKIPPED STATUS ---
       if (stageData?.status === 'skipped') {
         const reason = stageData?.reason || 'No reason provided';
-        const skippedAt = stageData?.skippedAt ? parseDateString(stageData.skippedAt) : null;
+        const skippedAt = stageData?.skippedAt ? parseDate(stageData.skippedAt) : null;
         return (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -769,77 +567,50 @@ export default function ReportsPage() {
           </Tooltip>
         );
       }
-      // --- 3. DETERMINE COMPLETION DATE (CORRECTED PRIORITY) ---
-      let completionDateStr = null;
+
+      // --- 3. DETERMINE COMPLETION DATE (Using Utils) ---
+      // Get all linked docs for this stage
+      let linkedDocs = [];
       if (stage.documents?.length > 0) {
-        const allLinkedDocs = stage.documents.flatMap(docConfig => {
-          if (!isDocumentApplicable(docConfig, task)) {
-            return [];
-          }
-          const docs = getDocumentForTaskStage(task, { ...stage, documents: [docConfig] });
-          return docs;
+        linkedDocs = stage.documents.flatMap(docConfig => {
+          if (!isDocumentApplicable(docConfig, task)) return [];
+          return getDocumentForTaskStage(task, { ...stage, documents: [docConfig] });
         }).filter(d => d && !d.indicator);
-        if (allLinkedDocs.length > 0) {
-          let validDates = [];
-
-          allLinkedDocs.forEach(linkedDoc => {
-            const details = linkedDoc.extracted_details || {};
-            const kycDoc = kycDocuments.get(linkedDoc.kyc_id || linkedDoc.document_id);
-
-            if (kycDoc?.fields) {
-              const dateFieldsToCheck = kycDoc.fields
-                .filter((field: any) => {
-                  // Check if field is explicitly marked as date type
-                  if (field.fieldType === 'date' || field.type === 'date') return true;
-
-                  // Check if field name suggests it's a date field
-                  const fieldName = field.fieldName || field.name || '';
-                  const value = details[fieldName];
-                  return isLikelyDateField(fieldName, value);
-                })
-                .map((field: any) => field.fieldName || field.name || '')
-                .filter(Boolean);
-
-              for (const field of dateFieldsToCheck) {
-                const fieldValue = details[field];
-                const parsed = parseDateString(fieldValue);
-                if (parsed) {
-                  validDates.push(parsed);
-                  break;
-                }
-              }
-            }
-          });
-
-          if (validDates.length > 0) {
-            validDates.sort((a, b) => b.getTime() - a.getTime());
-            completionDateStr = validDates[0]; // Use latest document date
-          }
-        }
       }
-      // PRIORITY 2: If no document dates, use manually entered stage date
-      if (!completionDateStr && stageData?.date) {
-        completionDateStr = stageData.date;
-      }
-      // PRIORITY 3: Final fallback to completedAt timestamp
-      if (!completionDateStr && stageData?.status === 'completed' && stageData?.completedAt) {
-        completionDateStr = stageData.completedAt;
-      }
-      const completionDate = parseDateString(completionDateStr);
+      
+      // Use the util to calculate the date. 
+      // We pass the first doc if available, similar to EditableStageCell.
+      // If there are multiple, the util calculates based on the passed doc. 
+      // To simulate finding the "best" date among multiple docs (original behavior), we could loop, 
+      // but usually the first applicable document found is the source of truth.
+      const primaryDoc = linkedDocs[0]; 
+      const docFields = primaryDoc ? kycDocuments.get(primaryDoc.kyc_id || primaryDoc.document_id)?.fields : [];
+
+      const completionDateStr = calculateStageDate(
+        stage, 
+        stageData, 
+        primaryDoc, 
+        docFields, 
+        null, 
+        false
+      );
+
+      const completionDate = parseDate(completionDateStr);
+      
       if (completionDate) {
         let isCompletedOverdue = false;
         let durationTakenText = 'N/A';
+        
         if (effectiveStartTime && estimatedMinutes && estimatedMinutes > 0) {
           const durationMs = completionDate.getTime() - effectiveStartTime.getTime();
           const durationMinutes = Math.floor(durationMs / (1000 * 60));
           isCompletedOverdue = durationMinutes > estimatedMinutes;
           durationTakenText = formatDuration(durationMinutes);
         }
+        
         const textColorClass = isCompletedOverdue ? "text-amber-600" : "text-emerald-600";
         const icon = isCompletedOverdue ? <Clock className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />;
         const borderColorClass = isCompletedOverdue ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-100";
-
-        // Only show completed statuses that are either "Completed On Time" or "Completed (Overdue)"
         const statusText = isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time";
 
         if (!showTimeStatuses) {
@@ -876,7 +647,8 @@ export default function ReportsPage() {
           </Tooltip>
         );
       }
-      // --- 5. SCENARIO B: STAGE IS IN PROGRESS ---
+      
+      // --- 4. SCENARIO B: STAGE IS IN PROGRESS ---
       if (!effectiveStartTime) {
         return <span className="text-slate-300">-</span>;
       }
@@ -944,12 +716,19 @@ export default function ReportsPage() {
           if (!isDocumentApplicable(stageDocInfo, task)) continue;
           const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
           if (!linked || linked.indicator) continue;
-          const val = linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
-          if (val) { foundValue = val; foundDoc = linked; break; }
+          
+          // Use findDateInObject if it's a date field, or direct access
+          if (col.fieldType === 'date' || col.fieldType === 'Date') {
+             foundValue = findDateInObject(linked.extracted_details || {}, [col.fieldName, col.fieldId]);
+          } else {
+             foundValue = linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
+          }
+          
+          if (foundValue) { foundDoc = linked; break; }
         }
         if (!foundDoc) return <span className="text-red-500 text-xs font-bold">Missing</span>;
         const isOld = foundDoc.created_at && task.created_at && new Date(foundDoc.created_at) < new Date(task.created_at);
-        const display = col.fieldType === 'Date' ? formatDateForDisplay(foundValue) : foundValue;
+        const display = (col.fieldType === 'Date' || col.fieldType === 'date') ? formatDateForDisplay(foundValue) : foundValue;
         return <span className={`text-xs ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || '-'}</span>;
       }
 
@@ -960,9 +739,16 @@ export default function ReportsPage() {
       if (!linked) return <span className="text-red-500 text-xs font-bold">Missing</span>;
 
       if (linked.indicator) return <span className="inline-flex items-center rounded-md bg-red-50 text-red-600 border border-red-200 text-[10px] px-1.5 py-0.5">Indicator</span>;
-      const val = linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
+      
+      let val;
+      if (col.fieldType === 'date' || col.fieldType === 'Date') {
+         val = findDateInObject(linked.extracted_details || {}, [col.fieldName, col.fieldId]);
+      } else {
+         val = linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
+      }
+
       const isOld = linked.created_at && task.created_at && new Date(linked.created_at) < new Date(task.created_at);
-      const display = col.fieldType === 'Date' ? formatDateForDisplay(val) : val;
+      const display = (col.fieldType === 'Date' || col.fieldType === 'date') ? formatDateForDisplay(val) : val;
 
       return <span className={`text-xs ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || '-'}</span>;
     }
@@ -1028,7 +814,6 @@ export default function ReportsPage() {
         const hasDocuments = config.documents && Object.keys(config.documents).length > 0;
         const shouldShowDateColumn = config.isStageDateSelected || hasDocuments;
 
-        // Add stage date column if needed
         if (shouldShowDateColumn) {
           const dateColId = `stage_${stage.id}_date`;
           if (!cols.some(c => c.id === dateColId)) {
@@ -1043,10 +828,8 @@ export default function ReportsPage() {
           }
         }
 
-        // Add document fields if expanded
         if (hasDocuments && expandedStageColumns.has(stage.id)) {
           if (isSpecialStage) {
-            // Handle special stage fields (WEF/TO)
             let wefAdded = false, toAdded = false;
 
             for (const [kycId] of Object.entries(config.documents)) {
@@ -1109,7 +892,6 @@ export default function ReportsPage() {
               }
             }
           } else {
-            // Handle regular document fields
             Object.entries(config.documents).forEach(([kycId, docConfig]: [string, any]) => {
               const kycDoc = kycDocuments.get(kycId);
               if (!kycDoc) return;
@@ -1150,7 +932,6 @@ export default function ReportsPage() {
     }
   }, [columns]);
 
-  // --- New: Filtered Columns for Rendering ---
   const filteredColumns = useMemo(() => {
     return columns.filter(c => visibleColumnIds.includes(c.id));
   }, [columns, visibleColumnIds]);
@@ -1232,12 +1013,10 @@ const handleExport = async (type: 'excel' | 'pdf') => {
       const wb = new ExcelJS.Workbook();
       const ws = wb.addWorksheet('Report');
 
-      // --- 1. Freeze the Header Row ---
       ws.views = [
         { state: 'frozen', xSplit: 0, ySplit: 1 }
       ];
 
-      // --- Helper to extract clean text data for export ---
       const getExportCellValue = (task: any, col: any) => {
         if (col.type === 'task') {
           return getRawCellValue(
@@ -1250,52 +1029,30 @@ const handleExport = async (type: 'excel' | 'pdf') => {
           const stage = stages.find(s => s.id === col.stageId);
           if (!stage) return '-';
           
-          // CHANGE 1: Return 'Unallocated' instead of 'N/A'
           if (!isStageApplicableToTask(stage, task)) return 'Unallocated';
 
           const stageData = task.stages?.[col.stageId];
 
           if (stageData?.status === 'skipped') return `Skipped: ${stageData.reason || ''}`;
 
-          let completionDateStr = null;
-          // Priority 1: Documents
+          // Using calculateStageDate for consistent export logic
+          let linkedDocs = [];
           if (stage.documents?.length > 0) {
-            const allLinkedDocs = stage.documents.flatMap((docConfig: any) => {
+            linkedDocs = stage.documents.flatMap((docConfig: any) => {
               if (!isDocumentApplicable(docConfig, task)) return [];
               return getDocumentForTaskStage(task, { ...stage, documents: [docConfig] });
             }).filter((d: any) => d && !d.indicator);
-
-            if (allLinkedDocs.length > 0) {
-              let validDates: Date[] = [];
-              allLinkedDocs.forEach((linkedDoc: any) => {
-                const details = linkedDoc.extracted_details || {};
-                const kycDoc = kycDocuments.get(linkedDoc.kyc_id || linkedDoc.document_id);
-                if (kycDoc?.fields) {
-                  const dateFields = kycDoc.fields
-                    .filter((field: any) => isLikelyDateField(field.fieldName || field.name || '', details[field.fieldName || field.name]))
-                    .map((field: any) => field.fieldName || field.name).filter(Boolean);
-                  dateFields.forEach((field: string) => {
-                    const parsed = parseDateString(details[field]);
-                    if (parsed) validDates.push(parsed);
-                  });
-                }
-              });
-              if (validDates.length > 0) {
-                validDates.sort((a, b) => b.getTime() - a.getTime());
-                completionDateStr = validDates[0];
-              }
-            }
           }
-          // Priority 2: Manual / Priority 3: Timestamp
-          if (!completionDateStr && stageData?.date) completionDateStr = stageData.date;
-          if (!completionDateStr && stageData?.status === 'completed' && stageData?.completedAt) completionDateStr = stageData.completedAt;
+          const primaryDoc = linkedDocs[0];
+          const docFields = primaryDoc ? kycDocuments.get(primaryDoc.kyc_id || primaryDoc.document_id)?.fields : [];
 
-          const completionDate = parseDateString(completionDateStr);
+          const completionDateStr = calculateStageDate(stage, stageData, primaryDoc, docFields, null, false);
+
+          const completionDate = parseDate(completionDateStr);
           if (completionDate) return formatDateForDisplay(completionDate);
           
-          let effectiveStartTime = task.created_at ? parseDateString(task.created_at) : null;
+          let effectiveStartTime = task.created_at ? parseDate(task.created_at) : null;
           
-          // CHANGE 2: If In Progress, return '-'
           if(stageData?.status === 'in_progress' || (effectiveStartTime && !completionDate)) return "-";
 
           return '-';
@@ -1305,7 +1062,6 @@ const handleExport = async (type: 'excel' | 'pdf') => {
           const stage = stages.find(s => s.id === col.stageId);
           if (!stage) return '-';
           
-          // CHANGE 1: Return 'Unallocated' instead of 'N/A'
           if (!isStageApplicableToTask(stage, task)) return 'Unallocated';
           
           let foundValue = null;
@@ -1318,17 +1074,22 @@ const handleExport = async (type: 'excel' | 'pdf') => {
             if (!isDocumentApplicable(stageDocInfo, task)) continue;
             const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
             if (!linked || linked.indicator) continue;
-            const val = linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
-            if (val) { foundValue = val; foundDoc = linked; break; }
+            
+            if (col.fieldType === 'date' || col.fieldType === 'Date') {
+                 foundValue = findDateInObject(linked.extracted_details || {}, [col.fieldName, col.fieldId]);
+            } else {
+                 foundValue = linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
+            }
+            
+            if (foundValue) { foundDoc = linked; break; }
           }
           if (!foundDoc) return col.isAutoAdded ? 'Missing' : '-';
           if (foundDoc.indicator) return 'Indicator';
-          return col.fieldType === 'Date' ? formatDateForDisplay(foundValue) : foundValue;
+          return (col.fieldType === 'Date' || col.fieldType === 'date') ? formatDateForDisplay(foundValue) : foundValue;
         }
         return '';
       };
 
-      // --- 2. Define Columns with Fixed Widths ---
       ws.columns = [
         { header: 'Task ID', key: 'id', width: 10 },
         ...filteredColumns.map(col => ({
@@ -1338,7 +1099,6 @@ const handleExport = async (type: 'excel' | 'pdf') => {
         }))
       ];
 
-      // --- 3. Style Header Row ---
       const headerRow = ws.getRow(1);
       headerRow.height = 30; 
       headerRow.eachCell((cell) => {
@@ -1361,7 +1121,6 @@ const handleExport = async (type: 'excel' | 'pdf') => {
         };
       });
 
-      // --- 4. Add Data Rows with Alternating Colors ---
       filteredTasks.forEach((task, index) => {
         const rowData = [
           task.id,
@@ -1373,35 +1132,29 @@ const handleExport = async (type: 'excel' | 'pdf') => {
         
         const row = ws.addRow(rowData);
         
-        // Alternating Background Colors (White vs Light Blue)
         const isOddRow = index % 2 !== 0; 
         const rowBackgroundColor = isOddRow ? 'FFEFF6FF' : 'FFFFFFFF'; 
 
         row.eachCell((cell, colNumber) => {
-          // Apply Background
           cell.fill = {
             type: 'pattern',
             pattern: 'solid',
             fgColor: { argb: rowBackgroundColor }
           };
 
-          // CHANGE 3: Logic for Text Color (Red for Unallocated)
           const isUnallocated = cell.value === 'Unallocated';
 
           cell.font = {
-            color: { argb: isUnallocated ? 'FFFF0000' : 'FF000000' }, // Red if Unallocated, else Black
-            bold: isUnallocated // Optional: make Unallocated bold
+            color: { argb: isUnallocated ? 'FFFF0000' : 'FF000000' },
+            bold: isUnallocated
           };
 
-          // Apply Alignment 
-          // CHANGE 4: wrapText: false (Unwrap long text)
           cell.alignment = { 
             vertical: 'middle', 
             horizontal: colNumber === 1 ? 'center' : 'left',
-            wrapText: false // Disabled wrapping to keep single line height
+            wrapText: false
           };
 
-          // Apply Border
           cell.border = {
             top: { style: 'thin', color: { argb: 'FFCBD5E1' } }, 
             left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
@@ -1411,7 +1164,6 @@ const handleExport = async (type: 'excel' | 'pdf') => {
         });
       });
 
-      // --- Generate Download ---
       const buffer = await wb.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const link = document.createElement('a');
@@ -1425,7 +1177,6 @@ const handleExport = async (type: 'excel' | 'pdf') => {
 
   if (reportLoading) return <div className="h-screen flex items-center justify-center bg-slate-50"><Loader2 className="h-10 w-10 animate-spin text-blue-600" /></div>;
 
-  // Toggle time status visibility
   const toggleTimeStatuses = () => {
     setShowTimeStatuses(prev => !prev);
   };
@@ -1484,9 +1235,9 @@ const handleExport = async (type: 'excel' | 'pdf') => {
                     {selectedOfficers.length > 0
                       ? `${selectedOfficers.length} selected`
                       : activeSubDeptId !== 'all'
-                        ? "Filter Sub-dept Officers" // Context: Sub-department
+                        ? "Filter Sub-dept Officers"
                         : activeDeptId
-                          ? "Filter Dept Officers"   // Context: Department
+                          ? "Filter Dept Officers" 
                           : "Select department first"}
                   </span>
                   <ChevronDown className="h-4 w-4 opacity-50" />

@@ -3,11 +3,13 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogPortal, DialogTitle } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Upload, Calendar, Check, X, Clock, Eye, AlertTriangle, Zap,
   Loader2, SkipForward, Clock3, MoreHorizontal, CheckCircle2,
@@ -18,15 +20,8 @@ import { supabase } from "@/lib/supabase/client"
 import { format, parse, isValid } from "date-fns"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { formatDuration, getTimeStatus, isDocumentApplicable, parseDate } from "../overall-view/tableUtils"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { DialogTrigger } from "@radix-ui/react-dialog"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { calculateStageDate } from "../utils/dateUtils"
 
 interface EditableStageCellProps {
   stage: any
@@ -42,7 +37,6 @@ interface EditableStageCellProps {
   isDocumentRow?: boolean
   documentData?: any
   onAutomationClick?: (e: React.MouseEvent, documentData?: any) => void
-  getKycFields?: (documentTypeId: string) => Promise<any[]>;
   departments?: any[]
   renderMode?: 'date' | 'actions'
   taskName?: string
@@ -81,143 +75,6 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[] = [])
   }
 };
 
-const isValidDateFormat = (dateStr: string): boolean => {
-  if (!dateStr || typeof dateStr !== 'string') return false;
-  
-  // Check for common valid date formats
-  const dateFormats = [
-    /^\d{4}-\d{2}-\d{2}$/, // YYYY-MM-DD
-    /^\d{2}\/\d{2}\/\d{4}$/, // DD/MM/YYYY
-    /^\d{2}-\d{2}-\d{4}$/, // DD-MM-YYYY
-    /^\d{4}\/\d{2}\/\d{2}$/ // YYYY/MM/DD
-  ];
-  return dateFormats.some(format => format.test(dateStr));
-};
-
-const findDateInObject = (obj: any, dateFields: string[]): string | null => {
-  if (!obj || typeof obj !== 'object') {
-    return null;
-  }
-  
-  // Helper function to parse date string only if needed
-  const parseDateIfNeeded = (dateStr: string): string | null => {
-    if (!dateStr || typeof dateStr !== 'string') return null;
-    
-    const trimmedStr = dateStr.trim();
-    if (!trimmedStr) return null;
-    
-    // **FIX: Check if it's already in DD/MM/YYYY HH:mm or DD/MM/YYYY format (display format)**
-    // This is the format we want to preserve as-is - don't convert it!
-    const displayFormatRegex = /^\d{2}\/\d{2}\/\d{4}( \d{2}:\d{2})?$/;
-    if (displayFormatRegex.test(trimmedStr)) {
-      console.log(`[findDateInObject] Date already in display format, preserving:`, trimmedStr);
-      return trimmedStr; // Return as-is without conversion
-    }
-    
-    // If already in a valid format like YYYY-MM-DD, return as is
-    if (isValidDateFormat(trimmedStr)) {
-      return trimmedStr;
-    }
-    
-    // Common date formats to try for conversion
-    const dateFormats = [
-      'dd/MM/yyyy',
-      'dd-MM-yyyy',
-      'dd.MM.yyyy',
-      'MM/dd/yyyy',
-      'MM-dd-yyyy',
-      'MM.dd.yyyy',
-      'yyyy-MM-dd',
-      'yyyy/MM/dd',
-      'dd/MM/yy',
-      'dd-MM-yy',
-      'MM/dd/yy',
-      'MM-dd-yy'
-    ];
-    
-    // Try each format
-    for (const formatStr of dateFormats) {
-      try {
-        const parsedDate = parse(trimmedStr, formatStr, new Date());
-        if (isValid(parsedDate)) {
-          // Convert to DD/MM/YYYY HH:mm format to match display format
-          return format(parsedDate, 'dd/MM/yyyy HH:mm');
-        }
-      } catch (e) {
-        // Ignore parse errors and try next format
-      }
-    }
-    
-    // Try ISO format (timestamps like "2025-12-16T07:00:46.224Z")
-    if (!isNaN(Date.parse(trimmedStr))) {
-      const date = new Date(trimmedStr);
-      // Convert timestamps to DD/MM/YYYY HH:mm format
-      return format(date, 'dd/MM/yyyy HH:mm');
-    }
-    
-    return null;
-  };
-  
-  // First, check for exact matches in dateFields
-  for (const key in obj) {
-    if (dateFields.includes(key) && obj[key] !== null && obj[key] !== undefined) {
-      const dateValue = obj[key];
-      
-      // Handle string dates
-      if (typeof dateValue === 'string') {
-        const parsedDate = parseDateIfNeeded(dateValue);
-        if (parsedDate) {
-          console.log(`[findDateInObject] Found date in field '${key}':`, dateValue, '->', parsedDate);
-          return parsedDate;
-        }
-      }
-      // Handle date objects
-      else if (dateValue instanceof Date && !isNaN(dateValue.getTime())) {
-        const formattedDate = format(dateValue, 'dd/MM/yyyy HH:mm');
-        console.log(`[findDateInObject] Found Date object in field '${key}':`, formattedDate);
-        return formattedDate;
-      }
-    }
-  }
-
-  // Then check for partial matches (case insensitive)
-  const lowerDateFields = dateFields.map(f => f.toLowerCase());
-  for (const key in obj) {
-    const lowerKey = key.toLowerCase();
-    if (lowerDateFields.some(df => lowerKey.includes(df)) && obj[key] !== null && obj[key] !== undefined) {
-      const dateValue = obj[key];
-      
-      // Handle string dates
-      if (typeof dateValue === 'string') {
-        const parsedDate = parseDateIfNeeded(dateValue);
-        if (parsedDate) {
-          console.log(`[findDateInObject] Found date in partial match field '${key}':`, dateValue, '->', parsedDate);
-          return parsedDate;
-        }
-      }
-      // Handle date objects
-      else if (dateValue instanceof Date && !isNaN(dateValue.getTime())) {
-        const formattedDate = format(dateValue, 'dd/MM/yyyy HH:mm');
-        console.log(`[findDateInObject] Found Date object in partial match field '${key}':`, formattedDate);
-        return formattedDate;
-      }
-    }
-  }
-
-  // Finally, recursively check nested objects
-  for (const key in obj) {
-    if (obj[key] !== null && typeof obj[key] === 'object' && !Array.isArray(obj[key])) {
-      const nestedDate = findDateInObject(obj[key], dateFields);
-      if (nestedDate) {
-        return nestedDate;
-      }
-    }
-  }
-
-  console.log('[findDateInObject] No valid date found in object for fields:', dateFields, 'Object keys:', Object.keys(obj));
-  return null;
-};
-
 // Main Component
 export default function EditableStageCell({
   stage,
@@ -250,8 +107,8 @@ export default function EditableStageCell({
   const [selectedSkipReason, setSelectedSkipReason] = useState('');
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-const [documentFields, setDocumentFields] = useState<any[]>([]);
-const [isLoadingFields, setIsLoadingFields] = useState(false);
+  const [documentFields, setDocumentFields] = useState<any[]>([]);
+  const [isLoadingFields, setIsLoadingFields] = useState(false);
 
 
   const handlePreviewDataChange = useCallback((docId: string, fieldName: string, value: any) => {
@@ -281,27 +138,28 @@ const [isLoadingFields, setIsLoadingFields] = useState(false);
   }, [linkedDocuments, requiresUpload, stage.id, stage.name]);
 
   useEffect(() => {
-  const fetchDocumentFields = async () => {
-    if (linkedDocument?.document_type_id && getKycFields) {
-      try {
-        console.log('[EditableStageCell] Fetching document fields for type:', linkedDocument.document_type_id);
-        setIsLoadingFields(true);
-        const fields = await getKycFields(linkedDocument.document_type_id);
-        console.log('[EditableStageCell] Fetched document fields:', fields);
-        setDocumentFields(fields);
-      } catch (error) {
-        console.error('[EditableStageCell] Error fetching document fields:', error);
+    const fetchDocumentFields = async () => {
+      if (linkedDocument?.document_type_id && getKycFields) {
+        try {
+          console.log('[EditableStageCell] Fetching document fields for type:', linkedDocument.document_type_id);
+          setIsLoadingFields(true);
+          const fields = await getKycFields(linkedDocument.document_type_id);
+          console.log('[EditableStageCell] Fetched document fields:', fields);
+          setDocumentFields(fields);
+        } catch (error) {
+          console.error('[EditableStageCell] Error fetching document fields:', error);
+          setDocumentFields([]);
+        } finally {
+          setIsLoadingFields(false);
+        }
+      } else {
         setDocumentFields([]);
-      } finally {
         setIsLoadingFields(false);
       }
-    } else {
-      setDocumentFields([]);
-      setIsLoadingFields(false);
-    }
-  };
-  fetchDocumentFields();
-}, [linkedDocument?.document_type_id, getKycFields]);
+    };
+    fetchDocumentFields();
+  }, [linkedDocument?.document_type_id, getKycFields]);
+
   const hasLinkedDocument = useMemo(() => {
     if (!linkedDocument) {
       return false;
@@ -325,203 +183,26 @@ const [isLoadingFields, setIsLoadingFields] = useState(false);
     return true;
   }, [linkedDocument, task]);
 
-const stageDate = useMemo(() => {
-const getDateFields = () => {
-  console.log('[EditableStageCell] Document fields:', documentFields);
-  console.log('[EditableStageCell] Stage config fields:', stage?.document_config?.fields);
-  
-  // First check if we have document fields from the linked document
-  if (documentFields && documentFields.length > 0) {
-    const docTypeDateFields = documentFields
-      .filter((field: any) => {
-        // Check if field is marked as immigration date or has date in name/type
-        const isImmigrationDate = field.isImmigrationDate === true;
-        const isDateField = field.type === 'date' || 
-                          field.field_type === 'date' || 
-                          field.data_type === 'date' ||
-                          (field.name && field.name.toLowerCase().includes('date')) ||
-                          (field.key && field.key.toLowerCase().includes('date'));
-        
-        console.log(`[EditableStageCell] Field ${field.name || field.key}:`, {
-          isImmigrationDate,
-          isDateField,
-          type: field.type || field.field_type || field.data_type,
-          field
-        });
-        
-        return isImmigrationDate || isDateField;
-      })
-      .map((field: any) => field.name || field.key)
-      .filter(Boolean); // Remove any undefined/null values
-
-    if (docTypeDateFields.length > 0) {
-      console.log('[EditableStageCell] Using date fields from document type:', docTypeDateFields);
-      return docTypeDateFields;
-    }
-  }
-
-  // Fallback to stage document config if available
-  if (stage?.document_config?.fields) {
-    const configFields = stage.document_config.fields
-      .filter((field: any) => {
-        return field.isImmigrationDate === true || 
-               field.type === 'date' || 
-               field.field_type === 'date' || 
-               field.data_type === 'date';
-      })
-      .map((field: any) => field.name || field.key)
-      .filter(Boolean);
-
-    if (configFields.length > 0) {
-      console.log('[EditableStageCell] Using date fields from stage config:', configFields);
-      return configFields;
-    }
-  }
-
-  // If we still don't have date fields, try to find any date-like fields in extracted details
-  if (linkedDocument?.extracted_details) {
-    const potentialDateFields = Object.entries(linkedDocument.extracted_details)
-      .filter(([_, value]) => {
-        if (typeof value !== 'string') return false;
-        // Check for common date patterns
-        return /^\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}/.test(value) || // DD/MM/YYYY or similar
-               /^\d{4}[\-\/]\d{1,2}[\-\/]\d{1,2}/.test(value); // YYYY-MM-DD
-      })
-      .map(([key]) => key);
-
-    if (potentialDateFields.length > 0) {
-      console.log('[EditableStageCell] Inferred potential date fields from extracted details:', potentialDateFields);
-      return potentialDateFields;
-    }
-  }
-
-  // Final fallback to common date field names
-  const commonDateFields = [
-    'date', 
-    'application_date', 
-    'document_date', 
-    'submission_date',
-    'date_and_time',
-    'receipt_date',
-    'transaction_date',
-    'created_at',
-    'updated_at'
-  ].filter(field => 
-    linkedDocument?.extracted_details && 
-    field in linkedDocument.extracted_details
-  );
-
-  if (commonDateFields.length > 0) {
-    console.log('[EditableStageCell] Using common date fields:', commonDateFields);
-    return commonDateFields;
-  }
-
-  console.log('[EditableStageCell] No date fields found in document type or stage config');
-  return [];
-};
-  
-  const dateFields = getDateFields();
-  const stageData = task?.stages?.[stage.id];
-  const hasDocumentsUploaded = stageData?.documentsUploaded !== undefined && stageData?.documentsUploaded !== null;
-  
-  console.log('[EditableStageCell] Stage data:', {
-    stageId: stage.id,
-    stageName: stage.name,
-    stageData,
-    hasDocumentsUploaded,
-    hasLinkedDocument,
-    linkedDocument: linkedDocument ? { 
-      hasExtractedDetails: !!linkedDocument.extracted_details,
-      hasExtractedData: !!linkedDocument.extracted_data,
-      documentTypeId: linkedDocument.document_type_id
-    } : 'No linked document',
-    isLoadingFields
-  });
-  // For completed stages without a document, return empty string to allow manual date entry
-  if (stageData?.status === 'completed' && !hasLinkedDocument) {
-    console.log('[EditableStageCell] Stage completed without document, using stage data date:', stageData.date);
-    return stageData.date || '';
-  }
-  
-  // If we're still loading fields, return null to prevent flash of incorrect state
-  if (isLoadingFields) {
-    console.log('[EditableStageCell] Still loading document fields, waiting...');
-    return null;
-  }
-  
-  // Rest of your existing stageDate logic...
-  // Check for document dates first
-  if ((requiresUpload || hasDocumentsUploaded) && hasLinkedDocument) {
-    // Check extracted_details for dates
-    if (linkedDocument.extracted_details) {
-      const extractedDate = findDateInObject(linkedDocument.extracted_details, dateFields);
-      console.log('[EditableStageCell] Extracted date from details:', extractedDate, {
-        dateFields,
-        extractedDetails: linkedDocument.extracted_details
-      });
-      if (extractedDate) {
-        return extractedDate;
-      }
-    }
+  // --- CHANGED: Uses the utility function now ---
+  const stageDate = useMemo(() => {
+    const stageData = task?.stages?.[stage.id];
     
-    // Check extracted_data for dates
-    if (linkedDocument.extracted_data) {
-      const extractedDate = findDateInObject(linkedDocument.extracted_data, dateFields);
-      console.log('[EditableStageCell] Extracted date from data:', extractedDate, {
-        dateFields,
-        extractedData: linkedDocument.extracted_data
-      });
-      if (extractedDate) {
-        return extractedDate;
-      }
-    }
-    
-    // If we get here, no date was found in the document
-    const hasAnyDateField = dateFields.some(field =>
-      (linkedDocument.extracted_details && field in linkedDocument.extracted_details) ||
-      (linkedDocument.extracted_data && field in linkedDocument.extracted_data)
+    return calculateStageDate(
+      stage,
+      stageData,
+      linkedDocument,
+      documentFields,
+      value,
+      isLoadingFields
     );
-    
-    console.log('[EditableStageCell] No date found in document', {
-      hasAnyDateField,
-      dateFields,
-      extractedDetailsKeys: linkedDocument.extracted_details ? Object.keys(linkedDocument.extracted_details) : [],
-      extractedDataKeys: linkedDocument.extracted_data ? Object.keys(linkedDocument.extracted_data) : []
-    });
-    
-    // **FIX: Also format completedAt timestamps consistently**
-    if (!hasAnyDateField && stageData?.completedAt) {
-      console.log('[EditableStageCell] Using completedAt as fallback:', stageData.completedAt);
-      // Parse and format the timestamp to DD/MM/YYYY HH:mm
-      const completedDate = new Date(stageData.completedAt);
-      if (isValid(completedDate)) {
-        return format(completedDate, 'dd/MM/yyyy HH:mm');
-      }
-      return stageData.completedAt;
-    }
-    return '';
-  }
-  
-  // For non-document stages, use the value prop if available
-  if (!requiresUpload && !hasDocumentsUploaded && value) {
-    console.log('[EditableStageCell] Using value prop for non-document stage:', value);
-    return typeof value === 'string' ? value : '';
-  }
-  
-  console.log('[EditableStageCell] No date found, returning empty string');
-  return '';
-}, [
-  hasLinkedDocument, 
-  linkedDocument, 
-  requiresUpload, 
-  value, 
-  task, 
-  stage.id, 
-  stage.name, 
-  stage.document_config?.fields, 
-  documentFields,
-  isLoadingFields
-]);
+  }, [
+    stage,
+    task,
+    linkedDocument,
+    documentFields,
+    value,
+    isLoadingFields
+  ]);
 
   const isStageApplicable = useMemo(() => isStageApplicableToTask(stage, task, departments), [stage, task, departments]);
 
@@ -1188,7 +869,6 @@ const getDateFields = () => {
       let completionDuration = 'N/A';
 
       if (completionDate && effectiveStartTime && stage.estimated_time) {
-        // ... (Keep existing duration calculation logic) ...
         const start = parseDate(effectiveStartTime instanceof Date ? effectiveStartTime.toISOString() : effectiveStartTime);
         if (start) {
           const durationMs = completionDate.getTime() - start.getTime();
@@ -1563,5 +1243,5 @@ const getDateFields = () => {
 }
 
 function SkipStageDialog() {
-  return null; // Placeholder as specific dialog implementation wasn't provided, but logic is handled
+  return null;
 }
