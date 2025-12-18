@@ -325,7 +325,7 @@ export function LinkSourcesDialog({ open, onOpenChange, field, onSuccess }: Link
       ...prev,
       {
         id: crypto.randomUUID(),
-        source_type: "profile",
+        source_type: "individual",
         table: "",
         path: "",
         priority: prev.length + 1,
@@ -473,7 +473,7 @@ export function LinkSourcesDialog({ open, onOpenChange, field, onSuccess }: Link
                         value={source.source_type}
                         onValueChange={value => updateSource(index, { source_type: value as any })}
                         options={[
-                          { value: "profile", label: "Profile" },
+                          { value: "individual", label: "Individual" },
                           { value: "document", label: "Document" },
                           { value: "company", label: "Company" },
                         ]}

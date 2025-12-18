@@ -40,7 +40,7 @@ export interface Database {
   }
   
   export interface JobFieldSource {
-    source_type: "profile" | "document" | "company"
+    source_type: "individual" | "document" | "company"
     table: string
     path: string
     priority: number

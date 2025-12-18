@@ -364,8 +364,8 @@ export function EnhancedAddFieldDialog({ open, onOpenChange, onSuccess, sections
                 <div className="space-y-2">
                   <Label>Source Type</Label>
                   <Select
-                    value={formData.sources?.[0]?.source_type || "profile"}
-                    onValueChange={(value: "profile" | "document" | "company") => {
+                    value={formData.sources?.[0]?.source_type || "individual"}
+                    onValueChange={(value: "individual" | "document" | "company") => {
                       const newSources = formData.sources || [];
                       newSources[0] = { ...newSources[0], source_type: value };
                       setFormData(prev => ({ ...prev, sources: newSources }));
@@ -375,7 +375,7 @@ export function EnhancedAddFieldDialog({ open, onOpenChange, onSuccess, sections
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="profile">Profile</SelectItem>
+                      <SelectItem value="individual">Individual</SelectItem>
                       <SelectItem value="document">Document</SelectItem>
                       <SelectItem value="company">Company</SelectItem>
                     </SelectContent>

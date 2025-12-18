@@ -68,7 +68,7 @@ interface FieldCardState {
   is_required: boolean
   optionsText: string
   // Data source related state
-  source_type: "profile" | "document" | "company"
+  source_type: "individual" | "document" | "company"
   selectedTable: string
   tableFields: TableColumn[]
   loadingTableFields: boolean
@@ -91,7 +91,7 @@ export function AddFieldDialog({ open, onOpenChange, onSuccess }: AddFieldDialog
     type: "text",
     is_required: false,
     optionsText: "",
-    source_type: "profile",
+    source_type: "individual",
     selectedTable: "",
     tableFields: [],
     loadingTableFields: false,
@@ -409,7 +409,7 @@ export function AddFieldDialog({ open, onOpenChange, onSuccess }: AddFieldDialog
                     <div className="space-y-2">
                       <Label>Source Type</Label>
                       <ComboBox value={card.source_type} onValueChange={(v) => handleCardChange(index, { source_type: v as any })}
-                        options={[{ value: 'profile', label: 'Profile' }, { value: 'document', label: 'Document' }, { value: 'company', label: 'Company' }]}
+                        options={[{ value: 'individual', label: 'Individual' }, { value: 'document', label: 'Document' }, { value: 'company', label: 'Company' }]}
                       />
                     </div>
                     <div className="space-y-2">

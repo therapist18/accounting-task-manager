@@ -381,7 +381,7 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                 <SelectValue placeholder="Select source type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="profile">Profile</SelectItem>
+                <SelectItem value="individual">Individual</SelectItem>
                 <SelectItem value="document">Document</SelectItem>
                 <SelectItem value="company">Company</SelectItem>
               </SelectContent>
