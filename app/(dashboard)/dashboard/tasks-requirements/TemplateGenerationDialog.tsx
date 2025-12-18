@@ -98,110 +98,74 @@ const formatDate = (date, formatStr) => {
     return (formatStr || 'YYYY-MM-DD').replace('YYYY', year).replace('MM', month).replace('DD', day);
 };
 
+const normalizeString = (str) => {
+    if (!str) return '';
+    return str.toLowerCase().replace(/[_\s-]/g, '');
+};
+
+// --- ROBUST JSON PARSER FOR NESTED DATA & ARRAYS ---
 const parseJsonValue = (data, path) => {
     if (!path || !data) return '';
-    
+
     try {
-        // Handle PostgreSQL JSON operator (->>, ->, #>, #>>)
-        if (path.includes('->>') || path.includes('->')) {
-            // Split on ->> first (for text extraction)
-            let parts = path.split('->>');
-            let isTextExtraction = true;
-            
-            if (parts.length === 1) {
-                // Try splitting on -> (for JSON extraction)
-                parts = path.split('->');
-                isTextExtraction = false;
+        let current = data;
+        // 1. Normalize the path.
+        // Replace '->>' (Postgres JSON text access) and '->' (Postgres JSON object access) with dots for uniform traversal
+        // Example: "physical_address_details->>'full_physical_address'" becomes "physical_address_details.full_physical_address"
+        const normalizedPath = path
+            .replace(/->>/g, '.')
+            .replace(/->/g, '.')
+            .replace(/['"]/g, ''); // Remove quotes often found in SQL paths
+
+        const keys = normalizedPath.split('.').map(k => k.trim()).filter(k => k);
+
+        for (const key of keys) {
+            if (current === null || current === undefined) return '';
+
+            // 2. Handle Arrays automatically
+            // If the current object is an array (e.g., physical_address_details is [{...}]),
+            // and we are trying to access a property, assume we want the first item.
+            if (Array.isArray(current)) {
+                current = current.length > 0 ? current[0] : null;
+                if (current === null) return '';
             }
-            
-            // First part is the column name
-            let currentValue = data[parts[0].trim()];
-            
-            // Process remaining parts
-            for (let i = 1; i < parts.length; i++) {
-                // Remove any quotes and trim the key
-                let key = parts[i].replace(/['"]/g, '').trim();
-                
-                // If currentValue is a string, try to parse it as JSON
-                if (typeof currentValue === 'string') {
-                    try {
-                        currentValue = JSON.parse(currentValue);
-                    } catch (e) {
-                        // If it fails, it might already be the value we need
-                        console.log('Could not parse JSON string:', currentValue);
-                    }
-                }
-                
-                // Handle nested path like "location.city"
-                if (key.includes('.')) {
-                    const nestedKeys = key.split('.');
-                    let nestedValue = currentValue;
-                    
-                    for (const nestedKey of nestedKeys) {
-                        if (nestedValue && typeof nestedValue === 'object') {
-                            nestedValue = nestedValue[nestedKey];
-                        } else {
-                            nestedValue = null;
-                            break;
+
+            // 3. Handle stringified JSON
+            // Sometimes the DB returns a JSON column as a string
+            if (typeof current === 'string') {
+                try {
+                    const parsed = JSON.parse(current);
+                    if (parsed && typeof parsed === 'object') {
+                        current = parsed;
+                        // If parsing revealed an array, unwrap it immediately
+                        if (Array.isArray(current)) {
+                            current = current.length > 0 ? current[0] : null;
                         }
                     }
-                    currentValue = nestedValue;
-                } else {
-                    // Simple key access
-                    if (currentValue && typeof currentValue === 'object') {
-                        // Try exact match first
-                        if (currentValue[key] !== undefined) {
-                            currentValue = currentValue[key];
-                        } else {
-                            // Try case-insensitive match
-                            const lowerKey = key.toLowerCase();
-                            const foundKey = Object.keys(currentValue).find(k => 
-                                k.toLowerCase() === lowerKey
-                            );
-                            currentValue = foundKey ? currentValue[foundKey] : '';
-                        }
-                    } else {
-                        currentValue = '';
-                    }
+                } catch (e) {
+                    // Not a JSON string, continue normally
                 }
             }
-            
-            // If we did a text extraction (->>), ensure we return a string
-            if (isTextExtraction && currentValue && typeof currentValue === 'object') {
-                return JSON.stringify(currentValue);
+
+            // 4. Access the property
+            if (current && typeof current === 'object' && key in current) {
+                current = current[key];
+            } else {
+                return ''; // Key not found
             }
-            
-            return currentValue !== null && currentValue !== undefined ? currentValue : '';
         }
-        
-        // Handle dot notation (e.g., "user.name")
-        if (path.includes('.')) {
-            return path.split('.').reduce((obj, part) => {
-                if (!obj) return '';
-                // Handle array indices (e.g., "users.0.name")
-                const arrayMatch = part.match(/^(\w+)\[(\d+)\]$/);
-                if (arrayMatch) {
-                    const [, prop, index] = arrayMatch;
-                    return obj[prop] && obj[prop][parseInt(index, 10)] !== undefined 
-                        ? obj[prop][parseInt(index, 10)] 
-                        : '';
-                }
-                return obj[part] !== undefined ? obj[part] : '';
-            }, data) || '';
-        }
-        
-        // Simple property access
-        return data[path] !== undefined ? data[path] : '';
+
+        // 5. Final output processing
+        if (current === null || current === undefined) return '';
+        if (typeof current === 'object') return JSON.stringify(current); // Should rarely happen if path is complete
+        return String(current);
+
     } catch (error) {
         console.error(`Error parsing JSON path '${path}':`, error);
         return '';
     }
 };
 
-const normalizeString = (str) => {
-    if (!str) return '';
-    return str.toLowerCase().replace(/[_\s-]/g, '');
-};
 
 // --- IMAGE CONTROLS COMPONENT ---
 const ImagePlaceholderControls = ({
@@ -225,7 +189,6 @@ const ImagePlaceholderControls = ({
 
     return (
         <div className="space-y-3">
-            {/* Alignment and Size */}
             <div className="flex items-center gap-2">
                 <ToggleGroup 
                     type="single" 
@@ -233,20 +196,12 @@ const ImagePlaceholderControls = ({
                     onValueChange={(align) => align && onStyleChange('textAlign', align)} 
                     className="bg-background rounded-md border h-9"
                 >
-                    <ToggleGroupItem value="left" className="px-2" title="Align Left">
-                        <AlignLeft className="h-4 w-4" />
-                    </ToggleGroupItem>
-                    <ToggleGroupItem value="center" className="px-2" title="Align Center">
-                        <AlignCenter className="h-4 w-4" />
-                    </ToggleGroupItem>
-                    <ToggleGroupItem value="right" className="px-2" title="Align Right">
-                        <AlignRight className="h-4 w-4" />
-                    </ToggleGroupItem>
+                    <ToggleGroupItem value="left" className="px-2" title="Align Left"><AlignLeft className="h-4 w-4" /></ToggleGroupItem>
+                    <ToggleGroupItem value="center" className="px-2" title="Align Center"><AlignCenter className="h-4 w-4" /></ToggleGroupItem>
+                    <ToggleGroupItem value="right" className="px-2" title="Align Right"><AlignRight className="h-4 w-4" /></ToggleGroupItem>
                 </ToggleGroup>
                 <Select value={currentSizeKey} onValueChange={(size) => onStyleChange('maxWidth', sizeMap[size])}>
-                    <SelectTrigger className="w-14 h-9" title="Image Size">
-                        <SelectValue>{iconMap[currentSizeKey]}</SelectValue>
-                    </SelectTrigger>
+                    <SelectTrigger className="w-14 h-9" title="Image Size"><SelectValue>{iconMap[currentSizeKey]}</SelectValue></SelectTrigger>
                     <SelectContent>
                         <SelectItem value="small">Small (25%)</SelectItem>
                         <SelectItem value="medium">Medium (50%)</SelectItem>
@@ -255,8 +210,6 @@ const ImagePlaceholderControls = ({
                     </SelectContent>
                 </Select>
             </div>
-
-            {/* Border Toggle */}
             <div className="flex items-center justify-between">
                 <Label className="text-xs text-muted-foreground">Show Border</Label>
                 <Button
@@ -269,8 +222,6 @@ const ImagePlaceholderControls = ({
                     {styles.showBorder ? "On" : "Off"}
                 </Button>
             </div>
-
-            {/* Padding Controls */}
             <div className="space-y-2">
                 <Label className="text-xs text-muted-foreground">Padding (px)</Label>
                 <div className="grid grid-cols-2 gap-2">
@@ -279,8 +230,7 @@ const ImagePlaceholderControls = ({
                         <Input
                             id="padding-top"
                             type="number"
-                            min="0"
-                            max="100"
+                            min="0" max="100"
                             value={styles.paddingTop || 0}
                             onChange={(e) => onStyleChange('paddingTop', parseInt(e.target.value) || 0)}
                             className="h-7 text-xs"
@@ -291,8 +241,7 @@ const ImagePlaceholderControls = ({
                         <Input
                             id="padding-bottom"
                             type="number"
-                            min="0"
-                            max="100"
+                            min="0" max="100"
                             value={styles.paddingBottom || 0}
                             onChange={(e) => onStyleChange('paddingBottom', parseInt(e.target.value) || 0)}
                             className="h-7 text-xs"
@@ -318,9 +267,7 @@ export default function TemplateGenerationDialog({
     personData = {},
     companyData = {},
 }) {
-    const {
-        toast
-    } = useToast();
+    const { toast } = useToast();
     const [formData, setFormData] = useState({});
     const [isGenerating, setIsGenerating] = useState(false);
     const [previewContent, setPreviewContent] = useState('');
@@ -333,7 +280,6 @@ export default function TemplateGenerationDialog({
 
     useEffect(() => {
         if (isOpen) {
-            console.log("--- Dialog Opened: Resetting State ---");
             setSelectedTemplate(template || (availableTemplates && availableTemplates[0]) || null);
             setUploadedFiles({});
             setImageStyles({});
@@ -341,7 +287,8 @@ export default function TemplateGenerationDialog({
         }
     }, [isOpen, template, availableTemplates]);
 
-    const populateContent = useCallback((data, placeholders, styles, forPreview = true) => {
+    // --- CONTENT POPULATION FOR PREVIEW ---
+    const populateContent = useCallback((data, placeholders, styles) => {
         if (!selectedTemplate?.content || !placeholders) return '';
         let content = selectedTemplate.content;
 
@@ -369,7 +316,6 @@ export default function TemplateGenerationDialog({
                             margin: 16px 0;
                             padding-top: ${style.paddingTop || 0}px;
                             padding-bottom: ${style.paddingBottom || 0}px;
-                            page-break-inside: avoid;
                         ">
                             <img 
                                 src="${value}" 
@@ -387,14 +333,12 @@ export default function TemplateGenerationDialog({
                             />
                         </div>
                     `;
-
                     content = content.replace(regex, imageHtml);
                 } else {
                     const formattedValue = String(value).replace(/\n/g, '<br />');
                     content = content.replace(regex, formattedValue);
                 }
             } else {
-                // Highlight unfilled placeholders
                 const highlightedPlaceholder = `<span style="background-color: #fef08a; color: #854d0e; padding: 2px 6px; border-radius: 3px; font-weight: bold;">{${placeholder.name}}</span>`;
                 content = content.replace(regex, highlightedPlaceholder);
             }
@@ -403,20 +347,17 @@ export default function TemplateGenerationDialog({
         return content;
     }, [selectedTemplate]);
 
+    // --- DATA FETCHING LOGIC ---
     const getPlaceholderValue = useCallback((placeholder) => {
         const ids = placeholder.master_field_ids || [];
         if (ids.length === 0 || !masterFields) return { value: '', source: null };
         
-        console.log(`[getPlaceholderValue] Processing placeholder: "${placeholder.name}"`, { placeholder });
         const values = [];
         let sourceName = 'Master Field';
         
         for (const id of ids) {
             const masterField = masterFields.get(parseInt(id, 10));
-            if (!masterField) {
-                console.warn(`MasterField with ID ${id} not found.`);
-                continue;
-            }
+            if (!masterField) continue;
             
             if (masterField.date_config?.useCurrentDate) {
                 return {
@@ -427,78 +368,40 @@ export default function TemplateGenerationDialog({
             
             const targetEntityType = placeholder.entity_type || 'principal';
             const entityId = entityIdMap[targetEntityType];
-            
-            if (!entityId) {
-                console.log(`No entityId found for type: ${targetEntityType}`);
-                continue;
-            }
+            if (!entityId) continue;
             
             if (masterField.sources) {
                 for (const source of masterField.sources) {
+                    // 1. Handle Linked Documents (Images)
                     if (placeholder.name.startsWith('%')) {
-                        const docType = placeholder.name.replace(/%/g, '');
-                        console.log(`[Image Source] Looking for document type: "${docType}" for company: ${entityIdMap?.company}`);
-
                         const documents = Object.values(sourceDataCache?.acc_portal_kyc_uploads || {});
                         const validDocumentIds = masterField.sources?.flatMap(s => s.document_id || []) || [];
-                        
                         const matchingDoc = documents.find(doc => {
                             const matchesType = validDocumentIds.includes(doc.kyc_document_id);
                             const matchesCompany = doc.company_id === entityIdMap?.company;
                             return matchesType && matchesCompany;
                         });
-                        
                         if (matchingDoc) {
                             const imageUrl = matchingDoc.file_path
                                 ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${matchingDoc.file_path}`
                                 : '';
-                            return {
-                                value: imageUrl,
-                                source: 'Document'
-                            };
+                            return { value: imageUrl, source: 'Document' };
                         }
-                    } else if (source.table && sourceDataCache[source.table]) {
+                    } 
+                    // 2. Handle Data Tables
+                    else if (source.table && sourceDataCache[source.table]) {
                         const records = Object.values(sourceDataCache[source.table]);
                         const linkingVar = source.linking_variable || 'id';
-                        
-                        // Find record based on linking variable
-                        const record = records.find(r => {
-                            const recordValue = String(r[linkingVar] || '');
-                            const targetValue = String(entityId);
-                            return recordValue === targetValue;
-                        });
+                        const record = records.find(r => String(r[linkingVar] || '') === String(entityId));
                         
                         if (record) {
-                            console.log(`[getPlaceholderValue] Found record for ${placeholder.name}:`, {
-                                table: source.table,
-                                path: source.path,
-                                linkingVar,
-                                entityId,
-                                recordId: record.id,
-                                matchedField: record[linkingVar]
-                            });
-                            
+                            // Use our robust JSON parser here
                             const value = parseJsonValue(record, source.path);
-                            
-                            console.log(`[getPlaceholderValue] Parsed value for ${placeholder.name}:`, {
-                                path: source.path,
-                                value,
-                                recordData: record
-                            });
-                            
                             if (value) {
                                 values.push(String(value));
                                 sourceName = 'Master Field';
                                 break;
                             }
-                        } else {
-                            console.log(`[getPlaceholderValue] No record found for ${placeholder.name}:`, {
-                                table: source.table,
-                                linkingVar,
-                                entityId,
-                                availableRecords: records.length,
-                                availableValues: records.map(r => r[linkingVar])
-                            });
                         }
                     }
                 }
@@ -506,10 +409,8 @@ export default function TemplateGenerationDialog({
         }
 
         if (values.length > 0) {
-            const finalValue = values.join(' ');
-            return { value: finalValue, source: sourceName };
+            return { value: values.join(' '), source: sourceName };
         }
-
         return { value: '', source: null };
     }, [masterFields, entityIdMap, sourceDataCache]);
 
@@ -533,15 +434,8 @@ export default function TemplateGenerationDialog({
 
     const handleImageStyleChange = (name, key, value) => {
         setImageStyles(prevStyles => {
-            const newStyles = {
-                ...prevStyles,
-                [name]: {
-                    ...(prevStyles[name] || {}),
-                    [key]: value
-                }
-            };
-            const preview = populateContent(formData, selectedTemplate.placeholders, newStyles);
-            setPreviewContent(preview);
+            const newStyles = { ...prevStyles, [name]: { ...(prevStyles[name] || {}), [key]: value } };
+            setPreviewContent(populateContent(formData, selectedTemplate.placeholders, newStyles));
             return newStyles;
         });
     };
@@ -555,9 +449,7 @@ export default function TemplateGenerationDialog({
 
             placeholders.forEach(placeholder => {
                 let matchResult = getPlaceholderValue(placeholder);
-                if (!matchResult.value) {
-                    matchResult = smartFieldMatch(placeholder.name);
-                }
+                if (!matchResult.value) matchResult = smartFieldMatch(placeholder.name);
 
                 initialFormData[placeholder.name] = matchResult.value || '';
                 if (matchResult.value && matchResult.source) {
@@ -566,11 +458,7 @@ export default function TemplateGenerationDialog({
 
                 if (placeholder.type === 'image') {
                     initialImageStyles[placeholder.name] = {
-                        maxWidth: '100%',
-                        textAlign: 'center',
-                        showBorder: false,
-                        paddingTop: 0,
-                        paddingBottom: 0
+                        maxWidth: '100%', textAlign: 'center', showBorder: false, paddingTop: 0, paddingBottom: 0
                     };
                 }
             });
@@ -579,51 +467,34 @@ export default function TemplateGenerationDialog({
             setAutoPopulatedFields(autoPopulated);
             setManuallyEditedFields(new Set());
             setImageStyles(initialImageStyles);
-
-            const preview = populateContent(initialFormData, placeholders, initialImageStyles, true);
-            setPreviewContent(preview);
+            setPreviewContent(populateContent(initialFormData, placeholders, initialImageStyles));
         }
     }, [isOpen, selectedTemplate, getPlaceholderValue, smartFieldMatch, populateContent]);
 
     const handleInputChange = (placeholderName, value) => {
-        const updatedFormData = {
-            ...formData,
-            [placeholderName]: value
-        };
+        const updatedFormData = { ...formData, [placeholderName]: value };
         setFormData(updatedFormData);
-        
         if (!manuallyEditedFields.has(placeholderName)) {
             setManuallyEditedFields(prev => new Set(prev).add(placeholderName));
         }
-        
         setPreviewContent(populateContent(updatedFormData, selectedTemplate.placeholders, imageStyles));
     };
 
     const handleFileChange = (placeholderName, e) => {
         const file = e.target.files[0];
         if (file) {
-            if (file.size > 5 * 1024 * 1024) { // 5MB limit
-                toast({
-                    title: "File Too Large",
-                    description: "Please select an image smaller than 5MB.",
-                    variant: "destructive",
-                });
+            if (file.size > 5 * 1024 * 1024) {
+                toast({ title: "File Too Large", description: "Image must be < 5MB.", variant: "destructive" });
                 return;
             }
-
-            setUploadedFiles(prev => ({
-                ...prev,
-                [placeholderName]: file
-            }));
-
+            setUploadedFiles(prev => ({ ...prev, [placeholderName]: file }));
             const reader = new FileReader();
-            reader.onloadend = () => {
-                handleInputChange(placeholderName, reader.result);
-            };
+            reader.onloadend = () => handleInputChange(placeholderName, reader.result);
             reader.readAsDataURL(file);
         }
     };
 
+    // --- DOCUMENT GENERATION ---
     const generateAndDownload = async (outputType = 'word') => {
         setIsGenerating(true);
         try {
@@ -635,16 +506,15 @@ export default function TemplateGenerationDialog({
                 
                 // Parse HTML content into paragraphs
                 const tempDiv = document.createElement('div');
-                tempDiv.innerHTML = populateContent(formData, placeholders, imageStyles, true);
+                tempDiv.innerHTML = populateContent(formData, placeholders, imageStyles);
                 
                 const paragraphs = [];
                 
                 const processNode = async (node, inheritedAlignment = AlignmentType.LEFT) => {
                     if (node.nodeType === Node.TEXT_NODE) {
-                        const text = node.textContent.trim();
-                        if (text) {
-                            return [new TextRun({ text })];
-                        }
+                        const text = node.textContent;
+                        // Avoid adding empty text nodes that can cause formatting issues, but preserve meaningful whitespace
+                        if (text) return [new TextRun({ text })];
                         return [];
                     }
 
@@ -652,125 +522,91 @@ export default function TemplateGenerationDialog({
                         const tagName = node.tagName.toLowerCase();
                         const style = node.getAttribute('style') || '';
                         
-                        // Extract text alignment from style
+                        // Extract text alignment
                         const textAlignMatch = style.match(/text-align:\s*(left|center|right|justify)/i);
                         const nodeAlignment = textAlignMatch 
                             ? ({
-                                'left': AlignmentType.LEFT,
-                                'center': AlignmentType.CENTER,
-                                'right': AlignmentType.RIGHT,
-                                'justify': AlignmentType.JUSTIFIED
+                                'left': AlignmentType.LEFT, 'center': AlignmentType.CENTER, 
+                                'right': AlignmentType.RIGHT, 'justify': AlignmentType.JUSTIFIED
                             }[textAlignMatch[1].toLowerCase()] || inheritedAlignment)
                             : inheritedAlignment;
                         
-                        // Handle images
+                        // --- IMAGE HANDLING START ---
                         if (tagName === 'img') {
                             const src = node.getAttribute('src');
-                            const alt = node.getAttribute('alt') || '';
-                            const parent = node.parentElement;
-                            const parentStyle = parent?.getAttribute('style') || '';
-                            
-                            // Extract alignment from parent div
-                            const alignMatch = parentStyle.match(/text-align:\s*(left|center|right)/i);
-                            const alignment = alignMatch 
-                                ? ({
-                                    'left': AlignmentType.LEFT,
-                                    'center': AlignmentType.CENTER,
-                                    'right': AlignmentType.RIGHT
-                                }[alignMatch[1].toLowerCase()] || AlignmentType.CENTER)
-                                : AlignmentType.CENTER;
-
-                            // Extract padding from parent div
-                            const paddingTopMatch = parentStyle.match(/padding-top:\s*(\d+)px/i);
-                            const paddingBottomMatch = parentStyle.match(/padding-bottom:\s*(\d+)px/i);
-                            const paddingTop = paddingTopMatch ? parseInt(paddingTopMatch[1]) * 20 : 0;
-                            const paddingBottom = paddingBottomMatch ? parseInt(paddingBottomMatch[1]) * 20 : 0;
-
-                            // Extract image properties
-                            const imgStyle = node.getAttribute('style') || '';
-                            const widthMatch = imgStyle.match(/width:\s*(\d+)%/i);
-                            const borderMatch = imgStyle.match(/border:\s*([^;]+)/i);
-                            const hasBorder = borderMatch && !borderMatch[1].includes('none');
-                            
-                            const widthPercentage = widthMatch ? parseInt(widthMatch[1]) : 100;
-
-                            if (!src) {
-                                console.warn('Image has no src attribute');
-                                return [];
-                            }
+                            if (!src) return [];
 
                             try {
                                 let imageData;
-                                
+                                // 1. Base64 Handling
                                 if (src.startsWith('data:')) {
-                                    // Handle base64 data URLs
-                                    console.log('Processing base64 image...');
                                     const base64Match = src.match(/^data:([^;]+);base64,(.+)$/);
-                                    if (!base64Match) {
-                                        throw new Error('Invalid data URL format');
-                                    }
-                                    
-                                    const base64Data = base64Match[2];
-                                    const binaryString = atob(base64Data);
-                                    const bytes = new Uint8Array(binaryString.length);
-                                    for (let i = 0; i < binaryString.length; i++) {
+                                    if (!base64Match) throw new Error('Invalid Base64');
+                                    // Use proper decoding
+                                    const binaryString = window.atob(base64Match[2]);
+                                    const len = binaryString.length;
+                                    const bytes = new Uint8Array(len);
+                                    for (let i = 0; i < len; i++) {
                                         bytes[i] = binaryString.charCodeAt(i);
                                     }
                                     imageData = bytes;
-                                    console.log('Base64 image processed successfully, size:', bytes.length);
-                                } else {
-                                    // Fetch from URL
-                                    console.log('Fetching image from URL:', src);
-                                    const response = await fetch(src, {
-                                        mode: 'cors',
-                                        cache: 'no-cache'
+                                } 
+                                // 2. URL Fetching (e.g. Supabase Storage)
+                                else {
+                                    const response = await fetch(src, { 
+                                        mode: 'cors', // Ensure CORS is handled
+                                        credentials: 'omit' // Usually needed for public storage buckets
                                     });
-                                    
-                                    if (!response.ok) {
-                                        throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
-                                    }
-                                    
+                                    if (!response.ok) throw new Error('Fetch failed');
                                     const blob = await response.blob();
-                                    console.log('Image fetched, type:', blob.type, 'size:', blob.size);
-                                    
-                                    const arrayBuffer = await blob.arrayBuffer();
-                                    imageData = new Uint8Array(arrayBuffer);
-                                    console.log('Image converted to buffer, size:', imageData.length);
+                                    imageData = new Uint8Array(await blob.arrayBuffer());
                                 }
 
-                                if (!imageData || imageData.length === 0) {
-                                    throw new Error('Image data is empty');
-                                }
+                                if (!imageData || imageData.length === 0) throw new Error('Empty image data');
 
-                                // Calculate dimensions
-                                const baseWidth = 6; // inches
-                                const imageWidth = (widthPercentage / 100) * baseWidth;
+                                // Calculate dimensions safely
+                                const imgStyle = node.getAttribute('style') || '';
+                                const widthMatch = imgStyle.match(/width:\s*(\d+)%/i);
+                                const widthPercentage = widthMatch ? parseInt(widthMatch[1]) : 100;
                                 
-                                console.log('Creating ImageRun with dimensions:', {
-                                    width: Math.round(imageWidth * 72),
-                                    height: Math.round(imageWidth * 72 * 0.75)
-                                });
+                                // Max width in Word (approx 6 inches or 600px equivalent for 72dpi)
+                                // docx expects pixels for transformation
+                                const pixelWidth = Math.round((widthPercentage / 100) * 550); 
+                                const pixelHeight = Math.round(pixelWidth * 0.75); // Default 4:3 aspect ratio
 
-                                // Create image with proper dimensions
                                 const imageRun = new ImageRun({
                                     data: imageData,
                                     transformation: {
-                                        width: Math.round(imageWidth * 72),
-                                        height: Math.round(imageWidth * 72 * 0.75),
+                                        width: pixelWidth,
+                                        height: pixelHeight,
                                     },
                                 });
 
-                                const paragraphOptions = {
-                                    children: [imageRun],
-                                    alignment,
-                                    spacing: { 
-                                        before: 200 + paddingTop, 
-                                        after: 200 + paddingBottom 
-                                    }
-                                };
+                                // Padding Logic
+                                const parent = node.parentElement;
+                                const parentStyle = parent?.getAttribute('style') || '';
+                                const ptMatch = parentStyle.match(/padding-top:\s*(\d+)px/i);
+                                const pbMatch = parentStyle.match(/padding-bottom:\s*(\d+)px/i);
+                                const spacingBefore = ptMatch ? parseInt(ptMatch[1]) * 20 : 200; // *20 converts px to twips roughly
+                                const spacingAfter = pbMatch ? parseInt(pbMatch[1]) * 20 : 200;
 
-                                if (hasBorder) {
-                                    paragraphOptions.border = {
+                                // Alignment from parent div (since img is inline)
+                                const parentAlignMatch = parentStyle.match(/text-align:\s*(left|center|right)/i);
+                                const imgAlign = parentAlignMatch 
+                                    ? ({'left':AlignmentType.LEFT,'center':AlignmentType.CENTER,'right':AlignmentType.RIGHT}[parentAlignMatch[1].toLowerCase()]) 
+                                    : AlignmentType.CENTER;
+
+                                // Create a dedicated paragraph for the image
+                                const imgParagraph = new Paragraph({
+                                    children: [imageRun],
+                                    alignment: imgAlign,
+                                    spacing: { before: spacingBefore, after: spacingAfter }
+                                });
+
+                                // Check for border
+                                const borderMatch = imgStyle.match(/border:\s*([^;]+)/i);
+                                if (borderMatch && !borderMatch[1].includes('none')) {
+                                    imgParagraph.border = {
                                         top: { style: BorderStyle.SINGLE, size: 6, color: "E2E8F0" },
                                         bottom: { style: BorderStyle.SINGLE, size: 6, color: "E2E8F0" },
                                         left: { style: BorderStyle.SINGLE, size: 6, color: "E2E8F0" },
@@ -778,64 +614,38 @@ export default function TemplateGenerationDialog({
                                     };
                                 }
 
-                                paragraphs.push(new Paragraph(paragraphOptions));
-                                console.log('Image paragraph created successfully');
+                                paragraphs.push(imgParagraph);
                             } catch (error) {
-                                console.error('Error processing image:', error);
+                                console.error('Image processing failed:', error);
+                                // Fallback text
                                 paragraphs.push(new Paragraph({
-                                    children: [new TextRun({ 
-                                        text: `[Image: ${alt || 'Failed to load'}]`, 
-                                        italics: true 
-                                    })],
-                                    alignment,
+                                    children: [new TextRun({ text: `[Image Error: ${error.message}]`, color: "red", italics: true })],
+                                    alignment: AlignmentType.CENTER
                                 }));
                             }
-                            return [];
+                            return []; // Image is handled by pushing a paragraph, return empty for current flow
                         }
+                        // --- IMAGE HANDLING END ---
 
-                        // Handle highlighted placeholders (unfilled)
-                        if (tagName === 'span' && style.includes('background-color: #fef08a')) {
-                            const text = node.textContent;
-                            return [new TextRun({ 
-                                text, 
-                                bold: true,
-                                color: "854D0E",
-                                highlight: "yellow"
-                            })];
-                        }
-
-                        // Handle headings
-                        if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tagName)) {
-                            const level = parseInt(tagName[1]);
-                            const headingMap = {
-                                1: HeadingLevel.HEADING_1,
-                                2: HeadingLevel.HEADING_2,
-                                3: HeadingLevel.HEADING_3,
-                                4: HeadingLevel.HEADING_4,
-                                5: HeadingLevel.HEADING_5,
-                                6: HeadingLevel.HEADING_6,
-                            };
-                            
+                        if (['h1', 'h2', 'h3'].includes(tagName)) {
+                            const levelMap = { h1: HeadingLevel.HEADING_1, h2: HeadingLevel.HEADING_2, h3: HeadingLevel.HEADING_3 };
                             paragraphs.push(new Paragraph({
-                                text: node.textContent,
-                                heading: headingMap[level],
+                                text: node.textContent || '',
+                                heading: levelMap[tagName],
                                 alignment: nodeAlignment,
                                 spacing: { before: 240, after: 120 }
                             }));
                             return [];
                         }
 
-                        // Handle paragraphs and divs
                         if (tagName === 'p' || tagName === 'div') {
-                            const textRuns = [];
+                            const childrenRuns = [];
                             for (const child of node.childNodes) {
-                                const runs = await processNode(child, nodeAlignment);
-                                textRuns.push(...runs);
+                                childrenRuns.push(...(await processNode(child, nodeAlignment)));
                             }
-                            
-                            if (textRuns.length > 0) {
+                            if (childrenRuns.length > 0) {
                                 paragraphs.push(new Paragraph({
-                                    children: textRuns,
+                                    children: childrenRuns,
                                     alignment: nodeAlignment,
                                     spacing: { after: 120 }
                                 }));
@@ -843,59 +653,29 @@ export default function TemplateGenerationDialog({
                             return [];
                         }
 
-                        // Handle line breaks
-                        if (tagName === 'br') {
-                            return [new TextRun({ break: 1 })];
-                        }
-
-                        // Handle bold
-                        if (tagName === 'strong' || tagName === 'b') {
-                            return [new TextRun({ text: node.textContent, bold: true })];
-                        }
-
-                        // Handle italic
-                        if (tagName === 'em' || tagName === 'i') {
-                            return [new TextRun({ text: node.textContent, italics: true })];
-                        }
-
-                        // Handle underline
-                        if (tagName === 'u') {
-                            return [new TextRun({ text: node.textContent, underline: {} })];
-                        }
-
-                        // Process children for other elements
-                        const textRuns = [];
+                        if (tagName === 'br') return [new TextRun({ break: 1 })];
+                        if (tagName === 'strong' || tagName === 'b') return [new TextRun({ text: node.textContent, bold: true })];
+                        
+                        // Recursive processing for other elements
+                        const runs = [];
                         for (const child of node.childNodes) {
-                            const runs = await processNode(child, nodeAlignment);
-                            textRuns.push(...runs);
+                            runs.push(...(await processNode(child, nodeAlignment)));
                         }
-                        return textRuns;
+                        return runs;
                     }
-
                     return [];
                 };
 
-                // Process all child nodes
                 for (const child of tempDiv.childNodes) {
                     await processNode(child);
                 }
 
-                // Create document
                 const doc = new Document({
                     sections: [{
                         properties: {
-                            page: {
-                                margin: {
-                                    top: convertInchesToTwip(1),
-                                    right: convertInchesToTwip(1),
-                                    bottom: convertInchesToTwip(1),
-                                    left: convertInchesToTwip(1),
-                                },
-                            },
+                            page: { margin: { top: convertInchesToTwip(1), right: convertInchesToTwip(1), bottom: convertInchesToTwip(1), left: convertInchesToTwip(1) } }
                         },
-                        children: paragraphs.length > 0 ? paragraphs : [
-                            new Paragraph({ children: [new TextRun('')] })
-                        ],
+                        children: paragraphs.length > 0 ? paragraphs : [new Paragraph({ children: [new TextRun('')] })],
                     }],
                 });
 
@@ -904,56 +684,27 @@ export default function TemplateGenerationDialog({
 
             } else if (outputType === 'pdf') {
                 const html2pdf = (await import('html2pdf.js')).default;
-                const contentElement = document.createElement('div');
-                contentElement.innerHTML = populateContent(formData, placeholders, imageStyles, true);
-                
-                // Add styles for better PDF rendering
-                contentElement.style.padding = '40px';
-                contentElement.style.backgroundColor = 'white';
-                contentElement.style.fontFamily = 'Arial, sans-serif';
-                contentElement.style.fontSize = '12pt';
-                contentElement.style.lineHeight = '1.6';
+                const element = document.createElement('div');
+                element.innerHTML = populateContent(formData, placeholders, imageStyles);
+                element.style.padding = '40px';
+                element.style.fontFamily = 'Arial, sans-serif';
 
                 const opt = {
-                    margin: [0.5, 0.5, 0.5, 0.5],
+                    margin: 0.5,
                     filename: `${fileName}.pdf`,
                     image: { type: 'jpeg', quality: 0.98 },
-                    html2canvas: {
-                        scale: 2,
-                        useCORS: true,
-                        logging: false,
-                        allowTaint: true,
-                        letterRendering: true,
-                        imageTimeout: 15000,
-                    },
-                    jsPDF: {
-                        unit: 'in',
-                        format: 'letter',
-                        orientation: 'portrait'
-                    },
-                    pagebreak: {
-                        mode: ['avoid-all', 'css', 'legacy']
-                    }
+                    html2canvas: { scale: 2, useCORS: true, logging: false },
+                    jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
                 };
-
-                await html2pdf().set(opt).from(contentElement).save();
+                await html2pdf().set(opt).from(element).save();
             }
 
-            toast({
-                title: "Success!",
-                description: `Your ${outputType === 'word' ? 'Word' : 'PDF'} document has been downloaded.`,
-            });
-
-            // Switch to preview tab after generation
+            toast({ title: "Success", description: "Document downloaded successfully.", className: "bg-green-500 text-white" });
             setActiveTab('preview');
 
         } catch (error) {
-            console.error("Error generating document:", error);
-            toast({
-                title: "Generation Failed",
-                description: error instanceof Error ? error.message : "An unexpected error occurred.",
-                variant: "destructive",
-            });
+            console.error("Generation Error:", error);
+            toast({ title: "Generation Failed", description: error.message || "Unknown error", variant: "destructive" });
         } finally {
             setIsGenerating(false);
         }
@@ -963,407 +714,135 @@ export default function TemplateGenerationDialog({
         const placeholders = selectedTemplate?.placeholders || [];
         const total = placeholders.length;
         if (total === 0) return { total: 0, filled: 0, percentage: 100 };
-        
-        const filled = placeholders.filter(p => 
-            formData[p.name] && String(formData[p.name]).trim() !== ''
-        ).length;
-        
-        const percentage = Math.round((filled / total) * 100);
-        return { total, filled, percentage };
+        const filled = placeholders.filter(p => formData[p.name] && String(formData[p.name]).trim() !== '').length;
+        return { total, filled, percentage: Math.round((filled / total) * 100) };
     }, [formData, selectedTemplate]);
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
             <DialogContent className="max-w-[95vw] w-full h-[95vh] flex flex-col p-0">
-                {/* Header */}
-                <DialogHeader className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-900 dark:to-gray-800">
+                <DialogHeader className="px-6 py-4 border-b bg-muted/20">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                            <div className="p-2 bg-blue-500 rounded-lg">
-                                <Wand2 className="h-5 w-5 text-white" />
-                            </div>
+                            <div className="p-2 bg-primary/10 rounded-lg"><Wand2 className="h-5 w-5 text-primary" /></div>
                             <div>
-                                <DialogTitle className="text-xl font-bold">{documentName}</DialogTitle>
-                                <DialogDescription className="text-sm">
-                                    Fill in the fields and generate your document
-                                </DialogDescription>
+                                <DialogTitle>{documentName}</DialogTitle>
+                                <DialogDescription>Generate and export your document</DialogDescription>
                             </div>
                         </div>
-                        <Button variant="ghost" size="icon" onClick={onClose}>
-                            <X className="h-5 w-5" />
-                        </Button>
+                        <Button variant="ghost" size="icon" onClick={onClose}><X className="h-5 w-5" /></Button>
                     </div>
-                    
-                    {/* Progress Bar */}
-                    <div className="mt-4 space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                            <span className="font-medium">
-                                Completion: {completionStats.filled} of {completionStats.total} fields
-                            </span>
-                            <span className="text-muted-foreground">
-                                {completionStats.percentage}%
-                            </span>
-                        </div>
-                        <Progress value={completionStats.percentage} className="h-2" />
+                    <div className="mt-4 flex items-center gap-4">
+                        <Progress value={completionStats.percentage} className="h-2 flex-1" />
+                        <span className="text-xs text-muted-foreground font-medium">{completionStats.percentage}% Complete</span>
                     </div>
                 </DialogHeader>
 
-                {/* Main Content */}
                 <div className="flex-1 overflow-hidden">
                     <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
-                        <TabsList className="mx-6 mt-4 grid w-[400px] grid-cols-2">
-                            <TabsTrigger value="edit" className="flex items-center gap-2">
-                                <Edit3 className="h-4 w-4" />
-                                Edit Fields
-                            </TabsTrigger>
-                            <TabsTrigger value="preview" className="flex items-center gap-2">
-                                <Eye className="h-4 w-4" />
-                                Preview
-                            </TabsTrigger>
-                        </TabsList>
-
-                        <div className="flex-1 overflow-hidden">
-                            <TabsContent value="edit" className="h-full m-0 p-0">
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 h-full">
-                                    {/* Form Panel */}
-                                    <ScrollArea className="h-full border-r bg-white dark:bg-gray-950">
-                                        <div className="p-6 space-y-4">
-                                            {availableTemplates?.length > 1 && (
-                                                <div className="space-y-2 bg-blue-50 dark:bg-gray-900 p-4 rounded-lg">
-                                                    <Label className="text-sm font-semibold">Template</Label>
-                                                    <Select 
-                                                        value={selectedTemplate?.id} 
-                                                        onValueChange={id => setSelectedTemplate(availableTemplates.find(t => t.id === id))}
-                                                    >
-                                                        <SelectTrigger className="bg-white dark:bg-gray-950">
-                                                            <SelectValue />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            {availableTemplates.map(t => (
-                                                                <SelectItem key={t.id} value={t.id}>
-                                                                    {t.file_name}
-                                                                </SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
-                                                </div>
-                                            )}
-
-                                            {selectedTemplate && (
-                                                <div className="space-y-4">
-                                                    {(selectedTemplate.placeholders || []).map(p => {
-                                                        const isFilled = formData[p.name] && String(formData[p.name]).trim() !== '';
-                                                        const isAutoPopulated = autoPopulatedFields.has(p.name);
-                                                        const isManuallyEdited = manuallyEditedFields.has(p.name);
-
-                                                        // Image Placeholder
-                                                        if (p.type === 'image') {
-                                                            const previewSrc = uploadedFiles[p.name] 
-                                                                ? URL.createObjectURL(uploadedFiles[p.name]) 
-                                                                : formData[p.name];
-                                                            
-                                                            return (
-                                                                <div key={p.id} className="space-y-3 p-4 border rounded-lg bg-gray-50 dark:bg-gray-900/50">
-                                                                    <div className="flex items-center justify-between">
-                                                                        <Label className="text-base font-semibold flex items-center gap-2">
-                                                                            <ImageIcon className="h-4 w-4" />
-                                                                            {p.description || p.name}
-                                                                            {p.required && !isFilled && (
-                                                                                <Badge variant="destructive" className="text-xs">
-                                                                                    Required
-                                                                                </Badge>
-                                                                            )}
-                                                                        </Label>
-                                                                        {isFilled && (
-                                                                            <Badge variant="success" className="text-xs">
-                                                                                <CheckCircle2 className="h-3 w-3 mr-1" />
-                                                                                Added
-                                                                            </Badge>
-                                                                        )}
-                                                                    </div>
-                                                                    
-                                                                    <div className={`w-full h-48 border-2 border-dashed rounded-lg flex items-center justify-center p-2 transition-colors ${
-                                                                        isFilled ? 'bg-white dark:bg-gray-950 border-blue-300' : 'bg-gray-100 dark:bg-gray-800 border-gray-300'
-                                                                    }`}>
-                                                                        {previewSrc ? (
-                                                                            <img 
-                                                                                src={previewSrc} 
-                                                                                alt="Preview" 
-                                                                                className="max-h-full max-w-full object-contain rounded" 
-                                                                            />
-                                                                        ) : (
-                                                                            <div className="text-center text-muted-foreground">
-                                                                                <ImageIcon className="mx-auto h-12 w-12 mb-2" />
-                                                                                <p className="text-sm">No image uploaded</p>
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                    
-                                                                    <div className="flex gap-2">
-                                                                        <Button 
-                                                                            asChild 
-                                                                            variant="outline" 
-                                                                            className="flex-1"
-                                                                        >
-                                                                            <label htmlFor={p.name} className="cursor-pointer flex items-center justify-center gap-2">
-                                                                                <FileUp className="h-4 w-4" />
-                                                                                {previewSrc ? 'Change Image' : 'Upload Image'}
-                                                                                <input 
-                                                                                    id={p.name} 
-                                                                                    type="file" 
-                                                                                    accept="image/*" 
-                                                                                    className="sr-only" 
-                                                                                    onChange={e => handleFileChange(p.name, e)} 
-                                                                                />
-                                                                            </label>
-                                                                        </Button>
-                                                                    </div>
-                                                                    
-                                                                    {isFilled && (
-                                                                        <div className="pt-2 border-t">
-                                                                            <Label className="text-xs text-muted-foreground mb-2 block">
-                                                                                Image Styling
-                                                                            </Label>
-                                                                            <ImagePlaceholderControls 
-                                                                                styles={imageStyles[p.name] || {}} 
-                                                                                onStyleChange={(key, val) => handleImageStyleChange(p.name, key, val)} 
-                                                                            />
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                            );
-                                                        }
-
-                                                        // Select (Dropdown) Placeholder
-                                                        const masterField = p.master_field_ids && masterFields 
-                                                            ? masterFields.get(parseInt(p.master_field_ids[0], 10)) 
-                                                            : null;
-                                                        
-                                                        if (masterField && masterField.type === 'select') {
-                                                            const options = (masterField.options && masterField.options[0]) 
-                                                                ? masterField.options[0].split('\n') 
-                                                                : [];
-                                                            
-                                                            return (
-                                                                <div key={p.id} className="space-y-2 p-4 border rounded-lg hover:border-blue-300 transition-colors">
-                                                                    <Label htmlFor={p.name} className="text-base font-semibold flex items-center gap-2">
-                                                                        {p.description || p.name}
-                                                                        {p.required && !isFilled && (
-                                                                            <Badge variant="destructive" className="text-xs">
-                                                                                Required
-                                                                            </Badge>
-                                                                        )}
-                                                                        {isFilled && (
-                                                                            <Badge variant="success" className="text-xs">
-                                                                                <CheckCircle2 className="h-3 w-3 mr-1" />
-                                                                                Filled
-                                                                            </Badge>
-                                                                        )}
-                                                                    </Label>
-                                                                    <Select 
-                                                                        value={formData[p.name] || ''} 
-                                                                        onValueChange={value => handleInputChange(p.name, value)}
-                                                                    >
-                                                                        <SelectTrigger className={!isFilled && p.required ? 'border-destructive' : ''}>
-                                                                            <SelectValue placeholder="Select an option" />
-                                                                        </SelectTrigger>
-                                                                        <SelectContent>
-                                                                            {options.map(opt => (
-                                                                                <SelectItem key={opt} value={opt}>
-                                                                                    {opt}
-                                                                                </SelectItem>
-                                                                            ))}
-                                                                        </SelectContent>
-                                                                    </Select>
-                                                                    {isAutoPopulated && !isManuallyEdited && (
-                                                                        <p className="text-xs text-blue-600 flex items-center gap-1">
-                                                                            <CheckCircle2 className="h-3 w-3" />
-                                                                            Auto-populated from {autoPopulatedFields.get(p.name)}
-                                                                        </p>
-                                                                    )}
-                                                                </div>
-                                                            );
-                                                        }
-
-                                                        // Text/Date/Textarea Placeholder
-                                                        const isLongText = p.type === 'textarea' || (formData[p.name] && String(formData[p.name]).length > 100);
-                                                        
-                                                        return (
-                                                            <div key={p.id} className="space-y-2 p-4 border rounded-lg hover:border-blue-300 transition-colors">
-                                                                <Label htmlFor={p.name} className="text-base font-semibold flex items-center gap-2">
-                                                                    {p.description || p.name}
-                                                                    {p.required && !isFilled && (
-                                                                        <Badge variant="destructive" className="text-xs">
-                                                                            Required
-                                                                        </Badge>
-                                                                    )}
-                                                                    {isFilled && (
-                                                                        <Badge variant="success" className="text-xs">
-                                                                            <CheckCircle2 className="h-3 w-3 mr-1" />
-                                                                            Filled
-                                                                        </Badge>
-                                                                    )}
-                                                                </Label>
-                                                                
-                                                                {isLongText ? (
-                                                                    <Textarea
-                                                                        id={p.name}
-                                                                        value={formData[p.name] || ''}
-                                                                        onChange={e => handleInputChange(p.name, e.target.value)}
-                                                                        className={`min-h-[100px] ${!isFilled && p.required ? 'border-destructive' : ''}`}
-                                                                        placeholder={`Enter ${p.description || p.name}`}
-                                                                    />
-                                                                ) : (
-                                                                    <Input
-                                                                        id={p.name}
-                                                                        type={p.type === 'date' ? 'date' : 'text'}
-                                                                        value={p.type === 'date' 
-                                                                            ? formatDate(formData[p.name], 'YYYY-MM-DD') 
-                                                                            : (formData[p.name] || '')
-                                                                        }
-                                                                        onChange={e => handleInputChange(p.name, e.target.value)}
-                                                                        className={!isFilled && p.required ? 'border-destructive' : ''}
-                                                                        placeholder={`Enter ${p.description || p.name}`}
-                                                                    />
-                                                                )}
-                                                                
-                                                                {isAutoPopulated && !isManuallyEdited && (
-                                                                    <p className="text-xs text-blue-600 flex items-center gap-1">
-                                                                        <CheckCircle2 className="h-3 w-3" />
-                                                                        Auto-populated from {autoPopulatedFields.get(p.name)}
-                                                                    </p>
-                                                                )}
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            )}
-
-                                            {!selectedTemplate && (
-                                                <div className="text-center p-12">
-                                                    <FileText className="mx-auto h-16 w-16 text-muted-foreground mb-4" />
-                                                    <h3 className="text-lg font-medium mb-2">No Templates Available</h3>
-                                                    <p className="text-sm text-muted-foreground">
-                                                        Please create a template first to generate documents.
-                                                    </p>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </ScrollArea>
-
-                                    {/* Live Preview Panel (for edit tab) */}
-                                    <div className="bg-gray-100 dark:bg-gray-900 p-6 overflow-y-auto">
-                                        <div className="max-w-3xl mx-auto">
-                                            <div className="bg-white shadow-2xl rounded-lg overflow-hidden">
-                                                <div className="bg-gray-200 dark:bg-gray-800 px-4 py-2 flex items-center gap-2 border-b">
-                                                    <div className="flex gap-1.5">
-                                                        <div className="w-3 h-3 rounded-full bg-red-500"></div>
-                                                        <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
-                                                        <div className="w-3 h-3 rounded-full bg-green-500"></div>
-                                                    </div>
-                                                    <span className="text-xs text-muted-foreground ml-2">Live Preview</span>
-                                                </div>
-                                                <div 
-                                                    dangerouslySetInnerHTML={{ __html: previewContent }}
-                                                    className="prose prose-sm max-w-none p-8"
-                                                    style={{
-                                                        minHeight: '400px',
-                                                        fontFamily: 'Georgia, serif',
-                                                        lineHeight: '1.6',
-                                                    }}
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </TabsContent>
-
-                            <TabsContent value="preview" className="h-full m-0 p-0">
-                                <div className="h-full bg-gray-100 dark:bg-gray-900 p-8 overflow-y-auto">
-                                    <div className="max-w-4xl mx-auto">
-                                        <div className="bg-white shadow-2xl rounded-lg overflow-hidden">
-                                            <div className="bg-gradient-to-r from-blue-500 to-indigo-600 px-6 py-4 text-white">
-                                                <div className="flex items-center justify-between">
-                                                    <div>
-                                                        <h3 className="text-lg font-semibold">Document Preview</h3>
-                                                        <p className="text-sm text-blue-100">
-                                                            {documentName} • {formatDate(new Date(), 'YYYY-MM-DD')}
-                                                        </p>
-                                                    </div>
-                                                    <Badge variant="secondary" className="bg-white/20 text-white">
-                                                        {completionStats.percentage}% Complete
-                                                    </Badge>
-                                                </div>
-                                            </div>
-                                            <div 
-                                                dangerouslySetInnerHTML={{ __html: previewContent }}
-                                                className="prose prose-base max-w-none p-12"
-                                                style={{
-                                                    minHeight: '800px',
-                                                    fontFamily: 'Georgia, serif',
-                                                    lineHeight: '1.8',
-                                                    fontSize: '14pt',
-                                                }}
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                            </TabsContent>
+                        <div className="px-6 pt-2 border-b">
+                            <TabsList className="w-[400px]">
+                                <TabsTrigger value="edit" className="flex-1">Edit Fields</TabsTrigger>
+                                <TabsTrigger value="preview" className="flex-1">Preview</TabsTrigger>
+                            </TabsList>
                         </div>
+
+                        <TabsContent value="edit" className="flex-1 overflow-hidden m-0 p-0">
+                            <div className="grid grid-cols-1 lg:grid-cols-2 h-full">
+                                {/* Form */}
+                                <ScrollArea className="h-full border-r p-6">
+                                    <div className="space-y-6 pb-20">
+                                        {availableTemplates?.length > 1 && (
+                                            <div className="space-y-2">
+                                                <Label>Select Template</Label>
+                                                <Select value={selectedTemplate?.id} onValueChange={id => setSelectedTemplate(availableTemplates.find(t => t.id === id))}>
+                                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                                    <SelectContent>{availableTemplates.map(t => <SelectItem key={t.id} value={t.id}>{t.file_name}</SelectItem>)}</SelectContent>
+                                                </Select>
+                                            </div>
+                                        )}
+
+                                        {selectedTemplate?.placeholders?.map(p => {
+                                            const isFilled = formData[p.name] && String(formData[p.name]).trim() !== '';
+                                            const isAuto = autoPopulatedFields.has(p.name);
+
+                                            if (p.type === 'image') {
+                                                const previewSrc = uploadedFiles[p.name] ? URL.createObjectURL(uploadedFiles[p.name]) : formData[p.name];
+                                                return (
+                                                    <div key={p.id} className="p-4 border rounded-lg space-y-3 bg-card">
+                                                        <div className="flex justify-between">
+                                                            <Label>{p.name}</Label>
+                                                            {isFilled && <Badge variant="secondary" className="text-[10px] h-5"><CheckCircle2 className="w-3 h-3 mr-1"/> Ready</Badge>}
+                                                        </div>
+                                                        <div className="h-32 border-2 border-dashed rounded flex items-center justify-center bg-muted/10">
+                                                            {previewSrc ? <img src={previewSrc} className="h-full w-full object-contain" alt="" /> : <ImageIcon className="text-muted-foreground h-8 w-8" />}
+                                                        </div>
+                                                        <div className="flex gap-2">
+                                                            <Button asChild variant="outline" size="sm" className="flex-1">
+                                                                <label className="cursor-pointer">
+                                                                    <FileUp className="h-3 w-3 mr-2" /> Upload
+                                                                    <input type="file" className="hidden" accept="image/*" onChange={e => handleFileChange(p.name, e)} />
+                                                                </label>
+                                                            </Button>
+                                                        </div>
+                                                        {isFilled && <ImagePlaceholderControls styles={imageStyles[p.name] || {}} onStyleChange={(key, v) => handleImageStyleChange(p.name, key, v)} />}
+                                                    </div>
+                                                );
+                                            }
+
+                                            return (
+                                                <div key={p.id} className="space-y-2">
+                                                    <div className="flex justify-between">
+                                                        <Label>{p.description || p.name} {p.required && <span className="text-red-500">*</span>}</Label>
+                                                        {isAuto && <span className="text-[10px] text-blue-500 flex items-center"><Wand2 className="w-3 h-3 mr-1"/> Auto-filled</span>}
+                                                    </div>
+                                                    {p.type === 'textarea' ? (
+                                                        <Textarea 
+                                                            value={formData[p.name] || ''} 
+                                                            onChange={e => handleInputChange(p.name, e.target.value)}
+                                                            className={isAuto ? "bg-blue-50/50" : ""}
+                                                        />
+                                                    ) : (
+                                                        <Input 
+                                                            type={p.type === 'date' ? 'date' : 'text'}
+                                                            value={p.type === 'date' ? formatDate(formData[p.name], 'YYYY-MM-DD') : (formData[p.name] || '')}
+                                                            onChange={e => handleInputChange(p.name, e.target.value)}
+                                                            className={isAuto ? "bg-blue-50/50" : ""}
+                                                        />
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </ScrollArea>
+                                {/* Live Preview Small */}
+                                <div className="hidden lg:block bg-muted/30 p-8 overflow-y-auto">
+                                    <div className="bg-white shadow-lg rounded-sm min-h-[500px] p-8" dangerouslySetInnerHTML={{ __html: previewContent }} />
+                                </div>
+                            </div>
+                        </TabsContent>
+
+                        <TabsContent value="preview" className="flex-1 bg-muted/30 p-8 overflow-y-auto">
+                            <div className="max-w-[210mm] mx-auto bg-white shadow-xl min-h-[297mm] p-[20mm]" dangerouslySetInnerHTML={{ __html: previewContent }} />
+                        </TabsContent>
                     </Tabs>
                 </div>
 
-                {/* Footer */}
-                <DialogFooter className="border-t px-6 py-4 bg-gray-50 dark:bg-gray-900/50">
-                    <div className="flex items-center justify-between w-full">
-                        <div className="text-sm text-muted-foreground flex items-center gap-4">
-                            {autoPopulatedFields.size > 0 && (
-                                <span className="flex items-center gap-2">
-                                    <CheckCircle2 className="h-4 w-4 text-green-500" />
-                                    <strong>{autoPopulatedFields.size}</strong> fields auto-populated
-                                </span>
-                            )}
-                            {completionStats.total > 0 && completionStats.filled < completionStats.total && (
-                                <span className="flex items-center gap-2 text-amber-600">
-                                    <AlertCircle className="h-4 w-4" />
-                                    {completionStats.total - completionStats.filled} fields remaining
-                                </span>
-                            )}
-                        </div>
-                        <div className='flex gap-2'>
-                            <Button variant="outline" onClick={onClose} disabled={isGenerating}>
-                                Cancel
-                            </Button>
+                <DialogFooter className="p-4 border-t">
+                    <div className="flex justify-between w-full items-center">
+                        <span className="text-xs text-muted-foreground">{autoPopulatedFields.size} fields auto-populated</span>
+                        <div className="flex gap-2">
+                            <Button variant="outline" onClick={onClose}>Cancel</Button>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <Button 
-                                        disabled={isGenerating || !selectedTemplate} 
-                                        className="min-w-[200px]"
-                                    >
-                                        {isGenerating ? (
-                                            <>
-                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                                Generating...
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Download className="mr-2 h-4 w-4" />
-                                                Generate & Download
-                                            </>
-                                        )}
+                                    <Button disabled={isGenerating}>
+                                        {isGenerating ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <Download className="mr-2 h-4 w-4" />}
+                                        Generate
                                     </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
-                                    <DropdownMenuItem onClick={() => generateAndDownload('word')}>
-                                        <FileText className="mr-2 h-4 w-4" />
-                                        Word Document (.docx)
-                                    </DropdownMenuItem>
-                                    {selectedTemplate?.file_type === 'text/html' && (
-                                        <DropdownMenuItem onClick={() => generateAndDownload('pdf')}>
-                                            <FileText className="mr-2 h-4 w-4" />
-                                            PDF Document (.pdf)
-                                        </DropdownMenuItem>
-                                    )}
+                                    <DropdownMenuItem onClick={() => generateAndDownload('word')}>Word (.docx)</DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => generateAndDownload('pdf')}>PDF (.pdf)</DropdownMenuItem>
                                 </DropdownMenuContent>
                             </DropdownMenu>
                         </div>
