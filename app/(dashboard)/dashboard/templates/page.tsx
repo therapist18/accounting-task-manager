@@ -86,7 +86,7 @@ export default function LettersPage() {
         subclass_id: subclassId
       };
     }
-    
+
     if (classId) {
       return {
         level: 3,
@@ -317,9 +317,9 @@ function TemplateCard({ template, onEdit, onDelete }) {
             <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => onEdit(template)}>
               <Settings className="h-4 w-4" />
             </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
+            <Button
+              variant="ghost"
+              size="icon"
               className="h-8 w-8 text-muted-foreground hover:text-destructive"
               onClick={(e) => {
                 e.stopPropagation();
@@ -334,7 +334,7 @@ function TemplateCard({ template, onEdit, onDelete }) {
               )}
             </Button>
           </div>
-          
+
           <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
             <AlertDialogContent>
               <AlertDialogHeader>
@@ -345,7 +345,7 @@ function TemplateCard({ template, onEdit, onDelete }) {
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction 
+                <AlertDialogAction
                   onClick={handleDelete}
                   className="bg-destructive hover:bg-destructive/90"
                   disabled={isDeleting}
@@ -396,10 +396,10 @@ function TemplateDisplayArea({ selectedLetter, onCreateNew, onEdit, templateVers
         setAllTemplates(data || []);
       } catch (error) {
         console.error(`Error fetching templates:`, error);
-        toast({ 
-          title: "Error Loading Templates", 
-          description: "Could not fetch templates.", 
-          variant: "destructive" 
+        toast({
+          title: "Error Loading Templates",
+          description: "Could not fetch templates.",
+          variant: "destructive"
         });
       } finally {
         setIsLoading(false);
@@ -427,7 +427,7 @@ function TemplateDisplayArea({ selectedLetter, onCreateNew, onEdit, templateVers
       }
 
       // Check if ANY job_level in the template's array matches the selected jobLevel
-      return tJobs.some((job: any) => 
+      return tJobs.some((job: any) =>
         job.level === jobLevel.level &&
         job.department_id === jobLevel.department_id &&
         job.subdepartment_id === jobLevel.subdepartment_id &&
@@ -447,7 +447,7 @@ function TemplateDisplayArea({ selectedLetter, onCreateNew, onEdit, templateVers
       let entityTypes = template.entity_types;
       // Handle stringified JSON if necessary
       if (typeof entityTypes === 'string') {
-        try { entityTypes = JSON.parse(entityTypes); } catch {}
+        try { entityTypes = JSON.parse(entityTypes); } catch { }
       }
 
       if (Array.isArray(entityTypes) && entityTypes.length > 0) {
@@ -495,9 +495,9 @@ function TemplateDisplayArea({ selectedLetter, onCreateNew, onEdit, templateVers
               <div className="space-y-4">
                 <TabsContent value="all">
                   {categorizedTemplates.categorized.all.map(template => (
-                    <TemplateCard 
-                      key={template.id} 
-                      template={template} 
+                    <TemplateCard
+                      key={template.id}
+                      template={template}
                       onEdit={onEdit}
                       onDelete={async (templateId) => {
                         await supabase.from('acc_portal_templates').delete().eq('id', templateId);
@@ -510,9 +510,9 @@ function TemplateDisplayArea({ selectedLetter, onCreateNew, onEdit, templateVers
                 {categorizedTemplates.tabs.map(tab => (
                   <TabsContent key={tab} value={tab}>
                     {categorizedTemplates.categorized[tab].map(template => (
-                      <TemplateCard 
-                        key={template.id} 
-                        template={template} 
+                      <TemplateCard
+                        key={template.id}
+                        template={template}
                         onEdit={onEdit}
                         onDelete={async (templateId) => {
                           await supabase.from('acc_portal_templates').delete().eq('id', templateId);
@@ -527,9 +527,9 @@ function TemplateDisplayArea({ selectedLetter, onCreateNew, onEdit, templateVers
                 {categorizedTemplates.categorized.uncategorized.length > 0 && (
                   <TabsContent value="uncategorized">
                     {categorizedTemplates.categorized.uncategorized.map(template => (
-                      <TemplateCard 
-                        key={template.id} 
-                        template={template} 
+                      <TemplateCard
+                        key={template.id}
+                        template={template}
                         onEdit={onEdit}
                         onDelete={async (templateId) => {
                           await supabase.from('acc_portal_templates').delete().eq('id', templateId);

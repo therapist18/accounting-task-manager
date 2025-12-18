@@ -41,6 +41,12 @@ interface JobField {
 }
 
 // --- MODIFICATION: Updated props to accept jobLevel object instead of string classId ---
+// Helper function to sanitize class names
+const sanitizeClassName = (cls: string | undefined): string => {
+  if (!cls) return '';
+  return String(cls).replace(/\s+/g, ' ').trim();
+};
+
 interface DocumentTemplateManagerProps {
   document: { id: string; name: string; display_name?: string; };
   initialTemplates?: DocumentTemplate[];
@@ -54,6 +60,7 @@ interface DocumentTemplateManagerProps {
     class_id?: number | null;
     subclass_id?: number | null;
   } | null;
+  className?: string; // Add className to props
 }
 
 const PLACEHOLDER_TYPES = [
@@ -202,7 +209,31 @@ function MasterFieldPicker({
 }
 
 // --- MODIFICATION: Destructure jobLevel instead of classId ---
-export default function DocumentTemplateManager({ document, isOpen, onClose, initialTemplates, onTemplateUpdate, jobLevel }: DocumentTemplateManagerProps) {
+export default function DocumentTemplateManager({ 
+  document, 
+  isOpen, 
+  onClose, 
+  initialTemplates = [], 
+  onTemplateUpdate, 
+  jobLevel = null,
+  className = '' 
+}: DocumentTemplateManagerProps) {
+  // Sanitize the className prop
+  const containerClassName = `document-template-manager ${sanitizeClassName(className)}`.trim();
+  
+  // Ensure jobLevel is properly typed and has all required properties
+  const safeJobLevel = useMemo(() => {
+    if (!jobLevel) {
+      return {
+        level: 0,
+        department_id: null,
+        subdepartment_id: null,
+        class_id: null,
+        subclass_id: null
+      };
+    }
+    return jobLevel;
+  }, [jobLevel]);
   const { toast } = useToast();
   const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
   const [currentTemplateIndex, setCurrentTemplateIndex] = useState<number | null>(null);
@@ -285,18 +316,53 @@ export default function DocumentTemplateManager({ document, isOpen, onClose, ini
     const { left, middle, right } = panelsVisible;
     const visibleCount = [left, middle, right].filter(Boolean).length;
 
-    if (visibleCount === 3) return { left: 'col-span-3', middle: 'col-span-5', right: 'col-span-4' };
+    // Ensure no whitespace in class names
+    const getClass = (className: string) => className.replace(/\s+/g, ' ').trim();
+
+    if (visibleCount === 3) return { 
+      left: getClass('col-span-3'), 
+      middle: getClass('col-span-5'), 
+      right: getClass('col-span-4') 
+    };
     if (visibleCount === 2) {
-      if (!left) return { left: 'hidden', middle: 'col-span-7', right: 'col-span-5' };
-      if (!middle) return { left: 'hidden', middle: 'hidden', right: 'col-span-12' };
-      if (!right) return { left: 'col-span-4', middle: 'col-span-8', right: 'hidden' };
+      if (!left) return { 
+        left: getClass('hidden'), 
+        middle: getClass('col-span-7'), 
+        right: getClass('col-span-5') 
+      };
+      if (!middle) return { 
+        left: getClass('hidden'), 
+        middle: getClass('hidden'), 
+        right: getClass('col-span-12') 
+      };
+      if (!right) return { 
+        left: getClass('col-span-4'), 
+        middle: getClass('col-span-8'), 
+        right: getClass('hidden') 
+      };
     }
     if (visibleCount === 1) {
-      if (left) return { left: 'col-span-12', middle: 'hidden', right: 'hidden' };
-      if (middle) return { left: 'hidden', middle: 'col-span-12', right: 'hidden' };
-      if (right) return { left: 'hidden', middle: 'hidden', right: 'col-span-12' };
+      if (left) return { 
+        left: getClass('col-span-12'), 
+        middle: getClass('hidden'), 
+        right: getClass('hidden') 
+      };
+      if (middle) return { 
+        left: getClass('hidden'), 
+        middle: getClass('col-span-12'), 
+        right: getClass('hidden') 
+      };
+      if (right) return { 
+        left: getClass('hidden'), 
+        middle: getClass('hidden'), 
+        right: getClass('col-span-12') 
+      };
     }
-    return { left: 'hidden', middle: 'hidden', right: 'hidden' };
+    return { 
+      left: getClass('hidden'), 
+      middle: getClass('hidden'), 
+      right: getClass('hidden') 
+    };
   }, [panelsVisible]);
 
 
@@ -787,7 +853,7 @@ const extractPlaceholders = async (source: { type: 'file', content: File } | { t
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="max-w-screen h-[90vh] flex flex-col">
+        <DialogContent className={`max-w-screen h-[90vh] flex flex-col ${containerClassName}`}>
           <DialogHeader>
             <DialogTitle>Template Manager: {document.display_name || document.name}</DialogTitle>
             <DialogDescription>Create and manage templates by uploading a DOCX file or using the rich text editor.</DialogDescription>
