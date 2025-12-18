@@ -341,18 +341,92 @@ export default function DocumentTemplateManager({ document, isOpen, onClose, ini
     }
   }, [isOpen, initialTemplates]);
 
-  const extractPlaceholders = async (source: { type: 'file', content: File } | { type: 'text', content: string }): Promise<string[]> => {
-    setIsProcessing(true);
-    try {
-      const matches = new Set<string>();
-      if (source.type === 'file') {
+const validateTemplate = async (file: File): Promise<boolean> => {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const zip = new PizZip(arrayBuffer);
+    
+    // Check if the file contains the required document.xml
+    const fileList = Object.keys(zip.files);
+    const hasDocumentXml = fileList.some(file => 
+      file.startsWith('word/document') && file.endsWith('.xml')
+    );
+    
+    if (!hasDocumentXml) {
+      throw new Error('The uploaded file is not a valid Word document (missing document.xml)');
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Template validation failed:', error);
+    return false;
+  }
+};
+const extractPlaceholders = async (source: { type: 'file', content: File } | { type: 'text', content: string }): Promise<string[]> => {
+  setIsProcessing(true);
+  try {
+    const matches = new Set<string>();
+    if (source.type === 'file') {
+      try {
         const arrayBuffer = await source.content.arrayBuffer();
         const zip = new PizZip(arrayBuffer);
         const inspectModule = new InspectModule();
-        new Docxtemplater(zip, { modules: [inspectModule] });
-        const tags = inspectModule.getAllTags();
-        Object.keys(tags).forEach(tag => matches.add(tag));
-      } else {
+        
+        try {
+          // Initialize docxtemplater with minimal configuration for tag inspection
+          const doc = new Docxtemplater(zip, { 
+            modules: [inspectModule],
+            paragraphLoop: true,
+            linebreaks: true
+          });
+          
+          // Try to extract tags even if there are syntax errors
+          try {
+            doc.render({});
+          } catch (e) {
+            console.warn('Template rendering warning (continuing):', e.message);
+          }
+          
+          const tags = inspectModule.getAllTags();
+          // Process all found tags and clean them up
+          Object.entries(tags).forEach(([tag, _]) => {
+            if (tag && typeof tag === 'string') {
+              try {
+                // Clean up any malformed tags by removing all non-alphanumeric characters except underscores
+                const cleanTag = tag.replace(/[^\w\s]/g, '').trim();
+                if (cleanTag) {
+                  matches.add(cleanTag);
+                }
+              } catch (e) {
+                console.warn(`Skipping malformed tag: ${tag}`, e);
+              }
+            }
+          });
+        } catch (e) {
+          console.warn('Error in docxtemplater initialization (trying to continue):', e);
+          // Fallback: Try to extract placeholders using regex
+          try {
+            const docXml = zip.files['word/document.xml'].asText();
+            const placeholderRegex = /\{\{([^{}]+)\}\}/g;
+            let match;
+            while ((match = placeholderRegex.exec(docXml)) !== null) {
+              if (match[1]) {
+                const cleanTag = match[1].trim();
+                if (cleanTag) {
+                  matches.add(cleanTag);
+                }
+              }
+            }
+          } catch (innerError) {
+            console.error('Error extracting placeholders with regex:', innerError);
+            throw new Error('Failed to extract placeholders from the template. The file might be corrupted or use unsupported features.');
+          }
+        }
+      } catch (error) {
+        console.error('Error processing DOCX file:', error);
+        throw new Error('Failed to process the document template. The file might be corrupted or in an unsupported format.');
+      }
+    } else {
         if (typeof window === 'undefined' || !source.content) return [];
         const parser = new DOMParser();
         const doc = parser.parseFromString(source.content, 'text/html');
@@ -360,14 +434,16 @@ export default function DocumentTemplateManager({ document, isOpen, onClose, ini
         const placeholderRegex = /\{+([^{}]+?)\}+/g;
         let match;
         while ((match = placeholderRegex.exec(textToParse)) !== null) {
-          if (match[1]) matches.add(match[1].trim());
+          if (match[1]) {
+            const tag = match[1].trim();
+            if (tag) matches.add(tag);
+          }
         }
       }
       return Array.from(matches);
     } catch (error) {
       console.error('Error extracting placeholders:', error);
-      toast({ title: 'Template Analysis Failed', description: 'Could not read placeholders.', variant: 'destructive' });
-      return [];
+      throw error; // Re-throw to be handled by the caller
     } finally {
       setIsProcessing(false);
     }
@@ -417,10 +493,41 @@ export default function DocumentTemplateManager({ document, isOpen, onClose, ini
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.type !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return toast({ title: 'Invalid file type', variant: 'destructive' });
-    const extracted = await extractPlaceholders({ type: 'file', content: file });
-    addNewFileTemplate(file, extracted);
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    
+    if (file.type !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+      toast({ 
+        title: 'Invalid file type', 
+        description: 'Please upload a valid .docx file',
+        variant: 'destructive' 
+      });
+      return;
+    }
+
+    try {
+      const isValid = await validateTemplate(file);
+      if (!isValid) {
+        throw new Error('The uploaded file is not a valid Word document or is corrupted.');
+      }
+
+      const extracted = await extractPlaceholders({ type: 'file', content: file });
+      if (extracted.length === 0) {
+        toast({
+          title: 'No Placeholders Found',
+          description: 'The document does not contain any placeholders. Make sure to use {placeholder} syntax in your template.',
+          variant: 'default'
+        });
+      }
+      addNewFileTemplate(file, extracted);
+    } catch (error) {
+      console.error('Error processing template:', error);
+      toast({
+        title: 'Error Processing Template',
+        description: error instanceof Error ? error.message : 'Failed to process the template. The file might be corrupted or in an unsupported format.',
+        variant: 'destructive'
+      });
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
 
   const addNewFileTemplate = (file: File, extractedPlaceholders: string[]) => {

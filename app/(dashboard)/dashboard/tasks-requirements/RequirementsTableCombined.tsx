@@ -46,18 +46,18 @@ function deepEqual(obj1, obj2) {
 
 // --- ROBUST HELPER FUNCTION TO VALIDATE AND CLEAN UUIDS ---
 const parseAndCleanUUIDs = (input: any): string[] => {
-    if (!input) return [];
-    
-    // Standard UUID regex
-    const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
-    
-    // Convert input to a single string, handle arrays by joining them
-    const inputString = Array.isArray(input) ? input.join(',') : String(input);
-    
-    const matches = inputString.match(uuidRegex) || [];
-    
-    // Return a unique set of valid UUIDs
-    return [...new Set(matches)];
+  if (!input) return [];
+
+  // Standard UUID regex
+  const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+
+  // Convert input to a single string, handle arrays by joining them
+  const inputString = Array.isArray(input) ? input.join(',') : String(input);
+
+  const matches = inputString.match(uuidRegex) || [];
+
+  // Return a unique set of valid UUIDs
+  return [...new Set(matches)];
 };
 
 export default function RequirementsTableCombined({ loading, error, filteredGroupedTasks, organizedRequirements, classRequirements, expandedDocuments, toggleDocumentExpansion, renderDocumentStatus, getDocumentDataForPreview, getDocumentStatusText, renderClientFieldData, renderReferencesData, hasReferencesColumn, individualNames, companyData, getCurrentRequirements, fuzzyMatch, kycDocuments, documentTypes, mainTab, handleUploadSubmit, handleDeleteDocument, handleRetryExtraction, handleSaveEditedDocument, documentTemplates }: any) {
@@ -72,11 +72,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   const [selectedDocForUpload, setSelectedDocForUpload] = useState<any>(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [previewingDocuments, setPreviewingDocuments] = useState<any>(null);
-  
+
   // State for the unified template generation dialog
   const [showTemplateGenerator, setShowTemplateGenerator] = useState(false);
   const [selectedLetterInfo, setSelectedLetterInfo] = useState(null);
-  
+
   const [isPreparingTemplate, setIsPreparingTemplate] = useState(false);
   const [masterFields, setMasterFields] = useState<Map<number, any>>(new Map());
 
@@ -130,7 +130,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         toast({ title: 'No Templates Found', description: `No templates are available for: ${docItem.document.display_name}.`, variant: 'destructive' });
         return;
       }
-      
+
       const queriesToRun = new Map();
 
       templates.forEach(template => {
@@ -153,7 +153,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                   if (document_id) {
                     parseAndCleanUUIDs(document_id).forEach(uuid => tableQueries.docIds.add(uuid));
                   }
-                  
+
                   const linkVar = linking_variable || 'id';
                   if (!tableQueries.links.has(linkVar)) {
                     tableQueries.links.set(linkVar, new Set());
@@ -166,9 +166,9 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         });
       });
 
-      console.log("✅ Step 3: Analyzed templates. Required data sources:", 
-        Object.fromEntries(Array.from(queriesToRun.entries()).map(([table, { docIds, links }]) => 
-            [table, { docIds: [...docIds], links: Object.fromEntries(Array.from(links.entries()).map(([lv, ids]) => [lv, [...ids]])) }]
+      console.log("✅ Step 3: Analyzed templates. Required data sources:",
+        Object.fromEntries(Array.from(queriesToRun.entries()).map(([table, { docIds, links }]) =>
+          [table, { docIds: [...docIds], links: Object.fromEntries(Array.from(links.entries()).map(([lv, ids]) => [lv, [...ids]])) }]
         ))
       );
 
@@ -177,39 +177,99 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
       for (const [table, { docIds, links }] of queriesToRun.entries()) {
         const records = new Map();
-        
         console.log(`  - Querying table '${table}'...`);
+        // In RequirementsTableCombined.tsx, around line 180-210
+        if (table === 'acc_portal_kyc_uploads') {
+          // Get company ID from entityIdMap
+          const companyId = entityIdMap.company;
 
-        if (docIds.size > 0) {
-            console.log(`    - by document_id:`, [...docIds]);
-            const { data, error } = await supabase.from(table).select('*').in('document_id', [...docIds]);
-            if (error) console.error(`    - ❌ ERROR fetching by document_id:`, error);
-            else (data || []).forEach(rec => records.set(rec.id, rec));
+          // Filter out non-UUID values from docIds
+          const validKycDocIds = [...docIds].filter(id =>
+            typeof id === 'string' &&
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+          );
+
+          if (validKycDocIds.length > 0) {
+            console.log(`    - by kyc_document_id and company_id:`, { kyc_document_ids: validKycDocIds, company_id: companyId });
+
+            // First, get all matching kyc_document_ids
+            let query = supabase
+              .from(table)
+              .select('*')
+              .in('kyc_document_id', validKycDocIds);
+
+            // Then filter by company_id if available
+            if (companyId) {
+              query = query.eq('company_id', companyId);
+            }
+
+            const { data, error } = await query;
+
+            if (error) {
+              console.error(`    - ❌ ERROR fetching documents:`, error);
+              toast({
+                title: `Failed to fetch from ${table}`,
+                description: error.message,
+                variant: "destructive"
+              });
+            } else {
+              (data || []).forEach(rec => records.set(rec.id, rec));
+              console.log(`    - Found ${data?.length || 0} matching documents`);
+            }
+          }
         }
+        else {
+          if (docIds.size > 0) {
+            console.log(`    - by document_id:`, [...docIds]);
+            const { data, error } = await supabase
+              .from(table)
+              .select('*')
+              .in('document_id', [...docIds]);
 
-        for (const [linkVar, entityIdsSet] of links.entries()) {
+            if (error) {
+              console.error(`    - ❌ ERROR fetching by document_id:`, error);
+              toast({
+                title: `Failed to fetch from ${table}`,
+                description: error.message,
+                variant: "destructive"
+              });
+            } else {
+              (data || []).forEach(rec => records.set(rec.id, rec));
+            }
+          }
+
+          for (const [linkVar, entityIdsSet] of links.entries()) {
             const entityIds = [...entityIdsSet];
             if (entityIds.length > 0) {
-                console.log(`    - by linking_variable '${linkVar}':`, entityIds);
-                const { data, error } = await supabase.from(table).select('*').in(linkVar, entityIds);
-                if (error) {
-                    console.error(`    - ❌ ERROR fetching by ${linkVar}:`, error);
-                    toast({ title: `Failed to fetch from ${table}`, description: error.message, variant: "destructive" });
-                } else {
-                    (data || []).forEach(rec => records.set(rec.id, rec));
-                }
+              console.log(`    - by linking_variable '${linkVar}':`, entityIds);
+              const { data, error } = await supabase
+                .from(table)
+                .select('*')
+                .in(linkVar, entityIds);
+
+              if (error) {
+                console.error(`    - ❌ ERROR fetching by ${linkVar}:`, error);
+                toast({
+                  title: `Failed to fetch from ${table}`,
+                  description: error.message,
+                  variant: "destructive"
+                });
+              } else {
+                (data || []).forEach(rec => records.set(rec.id, rec));
+              }
             }
+          }
         }
-        
+
         sourceDataCache[table] = Array.from(records.values()).reduce((acc, rec) => {
-            acc[rec.id] = rec;
-            return acc;
+          acc[rec.id] = rec;
+          return acc;
         }, {});
         console.log(`  - ✅ Success! Fetched and cached ${records.size} unique records from '${table}'.`);
       }
 
       console.log("✅ Step 4: Data fetching complete. Final source data cache:", sourceDataCache);
-      
+
       const letterInfo = {
         document: docItem.document,
         task: task,
@@ -494,25 +554,66 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                 const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
                 const dependantIds = group.dependantIds || [];
                 const task = group.tasks[0];
+                const isCompany = task?.applicant_type === 'company';
+                const directors = task?.directors_details || [];
+                const docCategory = docItem.document?.category || '';
+                const isCompanyDoc = docCategory === 'company-docs' || docCategory === 'company';
+
                 return (
                   <React.Fragment key={`${sectionName}-doc-group-${groupIndex}`}>
-                    {[
-                      { type: 'company' }, { type: 'principal' },
-                      ...dependantIds.map(id => ({ type: 'dependant', id })),
-                      ...(hasClassD ? [{ type: 'understudy' }] : [])
-                    ].map(col => {
-                      const docForPreview = getDocumentDataForPreview(task, docItem.document, col.type, col.id);
-                      const statusNode = renderDocumentStatus(task, docItem.document, col.type, col.id);
-                      return (
-                        <TableCell key={`${sectionName}-d-${col.type}-${col.id || groupIndex}`} className="text-center border p-1">
-                          {docForPreview ? (
-                            <div className="cursor-pointer" onClick={() => handleViewDocuments([docForPreview], docItem.document, { full_name: 'Entity Name' })} title="Click to view document">
-                              {statusNode}
-                            </div>
-                          ) : (statusNode)}
+                    {/* Company Column - Only show if document is a company document */}
+                    <TableCell className="text-center border p-1">
+                      {isCompanyDoc ? (
+                        renderDocumentStatus(task, docItem.document, 'company')
+                      ) : (
+                        <span className="text-xs text-gray-500">N/A</span>
+                      )}
+                    </TableCell>
+
+                    {/* Directors/Principal Column(s) */}
+                    {isCompany && directors.length > 0 ? (
+                      // For company with directors, show director columns
+                      directors.map((director, idx) => (
+                        <TableCell key={`${sectionName}-director-${director.id || idx}`} className="text-center border p-1">
+                          {!isCompanyDoc ? (
+                            renderDocumentStatus(task, docItem.document, 'director', director.id)
+                          ) : (
+                            <span className="text-xs text-gray-500">N/A</span>
+                          )}
                         </TableCell>
-                      );
-                    })}
+                      ))
+                    ) : (
+                      // For individual, show principal column
+                      <TableCell className="text-center border p-1">
+                        {!isCompanyDoc ? (
+                          renderDocumentStatus(task, docItem.document, 'principal')
+                        ) : (
+                          <span className="text-xs text-gray-500">N/A</span>
+                        )}
+                      </TableCell>
+                    )}
+
+                    {/* Dependant Columns */}
+                    {dependantIds.map(id => (
+                      <TableCell key={`${sectionName}-dependant-${id}`} className="text-center border p-1">
+                        {!isCompanyDoc ? (
+                          renderDocumentStatus(task, docItem.document, 'dependant', id)
+                        ) : (
+                          <span className="text-xs text-gray-500">N/A</span>
+                        )}
+                      </TableCell>
+                    ))}
+
+                    {/* Understudy Column */}
+                    {hasClassD && (
+                      <TableCell className="text-center border p-1">
+                        {!isCompanyDoc ? (
+                          renderDocumentStatus(task, docItem.document, 'understudy')
+                        ) : (
+                          <span className="text-xs text-gray-500">N/A</span>
+                        )}
+                      </TableCell>
+                    )}
                   </React.Fragment>
                 );
               })}
@@ -706,6 +807,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             <TableHead className="sticky left-16 bg-blue-600 border-r border-blue-500 w-[300px] z-20 text-white font-semibold">Requirements</TableHead>
             {filteredGroupedTasks.map((group, groupIndex) => {
               const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+              const task = group.tasks[0];
+              const isCompany = task?.applicant_type === 'company';
               const { principalId, understudyId } = group.tasks.reduce((acc, task) => {
                 if (task.applicant_type === 'principal') acc.principalId = task.individual_id;
                 if (task.applicant_type === 'understudy') acc.understudyId = task.individual_id;
@@ -713,41 +816,119 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
               }, { principalId: null, understudyId: null });
               const principalName = principalId && individualNames[principalId];
               const understudyName = understudyId && individualNames[understudyId];
-              const companyId = group.tasks[0]?.company_id;
+              const companyId = task?.company_id;
               const company = companyId ? companyData[companyId] : null;
-              return [
+              const directors = task?.directors_details || [];
+
+              const headerCells = [
                 <TableHead key={`${groupIndex}-company`} className="bg-gray-600 border-r border-gray-400 text-white text-center font-semibold min-w-[170px] px-2 py-2">
                   <div className="flex flex-col items-center justify-center gap-1.5 h-full">
                     <Briefcase className="h-4 w-4" />
-                    {company ? (<span className="text-sm font-bold truncate max-w-[150px]" title={company.company_name}>{company.company_name}</span>) : (<span className="text-xs opacity-80">Company</span>)}
+                    {company ? (
+                      <span className="text-sm font-bold truncate max-w-[150px]" title={company.company_name}>
+                        {company.company_name}
+                      </span>
+                    ) : (
+                      <span className="text-xs opacity-80">Company</span>
+                    )}
                   </div>
-                </TableHead>,
-                <TableHead key={`${groupIndex}-principal`} className="bg-blue-600 border-r border-blue-400 text-white text-center font-semibold min-w-[170px] px-2 py-2">
-                  <div className="flex flex-col items-center justify-center gap-1.5 h-full">
-                    <UserCheck className="h-4 w-4" />
-                    {principalName ? (<><span className="text-sm font-bold truncate max-w-[150px]" title={principalName}>{principalName}</span><span className="text-xs opacity-80">Principal</span></>) : (<span className="text-xs opacity-80">Principal</span>)}
-                  </div>
-                </TableHead>,
-                ...(group.dependantIds || []).map((dependantId, depIndex) => {
-                  const dependantName = individualNames[dependantId];
-                  return (
-                    <TableHead key={`${groupIndex}-dependant-${dependantId}`} className={'bg-blue-500 border-r border-blue-400 text-white text-center font-semibold min-w-[170px] px-2 py-2'}>
+                </TableHead>
+              ];
+
+              // Add director columns for company or principal column for individual
+              if (isCompany && directors.length > 0) {
+                directors.forEach((director, idx) => {
+                  headerCells.push(
+                    <TableHead
+                      key={`${groupIndex}-director-${director.id || idx}`}
+                      className="bg-blue-600 border-r border-blue-400 text-white text-center font-semibold min-w-[170px] px-2 py-2"
+                    >
                       <div className="flex flex-col items-center justify-center gap-1.5 h-full">
-                        <Users className="h-4 w-4" />
-                        {dependantName ? (<><span className="text-sm font-bold truncate max-w-[150px]" title={dependantName}>{dependantName}</span><span className="text-xs opacity-80">{`Dependant ${depIndex + 1}`}</span></>) : (<span className="text-xs opacity-80">{`Dependant ${depIndex + 1}`}</span>)}
+                        <UserCheck className="h-4 w-4" />
+                        <span className="text-sm font-bold truncate max-w-[150px]" title={director.full_name}>
+                          {director.full_name}
+                        </span>
+                        <span className="text-xs opacity-80 capitalize">
+                          {director.role?.toLowerCase()}
+                        </span>
                       </div>
                     </TableHead>
                   );
-                }),
-                hasClassD && (
-                  <TableHead key={`${groupIndex}-understudy`} className="bg-blue-400 border-r border-blue-400 text-white text-center font-semibold min-w-[170px] px-2 py-2">
+                });
+              } else {
+                headerCells.push(
+                  <TableHead key={`${groupIndex}-principal`} className="bg-blue-600 border-r border-blue-400 text-white text-center font-semibold min-w-[170px] px-2 py-2">
                     <div className="flex flex-col items-center justify-center gap-1.5 h-full">
                       <UserCheck className="h-4 w-4" />
-                      {understudyName ? (<><span className="text-sm font-bold truncate max-w-[150px]" title={understudyName}>{understudyName}</span><span className="text-xs opacity-80">Understudy</span></>) : (<span className="text-xs opacity-80">Understudy</span>)}
+                      {principalName ? (
+                        <>
+                          <span className="text-sm font-bold truncate max-w-[150px]" title={principalName}>
+                            {principalName}
+                          </span>
+                          <span className="text-xs opacity-80">Principal</span>
+                        </>
+                      ) : (
+                        <span className="text-xs opacity-80">Principal</span>
+                      )}
                     </div>
                   </TableHead>
-                )
-              ];
+                );
+              }
+
+              // Add dependant columns
+              (group.dependantIds || []).forEach((dependantId, depIndex) => {
+                const dependantName = individualNames[dependantId];
+                headerCells.push(
+                  <TableHead
+                    key={`${groupIndex}-dependant-${dependantId}`}
+                    className="bg-blue-500 border-r border-blue-400 text-white text-center font-semibold min-w-[170px] px-2 py-2"
+                  >
+                    <div className="flex flex-col items-center justify-center gap-1.5 h-full">
+                      <Users className="h-4 w-4" />
+                      {dependantName ? (
+                        <>
+                          <span className="text-sm font-bold truncate max-w-[150px]" title={dependantName}>
+                            {dependantName}
+                          </span>
+                          <span className="text-xs opacity-80">
+                            Dependant {depIndex + 1}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-xs opacity-80">
+                          Dependant {depIndex + 1}
+                        </span>
+                      )}
+                    </div>
+                  </TableHead>
+                );
+              });
+
+              // Add understudy column if applicable
+              if (hasClassD) {
+                headerCells.push(
+                  <TableHead
+                    key={`${groupIndex}-understudy`}
+                    className="bg-blue-400 border-r border-blue-400 text-white text-center font-semibold min-w-[170px] px-2 py-2"
+                  >
+                    <div className="flex flex-col items-center justify-center gap-1.5 h-full">
+                      <UserCheck className="h-4 w-4" />
+                      {understudyName ? (
+                        <>
+                          <span className="text-sm font-bold truncate max-w-[150px]" title={understudyName}>
+                            {understudyName}
+                          </span>
+                          <span className="text-xs opacity-80">Understudy</span>
+                        </>
+                      ) : (
+                        <span className="text-xs opacity-80">Understudy</span>
+                      )}
+                    </div>
+                  </TableHead>
+                );
+              }
+
+              return headerCells;
             })}
             {hasReferencesColumn && allReferences.map((reference, refIndex) => (
               <TableHead key={`reference-${reference.id}`} className="bg-purple-600 border-r border-purple-400 text-white text-center font-semibold min-w-[170px] px-2 py-2">
