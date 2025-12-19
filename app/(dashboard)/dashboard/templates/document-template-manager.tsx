@@ -38,6 +38,12 @@ interface JobField {
   id: number;
   field_key: string;
   label: string;
+  sources?: Array<{
+    path: string;
+    table: string;
+    priority: number;
+    source_type?: string;
+  }>;
 }
 
 // --- MODIFICATION: Updated props to accept jobLevel object instead of string classId ---
@@ -209,18 +215,18 @@ function MasterFieldPicker({
 }
 
 // --- MODIFICATION: Destructure jobLevel instead of classId ---
-export default function DocumentTemplateManager({ 
-  document, 
-  isOpen, 
-  onClose, 
-  initialTemplates = [], 
-  onTemplateUpdate, 
+export default function DocumentTemplateManager({
+  document,
+  isOpen,
+  onClose,
+  initialTemplates = [],
+  onTemplateUpdate,
   jobLevel = null,
-  className = '' 
+  className = ''
 }: DocumentTemplateManagerProps) {
   // Sanitize the className prop
   const containerClassName = `document-template-manager ${sanitizeClassName(className)}`.trim();
-  
+
   // Ensure jobLevel is properly typed and has all required properties
   const safeJobLevel = useMemo(() => {
     if (!jobLevel) {
@@ -319,49 +325,49 @@ export default function DocumentTemplateManager({
     // Ensure no whitespace in class names
     const getClass = (className: string) => className.replace(/\s+/g, ' ').trim();
 
-    if (visibleCount === 3) return { 
-      left: getClass('col-span-3'), 
-      middle: getClass('col-span-5'), 
-      right: getClass('col-span-4') 
+    if (visibleCount === 3) return {
+      left: getClass('col-span-3'),
+      middle: getClass('col-span-5'),
+      right: getClass('col-span-4')
     };
     if (visibleCount === 2) {
-      if (!left) return { 
-        left: getClass('hidden'), 
-        middle: getClass('col-span-7'), 
-        right: getClass('col-span-5') 
+      if (!left) return {
+        left: getClass('hidden'),
+        middle: getClass('col-span-7'),
+        right: getClass('col-span-5')
       };
-      if (!middle) return { 
-        left: getClass('hidden'), 
-        middle: getClass('hidden'), 
-        right: getClass('col-span-12') 
+      if (!middle) return {
+        left: getClass('hidden'),
+        middle: getClass('hidden'),
+        right: getClass('col-span-12')
       };
-      if (!right) return { 
-        left: getClass('col-span-4'), 
-        middle: getClass('col-span-8'), 
-        right: getClass('hidden') 
+      if (!right) return {
+        left: getClass('col-span-4'),
+        middle: getClass('col-span-8'),
+        right: getClass('hidden')
       };
     }
     if (visibleCount === 1) {
-      if (left) return { 
-        left: getClass('col-span-12'), 
-        middle: getClass('hidden'), 
-        right: getClass('hidden') 
+      if (left) return {
+        left: getClass('col-span-12'),
+        middle: getClass('hidden'),
+        right: getClass('hidden')
       };
-      if (middle) return { 
-        left: getClass('hidden'), 
-        middle: getClass('col-span-12'), 
-        right: getClass('hidden') 
+      if (middle) return {
+        left: getClass('hidden'),
+        middle: getClass('col-span-12'),
+        right: getClass('hidden')
       };
-      if (right) return { 
-        left: getClass('hidden'), 
-        middle: getClass('hidden'), 
-        right: getClass('col-span-12') 
+      if (right) return {
+        left: getClass('hidden'),
+        middle: getClass('hidden'),
+        right: getClass('col-span-12')
       };
     }
-    return { 
-      left: getClass('hidden'), 
-      middle: getClass('hidden'), 
-      right: getClass('hidden') 
+    return {
+      left: getClass('hidden'),
+      middle: getClass('hidden'),
+      right: getClass('hidden')
     };
   }, [panelsVisible]);
 
@@ -382,7 +388,7 @@ export default function DocumentTemplateManager({
 
   const fetchMasterFields = async () => {
     try {
-      const { data, error } = await supabase.from('tm_job_fields').select('id, field_key, label').order('label');
+      const { data, error } = await supabase.from('tm_job_fields').select('*').order('label');
       if (error) throw error;
       setMasterFields(data || []);
     } catch (error) {
@@ -407,92 +413,92 @@ export default function DocumentTemplateManager({
     }
   }, [isOpen, initialTemplates]);
 
-const validateTemplate = async (file: File): Promise<boolean> => {
-  try {
-    const arrayBuffer = await file.arrayBuffer();
-    const zip = new PizZip(arrayBuffer);
-    
-    // Check if the file contains the required document.xml
-    const fileList = Object.keys(zip.files);
-    const hasDocumentXml = fileList.some(file => 
-      file.startsWith('word/document') && file.endsWith('.xml')
-    );
-    
-    if (!hasDocumentXml) {
-      throw new Error('The uploaded file is not a valid Word document (missing document.xml)');
-    }
-    
-    return true;
-  } catch (error) {
-    console.error('Template validation failed:', error);
-    return false;
-  }
-};
-const extractPlaceholders = async (source: { type: 'file', content: File } | { type: 'text', content: string }): Promise<string[]> => {
-  setIsProcessing(true);
-  try {
-    const matches = new Set<string>();
-    if (source.type === 'file') {
-      try {
-        const arrayBuffer = await source.content.arrayBuffer();
-        const zip = new PizZip(arrayBuffer);
-        const inspectModule = new InspectModule();
-        
-        try {
-          // Initialize docxtemplater with minimal configuration for tag inspection
-          const doc = new Docxtemplater(zip, { 
-            modules: [inspectModule],
-            paragraphLoop: true,
-            linebreaks: true
-          });
-          
-          // Try to extract tags even if there are syntax errors
-          try {
-            doc.render({});
-          } catch (e) {
-            console.warn('Template rendering warning (continuing):', e.message);
-          }
-          
-          const tags = inspectModule.getAllTags();
-          // Process all found tags and clean them up
-          Object.entries(tags).forEach(([tag, _]) => {
-            if (tag && typeof tag === 'string') {
-              try {
-                // Clean up any malformed tags by removing all non-alphanumeric characters except underscores
-                const cleanTag = tag.replace(/[^\w\s]/g, '').trim();
-                if (cleanTag) {
-                  matches.add(cleanTag);
-                }
-              } catch (e) {
-                console.warn(`Skipping malformed tag: ${tag}`, e);
-              }
-            }
-          });
-        } catch (e) {
-          console.warn('Error in docxtemplater initialization (trying to continue):', e);
-          // Fallback: Try to extract placeholders using regex
-          try {
-            const docXml = zip.files['word/document.xml'].asText();
-            const placeholderRegex = /\{\{([^{}]+)\}\}/g;
-            let match;
-            while ((match = placeholderRegex.exec(docXml)) !== null) {
-              if (match[1]) {
-                const cleanTag = match[1].trim();
-                if (cleanTag) {
-                  matches.add(cleanTag);
-                }
-              }
-            }
-          } catch (innerError) {
-            console.error('Error extracting placeholders with regex:', innerError);
-            throw new Error('Failed to extract placeholders from the template. The file might be corrupted or use unsupported features.');
-          }
-        }
-      } catch (error) {
-        console.error('Error processing DOCX file:', error);
-        throw new Error('Failed to process the document template. The file might be corrupted or in an unsupported format.');
+  const validateTemplate = async (file: File): Promise<boolean> => {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const zip = new PizZip(arrayBuffer);
+
+      // Check if the file contains the required document.xml
+      const fileList = Object.keys(zip.files);
+      const hasDocumentXml = fileList.some(file =>
+        file.startsWith('word/document') && file.endsWith('.xml')
+      );
+
+      if (!hasDocumentXml) {
+        throw new Error('The uploaded file is not a valid Word document (missing document.xml)');
       }
-    } else {
+
+      return true;
+    } catch (error) {
+      console.error('Template validation failed:', error);
+      return false;
+    }
+  };
+  const extractPlaceholders = async (source: { type: 'file', content: File } | { type: 'text', content: string }): Promise<string[]> => {
+    setIsProcessing(true);
+    try {
+      const matches = new Set<string>();
+      if (source.type === 'file') {
+        try {
+          const arrayBuffer = await source.content.arrayBuffer();
+          const zip = new PizZip(arrayBuffer);
+          const inspectModule = new InspectModule();
+
+          try {
+            // Initialize docxtemplater with minimal configuration for tag inspection
+            const doc = new Docxtemplater(zip, {
+              modules: [inspectModule],
+              paragraphLoop: true,
+              linebreaks: true
+            });
+
+            // Try to extract tags even if there are syntax errors
+            try {
+              doc.render({});
+            } catch (e) {
+              console.warn('Template rendering warning (continuing):', e.message);
+            }
+
+            const tags = inspectModule.getAllTags();
+            // Process all found tags and clean them up
+            Object.entries(tags).forEach(([tag, _]) => {
+              if (tag && typeof tag === 'string') {
+                try {
+                  // Clean up any malformed tags by removing all non-alphanumeric characters except underscores
+                  const cleanTag = tag.replace(/[^\w\s]/g, '').trim();
+                  if (cleanTag) {
+                    matches.add(cleanTag);
+                  }
+                } catch (e) {
+                  console.warn(`Skipping malformed tag: ${tag}`, e);
+                }
+              }
+            });
+          } catch (e) {
+            console.warn('Error in docxtemplater initialization (trying to continue):', e);
+            // Fallback: Try to extract placeholders using regex
+            try {
+              const docXml = zip.files['word/document.xml'].asText();
+              const placeholderRegex = /\{\{([^{}]+)\}\}/g;
+              let match;
+              while ((match = placeholderRegex.exec(docXml)) !== null) {
+                if (match[1]) {
+                  const cleanTag = match[1].trim();
+                  if (cleanTag) {
+                    matches.add(cleanTag);
+                  }
+                }
+              }
+            } catch (innerError) {
+              console.error('Error extracting placeholders with regex:', innerError);
+              throw new Error('Failed to extract placeholders from the template. The file might be corrupted or use unsupported features.');
+            }
+          }
+        } catch (error) {
+          console.error('Error processing DOCX file:', error);
+          throw new Error('Failed to process the document template. The file might be corrupted or in an unsupported format.');
+        }
+      } else {
         if (typeof window === 'undefined' || !source.content) return [];
         const parser = new DOMParser();
         const doc = parser.parseFromString(source.content, 'text/html');
@@ -515,56 +521,137 @@ const extractPlaceholders = async (source: { type: 'file', content: File } | { t
     }
   };
 
-  const autoGeneratePlaceholders = (extracted: string[]): Placeholder[] => extracted.map((name, index) => {
+// Update the findMatchingMasterFields function to handle sources array
+const findMatchingMasterFields = (placeholderName: string, masterFields: JobField[]): { ids: number[], sourceType?: string } => {
+  if (!placeholderName || !masterFields.length) return { ids: [] };
+
+  // Normalize the placeholder name for comparison
+  const normalizedPlaceholder = placeholderName
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '') // Remove special characters
+    .trim();
+
+  const matches = masterFields.filter(field => {
+    // Normalize field label and key for comparison
+    const normalizedLabel = field.label
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '')
+      .trim();
+    const normalizedKey = field.field_key
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '')
+      .trim();
+
+    // Check for direct matches or partial matches with high confidence
+    return (
+      normalizedPlaceholder === normalizedLabel ||
+      normalizedPlaceholder === normalizedKey ||
+      normalizedPlaceholder.includes(normalizedLabel) ||
+      normalizedLabel.includes(normalizedPlaceholder) ||
+      normalizedPlaceholder.includes(normalizedKey) ||
+      normalizedKey.includes(normalizedPlaceholder)
+    );
+  });
+
+  // Extract source types from the sources array
+  const sourceTypes = matches.flatMap(field => 
+    Array.isArray(field.sources) 
+      ? field.sources.map(s => s.source_type).filter(Boolean)
+      : []
+  );
+
+  // Count occurrences of each source type
+  const sourceTypeCount = sourceTypes.reduce((acc, type) => {
+    if (type) {
+      acc[type] = (acc[type] || 0) + 1;
+    }
+    return acc;
+  }, {} as Record<string, number>);
+
+  // Get the most common source type
+  const mostCommonSourceType = Object.entries(sourceTypeCount)
+    .sort((a, b) => b[1] - a[1])
+    .map(([type]) => type)[0];
+
+  return {
+    ids: matches.map(field => field.id),
+    sourceType: mostCommonSourceType
+  };
+};
+
+// Update the autoGeneratePlaceholders function to use source_type from master fields
+const autoGeneratePlaceholders = (extracted: string[], masterFields: JobField[] = []): Placeholder[] =>
+  extracted.map((name, index) => {
     const isImage = name.startsWith('%') && name.endsWith('%');
     const cleanName = isImage ? name.substring(1, name.length - 1) : name;
+
+    // Find matching master fields and get source type
+    const { ids: matchingFieldIds, sourceType } = findMatchingMasterFields(cleanName, masterFields);
+
     return {
       id: `auto_${Date.now()}_${index}`,
       name: cleanName,
-      description: ``,
+      description: matchingFieldIds.length > 0
+        ? `Auto-linked to ${matchingFieldIds.length} field(s)`
+        : '',
       type: isImage ? 'image' : 'text',
       required: true,
-      entity_type: 'principal',
-      master_field_ids: []
+      entity_type: (sourceType as EntityType) || 'principal', // Use source_type from master field or default to 'principal'
+      master_field_ids: matchingFieldIds
     };
   });
 
-  const mergePlaceholders = (existingPlaceholders: Placeholder[], extractedNames: string[]): Placeholder[] => {
-    const existingMap = new Map(existingPlaceholders.map(p => [p.name, p]));
-    const updatedPlaceholders: Placeholder[] = [];
-    const processedNames = new Set<string>();
-    for (const name of extractedNames) {
-      const isImageTag = name.startsWith('%') && name.endsWith('%');
-      const cleanName = isImageTag ? name.substring(1, name.length - 1) : name;
-      if (processedNames.has(cleanName)) continue;
-      const existingPlaceholder = existingMap.get(cleanName);
-      if (existingPlaceholder) {
-        updatedPlaceholders.push(existingPlaceholder);
-      } else {
-        updatedPlaceholders.push({
-          id: `auto_${Date.now()}_${updatedPlaceholders.length}`,
-          name: cleanName,
-          description: '',
-          type: isImageTag ? 'image' : 'text',
-          required: true,
-          entity_type: 'principal',
-          master_field_ids: []
-        });
-      }
-      processedNames.add(cleanName);
-    }
-    return updatedPlaceholders;
-  };
+// Update the mergePlaceholders function to use source_type from master fields
+const mergePlaceholders = (
+  existingPlaceholders: Placeholder[],
+  extractedNames: string[],
+  masterFields: JobField[] = []
+): Placeholder[] => {
+  const existingMap = new Map(existingPlaceholders.map(p => [p.name, p]));
+  const updatedPlaceholders: Placeholder[] = [];
+  const processedNames = new Set<string>();
 
+  for (const name of extractedNames) {
+    const isImageTag = name.startsWith('%') && name.endsWith('%');
+    const cleanName = isImageTag ? name.substring(1, name.length - 1) : name;
+
+    if (processedNames.has(cleanName)) continue;
+
+    const existingPlaceholder = existingMap.get(cleanName);
+    if (existingPlaceholder) {
+      updatedPlaceholders.push(existingPlaceholder);
+    } else {
+      // Find matching master fields and get source type
+      const { ids: matchingFieldIds, sourceType } = findMatchingMasterFields(cleanName, masterFields);
+
+      updatedPlaceholders.push({
+        id: `auto_${Date.now()}_${updatedPlaceholders.length}`,
+        name: cleanName,
+        description: matchingFieldIds.length > 0
+          ? `Auto-linked to ${matchingFieldIds.length} field(s)`
+          : '',
+        type: isImageTag ? 'image' : 'text',
+        required: true,
+        entity_type: (sourceType as EntityType) || 'principal', // Use source_type from master field or default to 'principal'
+        master_field_ids: matchingFieldIds
+      });
+    }
+    processedNames.add(cleanName);
+  }
+
+  return updatedPlaceholders;
+};
+
+  // Update the handleFileChange function to pass masterFields
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
+
     if (file.type !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-      toast({ 
-        title: 'Invalid file type', 
+      toast({
+        title: 'Invalid file type',
         description: 'Please upload a valid .docx file',
-        variant: 'destructive' 
+        variant: 'destructive'
       });
       return;
     }
@@ -583,7 +670,8 @@ const extractPlaceholders = async (source: { type: 'file', content: File } | { t
           variant: 'default'
         });
       }
-      addNewFileTemplate(file, extracted);
+      // Pass masterFields to autoGeneratePlaceholders
+      addNewFileTemplate(file, extracted, masterFields);
     } catch (error) {
       console.error('Error processing template:', error);
       toast({
@@ -596,13 +684,17 @@ const extractPlaceholders = async (source: { type: 'file', content: File } | { t
     }
   };
 
-  const addNewFileTemplate = (file: File, extractedPlaceholders: string[]) => {
+  // Update the addNewFileTemplate function to accept masterFields
+  const addNewFileTemplate = (file: File, extractedPlaceholders: string[], masterFields: JobField[] = []) => {
     const tempId = `temp_file_${Date.now()}`;
     const newTemplate: DocumentTemplate = {
-      id: tempId, document_id: document.id,
+      id: tempId,
+      document_id: document.id,
       name: file.name.replace(/\.[^/.]+$/, ''),
-      file_name: file.name, file_type: file.type, file_size: file.size,
-      placeholders: autoGeneratePlaceholders(extractedPlaceholders),
+      file_name: file.name,
+      file_type: file.type,
+      file_size: file.size,
+      placeholders: autoGeneratePlaceholders(extractedPlaceholders, masterFields),
       created_at: new Date().toISOString(),
       entity_types: [],
     };
@@ -610,7 +702,32 @@ const extractPlaceholders = async (source: { type: 'file', content: File } | { t
     const updatedTemplates = [...templates, newTemplate];
     setTemplates(updatedTemplates);
     setCurrentTemplateIndex(updatedTemplates.length - 1);
-    toast({ title: 'File Template Added', description: `Detected ${extractedPlaceholders.length} placeholders.` });
+    toast({
+      title: 'File Template Added',
+      description: `Detected ${extractedPlaceholders.length} placeholders. ${newTemplate.placeholders.filter(p => p.master_field_ids?.length).length
+        } placeholders were automatically linked to master fields.`
+    });
+  };
+
+  // Update the handleRescanPlaceholders function to pass masterFields
+  const handleRescanPlaceholders = async () => {
+    if (!currentTemplate || currentTemplate.content === undefined) return;
+    const extracted = await extractPlaceholders({ type: 'text', content: currentTemplate.content });
+    const updatedTemplates = [...templates];
+    const existingPlaceholders = updatedTemplates[currentTemplateIndex].placeholders || [];
+    updatedTemplates[currentTemplateIndex].placeholders = mergePlaceholders(
+      existingPlaceholders,
+      extracted,
+      masterFields // Pass masterFields to mergePlaceholders
+    );
+    updatedTemplates[currentTemplateIndex].isDirty = false;
+    setTemplates(updatedTemplates);
+    const linkedCount = updatedTemplates[currentTemplateIndex].placeholders
+      .filter(p => p.master_field_ids?.length).length;
+    toast({
+      title: 'Placeholders Updated',
+      description: `Found ${extracted.length} placeholders. ${linkedCount} were automatically linked to master fields.`
+    });
   };
 
   const addNewTextTemplate = () => {
@@ -653,32 +770,38 @@ const extractPlaceholders = async (source: { type: 'file', content: File } | { t
     setTemplates(updatedTemplates);
   };
 
-  // Update placeholders when entity types change
+  // Set default entity types for new placeholders
   useEffect(() => {
-    if (currentTemplateIndex === null || !templates[currentTemplateIndex]?.entity_types?.length) return;
-    
+    if (currentTemplateIndex === null) return;
+
     const currentTemplate = templates[currentTemplateIndex];
-    const entityTypes = currentTemplate.entity_types;
-    
-    // Only update if we have placeholders and entity types
-    if (!currentTemplate.placeholders?.length || !entityTypes?.length) return;
-    
-    // Check if any placeholder has an entity_type not in the current template's entity_types
-    const needsUpdate = currentTemplate.placeholders.some(p => !entityTypes.includes(p.entity_type));
-    
-    if (needsUpdate) {
+    const entityTypes = currentTemplate.entity_types || [];
+
+    // Only set default entity type for new placeholders if we have entity types defined
+    if (entityTypes.length > 0) {
       const updatedTemplates = [...templates];
-      updatedTemplates[currentTemplateIndex] = {
-        ...currentTemplate,
-        placeholders: currentTemplate.placeholders.map(p => ({
-          ...p,
-          // Update entity_type if it's not in the allowed types, defaulting to the first allowed type
-          entity_type: entityTypes.includes(p.entity_type) 
-            ? p.entity_type 
-            : entityTypes[0]
-        }))
-      };
-      setTemplates(updatedTemplates);
+      const placeholders = [...(currentTemplate.placeholders || [])];
+      let needsUpdate = false;
+
+      // Only update placeholders that don't have an entity_type set
+      const updatedPlaceholders = placeholders.map(p => {
+        if (!p.entity_type) {
+          needsUpdate = true;
+          return {
+            ...p,
+            entity_type: entityTypes[0] // Set to first allowed entity type
+          };
+        }
+        return p;
+      });
+
+      if (needsUpdate) {
+        updatedTemplates[currentTemplateIndex] = {
+          ...currentTemplate,
+          placeholders: updatedPlaceholders
+        };
+        setTemplates(updatedTemplates);
+      }
     }
   }, [currentTemplateIndex, templates, templates[currentTemplateIndex]?.entity_types]);
 
@@ -691,17 +814,6 @@ const extractPlaceholders = async (source: { type: 'file', content: File } | { t
       : [...currentTypes, entityType];
     updatedTemplates[currentTemplateIndex].entity_types = newTypes;
     setTemplates(updatedTemplates);
-  };
-
-  const handleRescanPlaceholders = async () => {
-    if (!currentTemplate || currentTemplate.content === undefined) return;
-    const extracted = await extractPlaceholders({ type: 'text', content: currentTemplate.content });
-    const updatedTemplates = [...templates];
-    const existingPlaceholders = updatedTemplates[currentTemplateIndex].placeholders || [];
-    updatedTemplates[currentTemplateIndex].placeholders = mergePlaceholders(existingPlaceholders, extracted);
-    updatedTemplates[currentTemplateIndex].isDirty = false;
-    setTemplates(updatedTemplates);
-    toast({ title: 'Placeholders Updated', description: `Found ${extracted.length} placeholders.` });
   };
 
   const handleEditorBlur = () => { if (currentTemplate?.isDirty) handleRescanPlaceholders(); };
@@ -890,6 +1002,95 @@ const extractPlaceholders = async (source: { type: 'file', content: File } | { t
     }
   };
 
+  // Add this function for manual rescan with enhanced detection
+const handleManualRescan = async () => {
+  if (!currentTemplate) return;
+  
+  try {
+    setIsProcessing(true);
+    let content = currentTemplate.content || '';
+    
+    // If it's a file template, extract content from the file
+    if (currentTemplate.file_name && templateFiles.has(currentTemplate.id)) {
+      const file = templateFiles.get(currentTemplate.id);
+      if (file) {
+        const extracted = await extractPlaceholders({ type: 'file', content: file });
+        content = extracted.join(' '); // Use extracted placeholders as content for further processing
+      }
+    }
+
+    // Enhanced pattern matching for different placeholder formats
+    const patterns = [
+      /{{([^{}]+)}}/g,        // Handlebars-style: {{placeholder}}
+      /\[\[([^\]]+)\]\]/g,     // Double bracket: [[placeholder]]
+      /%([^%]+)%/g,            // Percent-encoded: %placeholder%
+      /{([^{}]+)}/g,           // Single curly: {placeholder}
+      /\(\(([^)]+)\)/g,        // Double parens: ((placeholder))
+      /<([^>]+)>/g,            // HTML-style: <placeholder>
+      /\[([^\]]+)\]/g,         // Single bracket: [placeholder]
+      /#([^#\s]+)#/g,          // Hash-delimited: #placeholder#
+      /\$([A-Za-z0-9_]+)/g,    // Variable-style: $placeholder
+      /@([A-Za-z0-9_]+)@/g     // Email-style: @placeholder@
+    ];
+
+    const foundPlaceholders = new Set<string>();
+    
+    // Try each pattern and collect unique placeholders
+    patterns.forEach(pattern => {
+      let match;
+      while ((match = pattern.exec(content)) !== null) {
+        if (match[1]) { // If we have a captured group
+          foundPlaceholders.add(match[1].trim());
+        }
+      }
+    });
+
+    // Convert to array and filter out empty strings
+    const extracted = Array.from(foundPlaceholders).filter(Boolean);
+    
+    if (extracted.length === 0) {
+      toast({
+        title: 'No Placeholders Found',
+        description: 'No placeholders were found using standard patterns. Try checking your template format.',
+        variant: 'default'
+      });
+      return;
+    }
+
+    // Update the placeholders in the template
+    const updatedTemplates = [...templates];
+    const existingPlaceholders = updatedTemplates[currentTemplateIndex].placeholders || [];
+    
+    updatedTemplates[currentTemplateIndex].placeholders = mergePlaceholders(
+      existingPlaceholders,
+      extracted,
+      masterFields
+    );
+    
+    updatedTemplates[currentTemplateIndex].isDirty = true;
+    setTemplates(updatedTemplates);
+    
+    const linkedCount = updatedTemplates[currentTemplateIndex].placeholders
+      .filter(p => p.master_field_ids?.length).length;
+      
+    toast({
+      title: 'Manual Rescan Complete',
+      description: `Found ${extracted.length} placeholders using enhanced detection. ${linkedCount} were automatically linked to master fields.`,
+      variant: 'default'
+    });
+    
+  } catch (error) {
+    console.error('Error during manual rescan:', error);
+    toast({
+      title: 'Rescan Error',
+      description: error instanceof Error ? error.message : 'Failed to rescan placeholders',
+      variant: 'destructive'
+    });
+  } finally {
+    setIsProcessing(false);
+  }
+};
+
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onClose}>
@@ -987,6 +1188,20 @@ const extractPlaceholders = async (source: { type: 'file', content: File } | { t
                             Download
                           </Button>
                         )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleManualRescan}
+                          disabled={isProcessing || currentTemplateIndex === null}
+                          className="ml-2"
+                        >
+                          {isProcessing ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="mr-2 h-4 w-4" />
+                          )}
+                          Manual Rescan
+                        </Button>
                       </div>
                     </div>
                     <div className="space-y-2 flex-1 flex flex-col">
