@@ -1,40 +1,36 @@
 // @ts-nocheck
 "use client"
 
-import { useState, useCallback, useMemo, useEffect, useRef } from "react"
+import { useState, useCallback, useMemo, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Check, ChevronsUpDown } from "lucide-react"
+import { Check, ChevronsUpDown, User, Users, Building2, Loader2, FileText, Briefcase, Shield, Info } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { User, Users, Building2, Loader2, FileText, Briefcase, UserCheck, Shield } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
-import { fetchDepartments } from "../../departments/departments/database"
 import { format } from "date-fns"
 
-// Interface for a company
 interface Company {
     id: number
     company_name: string
 }
 
-// Interface for an official (Director or Shareholder)
 interface Official {
     id: number
     full_name: string
     is_current: boolean
-    role: string // Distinguishes between Director and Shareholder
+    roles: string[] // Changed to array to handle multiple roles
+    primary_role: string
 }
 
-// Props for the new dialog component
 interface NewCompanyInquiryDialogProps {
     open: boolean
     onOpenChange: (open: boolean) => void
@@ -45,6 +41,7 @@ interface NewCompanyInquiryDialogProps {
     selectedClassId?: string
     users: any[]
     officers: any[]
+    initialData?: any 
 }
 
 export function NewCompanyInquiryDialog({
@@ -56,24 +53,24 @@ export function NewCompanyInquiryDialog({
     selectedSubdepartmentId = '',
     selectedClassId = '',
     users = [],
-    officers = []
+    officers = [],
+    initialData = null 
 }: NewCompanyInquiryDialogProps) {
-    // State for company and official selection
+    const isEditMode = !!initialData;
+
     const [companies, setCompanies] = useState<Company[]>([])
     const [selectedCompany, setSelectedCompany] = useState<Company | null>(null)
     const [officials, setOfficials] = useState<Official[]>([])
     const [selectedOfficialIds, setSelectedOfficialIds] = useState<Set<number>>(new Set())
+    const [primaryDirectorId, setPrimaryDirectorId] = useState<number | null>(null)
 
-    // Loading states
     const [loadingCompanies, setLoadingCompanies] = useState(false)
     const [loadingOfficials, setLoadingOfficials] = useState(false)
     const [loading, setLoading] = useState(false)
     const [loadingStaff, setLoadingStaff] = useState(false)
 
-    // State for UI components
     const [isCompanyPopoverOpen, setIsCompanyPopoverOpen] = useState(false)
 
-    // Reused state from the original component
     const [departments, setDepartments] = useState<any[]>(propDepartments || [])
     const [localUsers, setLocalUsers] = useState<any[]>(users || [])
     const [localOfficers, setLocalOfficers] = useState<any[]>(officers || [])
@@ -81,19 +78,50 @@ export function NewCompanyInquiryDialog({
     const [availableOfficers, setAvailableOfficers] = useState([])
     const [availableManagers, setAvailableManagers] = useState([])
     const [availableAssistants, setAvailableAssistants] = useState([])
+    
     const [formData, setFormData] = useState({
         job_description: '',
-        department_id: selectedDepartmentId || '',
-        subdepartment_id: selectedSubdepartmentId || '',
-        class_id: selectedClassId || '',
+        department_id: '',
+        subdepartment_id: '',
+        class_id: '',
         subclass_id: '',
         officer_id: '',
         task_manager_id: '',
         task_assistant_id: '',
         enquiry_date: new Date().toISOString().split('T')[0]
-    })
+    });
 
-    // Fetch all companies
+    // Populate form on Edit Mode
+    useEffect(() => {
+        if (open && initialData) {
+            setFormData({
+                job_description: initialData.job_description || '',
+                department_id: initialData.department_id?.toString() || '',
+                subdepartment_id: initialData.subdepartment_id?.toString() || '',
+                class_id: initialData.class_id?.toString() || '',
+                subclass_id: initialData.subclass_id?.toString() || '',
+                officer_id: initialData.officer_id?.toString() || '',
+                task_manager_id: initialData.task_manager_id?.toString() || '',
+                task_assistant_id: initialData.task_assistant_id?.toString() || '',
+                enquiry_date: initialData.date_initiated ? new Date(initialData.date_initiated).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
+            });
+            setTaskType(initialData.renewal_status || 'new');
+            setSelectedCompany({
+                id: initialData.company_id,
+                company_name: initialData.applicant_name
+            });
+            
+            if (initialData.directors_details) {
+                const ids = initialData.directors_details.map((d: any) => d.id);
+                setSelectedOfficialIds(new Set(ids));
+                const primary = initialData.directors_details.find((d: any) => d.is_primary);
+                if (primary) setPrimaryDirectorId(primary.id);
+            }
+        } else if (open && !initialData) {
+            resetForm();
+        }
+    }, [open, initialData]);
+
     const loadCompanies = useCallback(async () => {
         setLoadingCompanies(true);
         try {
@@ -101,22 +129,14 @@ export function NewCompanyInquiryDialog({
                 .from('acc_portal_company_duplicate')
                 .select('id, company_name')
                 .order('company_name');
-
-            if (error) throw error;
-            setCompanies(data || []);
-        } catch (error) {
-            console.error('Error fetching companies:', error);
-            toast({ title: "Error", description: "Failed to load companies.", variant: "destructive" });
+            if (!error) setCompanies(data || []);
         } finally {
             setLoadingCompanies(false);
         }
     }, []);
 
-    // Fetch officials (directors/shareholders) for a given company
     const fetchOfficials = useCallback(async (companyId: number) => {
         setLoadingOfficials(true);
-        setOfficials([]);
-        setSelectedOfficialIds(new Set());
         try {
             const { data, error } = await supabase
                 .from('registry_individuals')
@@ -125,164 +145,61 @@ export function NewCompanyInquiryDialog({
 
             if (error) throw error;
 
-            const associatedOfficials: Official[] = [];
+            const associatedMap = new Map<number, Official>();
+
             (data || []).forEach(individual => {
                 const associations = individual.employment_data?.associations || [];
-                
                 const relevantAssociations = associations.filter(assoc =>
                     assoc.company_id?.toString() === companyId.toString() && 
                     (assoc.individual_type === 'Director' || assoc.individual_type === 'Shareholder')
                 );
 
-                relevantAssociations.forEach(relevantAssociation => {
-                    associatedOfficials.push({
+                if (relevantAssociations.length > 0) {
+                    const roles = Array.from(new Set(relevantAssociations.map(a => a.individual_type)));
+                    const isAnyActive = relevantAssociations.some(a => a.is_current === true);
+                    
+                    associatedMap.set(individual.id, {
                         id: individual.id,
                         full_name: individual.full_name,
-                        is_current: relevantAssociation.is_current === true,
-                        role: relevantAssociation.individual_type
+                        is_current: isAnyActive,
+                        roles: roles,
+                        primary_role: roles.includes('Director') ? 'Director' : 'Shareholder'
                     });
-                })
+                }
             });
 
-            const uniqueOfficials = Array.from(new Map(associatedOfficials.map(item => [item.id, item])).values());
+            const uniqueOfficials = Array.from(associatedMap.values());
             setOfficials(uniqueOfficials);
-
-            const activeOfficialIds = uniqueOfficials
-                .filter(d => d.is_current)
-                .map(d => d.id);
-            setSelectedOfficialIds(new Set(activeOfficialIds));
+            
+            if (!isEditMode) {
+                const activeOfficialIds = uniqueOfficials
+                    .filter(d => d.is_current)
+                    .map(d => d.id);
+                setSelectedOfficialIds(new Set(activeOfficialIds));
+            }
 
         } catch (error) {
             console.error('Error fetching officials:', error);
-            toast({ title: "Error", description: "Failed to load officials for this company.", variant: "destructive" });
         } finally {
             setLoadingOfficials(false);
         }
-    }, []);
+    }, [isEditMode]);
 
-    // Sync departments state with propDepartments
     useEffect(() => {
-        if (propDepartments && propDepartments.length > 0) {
-            setDepartments(propDepartments);
+        if (open && companies.length === 0) loadCompanies();
+        if (open && !isEditMode && selectedDepartmentId) {
+            setFormData(prev => ({
+                ...prev,
+                department_id: String(selectedDepartmentId),
+                subdepartment_id: String(selectedSubdepartmentId || ''),
+                class_id: String(selectedClassId || '')
+            }));
         }
-    }, [propDepartments]);
+    }, [open, selectedDepartmentId, loadCompanies, isEditMode]);
 
-    // Effect to handle department, subdepartment, and class selection
     useEffect(() => {
-        if (open) {
-            if (selectedDepartmentId) {
-                const department = propDepartments.find(d => 
-                    String(d.id) === String(selectedDepartmentId) || d.id === Number(selectedDepartmentId)
-                );
-               
-                let subdepartment = null;
-                let selectedClass = null;
-                
-                if (department?.tm_subdepartments) {
-                    if (selectedSubdepartmentId) {
-                        subdepartment = department.tm_subdepartments.find((sd: any) => 
-                            String(sd.id) === String(selectedSubdepartmentId) || sd.id === Number(selectedSubdepartmentId)
-                        );
-                        
-                        if (subdepartment?.classes && selectedClassId) {
-                            const findClass = (classes: any[], targetId: string | number): any => {
-                                for (const cls of classes) {
-                                    if (String(cls.id) === String(targetId) || cls.id === Number(targetId)) {
-                                        return cls;
-                                    }
-                                    if (cls.subClasses?.length) {
-                                        const found = findClass(cls.subClasses, targetId);
-                                        if (found) return found;
-                                    }
-                                }
-                                return null;
-                            };
-                            
-                            selectedClass = findClass(subdepartment.classes, selectedClassId);
-                             
-                            if (selectedClass?.subClasses?.length > 0) {
-                                const firstSubclass = selectedClass.subClasses[0];
-                                setFormData(prev => ({
-                                    ...prev,
-                                    class_id: selectedClass.id.toString(),
-                                    subclass_id: firstSubclass.id.toString()
-                                }));
-                            } else if (selectedClass) {
-                                setFormData(prev => ({
-                                    ...prev,
-                                    class_id: selectedClass.id.toString(),
-                                    subclass_id: ''
-                                }));
-                            }
-                        }
-                    }
-                }
-                
-                setFormData(prev => ({
-                    ...prev,
-                    department_id: String(selectedDepartmentId),
-                    subdepartment_id: subdepartment ? String(subdepartment.id) : '',
-                    class_id: selectedClass ? String(selectedClass.id) : '',
-                    // Keep subclass if already set by logic above, else empty
-                    subclass_id: prev.class_id === (selectedClass ? String(selectedClass.id) : '') ? prev.subclass_id : ''
-                }));
-            }
-            
-            if (companies.length === 0) {
-               loadCompanies();
-            }   
-        }
-    }, [open, selectedDepartmentId, companies.length, loadCompanies]);
-
-    // Effect to fetch officials when a company is selected
-    useEffect(() => {
-        if (selectedCompany) {
-            fetchOfficials(selectedCompany.id);
-        } else {
-            setOfficials([]);
-            setSelectedOfficialIds(new Set());
-        }
+        if (selectedCompany) fetchOfficials(selectedCompany.id);
     }, [selectedCompany, fetchOfficials]);
-
-    // Handle form field changes
-    const handleChange = useCallback((field: keyof typeof formData, value: any) => {
-        setFormData(prev => {
-            const newState = { ...prev };
-            
-            if (field === 'department_id') {
-                newState.department_id = value;
-                newState.subdepartment_id = '';
-                newState.class_id = '';
-                newState.subclass_id = '';
-                newState.officer_id = '';
-                newState.task_manager_id = '';
-                newState.task_assistant_id = '';
-            } 
-            else if (field === 'subdepartment_id') {
-                newState.subdepartment_id = value;
-                newState.class_id = '';
-                newState.subclass_id = '';
-                newState.officer_id = '';
-                newState.task_manager_id = '';
-                newState.task_assistant_id = '';
-            } 
-            else if (field === 'class_id') {
-                newState.class_id = value;
-                newState.subclass_id = '';
-            } 
-            else if (field === 'subclass_id') {
-                newState.subclass_id = value;
-            }
-            else if (field === 'task_manager_id') {
-                newState.task_manager_id = value;
-                newState.task_assistant_id = '';
-            } 
-            else {
-                newState[field] = value;
-            }
-            return { ...newState };
-        });
-    }, [formData]);
 
     const loadStaffData = useCallback(async () => {
         setLoadingStaff(true);
@@ -291,107 +208,33 @@ export function NewCompanyInquiryDialog({
                 supabase.from('tm_users').select('*').order('name'),
                 supabase.from('tm_users').select('*').eq('role', 'officer').order('name')
             ]);
-            if (usersResult.error) throw usersResult.error;
-            if (officersResult.error) throw officersResult.error;
             setLocalUsers(usersResult.data || []);
             setLocalOfficers(officersResult.data || []);
-        } catch (error) {
-            toast({ title: "Error", description: "Failed to load staff data", variant: "destructive" });
         } finally {
             setLoadingStaff(false);
         }
     }, []);
 
     useEffect(() => {
-        if (!open) return;
-        if ((users.length > 0) && (officers.length > 0)) {
-            setLocalUsers(users);
-            setLocalOfficers(officers);
-        } else if (localUsers.length === 0 || localOfficers.length === 0) {
-            loadStaffData();
-        }
-    }, [open, users, officers, localUsers.length, localOfficers.length, loadStaffData]);
-
-
-    const findActiveStaffForSubdept = useCallback((subdept, allUsers, allOfficers) => {
-        if (!subdept || !allUsers || !allOfficers) return { officers: [], managers: [], assistants: [] };
-        const getActiveUserIds = (historyArray) => (historyArray || []).filter(item => item && !item.end_date).map(item => item.id).filter(Boolean);
-        const activeOfficerIds = getActiveUserIds(subdept.officer_history);
-        const activeManagerIds = getActiveUserIds(subdept.manager_history);
-        if (activeOfficerIds.length === 0 && activeManagerIds.length === 0) {
-            return {
-                officers: allOfficers,
-                managers: allUsers.filter(u => u.role === 'user' || u.role === 'admin'),
-                assistants: allUsers.filter(u => u.role === 'user')
-            };
-        }
-        return {
-            officers: allOfficers.filter(o => activeOfficerIds.includes(o.id)),
-            managers: allUsers.filter(u => activeManagerIds.includes(u.id)),
-            assistants: [] 
-        };
-    }, []);
-
-    useEffect(() => {
-        if (!open || !formData.subdepartment_id || localUsers.length === 0) return;
-        
-        const dept = departments.find(d => d.id.toString() === formData.department_id);
-        const subdept = dept?.tm_subdepartments?.find((s: any) => s.id.toString() === formData.subdepartment_id);
-        
-        if (subdept) {
-            const activeStaff = findActiveStaffForSubdept(subdept, localUsers, localOfficers);
-            setAvailableOfficers(activeStaff.officers);
-            setAvailableManagers(activeStaff.managers);
-            setAvailableAssistants([]);
-            setFormData(prev => ({ ...prev, officer_id: '', task_manager_id: '', task_assistant_id: '' }));
-        }
-    }, [open, formData.subdepartment_id, localUsers, localOfficers, departments, formData.department_id, findActiveStaffForSubdept]);
-
-    useEffect(() => {
-        if (!open || !formData.task_manager_id || localUsers.length === 0) {
-            setAvailableAssistants([]);
-            return;
-        }
-        
-        const dept = departments.find(d => d.id.toString() === formData.department_id);
-        const subdept = dept?.tm_subdepartments?.find((s: any) => s.id.toString() === formData.subdepartment_id);
-        
-        if (subdept) {
-            const assistantsForManager = subdept.assistant_history?.filter(a => !a.end_date && a.manager_id?.toString() === formData.task_manager_id).map(a => a.id) || [];
-            setAvailableAssistants(localUsers.filter(user => assistantsForManager.includes(user.id)));
-        }
-    }, [formData.task_manager_id, formData.subdepartment_id, departments, localUsers, formData.department_id]);
+        if (open && localUsers.length === 0) loadStaffData();
+    }, [open, localUsers.length, loadStaffData]);
 
     const availableSubdepartments = useMemo(() => {
-        if (!formData.department_id) return [];
-        const dept = departments.find(d => 
-            String(d.id) === String(formData.department_id) || d.id === Number(formData.department_id)
-        );
+        const dept = departments.find(d => String(d.id) === String(formData.department_id));
         return dept?.tm_subdepartments || [];
     }, [departments, formData.department_id]);
 
     const availableClasses = useMemo(() => {
-        if (!formData.subdepartment_id) return [];
-        const subdept = availableSubdepartments.find(s => 
-            String(s.id) === String(formData.subdepartment_id) || s.id === Number(formData.subdepartment_id)
-        );
+        const subdept = availableSubdepartments.find(s => String(s.id) === String(formData.subdepartment_id));
         return subdept?.classes?.filter(cls => !cls.parentId) || [];
     }, [availableSubdepartments, formData.subdepartment_id]);
     
     const availableSubclasses = useMemo(() => {
-        if (!formData.class_id) return [];
-        
-        const subdept = availableSubdepartments.find(s => 
-            String(s.id) === String(formData.subdepartment_id) || s.id === Number(formData.subdepartment_id)
-        );
-        
+        const subdept = availableSubdepartments.find(s => String(s.id) === String(formData.subdepartment_id));
         if (!subdept?.classes) return [];
-        
         const findClass = (classes: any[]): any[] => {
             for (const cls of classes) {
-                if (String(cls.id) === String(formData.class_id) || cls.id === Number(formData.class_id)) {
-                    return cls.subClasses || [];
-                }
+                if (String(cls.id) === String(formData.class_id)) return cls.subClasses || [];
                 if (cls.subClasses?.length) {
                     const found = findClass(cls.subClasses);
                     if (found) return found;
@@ -399,24 +242,19 @@ export function NewCompanyInquiryDialog({
             }
             return [];
         };
-        
         return findClass(subdept.classes);
     }, [availableSubdepartments, formData.subdepartment_id, formData.class_id]);
-    
-    // Auto-select the first subclass when they become available
-    useEffect(() => {
-        if (formData.class_id && availableSubclasses.length > 0 && !formData.subclass_id) {
-            handleChange('subclass_id', availableSubclasses[0].id.toString());
-        }
-    }, [availableSubclasses, formData.class_id, formData.subclass_id]);
 
     const handleOfficialSelection = (officialId: number) => {
         setSelectedOfficialIds(prev => {
             const newSet = new Set(prev);
+            const official = officials.find(o => o.id === officialId);
             if (newSet.has(officialId)) {
                 newSet.delete(officialId);
+                if (primaryDirectorId === officialId) setPrimaryDirectorId(null);
             } else {
                 newSet.add(officialId);
+                if (official?.roles.includes('Director') && !primaryDirectorId) setPrimaryDirectorId(officialId);
             }
             return newSet;
         });
@@ -424,95 +262,70 @@ export function NewCompanyInquiryDialog({
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        
-        if (!selectedCompany) {
-            toast({ title: "Validation Error", description: "Please select a company.", variant: "destructive" });
-            return;
-        }
-        if (selectedOfficialIds.size === 0) {
-            toast({ title: "Validation Error", description: "Please select at least one official.", variant: "destructive" });
+        if (!selectedCompany || selectedOfficialIds.size === 0) {
+            toast({ title: "Validation Error", description: "Missing company or officials.", variant: "destructive" });
             return;
         }
 
         setLoading(true);
-
         try {
-            const now = new Date();
-            const enquiryStageId = '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa'; 
-            const initialStages = {
-                [enquiryStageId]: {
-                    date: format(now, 'dd/MM/yyyy'),
-                    status: 'completed',
-                    completedAt: now.toISOString(),
-                },
-            };
-
             const directorsDetails = Array.from(selectedOfficialIds).map(officialId => {
                 const official = officials.find(o => o.id === officialId);
                 return {
                     id: official?.id,
                     full_name: official?.full_name,
-                    role: official?.role
+                    role: official?.primary_role,
+                    roles: official?.roles,
+                    is_primary: officialId === primaryDirectorId
                 };
             });
 
-            // 1. Calculate Job Level
-            const jobLevel = {
-                level: formData.subclass_id ? 4 :
-                       formData.class_id ? 3 :
-                       formData.subdepartment_id ? 2 :
-                       formData.department_id ? 1 : null,
-                department_id: formData.department_id ? parseInt(formData.department_id) : null,
-                subdepartment_id: formData.subdepartment_id ? parseInt(formData.subdepartment_id) : null,
-                class_id: formData.class_id ? parseInt(formData.class_id) : null,
-                subclass_id: formData.subclass_id ? parseInt(formData.subclass_id) : null
-            };
-
-            // 2. Prepare Staff Data
-            const officer = localOfficers.find(o => o.id.toString() === formData.officer_id);
-            const manager = localUsers.find(m => m.id.toString() === formData.task_manager_id);
-            const assistant = localUsers.find(a => a.id.toString() === formData.task_assistant_id);
-            // 3. Construct Task Object
-            const taskToCreate = {
-                job_description: formData.job_description || '',
-                status: 'enquiry',
+            const taskPayload = {
+                job_description: formData.job_description,
                 renewal_status: taskType,
-                // Parse IDs as integers
-                department_id: formData.department_id ? parseInt(formData.department_id) : null,
-                subdepartment_id: formData.subdepartment_id ? parseInt(formData.subdepartment_id) : null,
-                class_id: formData.class_id ? parseInt(formData.class_id) : null,
-                subclass_id: formData.subclass_id ? parseInt(formData.subclass_id) : null,
-                
+                            department_id: parseInt(formData.department_id) || null,
+                subdepartment_id: parseInt(formData.subdepartment_id) || null,
+                class_id: parseInt(formData.class_id) || null,
+                subclass_id: parseInt(formData.subclass_id) || null,
                 applicant_type: 'company',
                 date_initiated: new Date(formData.enquiry_date),
                 applicant_name: selectedCompany.company_name,
                 company_id: selectedCompany.id,
-                
-                // IDs
                 officer_id: formData.officer_id && formData.officer_id !== 'none' ? parseInt(formData.officer_id) : null,
                 task_manager_id: formData.task_manager_id && formData.task_manager_id !== 'none' ? parseInt(formData.task_manager_id) : null,
                 task_assistant_id: formData.task_assistant_id && formData.task_assistant_id !== 'none' ? parseInt(formData.task_assistant_id) : null,
-                
-                // JSON Fields
-                stages: initialStages,
                 directors_details: directorsDetails,
-                job_level: jobLevel,
-              
-         
+                job_level: {
+                    level: formData.subclass_id ? 4 : formData.class_id ? 3 : formData.subdepartment_id ? 2 : 1,
+                    department_id: parseInt(formData.department_id) || null,
+                    subdepartment_id: parseInt(formData.subdepartment_id) || null,
+                    class_id: parseInt(formData.class_id) || null,
+                    subclass_id: parseInt(formData.subclass_id) || null
+                }
             };
 
-            const { data, error } = await supabase.from('tm_tasks').insert([taskToCreate]).select();
+            let result;
+            if (isEditMode) {
+                result = await supabase.from('tm_tasks').update(taskPayload).eq('id', initialData.id).select();
+            } else {
+                const enquiryStageId = '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa';
+                taskPayload.status = 'enquiry';
+                taskPayload.stages = {
+                    [enquiryStageId]: {
+                        date: format(new Date(), 'dd/MM/yyyy'),
+                        status: 'completed',
+                        completedAt: new Date().toISOString(),
+                    },
+                };
+                result = await supabase.from('tm_tasks').insert([taskPayload]).select();
+            }
 
-            if (error) throw error;
-
-            toast({ title: 'Success', description: `Enquiry for ${selectedCompany.company_name} created successfully.` });
-            onEnquiryCreated(data);
-            resetForm();
+            if (result.error) throw result.error;
+            toast({ title: 'Success', description: `Enquiry ${isEditMode ? 'updated' : 'created'}` });
+            onEnquiryCreated(result.data);
             onOpenChange(false);
-
         } catch (error) {
-            console.error('Error creating enquiry:', error);
-            toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to create enquiry', variant: 'destructive' });
+            toast({ title: 'Error', description: error.message, variant: 'destructive' });
         } finally {
             setLoading(false);
         }
@@ -522,12 +335,13 @@ export function NewCompanyInquiryDialog({
         setSelectedCompany(null);
         setOfficials([]);
         setSelectedOfficialIds(new Set());
+        setPrimaryDirectorId(null);
         setTaskType('new');
         setFormData({
             job_description: '',
-            department_id: '',
-            subdepartment_id: '',
-            class_id: '',
+            department_id: selectedDepartmentId || '',
+            subdepartment_id: selectedSubdepartmentId || '',
+            class_id: selectedClassId || '',
             subclass_id: '',
             officer_id: '',
             task_manager_id: '',
@@ -540,46 +354,41 @@ export function NewCompanyInquiryDialog({
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
-                    <DialogTitle>New Company Enquiry</DialogTitle>
+                    <DialogTitle>{isEditMode ? 'Edit Company Enquiry' : 'New Company Enquiry'}</DialogTitle>
                     <DialogDescription>
-                        Create a single task for a company, including selected directors or shareholders.
+                        {isEditMode ? 'Modify existing task details.' : 'Register a new enquiry for a company and its officials.'}
                     </DialogDescription>
                 </DialogHeader>
 
                 <form onSubmit={handleSubmit} className="space-y-6">
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        {/* Left Column - Company & Official Selection */}
+                        {/* LEFT COLUMN: Entity selection */}
                         <div className="lg:col-span-1 space-y-6">
-                            <Card>
-                                <CardHeader>
-                                    <CardTitle className="flex items-center gap-2"><Building2 className="h-4 w-4" /> Select Company</CardTitle>
+                            <Card className="border-blue-100 shadow-sm">
+                                <CardHeader className="pb-3">
+                                    <CardTitle className="text-sm font-bold flex items-center gap-2">
+                                        <Building2 className="h-4 w-4 text-blue-600" /> Company
+                                    </CardTitle>
                                 </CardHeader>
                                 <CardContent>
                                     <Popover open={isCompanyPopoverOpen} onOpenChange={setIsCompanyPopoverOpen}>
                                         <PopoverTrigger asChild>
-                                            <Button variant="outline" role="combobox" className={cn("w-full justify-between", !selectedCompany && "text-muted-foreground")}>
-                                                {selectedCompany ? selectedCompany.company_name : "Select company..."}
+                                            <Button variant="outline" role="combobox" className={cn("w-full justify-between text-left font-normal", !selectedCompany && "text-muted-foreground")}>
+                                                <span className="truncate">{selectedCompany ? selectedCompany.company_name : "Search company..."}</span>
                                                 <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                                             </Button>
                                         </PopoverTrigger>
                                         <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
                                             <Command>
-                                                <CommandInput placeholder="Search company..." />
-                                                <CommandEmpty>No company found.</CommandEmpty>
+                                                <CommandInput placeholder="Type company name..." />
+                                                <CommandEmpty>No results.</CommandEmpty>
                                                 <CommandGroup className="max-h-60 overflow-auto">
                                                     {loadingCompanies ? (
-                                                        <div className="flex justify-center p-2"><Loader2 className="h-5 w-5 animate-spin" /></div>
-                                                    ) : companies.map((company) => (
-                                                        <CommandItem
-                                                            value={company.company_name}
-                                                            key={company.id}
-                                                            onSelect={() => {
-                                                                setSelectedCompany(company);
-                                                                setIsCompanyPopoverOpen(false);
-                                                            }}
-                                                        >
-                                                            {company.company_name}
-                                                            <Check className={cn("ml-auto h-4 w-4", selectedCompany?.id === company.id ? "opacity-100" : "opacity-0")} />
+                                                        <div className="flex justify-center p-2"><Loader2 className="h-4 w-4 animate-spin" /></div>
+                                                    ) : companies.map((c) => (
+                                                        <CommandItem key={c.id} onSelect={() => { setSelectedCompany(c); setIsCompanyPopoverOpen(false); }}>
+                                                            {c.company_name}
+                                                            <Check className={cn("ml-auto h-4 w-4", selectedCompany?.id === c.id ? "opacity-100" : "opacity-0")} />
                                                         </CommandItem>
                                                     ))}
                                                 </CommandGroup>
@@ -590,182 +399,210 @@ export function NewCompanyInquiryDialog({
                             </Card>
 
                             {selectedCompany && (
-                                <Card>
-                                    <CardHeader>
-                                        <CardTitle className="flex items-center gap-2"><Users className="h-4 w-4" /> Select Officials</CardTitle>
-                                        <CardDescription>Select the directors and shareholders to include in the enquiry.</CardDescription>
+                                <Card className="border-blue-100 shadow-sm">
+                                    <CardHeader className="pb-3">
+                                        <CardTitle className="text-sm font-bold flex items-center gap-2">
+                                            <Users className="h-4 w-4 text-blue-600" /> Officials
+                                        </CardTitle>
+                                        <CardDescription className="text-[11px]">Select directors or shareholders to include.</CardDescription>
                                     </CardHeader>
                                     <CardContent>
                                         {loadingOfficials ? (
-                                            <div className="flex items-center justify-center p-4">
-                                                <Loader2 className="h-5 w-5 animate-spin text-gray-500" />
+                                            <div className="flex flex-col items-center py-6 text-muted-foreground gap-2">
+                                                <Loader2 className="h-5 w-5 animate-spin" />
+                                                <span className="text-xs">Loading officials...</span>
                                             </div>
                                         ) : officials.length > 0 ? (
-                                            <div className="mt-2 space-y-2 max-h-80 overflow-y-auto border rounded-md p-2">
+                                            <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
                                                 {officials.map((official) => (
-                                                    <div key={official.id} className="flex items-center space-x-2 p-1 hover:bg-gray-50 rounded">
-                                                        <input
-                                                            type="checkbox"
-                                                            id={`official-${official.id}`}
-                                                            checked={selectedOfficialIds.has(official.id)}
-                                                            onChange={() => handleOfficialSelection(official.id)}
-                                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                                        />
-                                                        <label htmlFor={`official-${official.id}`} className="text-sm flex-1 flex justify-between items-center cursor-pointer">
-                                                            <span>{official.full_name}</span>
-                                                            <div className="flex items-center gap-2">
-                                                                <Badge variant="secondary" className="text-xs">{official.role}</Badge>
-                                                                {official.is_current && <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">Active</Badge>}
+                                                    <div 
+                                                        key={official.id} 
+                                                        className={cn(
+                                                            "p-3 rounded-lg border transition-all",
+                                                            selectedOfficialIds.has(official.id) ? "bg-blue-50/50 border-blue-200" : "bg-card border-slate-100"
+                                                        )}
+                                                    >
+                                                        <div className="flex items-start gap-3">
+                                                            <div className="pt-0.5">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={selectedOfficialIds.has(official.id)}
+                                                                    onChange={() => handleOfficialSelection(official.id)}
+                                                                    className="h-4 w-4 rounded border-slate-300 text-blue-600 cursor-pointer"
+                                                                />
                                                             </div>
-                                                        </label>
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                                                                    <span className="text-xs font-semibold truncate leading-none">{official.full_name}</span>
+                                                                    {official.is_current ? (
+                                                                        <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] px-1.5 py-0 h-4">Active</Badge>
+                                                                    ) : (
+                                                                        <Badge className="bg-slate-50 text-slate-500 border-slate-200 text-[10px] px-1.5 py-0 h-4">Inactive</Badge>
+                                                                    )}
+                                                                </div>
+                                                                
+                                                                <div className="flex flex-wrap gap-1 mb-2">
+                                                                    {official.roles.map(role => (
+                                                                        <Badge key={role} variant="outline" className={cn(
+                                                                            "text-[9px] px-1.5 py-0 h-4 uppercase font-bold",
+                                                                            role === 'Director' ? "text-indigo-600 border-indigo-200" : "text-amber-600 border-amber-200"
+                                                                        )}>
+                                                                            {role}
+                                                                        </Badge>
+                                                                    ))}
+                                                                </div>
+
+                                                                {official.roles.includes('Director') && selectedOfficialIds.has(official.id) && (
+                                                                    <div className="mt-2 pt-2 border-t border-blue-100 flex items-center gap-2">
+                                                                        <input
+                                                                            type="radio"
+                                                                            id={`primary-${official.id}`}
+                                                                            name="primary-director"
+                                                                            checked={primaryDirectorId === official.id}
+                                                                            onChange={() => setPrimaryDirectorId(official.id)}
+                                                                            className="h-3 w-3 text-blue-600"
+                                                                        />
+                                                                        <label htmlFor={`primary-${official.id}`} className="text-[10px] text-slate-500 cursor-pointer font-medium italic">
+                                                                            Set as Primary Director
+                                                                        </label>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 ))}
                                             </div>
                                         ) : (
-                                            <p className="text-sm text-center text-gray-500 py-4">No directors or shareholders found.</p>
+                                            <div className="text-center py-8 text-slate-400 bg-slate-50 rounded-lg border border-dashed">
+                                                <Info className="h-8 w-8 mx-auto mb-2 opacity-20" />
+                                                <p className="text-xs">No officials linked to this company.</p>
+                                            </div>
                                         )}
                                     </CardContent>
                                 </Card>
                             )}
                         </div>
 
-                        {/* Right Column - Enquiry & Assignment Details (unchanged) */}
+                        {/* RIGHT COLUMN: Details & Assignment */}
                         <div className="lg:col-span-2 space-y-6">
-                            <Card>
-                                <CardHeader>
-                                    <CardTitle className="flex items-center gap-2"><FileText className="h-4 w-4" /> Enquiry Details</CardTitle>
+                            <Card className="shadow-sm">
+                                <CardHeader className="pb-3 border-b mb-4">
+                                    <CardTitle className="text-sm font-bold flex items-center gap-2">
+                                        <FileText className="h-4 w-4 text-slate-600" /> Basic Information
+                                    </CardTitle>
                                 </CardHeader>
                                 <CardContent className="space-y-4">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div>
-                                            <Label htmlFor="task-type">Task Type <span className="text-red-500">*</span></Label>
-                                            <Select value={taskType} onValueChange={(v: 'new' | 'renewal') => setTaskType(v)}>
-                                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-1.5">
+                                            <Label className="text-xs">Task Context</Label>
+                                            <Select value={taskType} onValueChange={(v: any) => setTaskType(v)}>
+                                                <SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="new">New</SelectItem>
-                                                    <SelectItem value="renewal">Renewal</SelectItem>
+                                                    <SelectItem value="new" className="text-xs">New Service</SelectItem>
+                                                    <SelectItem value="renewal" className="text-xs">Renewal/Compliance</SelectItem>
                                                 </SelectContent>
                                             </Select>
                                         </div>
-                                        <div>
-                                            <Label htmlFor="enquiry-date">Enquiry Date <span className="text-red-500">*</span></Label>
-                                            <Input id="enquiry-date" type="date" value={formData.enquiry_date} onChange={(e) => setFormData(p => ({ ...p, enquiry_date: e.target.value }))} required />
+                                        <div className="space-y-1.5">
+                                            <Label className="text-xs">Date of Enquiry</Label>
+                                            <Input type="date" className="h-9 text-xs" value={formData.enquiry_date} onChange={(e) => setFormData(p => ({ ...p, enquiry_date: e.target.value }))} required />
                                         </div>
                                     </div>
-                                    <div>
-                                        <Label htmlFor="job-description">Job Description <span className="text-red-500">*</span></Label>
-                                        <Textarea id="job-description" value={formData.job_description} onChange={(e) => setFormData(p => ({ ...p, job_description: e.target.value }))} placeholder="Describe the enquiry..." required />
+                                    <div className="space-y-1.5">
+                                        <Label className="text-xs">Job Description</Label>
+                                        <Textarea 
+                                            value={formData.job_description} 
+                                            onChange={(e) => setFormData(p => ({ ...p, job_description: e.target.value }))} 
+                                            placeholder="Specify the services requested or the scope of the work..." 
+                                            className="min-h-[80px] text-xs resize-none"
+                                            required 
+                                        />
                                     </div>
                                 </CardContent>
                             </Card>
 
-                            <Card>
-                                <CardHeader>
-                                    <CardTitle className="flex items-center gap-2"><Briefcase className="h-4 w-4" /> Department & Classification</CardTitle>
+                            <Card className="shadow-sm">
+                                <CardHeader className="pb-3 border-b mb-4">
+                                    <CardTitle className="text-sm font-bold flex items-center gap-2">
+                                        <Briefcase className="h-4 w-4 text-slate-600" /> Classification
+                                    </CardTitle>
                                 </CardHeader>
                                 <CardContent className="space-y-4">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div>
-                                            <Label>Department <span className="text-red-500">*</span></Label>
-                                            <Select value={formData.department_id} onValueChange={(v) => handleChange('department_id', v)} disabled={departments.length === 0}>
-                                                <SelectTrigger><SelectValue placeholder="Select department..." /></SelectTrigger>
-                                                <SelectContent>{departments.map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>)}</SelectContent>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-1.5">
+                                            <Label className="text-xs">Department</Label>
+                                            <Select value={formData.department_id} onValueChange={(v) => {
+                                                setFormData(prev => ({ ...prev, department_id: v, subdepartment_id: '', class_id: '', subclass_id: '' }));
+                                            }}>
+                                                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select Dept" /></SelectTrigger>
+                                                <SelectContent>{departments.map(d => <SelectItem key={d.id} value={d.id.toString()} className="text-xs">{d.name}</SelectItem>)}</SelectContent>
                                             </Select>
                                         </div>
-                                        <div>
-                                            <Label>Subdepartment</Label>
-                                            <Select value={formData.subdepartment_id} onValueChange={(v) => handleChange('subdepartment_id', v)} disabled={!formData.department_id}>
-                                                <SelectTrigger><SelectValue placeholder="Select subdepartment..." /></SelectTrigger>
-                                                <SelectContent>{availableSubdepartments.map(sd => <SelectItem key={sd.id} value={sd.id.toString()}>{sd.name}</SelectItem>)}</SelectContent>
+                                        <div className="space-y-1.5">
+                                            <Label className="text-xs">Subdepartment</Label>
+                                            <Select value={formData.subdepartment_id} onValueChange={(v) => {
+                                                setFormData(prev => ({ ...prev, subdepartment_id: v, class_id: '', subclass_id: '' }));
+                                            }}>
+                                                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select Subdept" /></SelectTrigger>
+                                                <SelectContent>{availableSubdepartments.map(sd => <SelectItem key={sd.id} value={sd.id.toString()} className="text-xs">{sd.name}</SelectItem>)}</SelectContent>
                                             </Select>
                                         </div>
                                     </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div>
-                                            <Label>Class</Label>
-                                            <Select 
-                                                value={formData.class_id} 
-                                                onValueChange={(v) => {
-                                                    handleChange('class_id', v);
-                                                    const selectedClass = availableClasses.find(c => c.id.toString() === v);
-                                                    if (selectedClass?.subClasses?.length > 0) {
-                                                        handleChange('subclass_id', selectedClass.subClasses[0].id.toString());
-                                                    } else {
-                                                        handleChange('subclass_id', '');
-                                                    }
-                                                }} 
-                                                disabled={!formData.subdepartment_id}
-                                            >
-                                                <SelectTrigger><SelectValue placeholder="Select class..." /></SelectTrigger>
-                                                <SelectContent>
-                                                    {availableClasses.map(c => (
-                                                        <SelectItem key={c.id} value={c.id.toString()}>
-                                                            {c.name}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-1.5">
+                                            <Label className="text-xs">Service Class</Label>
+                                            <Select value={formData.class_id} onValueChange={(v) => {
+                                                setFormData(prev => ({ ...prev, class_id: v, subclass_id: '' }));
+                                            }}>
+                                                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select Class" /></SelectTrigger>
+                                                <SelectContent>{availableClasses.map(c => <SelectItem key={c.id} value={c.id.toString()} className="text-xs">{c.name}</SelectItem>)}</SelectContent>
                                             </Select>
                                         </div>
-                                        <div>
-                                            <Label>Subclass</Label>
-                                            <Select 
-                                                value={formData.subclass_id} 
-                                                onValueChange={(v) => handleChange('subclass_id', v)} 
-                                                disabled={!formData.class_id || availableSubclasses.length === 0}
-                                            >
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder={
-                                                        availableSubclasses.length > 0 
-                                                            ? "Select subclass..." 
-                                                            : "No subclasses available"
-                                                    } />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {availableSubclasses.map(sc => (
-                                                        <SelectItem key={sc.id} value={sc.id.toString()}>
-                                                            {sc.name}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
+                                        <div className="space-y-1.5">
+                                            <Label className="text-xs">Subclass</Label>
+                                            <Select value={formData.subclass_id} onValueChange={(v) => setFormData(p => ({ ...p, subclass_id: v }))}>
+                                                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select Subclass" /></SelectTrigger>
+                                                <SelectContent>{availableSubclasses.map(sc => <SelectItem key={sc.id} value={sc.id.toString()} className="text-xs">{sc.name}</SelectItem>)}</SelectContent>
                                             </Select>
                                         </div>
                                     </div>
                                 </CardContent>
                             </Card>
 
-                            <Card>
-                                <CardHeader>
-                                    <CardTitle className="flex items-center gap-2"><Shield className="h-4 w-4" /> Staff Assignment</CardTitle>
-                                    <CardDescription>Assign staff based on the selected subdepartment.</CardDescription>
+                            <Card className="shadow-sm border-indigo-100">
+                                <CardHeader className="pb-3 border-b border-indigo-50 mb-4">
+                                    <CardTitle className="text-sm font-bold flex items-center gap-2">
+                                        <Shield className="h-4 w-4 text-indigo-600" /> Assignment
+                                    </CardTitle>
                                 </CardHeader>
-                                <CardContent className="space-y-4">
-                                    <div>
-                                        <Label>Officer</Label>
-                                        <Select value={formData.officer_id} onValueChange={(v) => handleChange('officer_id', v)} disabled={!formData.subdepartment_id || loadingStaff}>
-                                            <SelectTrigger><SelectValue placeholder="Select officer..." /></SelectTrigger>
+                                <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div className="space-y-1.5">
+                                        <Label className="text-xs text-indigo-900">Officer</Label>
+                                        <Select value={formData.officer_id} onValueChange={(v) => setFormData(p => ({ ...p, officer_id: v }))}>
+                                            <SelectTrigger className="h-9 text-xs border-indigo-100"><SelectValue placeholder="Assign Officer" /></SelectTrigger>
                                             <SelectContent>
                                                 <SelectItem value="none">No Officer</SelectItem>
-                                                {availableOfficers.map(o => <SelectItem key={o.id} value={o.id.toString()}>{o.name}</SelectItem>)}
+                                                {localOfficers.map(o => <SelectItem key={o.id} value={o.id.toString()} className="text-xs">{o.name}</SelectItem>)}
                                             </SelectContent>
                                         </Select>
                                     </div>
-                                    <div>
-                                        <Label>Task Manager</Label>
-                                        <Select value={formData.task_manager_id} onValueChange={(v) => handleChange('task_manager_id', v)} disabled={!formData.subdepartment_id || loadingStaff}>
-                                            <SelectTrigger><SelectValue placeholder="Select manager..." /></SelectTrigger>
+                                    <div className="space-y-1.5">
+                                        <Label className="text-xs text-indigo-900">Task Manager</Label>
+                                        <Select value={formData.task_manager_id} onValueChange={(v) => setFormData(p => ({ ...p, task_manager_id: v }))}>
+                                            <SelectTrigger className="h-9 text-xs border-indigo-100"><SelectValue placeholder="Assign Manager" /></SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="none">No Task Manager</SelectItem>
-                                                {availableManagers.map(m => <SelectItem key={m.id} value={m.id.toString()}>{m.name}</SelectItem>)}
+                                                <SelectItem value="none">No Manager</SelectItem>
+                                                {localUsers.map(m => <SelectItem key={m.id} value={m.id.toString()} className="text-xs">{m.name}</SelectItem>)}
                                             </SelectContent>
                                         </Select>
                                     </div>
-                                    <div>
-                                        <Label>Task Assistant</Label>
-                                        <Select value={formData.task_assistant_id} onValueChange={(v) => handleChange('task_assistant_id', v)} disabled={!formData.task_manager_id || loadingStaff}>
-                                            <SelectTrigger><SelectValue placeholder="Select assistant..." /></SelectTrigger>
+                                    <div className="space-y-1.5">
+                                        <Label className="text-xs text-indigo-900">Assistant</Label>
+                                        <Select value={formData.task_assistant_id} onValueChange={(v) => setFormData(p => ({ ...p, task_assistant_id: v }))}>
+                                            <SelectTrigger className="h-9 text-xs border-indigo-100"><SelectValue placeholder="Assign Assistant" /></SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="none">No Task Assistant</SelectItem>
-                                                {availableAssistants.map(a => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>)}
+                                                <SelectItem value="none">No Assistant</SelectItem>
+                                                {localUsers.map(a => <SelectItem key={a.id} value={a.id.toString()} className="text-xs">{a.name}</SelectItem>)}
                                             </SelectContent>
                                         </Select>
                                     </div>
@@ -774,10 +611,15 @@ export function NewCompanyInquiryDialog({
                         </div>
                     </div>
 
-                    <DialogFooter>
-                        <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>Cancel</Button>
-                        <Button type="submit" disabled={loading || !selectedCompany || selectedOfficialIds.size === 0}>
-                            {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creating...</> : `Create Enquiry`}
+                    <DialogFooter className="border-t pt-4">
+                        <Button type="button" variant="ghost" className="text-xs" onClick={() => onOpenChange(false)}>Cancel</Button>
+                        <Button 
+                            type="submit" 
+                            className="bg-blue-600 hover:bg-blue-700 text-xs px-8" 
+                            disabled={loading || !selectedCompany || selectedOfficialIds.size === 0}
+                        >
+                            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                            {isEditMode ? 'Save Changes' : 'Create Inquiry Task'}
                         </Button>
                     </DialogFooter>
                 </form>

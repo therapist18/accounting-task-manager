@@ -34,6 +34,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { OtherDialog } from "./components/OtherDialog"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import EditableStageCell from "./components/EditableStageCell"
+import { NewCompanyInquiryDialog } from "./components/NewCompanyInquiryDialog"
 
 export default function DepartmentTasksManager({
   error,
@@ -114,6 +115,7 @@ export default function DepartmentTasksManager({
   const [tableRows, setTableRows] = useState([]);
   const [taskDependants, setTaskDependants] = useState<Map<string, any[]>>(new Map());
   const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(new Map());
+  const [companyInquiryDialogOpen, setCompanyInquiryDialogOpen] = useState(false);
 
   useEffect(() => {
     const loadDepartments = async () => {
@@ -1628,10 +1630,27 @@ export default function DepartmentTasksManager({
     }
   }, [getDocumentForTaskStage, kycDocuments]);
 
-  const handleTaskEdit = (task: any) => {
+  const handleTaskEdit = (task: UtilTask) => {
+    // Get the department for this task
+    const department = departments.find(d =>
+      d.id === task.department_id ||
+      d.id.toString() === task.department_id?.toString()
+    );
+
+    // Get the department specification
+    const specification = department?.specification || 'individual';
+    console.log(`[DepartmentTasksManager] Department Specification: ${specification} (Task ID: ${task.id})`);
+
+    // Store the task for editing
     setEditingTask(task);
-    setEditDialogOpen(true)
-  }
+
+    // Show the appropriate dialog based on specification
+    if (specification === 'company') {
+      setCompanyInquiryDialogOpen(true);
+    } else {
+      setEditDialogOpen(true);
+    }
+  };
 
   const handleTaskUpdate = (updatedTask: any) => {
     onTaskUpdate?.(updatedTask);
@@ -2866,7 +2885,20 @@ export default function DepartmentTasksManager({
         allDocuments={allDocuments}
         onTaskUpdate={handleTaskUpdate}
       />
-
+{companyInquiryDialogOpen && editingTask && (
+  <NewCompanyInquiryDialog
+    open={companyInquiryDialogOpen}
+    onOpenChange={setCompanyInquiryDialogOpen}
+    initialData={editingTask}  // Pass the task data as initialData
+    departments={departments}
+    users={Array.from(tmUsers.values())}
+    officers={subdepartmentOfficers}
+    onEnquiryCreated={(updatedTask) => {
+      handleTaskUpdate(updatedTask);
+      setCompanyInquiryDialogOpen(false);
+    }}
+  />
+)}
       <StageUploadDialog
         key={stageDialogKey} // <--- THIS IS THE CRITICAL FIX
         open={isStageUploadDialogOpen}
