@@ -642,6 +642,35 @@ const extractPlaceholders = async (source: { type: 'file', content: File } | { t
     setTemplates(updatedTemplates);
   };
 
+  // Update placeholders when entity types change
+  useEffect(() => {
+    if (currentTemplateIndex === null || !templates[currentTemplateIndex]?.entity_types?.length) return;
+    
+    const currentTemplate = templates[currentTemplateIndex];
+    const entityTypes = currentTemplate.entity_types;
+    
+    // Only update if we have placeholders and entity types
+    if (!currentTemplate.placeholders?.length || !entityTypes?.length) return;
+    
+    // Check if any placeholder has an entity_type not in the current template's entity_types
+    const needsUpdate = currentTemplate.placeholders.some(p => !entityTypes.includes(p.entity_type));
+    
+    if (needsUpdate) {
+      const updatedTemplates = [...templates];
+      updatedTemplates[currentTemplateIndex] = {
+        ...currentTemplate,
+        placeholders: currentTemplate.placeholders.map(p => ({
+          ...p,
+          // Update entity_type if it's not in the allowed types, defaulting to the first allowed type
+          entity_type: entityTypes.includes(p.entity_type) 
+            ? p.entity_type 
+            : entityTypes[0]
+        }))
+      };
+      setTemplates(updatedTemplates);
+    }
+  }, [currentTemplateIndex, templates, templates[currentTemplateIndex]?.entity_types]);
+
   const handleEntityTypeToggle = (entityType: EntityType) => {
     if (currentTemplateIndex === null) return;
     const updatedTemplates = [...templates];
