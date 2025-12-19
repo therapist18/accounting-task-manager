@@ -17,7 +17,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
     AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp,
-    Image as ImageIcon, Loader2, Wand2, ZoomIn, ZoomOut, Expand, Minimize,
+    Image as ImageIcon, Loader2, Wand2, Expand,
     Eye, Edit3, CheckCircle2, AlertCircle, X
 } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -25,6 +25,11 @@ import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { saveAs } from 'file-saver';
+
+// --- ADDED: Core libraries for robust Word generation ---
+import Docxtemplater from "docxtemplater";
+import PizZip from "pizzip";
+import ImageModule from 'docxtemplater-image-module-free';
 
 // --- HELPER FUNCTIONS ---
 const formatDate = (date, formatStr) => {
@@ -36,6 +41,28 @@ const formatDate = (date, formatStr) => {
     const year = d.getFullYear();
     return (formatStr || 'YYYY-MM-DD').replace('YYYY', year).replace('MM', month).replace('DD', day);
 };
+
+// Robust base64 to ArrayBuffer converter
+const base64Parser = (dataURL) => {
+    if (typeof dataURL !== 'string') return null;
+    const regex = /^data:image\/(png|jpeg|jpg);base64,/;
+    if (!regex.test(dataURL)) return false;
+    const base64 = dataURL.replace(regex, "");
+    const binaryStr = atob(base64);
+    const len = binaryStr.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+    }
+    return bytes.buffer;
+};
+
+const toBase64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = error => reject(error);
+});
 
 const parseJsonValue = (data, path) => {
     if (!path || !data) return '';
@@ -93,60 +120,38 @@ const ImagePlaceholderControls = ({ styles, onStyleChange }) => {
                 <Select value={currentSizeKey} onValueChange={(size) => onStyleChange('maxWidth', sizeMap[size])}>
                     <SelectTrigger className="w-14 h-9"><SelectValue><Expand className="h-4 w-4" /></SelectValue></SelectTrigger>
                     <SelectContent>
-                        <SelectItem value="small">Small</SelectItem>
-                        <SelectItem value="medium">Medium</SelectItem>
-                        <SelectItem value="large">Large</SelectItem>
+                        <SelectItem value="small">Small (25%)</SelectItem>
+                        <SelectItem value="medium">Medium (50%)</SelectItem>
+                        <SelectItem value="large">Large (75%)</SelectItem>
                         <SelectItem value="full-width">Full Width</SelectItem>
                     </SelectContent>
                 </Select>
             </div>
-            <div className="flex items-center justify-between">
-                <Label className="text-xs text-muted-foreground">Show Border</Label>
-                <Button type="button" variant={styles.showBorder ? "default" : "outline"} size="sm" onClick={() => onStyleChange('showBorder', !styles.showBorder)} className="h-7 px-3">{styles.showBorder ? "On" : "Off"}</Button>
-            </div>
             <div className="space-y-2">
-                <Label className="text-xs text-muted-foreground">Padding (px)</Label>
+                <Label className="text-xs text-muted-foreground">Word Export Dimensions (px)</Label>
                 <div className="grid grid-cols-2 gap-2">
-                    <div><Label className="text-xs">Top</Label><Input type="number" min="0" max="100" value={styles.paddingTop || 0} onChange={(e) => onStyleChange('paddingTop', parseInt(e.target.value) || 0)} className="h-7 text-xs" /></div>
-                    <div><Label className="text-xs">Bottom</Label><Input type="number" min="0" max="100" value={styles.paddingBottom || 0} onChange={(e) => onStyleChange('paddingBottom', parseInt(e.target.value) || 0)} className="h-7 text-xs" /></div>
+                    <div>
+                        <Label className="text-xs">Width</Label>
+                        <Input 
+                            type="number" 
+                            value={styles.imageWidth || 300} 
+                            onChange={(e) => onStyleChange('imageWidth', parseInt(e.target.value) || 300)} 
+                            className="h-7 text-xs" 
+                        />
+                    </div>
+                    <div>
+                        <Label className="text-xs">Height</Label>
+                        <Input 
+                            type="number" 
+                            value={styles.imageHeight || 200} 
+                            onChange={(e) => onStyleChange('imageHeight', parseInt(e.target.value) || 200)} 
+                            className="h-7 text-xs" 
+                        />
+                    </div>
                 </div>
             </div>
         </div>
     );
-};
-
-// --- HELPER: Safely Get Text Run Styles WITHOUT COLORS ---
-const getTextRunStyles = (styleMap) => {
-    const styles = {};
-    
-    // STRICT: No colors to prevent corruption
-    
-    // Font Size: Word uses Half-points (e.g., 24 = 12pt)
-    if (styleMap['font-size']) {
-        const match = styleMap['font-size'].match(/(\d+)/);
-        if (match) {
-            const parsed = parseInt(match[1]);
-            if (!isNaN(parsed) && parsed > 0 && parsed < 200) {
-                styles.size = parsed * 2; 
-            }
-        }
-    }
-
-    // Font styles
-    if (styleMap['font-weight'] === 'bold' || parseInt(styleMap['font-weight']) >= 600) {
-        styles.bold = true;
-    }
-    if (styleMap['font-style'] === 'italic') {
-        styles.italics = true;
-    }
-    if (styleMap['text-decoration'] && styleMap['text-decoration'].includes('line-through')) {
-        styles.strike = true;
-    }
-    if (styleMap['text-decoration'] && styleMap['text-decoration'].includes('underline')) {
-        styles.underline = {};
-    }
-
-    return styles;
 };
 
 export default function TemplateGenerationDialog({
@@ -174,6 +179,251 @@ export default function TemplateGenerationDialog({
         }
     }, [isOpen, template, availableTemplates]);
 
+// --- ROBUST DOCX GENERATION ---
+const generateDocxBlob = async (template, values, imageStylesMap, buffer) => {
+    try {
+        const zip = new PizZip(buffer);
+        const renderData = {};
+        const placeholders = template.placeholders || [];
+
+        // 1. Process Data
+        for (const p of placeholders) {
+            let value = values[p.name];
+            // Normalize key: remove {% and %} for docxtemplater mapping
+            let renderKey = p.name.replace(/^\{%/, '').replace(/\}$/, '');
+
+            if (p.type === 'image') {
+                if (value && typeof value === 'string' && value.startsWith('data:image')) {
+                    renderData[renderKey] = value;
+                } else if (value instanceof File) {
+                    renderData[renderKey] = await toBase64(value);
+                } else {
+                    renderData[renderKey] = null;
+                }
+            } else if (p.type === 'checkbox') {
+                renderData[renderKey] = value ? '☑' : '☐';
+            } else {
+                renderData[renderKey] = value || '';
+            }
+        }
+
+        // 2. Image Module Config
+        const imageModule = new ImageModule({
+            centered: false,
+            getImage: (tagValue) => base64Parser(tagValue),
+            getSize: (img, tagValue, tagName) => {
+                // Try to find styles by tag name or original placeholder name
+                const styles = imageStylesMap[tagName] || imageStylesMap[`{%${tagName}}`];
+                if (styles?.imageWidth) return [styles.imageWidth, styles.imageHeight];
+                
+                const pConfig = placeholders.find(p => p.name.includes(tagName));
+                if (pConfig?.imageConfig) return [pConfig.imageConfig.width, pConfig.imageConfig.height];
+                
+                return [300, 200]; 
+            }
+        });
+
+        // 3. Initialize Docxtemplater
+        const doc = new Docxtemplater(zip, {
+            modules: [imageModule],
+            paragraphLoop: true,
+            linebreaks: true,
+            nullGetter: () => "" 
+        });
+
+        doc.setData(renderData);
+        doc.render(); 
+
+        return doc.getZip().generate({
+            type: "blob",
+            mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        });
+    } catch (err) {
+        console.error("Internal Docx Generation Error:", err);
+        throw err;
+    }
+};
+
+// --- HTML TO WORD CONVERTER (Robust Version) ---
+const generateDocxFromHtml = async (htmlString) => {
+    const { 
+        Document, Packer, Paragraph, TextRun, ImageRun, 
+        Table, TableRow, TableCell, WidthType, BorderStyle 
+    } = await import('docx');
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlString, 'text/html');
+    const root = doc.body;
+
+    // Helper to recursively process nodes with inherited styles
+    const processNode = async (node, inheritedStyles = {}) => {
+        const styles = { ...inheritedStyles };
+
+        // 1. Handle Text Nodes
+        if (node.nodeType === Node.TEXT_NODE) {
+            const text = node.textContent;
+            if (!text || text.trim() === '') return [];
+            return [new TextRun({ 
+                text: text, 
+                size: styles.size || 24, 
+                bold: !!styles.bold, 
+                italics: !!styles.italics,
+                underline: !!styles.underline ? {} : undefined,
+                color: styles.color || undefined
+            })];
+        }
+
+        // 2. Handle Elements
+        if (node.nodeType === Node.ELEMENT_NODE) {
+            const tagName = node.tagName.toLowerCase();
+
+            // Update styles based on tag
+            if (tagName === 'strong' || tagName === 'b') styles.bold = true;
+            if (tagName === 'i' || tagName === 'em') styles.italics = true;
+            if (tagName === 'u') styles.underline = true;
+            if (tagName === 'h1') { styles.bold = true; styles.size = 48; }
+            if (tagName === 'h2') { styles.bold = true; styles.size = 36; }
+            if (tagName === 'h3') { styles.bold = true; styles.size = 30; }
+
+            // Handle Images separately (Blocks)
+            if (tagName === 'img') {
+                const src = node.getAttribute('src');
+                if (!src) return [];
+                try {
+                    let imageData;
+                    if (src.startsWith('data:')) {
+                        imageData = base64Parser(src);
+                    } else {
+                        const res = await fetch(src, { mode: 'cors' });
+                        imageData = await res.arrayBuffer();
+                    }
+                    return [new ImageRun({ 
+                        data: imageData, 
+                        transformation: { width: 400, height: 300 } 
+                    })];
+                } catch (e) {
+                    return [new TextRun({ text: "[Image Error]", color: "FF0000" })];
+                }
+            }
+
+            // Handle Br tag
+            if (tagName === 'br') {
+                return [new TextRun({ break: 1 })];
+            }
+
+            // Process all children with current styles
+            const children = [];
+            for (const child of node.childNodes) {
+                const results = await processNode(child, styles);
+                children.push(...results);
+            }
+
+            // Handle block-level elements
+            if (['p', 'div', 'li', 'h1', 'h2', 'h3', 'h4'].includes(tagName)) {
+                // Return a Paragraph as a single item in an array
+                return [new Paragraph({ children: children.length ? children : [new TextRun("")] })];
+            }
+
+            // Inline elements just return their processed children
+            return children;
+        }
+        return [];
+    };
+
+    const docxContent = [];
+    for (const child of root.childNodes) {
+        const results = await processNode(child);
+        results.forEach(res => {
+            // Ensure block level items are handled correctly
+            if (res instanceof Paragraph || res instanceof Table) {
+                docxContent.push(res);
+            } else {
+                // Wrap stray TextRuns/Images in a paragraph
+                docxContent.push(new Paragraph({ children: [res] }));
+            }
+        });
+    }
+
+    // Fallback if empty
+    if (docxContent.length === 0) docxContent.push(new Paragraph(""));
+
+    const docxFile = new Document({
+        sections: [{ children: docxContent }]
+    });
+
+    return await Packer.toBlob(docxFile);
+};
+// --- MAIN GENERATE AND DOWNLOAD HANDLER ---
+const generateAndDownload = async (outputType = 'word') => {
+    if (!selectedTemplate) {
+        toast({ title: "Error", description: "No template selected", variant: "destructive" });
+        return;
+    }
+
+    setIsGenerating(true);
+    const fileName = `${documentName.replace(/[^\w\s-]/g, '_')}_${formatDate(new Date(), 'YYYYMMDD')}`;
+
+    try {
+        if (outputType === 'word') {
+            // SCENARIO A: Pre-existing Word Template (.docx)
+            if (selectedTemplate.file_path) {
+                console.log("[Word Export] Using pre-existing DOCX template...");
+                const bucket = "templates"; 
+                const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${bucket}/${selectedTemplate.file_path}`;
+                
+                const response = await fetch(fileUrl);
+                if (!response.ok) throw new Error(`Could not download Word template (Status: ${response.status})`);
+                
+                const arrayBuffer = await response.arrayBuffer();
+                const blob = await generateDocxBlob(selectedTemplate, formData, imageStyles, arrayBuffer);
+                
+                saveAs(blob, `${fileName}.docx`);
+                toast({ title: "Success", description: "Word document generated from template" });
+            } 
+            // SCENARIO B: Fallback - Convert HTML Template to Word (.docx)
+            else {
+                console.log("[Word Export] No file path found. Converting HTML to Word...");
+                const htmlString = populateContent(formData, selectedTemplate.placeholders || [], imageStyles);
+                const blob = await generateDocxFromHtml(htmlString);
+                
+                saveAs(blob, `${fileName}.docx`);
+                toast({ title: "Success", description: "Converted HTML template to Word document" });
+            }
+
+        } else if (outputType === 'pdf') {
+            // Existing PDF Logic...
+            const html2pdf = (await import('html2pdf.js')).default;
+            const htmlString = populateContent(formData, selectedTemplate.placeholders, imageStyles);
+            const element = document.createElement('div');
+            element.innerHTML = htmlString;
+            element.className = 'prose max-w-none p-10';
+            element.style.fontFamily = 'serif';
+            element.style.width = '800px';
+
+            const opt = {
+                margin: 10,
+                filename: `${fileName}.pdf`,
+                image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: { scale: 2, useCORS: true, logging: false },
+                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            };
+
+            await html2pdf().set(opt).from(element).save();
+            toast({ title: "Success", description: "PDF document downloaded" });
+        }
+    } catch (error) {
+        console.error("Export Error:", error);
+        toast({ 
+            title: "Export Failed", 
+            description: error.message || "An unexpected error occurred", 
+            variant: "destructive" 
+        });
+    } finally {
+        setIsGenerating(false);
+    }
+};
+
+    // --- REUSE POPULATE CONTENT FOR PREVIEW ---
     const populateContent = useCallback((data, placeholders, styles) => {
         if (!selectedTemplate?.content || !placeholders) return '';
         let content = selectedTemplate.content;
@@ -184,22 +434,22 @@ export default function TemplateGenerationDialog({
 
             if (value && String(value).trim() !== '') {
                 if (placeholder.type === 'image') {
-                    const style = styles[placeholder.name] || { maxWidth: '100%', textAlign: 'center', showBorder: false, paddingTop: 0, paddingBottom: 0 };
-                    const imageHtml = `<div style="text-align: ${style.textAlign || 'center'}; margin: 16px 0; padding-top: ${style.paddingTop || 0}px; padding-bottom: ${style.paddingBottom || 0}px;">
-                            <img src="${value}" alt="${placeholder.name}" style="max-width: 100%; width: ${style.maxWidth}; height: auto; display: inline-block; border: ${style.showBorder ? '1px solid #e2e8f0' : 'none'};" />
+                    const style = styles[placeholder.name] || { maxWidth: '100%', textAlign: 'center' };
+                    const imageHtml = `<div style="text-align: ${style.textAlign || 'center'}; margin: 16px 0;">
+                            <img src="${value}" style="max-width: 100%; width: ${style.maxWidth}; height: auto;" />
                         </div>`;
                     content = content.replace(regex, imageHtml);
                 } else {
                     content = content.replace(regex, String(value).replace(/\n/g, '<br />'));
                 }
             } else {
-                content = content.replace(regex, `<span style="background-color: #fef08a; color: #854d0e; padding: 2px 6px; border-radius: 3px; font-weight: bold;">{${placeholder.name}}</span>`);
+                content = content.replace(regex, `<span style="background-color: #fef08a; padding: 2px 4px;">{${placeholder.name}}</span>`);
             }
         });
         return content;
     }, [selectedTemplate]);
 
-    // ... (Data Fetching Logic - getPlaceholderValue, smartFieldMatch, useEffect - Same as before)
+    // ... (rest of helper logic: getPlaceholderValue, smartFieldMatch, handleInputChange remain the same) ...
     const getPlaceholderValue = useCallback((placeholder) => {
         const ids = placeholder.master_field_ids || [];
         if (ids.length === 0 || !masterFields) return { value: '', source: null };
@@ -244,6 +494,25 @@ export default function TemplateGenerationDialog({
         return { value: '', source: null };
     }, [extractedData, personData, companyData]);
 
+    const handleInputChange = (name, val) => {
+        setFormData(prev => {
+            const next = { ...prev, [name]: val };
+            setPreviewContent(populateContent(next, selectedTemplate.placeholders, imageStyles));
+            return next;
+        });
+        if (!manuallyEditedFields.has(name)) setManuallyEditedFields(prev => new Set(prev).add(name));
+    };
+
+    const handleFileChange = (name, e) => {
+        const file = e.target.files[0];
+        if (file) {
+            setUploadedFiles(prev => ({ ...prev, [name]: file }));
+            const reader = new FileReader();
+            reader.onloadend = () => handleInputChange(name, reader.result);
+            reader.readAsDataURL(file);
+        }
+    };
+
     const handleImageStyleChange = (name, key, value) => {
         setImageStyles(prev => {
             const next = { ...prev, [name]: { ...(prev[name] || {}), [key]: value } };
@@ -261,330 +530,19 @@ export default function TemplateGenerationDialog({
                 if (!match.value) match = smartFieldMatch(p.name);
                 initData[p.name] = match.value || '';
                 if (match.value) autoMap.set(p.name, match.source);
-                if (p.type === 'image') initStyles[p.name] = { maxWidth: '100%', textAlign: 'center' };
+                if (p.type === 'image') {
+                    initStyles[p.name] = { 
+                        maxWidth: '100%', 
+                        textAlign: 'center',
+                        imageWidth: p.imageConfig?.width || 300,
+                        imageHeight: p.imageConfig?.height || 200
+                    };
+                }
             });
             setFormData(initData); setAutoPopulatedFields(autoMap); setImageStyles(initStyles);
             setPreviewContent(populateContent(initData, placeholders, initStyles));
         }
     }, [isOpen, selectedTemplate, getPlaceholderValue, smartFieldMatch, populateContent]);
-
-    const handleInputChange = (name, val) => {
-        setFormData(prev => {
-            const next = { ...prev, [name]: val };
-            setPreviewContent(populateContent(next, selectedTemplate.placeholders, imageStyles));
-            return next;
-        });
-        if (!manuallyEditedFields.has(name)) setManuallyEditedFields(prev => new Set(prev).add(name));
-    };
-
-    const handleFileChange = (name, e) => {
-        const file = e.target.files[0];
-        if (file) {
-            if (file.size > 5 * 1024 * 1024) return toast({ title: "Too Large", description: "< 5MB only", variant: "destructive" });
-            setUploadedFiles(prev => ({ ...prev, [name]: file }));
-            const reader = new FileReader();
-            reader.onloadend = () => handleInputChange(name, reader.result);
-            reader.readAsDataURL(file);
-        }
-    };
-
-    // --- GENERATE AND DOWNLOAD ---
-    const generateAndDownload = async (outputType = 'word') => {
-        setIsGenerating(true);
-        try {
-            const fileName = `${documentName.replace(/[^\w\s-]/g, '_')}_${formatDate(new Date(), 'YYYYMMDD')}`;
-            const placeholders = selectedTemplate?.placeholders || [];
-
-            console.log("[Gen] Populating content...");
-            let fullHtml = populateContent(formData, placeholders, imageStyles, true);
-
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(fullHtml, 'text/html');
-            const rootElement = doc.body;
-
-            if (outputType === 'word') {
-                console.log("[Word Gen] Starting...");
-                const { Document, Packer, Paragraph, TextRun, ImageRun, AlignmentType, HeadingLevel, convertInchesToTwip, BorderStyle, Table, TableRow, TableCell, WidthType, VerticalAlign } = await import('docx');
-
-                const getStyleMap = (styleStr) => {
-                    if (!styleStr) return {};
-                    return styleStr.split(';').reduce((acc, rule) => {
-                        const [prop, val] = rule.split(':');
-                        if (prop && val) acc[prop.trim().toLowerCase()] = val.trim();
-                        return acc;
-                    }, {});
-                };
-
-                const getAlignment = (styleMap, defaultAlign = AlignmentType.LEFT) => {
-                    const align = styleMap['text-align'];
-                    if (align === 'center') return AlignmentType.CENTER;
-                    if (align === 'right') return AlignmentType.RIGHT;
-                    if (align === 'justify') return AlignmentType.JUSTIFIED;
-                    return defaultAlign;
-                };
-
-                const processWordImage = async (imgNode) => {
-                    const src = imgNode.getAttribute('src');
-                    const styleMap = getStyleMap(imgNode.getAttribute('style'));
-                    if (!src) return null;
-
-                    try {
-                        let imageData;
-                        if (src.startsWith('data:')) {
-                            const base64 = src.split(',')[1];
-                            const binaryStr = window.atob(base64);
-                            const len = binaryStr.length;
-                            const bytes = new Uint8Array(len);
-                            for (let i = 0; i < len; i++) bytes[i] = binaryStr.charCodeAt(i);
-                            imageData = bytes;
-                        } else {
-                            const res = await fetch(src, { mode: 'cors' });
-                            const blob = await res.blob();
-                            imageData = new Uint8Array(await blob.arrayBuffer());
-                        }
-
-                        const dimensions = await new Promise((resolve) => {
-                            const img = new Image();
-                            img.onload = () => resolve({ w: img.naturalWidth || 100, h: img.naturalHeight || 100 });
-                            img.onerror = () => resolve({ w: 100, h: 100 });
-                            img.src = src;
-                        });
-
-                        const maxWidth = 550;
-                        let widthPercent = 100;
-                        if (styleMap.width && styleMap.width.includes('%')) {
-                            widthPercent = Math.min(100, Math.max(10, parseInt(styleMap.width) || 100));
-                        }
-
-                        let targetWidth = Math.floor((widthPercent / 100) * maxWidth);
-                        if (isNaN(targetWidth) || targetWidth <= 0) targetWidth = 100;
-
-                        let targetHeight = Math.floor((targetWidth / dimensions.w) * dimensions.h);
-                        if (isNaN(targetHeight) || targetHeight <= 0) targetHeight = 100;
-
-                        const parentStyle = getStyleMap(imgNode.parentElement?.getAttribute('style'));
-                        const align = getAlignment(parentStyle, AlignmentType.CENTER);
-
-                        // Simple Border (No colors)
-                        const borderStyle = {};
-                        if (styleMap.border && !styleMap.border.includes('none')) {
-                            const b = { style: BorderStyle.SINGLE, size: 6 };
-                            borderStyle.top = b; borderStyle.bottom = b; borderStyle.left = b; borderStyle.right = b;
-                        }
-
-                        return new Paragraph({
-                            children: [new ImageRun({ data: imageData, transformation: { width: targetWidth, height: targetHeight } })],
-                            alignment: align,
-                            spacing: { before: 100, after: 100 },
-                            border: Object.keys(borderStyle).length > 0 ? borderStyle : undefined
-                        });
-                    } catch (err) {
-                        return new Paragraph({ children: [new TextRun({ text: "[Image Error]" })] });
-                    }
-                };
-
-                const processNode = async (node) => {
-                    if (node.nodeType === Node.TEXT_NODE) {
-                        const text = node.textContent;
-                        if (!text) return [];
-                        const textSegments = text.split(/(\s+)/).filter(s => s.length > 0);
-                        const parentStyle = node.parentNode?.nodeType === Node.ELEMENT_NODE ? getStyleMap(node.parentNode.getAttribute('style')) : {};
-                        return textSegments.map(segment => ({
-                            type: 'inline',
-                            val: new TextRun({ text: segment, ...getTextRunStyles(parentStyle), space: /^\s+$/.test(segment) ? 'preserve' : undefined })
-                        }));
-                    }
-
-                    if (node.nodeType === Node.ELEMENT_NODE) {
-                        const tagName = node.tagName.toLowerCase();
-                        const styleMap = getStyleMap(node.getAttribute('style'));
-
-                        if (tagName === 'img') {
-                            const p = await processWordImage(node);
-                            return p ? [{ type: 'block', val: p }] : [];
-                        }
-
-                        // --- TABLE HANDLING ---
-                        if (tagName === 'table') {
-                            const rows = [];
-                            const trs = node.querySelectorAll('tr');
-                            for (const tr of trs) {
-                                const cells = [];
-                                const tds = tr.querySelectorAll('td, th');
-                                const cellWidthPercent = tds.length > 0 ? 100 / tds.length : 100;
-
-                                for (const td of tds) {
-                                    const cellChildren = [];
-                                    for (const child of td.childNodes) {
-                                        const res = await processNode(child);
-                                        if (res) {
-                                            const blocks = []; let inlines = [];
-                                            res.forEach(item => {
-                                                if (item.type === 'block') {
-                                                    if(inlines.length) { blocks.push(new Paragraph({ children: inlines })); inlines=[]; }
-                                                    blocks.push(item.val);
-                                                } else inlines.push(item.val);
-                                            });
-                                            if(inlines.length) blocks.push(new Paragraph({ children: inlines }));
-                                            cellChildren.push(...blocks);
-                                        }
-                                    }
-                                    if (!cellChildren.length) cellChildren.push(new Paragraph({}));
-                                    
-                                    // Add Borders to Table Cells
-                                    cells.push(new TableCell({
-                                        children: cellChildren,
-                                        width: { size: cellWidthPercent, type: WidthType.PERCENTAGE },
-                                        verticalAlign: VerticalAlign.CENTER,
-                                        borders: {
-                                            top: { style: BorderStyle.SINGLE, size: 2 },
-                                            bottom: { style: BorderStyle.SINGLE, size: 2 },
-                                            left: { style: BorderStyle.SINGLE, size: 2 },
-                                            right: { style: BorderStyle.SINGLE, size: 2 },
-                                        },
-                                        margins: { top: 100, bottom: 100, left: 100, right: 100 },
-                                        shading: tagName === 'th' || td.tagName === 'TH' ? { fill: "EEEEEE" } : undefined
-                                    }));
-                                }
-                                rows.push(new TableRow({ children: cells }));
-                            }
-                            return [{ type: 'block', val: new Table({ rows: rows, width: { size: 100, type: WidthType.PERCENTAGE } }) }];
-                        }
-
-                        const childrenData = [];
-                        for (const child of node.childNodes) {
-                            const res = await processNode(child);
-                            if (res) childrenData.push(...res);
-                        }
-
-                        if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tagName)) {
-                            const inlines = childrenData.filter(c => c.type === 'inline').map(c => c.val);
-                            const level = parseInt(tagName[1]) || 1;
-                            return [{ type: 'block', val: new Paragraph({ children: inlines.length ? inlines : [new TextRun("")], heading: HeadingLevel[`HEADING_${level}`], alignment: getAlignment(styleMap), spacing: { before: 240, after: 120 } }) }];
-                        }
-
-                        if (tagName === 'p' || tagName === 'div' || tagName === 'li') {
-                            const hasBlockChildren = childrenData.some(c => c.type === 'block');
-                            const align = getAlignment(styleMap);
-                            if (hasBlockChildren) {
-                                const blocks = [];
-                                let currentInline = [];
-                                const flush = () => { if (currentInline.length) { blocks.push({ type: 'block', val: new Paragraph({ children: currentInline, alignment: align }) }); currentInline = []; } };
-                                childrenData.forEach(item => { if (item.type === 'block') { flush(); blocks.push(item); } else currentInline.push(item.val); });
-                                flush();
-                                return blocks;
-                            } else {
-                                if (!childrenData.length && tagName === 'p') return [{ type: 'block', val: new Paragraph({}) }];
-                                if (!childrenData.length) return [];
-                                return [{ type: 'block', val: new Paragraph({ children: childrenData.map(c => c.val), alignment: align, bullet: tagName === 'li' ? { level: 0 } : undefined, spacing: { after: 100 } }) }];
-                            }
-                        }
-
-                        if (['b', 'strong', 'i', 'em', 'u', 'span'].includes(tagName)) {
-                            return childrenData.map(child => {
-                                if (child.type === 'inline') {
-                                    const parentStyle = getStyleMap(node.getAttribute('style') || '');
-                                    const styles = getTextRunStyles(parentStyle);
-                                    return { type: 'inline', val: new TextRun({ text: child.val.root.text, ...child.val.options, ...styles }) };
-                                }
-                                return child;
-                            });
-                        }
-
-                        if (tagName === 'br') return [{ type: 'inline', val: new TextRun({ break: 1 }) }];
-                        return childrenData;
-                    }
-                    return [];
-                };
-
-                const processedNodes = [];
-                for (const child of rootElement.childNodes) {
-                    const res = await processNode(child);
-                    if (res) processedNodes.push(...res);
-                }
-
-                const finalChildren = [];
-                let stray = [];
-                processedNodes.forEach(n => {
-                    if (n.type === 'block') {
-                        if (stray.length > 0) { finalChildren.push(new Paragraph({ children: stray })); stray = []; }
-                        finalChildren.push(n.val);
-                    } else { stray.push(n.val); }
-                });
-                if (stray.length > 0) finalChildren.push(new Paragraph({ children: stray }));
-
-                const docxFile = new Document({
-                    sections: [{ properties: { page: { margin: { top: convertInchesToTwip(1), right: convertInchesToTwip(1), bottom: convertInchesToTwip(1), left: convertInchesToTwip(1) } } }, children: finalChildren.length ? finalChildren : [new Paragraph("")] }]
-                });
-                const blob = await Packer.toBlob(docxFile);
-                saveAs(blob, `${fileName}.docx`);
-
-            } else if (outputType === 'pdf') {
-                console.log("[PDF Gen] Starting...");
-                const html2pdf = (await import('html2pdf.js')).default;
-                
-                // Create offscreen container
-                const pdfContainer = document.createElement('div');
-                pdfContainer.style.position = 'absolute';
-                pdfContainer.style.left = '-9999px';
-                pdfContainer.style.top = '0px';
-                pdfContainer.style.width = '210mm'; // A4
-                pdfContainer.style.minHeight = '297mm';
-                pdfContainer.style.padding = '25mm 20mm'; // Top/Bottom 25mm, Left/Right 20mm
-                pdfContainer.style.backgroundColor = 'white';
-                pdfContainer.style.fontFamily = 'Arial, sans-serif';
-                pdfContainer.style.fontSize = '12pt';
-                pdfContainer.style.lineHeight = '1.5';
-                
-                const tempDiv = document.createElement('div');
-                tempDiv.innerHTML = fullHtml;
-                
-                // --- INJECT PDF STYLES ---
-                const style = document.createElement('style');
-                style.innerHTML = `
-                    table { width: 100%; border-collapse: collapse; margin: 15px 0; }
-                    th, td { border: 1px solid #000; padding: 8px; text-align: left; }
-                    th { background-color: #f0f0f0; font-weight: bold; }
-                    img { max-width: 100%; height: auto; display: block; margin: 10px auto; }
-                `;
-                pdfContainer.appendChild(style);
-                
-                // Move content
-                while (tempDiv.firstChild) {
-                    pdfContainer.appendChild(tempDiv.firstChild);
-                }
-                
-                document.body.appendChild(pdfContainer);
-
-                // Wait for images
-                const images = Array.from(pdfContainer.querySelectorAll('img'));
-                await Promise.all(images.map(img => {
-                    if (img.complete) return Promise.resolve();
-                    return new Promise(resolve => { img.onload = resolve; img.onerror = resolve; });
-                }));
-
-                const opt = {
-                    margin: 0, // Handled by padding above
-                    filename: `${fileName}.pdf`,
-                    image: { type: 'jpeg', quality: 0.98 },
-                    html2canvas: { scale: 2, useCORS: true, logging: false },
-                    jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
-                    pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
-                };
-                
-                await html2pdf().set(opt).from(pdfContainer).save();
-                document.body.removeChild(pdfContainer);
-                console.log("[PDF Gen] Complete");
-            }
-
-            toast({ title: "Success", description: "Downloaded successfully", className: "bg-green-500 text-white" });
-            setActiveTab('preview');
-
-        } catch (e) {
-            console.error("Export Error:", e);
-            toast({ title: "Error", description: e.message, variant: "destructive" });
-        } finally { setIsGenerating(false); }
-    };
 
     const completionStats = useMemo(() => {
         const placeholders = selectedTemplate?.placeholders || [];
@@ -596,33 +554,34 @@ export default function TemplateGenerationDialog({
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-            {/* UI Implementation remains same */}
             <DialogContent className="max-w-[95vw] w-full h-[95vh] flex flex-col p-0">
+                {/* Header Section */}
                 <DialogHeader className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-blue-500 rounded-lg"><Wand2 className="h-5 w-5 text-white" /></div>
                             <div>
                                 <DialogTitle className="text-xl font-bold">{documentName}</DialogTitle>
-                                <DialogDescription className="text-sm">Fill in fields and generate document</DialogDescription>
+                                <DialogDescription className="text-sm">Auto-populate fields and generate robust Word docs</DialogDescription>
                             </div>
                         </div>
                         <Button variant="ghost" size="icon" onClick={onClose}><X className="h-5 w-5" /></Button>
                     </div>
                     <div className="mt-4 space-y-2">
                         <div className="flex items-center justify-between text-sm">
-                            <span className="font-medium">Completion: {completionStats.filled} of {completionStats.total} fields</span>
+                            <span className="font-medium">Form Progress: {completionStats.filled}/{completionStats.total} Fields</span>
                             <span className="text-muted-foreground">{completionStats.percentage}%</span>
                         </div>
                         <Progress value={completionStats.percentage} className="h-2" />
                     </div>
                 </DialogHeader>
 
+                {/* Tabs Section */}
                 <div className="flex-1 overflow-hidden">
                     <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
                         <TabsList className="mx-6 mt-4 grid w-[400px] grid-cols-2">
-                            <TabsTrigger value="edit"><Edit3 className="h-4 w-4 mr-2" />Edit Fields</TabsTrigger>
-                            <TabsTrigger value="preview"><Eye className="h-4 w-4 mr-2" />Preview</TabsTrigger>
+                            <TabsTrigger value="edit"><Edit3 className="h-4 w-4 mr-2" />Field Editor</TabsTrigger>
+                            <TabsTrigger value="preview"><Eye className="h-4 w-4 mr-2" />Document Preview</TabsTrigger>
                         </TabsList>
 
                         <div className="flex-1 overflow-hidden">
@@ -630,124 +589,79 @@ export default function TemplateGenerationDialog({
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 h-full">
                                     <ScrollArea className="h-full border-r bg-white">
                                         <div className="p-6 space-y-4">
-                                            {availableTemplates?.length > 1 && (
-                                                <div className="space-y-2 bg-blue-50 p-4 rounded-lg">
-                                                    <Label className="text-sm font-semibold">Template</Label>
-                                                    <Select value={selectedTemplate?.id} onValueChange={id => setSelectedTemplate(availableTemplates.find(t => t.id === id))}>
-                                                        <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
-                                                        <SelectContent>{availableTemplates.map(t => <SelectItem key={t.id} value={t.id}>{t.file_name}</SelectItem>)}</SelectContent>
-                                                    </Select>
-                                                </div>
-                                            )}
-
-                                            {selectedTemplate && (
-                                                <div className="space-y-4">
-                                                    {(selectedTemplate.placeholders || []).map(p => {
-                                                        const isFilled = formData[p.name] && String(formData[p.name]).trim() !== '';
-                                                        const isAutoPopulated = autoPopulatedFields.has(p.name);
-
-                                                        if (p.type === 'image') {
-                                                            const previewSrc = uploadedFiles[p.name] ? URL.createObjectURL(uploadedFiles[p.name]) : formData[p.name];
-                                                            return (
-                                                                <div key={p.id} className="space-y-3 p-4 border rounded-lg bg-gray-50">
-                                                                    <div className="flex items-center justify-between">
-                                                                        <Label className="text-base font-semibold flex items-center gap-2">
-                                                                            <ImageIcon className="h-4 w-4" />{p.description || p.name}
-                                                                        </Label>
-                                                                        {isFilled && <Badge variant="success" className="text-xs"><CheckCircle2 className="h-3 w-3 mr-1" />Added</Badge>}
-                                                                    </div>
-                                                                    <div className={`w-full h-48 border-2 border-dashed rounded-lg flex items-center justify-center p-2 ${isFilled ? 'bg-white border-blue-300' : 'bg-gray-100 border-gray-300'}`}>
-                                                                        {previewSrc ? <img src={previewSrc} alt="Preview" className="max-h-full max-w-full object-contain rounded" /> : <div className="text-center text-muted-foreground"><ImageIcon className="mx-auto h-12 w-12 mb-2" /><p className="text-sm">No image</p></div>}
-                                                                    </div>
-                                                                    <Button asChild variant="outline" className="flex-1">
-                                                                        <label className="cursor-pointer flex items-center justify-center gap-2">
-                                                                            <FileUp className="h-4 w-4" />{previewSrc ? 'Change' : 'Upload'}
-                                                                            <input id={p.name} type="file" accept="image/*" className="sr-only" onChange={e => handleFileChange(p.name, e)} />
-                                                                        </label>
-                                                                    </Button>
-                                                                    {isFilled && (
-                                                                        <div className="pt-2 border-t">
-                                                                            <Label className="text-xs text-muted-foreground mb-2 block">Image Styling</Label>
-                                                                            <ImagePlaceholderControls styles={imageStyles[p.name] || {}} onStyleChange={(key, val) => handleImageStyleChange(p.name, key, val)} />
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                            );
-                                                        }
-
-                                                        const isLongText = p.type === 'textarea' || (formData[p.name] && String(formData[p.name]).length > 100);
-                                                        return (
-                                                            <div key={p.id} className="space-y-2 p-4 border rounded-lg hover:border-blue-300 transition-colors">
-                                                                <Label htmlFor={p.name} className="text-base font-semibold flex items-center gap-2">
-                                                                    {p.description || p.name}
-                                                                    {isFilled && <Badge variant="success" className="text-xs"><CheckCircle2 className="h-3 w-3 mr-1" />Filled</Badge>}
-                                                                </Label>
-                                                                {isLongText ? (
-                                                                    <Textarea id={p.name} value={formData[p.name] || ''} onChange={e => handleInputChange(p.name, e.target.value)} className="min-h-[100px]" placeholder={`Enter ${p.description || p.name}`} />
-                                                                ) : (
-                                                                    <Input id={p.name} type={p.type === 'date' ? 'date' : 'text'} value={p.type === 'date' ? formatDate(formData[p.name], 'YYYY-MM-DD') : (formData[p.name] || '')} onChange={e => handleInputChange(p.name, e.target.value)} placeholder={`Enter ${p.description || p.name}`} />
-                                                                )}
-                                                                {isAutoPopulated && <p className="text-xs text-blue-600 flex items-center gap-1"><CheckCircle2 className="h-3 w-3" />Auto-filled from {autoPopulatedFields.get(p.name)}</p>}
+                                            {selectedTemplate && (selectedTemplate.placeholders || []).map(p => {
+                                                const isFilled = formData[p.name] && String(formData[p.name]).trim() !== '';
+                                                
+                                                if (p.type === 'image') {
+                                                    const previewSrc = uploadedFiles[p.name] ? URL.createObjectURL(uploadedFiles[p.name]) : formData[p.name];
+                                                    return (
+                                                        <div key={p.id} className="space-y-3 p-4 border rounded-lg bg-gray-50">
+                                                            <Label className="text-base font-semibold flex items-center gap-2">
+                                                                <ImageIcon className="h-4 w-4" />{p.description || p.name}
+                                                            </Label>
+                                                            <div className="w-full h-48 border-2 border-dashed rounded-lg flex items-center justify-center bg-white">
+                                                                {previewSrc ? <img src={previewSrc} className="max-h-full object-contain" /> : <p className="text-xs text-muted-foreground">No image provided</p>}
                                                             </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            )}
+                                                            <Button asChild variant="outline" className="w-full">
+                                                                <label className="cursor-pointer">
+                                                                    <FileUp className="h-4 w-4 mr-2" />Upload Image
+                                                                    <input type="file" accept="image/*" className="sr-only" onChange={e => handleFileChange(p.name, e)} />
+                                                                </label>
+                                                            </Button>
+                                                            {isFilled && <ImagePlaceholderControls styles={imageStyles[p.name] || {}} onStyleChange={(key, val) => handleImageStyleChange(p.name, key, val)} />}
+                                                        </div>
+                                                    );
+                                                }
+
+                                                return (
+                                                    <div key={p.id} className="space-y-2 p-4 border rounded-lg">
+                                                        <Label className="font-semibold">{p.description || p.name}</Label>
+                                                        <Input 
+                                                            value={formData[p.name] || ''} 
+                                                            onChange={e => handleInputChange(p.name, e.target.value)} 
+                                                            placeholder="Enter text..."
+                                                        />
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
                                     </ScrollArea>
-
-                                    <div className="bg-gray-100 p-6 overflow-y-auto">
-                                        <div className="max-w-3xl mx-auto">
-                                            <div className="bg-white shadow-2xl rounded-lg overflow-hidden">
-                                                <div className="bg-gray-200 px-4 py-2 flex items-center gap-2 border-b">
-                                                    <div className="flex gap-1.5">
-                                                        <div className="w-3 h-3 rounded-full bg-red-500"></div>
-                                                        <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
-                                                        <div className="w-3 h-3 rounded-full bg-green-500"></div>
-                                                    </div>
-                                                    <span className="text-xs text-muted-foreground ml-2">Live Preview</span>
-                                                </div>
-                                                <div dangerouslySetInnerHTML={{ __html: previewContent }} className="prose prose-sm max-w-none p-8" style={{ minHeight: '400px', fontFamily: 'Georgia, serif', lineHeight: '1.6' }} />
-                                            </div>
-                                        </div>
+                                    
+                                    <div className="bg-gray-100 p-6 overflow-y-auto hidden lg:block">
+                                        <div className="bg-white shadow-lg p-12 min-h-full prose prose-sm max-w-none" 
+                                             style={{ fontFamily: 'serif' }}
+                                             dangerouslySetInnerHTML={{ __html: previewContent }} />
                                     </div>
                                 </div>
                             </TabsContent>
 
-                            <TabsContent value="preview" className="h-full m-0 p-0">
-                                <div className="h-full bg-gray-100 p-8 overflow-y-auto">
-                                    <div className="max-w-4xl mx-auto">
-                                        <div className="bg-white shadow-2xl rounded-lg overflow-hidden">
-                                            <div className="bg-gradient-to-r from-blue-500 to-indigo-600 px-6 py-4 text-white">
-                                                <h3 className="text-lg font-semibold">Document Preview</h3>
-                                                <p className="text-sm text-blue-100">{documentName} • {formatDate(new Date(), 'YYYY-MM-DD')}</p>
-                                            </div>
-                                            <div dangerouslySetInnerHTML={{ __html: previewContent }} className="prose prose-base max-w-none p-12" style={{ minHeight: '800px', fontFamily: 'Georgia, serif', lineHeight: '1.8', fontSize: '14pt' }} />
-                                        </div>
-                                    </div>
-                                </div>
+                            <TabsContent value="preview" className="h-full m-0 p-0 overflow-y-auto bg-gray-100">
+                                <div className="max-w-4xl mx-auto my-8 bg-white shadow-2xl p-16 min-h-screen prose max-w-none"
+                                     style={{ fontFamily: 'serif' }}
+                                     dangerouslySetInnerHTML={{ __html: previewContent }} />
                             </TabsContent>
                         </div>
                     </Tabs>
                 </div>
 
+                {/* Footer Section */}
                 <DialogFooter className="border-t px-6 py-4 bg-gray-50">
                     <div className="flex items-center justify-between w-full">
-                        <div className="text-sm text-muted-foreground flex items-center gap-4">
-                            {autoPopulatedFields.size > 0 && <span className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-green-500" /><strong>{autoPopulatedFields.size}</strong> auto-filled</span>}
-                            {completionStats.total > 0 && completionStats.filled < completionStats.total && <span className="flex items-center gap-2 text-amber-600"><AlertCircle className="h-4 w-4" />{completionStats.total - completionStats.filled} remaining</span>}
+                        <div className="text-xs text-muted-foreground">
+                             {autoPopulatedFields.size} fields auto-matched from records.
                         </div>
                         <div className='flex gap-2'>
-                            <Button variant="outline" onClick={onClose} disabled={isGenerating}>Cancel</Button>
+                            <Button variant="outline" onClick={onClose}>Cancel</Button>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <Button disabled={isGenerating || !selectedTemplate} className="min-w-[200px]">
-                                        {isGenerating ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Generating...</> : <><Download className="mr-2 h-4 w-4" />Generate & Download</>}
+                                    <Button disabled={isGenerating || !selectedTemplate}>
+                                        {isGenerating ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <Download className="mr-2 h-4 w-4" />}
+                                        Generate & Export
                                     </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
-                                    <DropdownMenuItem onClick={() => generateAndDownload('word')}><FileText className="mr-2 h-4 w-4" />Word (.docx)</DropdownMenuItem>
-                                    {selectedTemplate?.file_type === 'text/html' && <DropdownMenuItem onClick={() => generateAndDownload('pdf')}><FileText className="mr-2 h-4 w-4" />PDF (.pdf)</DropdownMenuItem>}
+                                    <DropdownMenuItem onClick={() => generateAndDownload('word')}>Word Document (.docx)</DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => generateAndDownload('pdf')}>PDF Document (.pdf)</DropdownMenuItem>
                                 </DropdownMenuContent>
                             </DropdownMenu>
                         </div>
