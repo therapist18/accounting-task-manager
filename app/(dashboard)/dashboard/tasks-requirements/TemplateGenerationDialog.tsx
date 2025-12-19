@@ -17,7 +17,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
     AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp,
-    Loader2, Wand2, Expand, Eye, Edit3, CheckCircle2, X, Image as ImageIcon
+    Loader2, Wand2, Expand, Eye, Edit3, CheckCircle2, X, Image as ImageIcon, AlertCircle
 } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Progress } from "@/components/ui/progress";
@@ -28,15 +28,15 @@ import { saveAs } from 'file-saver';
 import Docxtemplater from "docxtemplater";
 import PizZip from "pizzip";
 import ImageModule from 'docxtemplater-image-module-free';
-import * as mammoth from "mammoth"; 
+import * as mammoth from "mammoth";
 
-// --- SHARED STYLING (Matches TemplateEditor.tsx) ---
+// --- SHARED STYLING ---
 const EDITOR_PREVIEW_STYLES = `
   prose prose-sm sm:prose-base dark:prose-invert max-w-full focus:outline-none 
   [&_table]:border-collapse [&_table]:border [&_table]:border-border [&_table]:w-full [&_table]:my-4
   [&_th]:border [&_th]:border-border [&_th]:bg-muted/50 [&_th]:p-2 [&_th]:text-left
   [&_td]:border [&_td]:border-border [&_td]:p-2 relative
-  [&_img]:rounded-lg [&_img]:border [&_img]:border-border [&_img]:max-w-full
+  [&_img]:rounded-lg [&_img]:border [&_img]:border-border [&_img]:max-w-full [&_img]:mx-auto
 `.replace(/\s+/g, ' ').trim();
 
 // --- HELPER FUNCTIONS ---
@@ -139,6 +139,7 @@ export default function TemplateGenerationDialog({
     const [isGenerating, setIsGenerating] = useState(false);
     const [isPreviewLoading, setIsPreviewLoading] = useState(false);
     const [previewContent, setPreviewContent] = useState('');
+    const [docPreviewUrl, setDocPreviewUrl] = useState(null);
     const [autoPopulatedFields, setAutoPopulatedFields] = useState(new Map());
     const [manuallyEditedFields, setManuallyEditedFields] = useState(new Set());
     const [selectedTemplate, setSelectedTemplate] = useState(template);
@@ -170,7 +171,7 @@ export default function TemplateGenerationDialog({
         return content;
     }, [selectedTemplate]);
 
-    // --- WORD PREVIEW GENERATOR (Mammoth + Docxtemplater) ---
+    // --- WORD PREVIEW GENERATOR ---
     const updateWordPreview = useCallback(async (data, styles) => {
         if (!docxTemplateBuffer.current) return;
         try {
@@ -179,7 +180,7 @@ export default function TemplateGenerationDialog({
             const renderData = {};
             (selectedTemplate.placeholders || []).forEach(p => {
                 let val = data[p.name];
-                let key = p.name.replace(/^\{+/, '').replace(/\}+$/, '');
+                let key = p.name.replace(/^\{+/, '').replace(/\}+$/, '').replace(/^%/, '').replace(/^#/, '');
                 if (p.type === 'image') renderData[key] = val?.startsWith('data:image') ? val : null;
                 else renderData[key] = val || `[${p.name}]`;
             });
@@ -187,7 +188,10 @@ export default function TemplateGenerationDialog({
             const imageModule = new ImageModule({
                 centered: false,
                 getImage: (tag) => base64Parser(tag),
-                getSize: () => [150, 100],
+                getSize: (img, tag, name) => {
+                    const s = styles[name] || styles[`{%${name}}`];
+                    return s ? [s.imageWidth || 300, s.imageHeight || 200] : [300, 200];
+                },
             });
 
             const doc = new Docxtemplater(zip, { modules: [imageModule], paragraphLoop: true, linebreaks: true });
@@ -195,13 +199,21 @@ export default function TemplateGenerationDialog({
             doc.render();
             const out = doc.getZip().generate({ type: "arraybuffer" });
 
+            // Using mammoth with custom image handler for HTML preview
             const result = await mammoth.convertToHtml({ arrayBuffer: out }, {
                 styleMap: [
                     "p => p:fresh",
                     "table => table.border-collapse.table-auto.w-full.my-4",
                     "td => td.border.p-2",
                     "th => th.border.bg-muted.p-2.font-bold"
-                ]
+                ],
+                convertImage: mammoth.images.imgElement(function (image) {
+                    return image.read("base64").then(function (imageBuffer) {
+                        return {
+                            src: "data:" + image.contentType + ";base64," + imageBuffer
+                        };
+                    });
+                })
             });
             setPreviewContent(result.value);
         } catch (err) {
@@ -217,14 +229,20 @@ export default function TemplateGenerationDialog({
         const load = async () => {
             const current = availableTemplates.find(t => t.id === selectedTemplate?.id) || availableTemplates[0] || template;
             setSelectedTemplate(current);
+
             if (current?.file_path) {
                 setIsPreviewLoading(true);
-                const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${current.file_path}`;
-                const res = await fetch(fileUrl);
+                const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${current.file_path}`;
+
+                // Set iframe preview URL (Google Viewer)
+                setDocPreviewUrl(`https://docs.google.com/viewer?url=${encodeURIComponent(publicUrl)}&embedded=true`);
+
+                const res = await fetch(publicUrl);
                 docxTemplateBuffer.current = await res.arrayBuffer();
                 updateWordPreview(formData, imageStyles);
             } else {
                 docxTemplateBuffer.current = null;
+                setDocPreviewUrl(null);
                 setPreviewContent(populateHtmlContent(formData, current?.placeholders || [], imageStyles));
             }
         };
@@ -327,35 +345,68 @@ export default function TemplateGenerationDialog({
         setIsGenerating(true);
         try {
             const fileName = `${documentName.replace(/[^\w\s-]/g, '_')}_${formatDate(new Date(), 'YYYYMMDD')}`;
-            if (type === 'word') {
-                let blob;
-                if (docxTemplateBuffer.current) {
-                    const zip = new PizZip(docxTemplateBuffer.current);
-                    const renderData = {};
-                    (selectedTemplate.placeholders || []).forEach(p => {
-                        let val = formData[p.name];
-                        let key = p.name.replace(/^\{+/, '').replace(/\}+$/, '');
-                        renderData[key] = p.type === 'image' ? (val?.startsWith('data:image') ? val : null) : (val || "");
-                    });
-                    const imageModule = new ImageModule({ centered: false, getImage: (tag) => base64Parser(tag), getSize: (img, tag, name) => {
+            let blob;
+
+            if (docxTemplateBuffer.current) {
+                // Scenario: Template is a Word file. Always generate Word first to preserve structure.
+                const zip = new PizZip(docxTemplateBuffer.current);
+                const renderData = {};
+                (selectedTemplate.placeholders || []).forEach(p => {
+                    let val = formData[p.name];
+                    let key = p.name.replace(/^\{+/, '').replace(/\}+$/, '').replace(/^%/, '').replace(/^#/, '');
+                    renderData[key] = p.type === 'image' ? (val?.startsWith('data:image') ? val : null) : (val || "");
+                });
+
+                const imageModule = new ImageModule({
+                    centered: false,
+                    getImage: (tag) => base64Parser(tag),
+                    getSize: (img, tag, name) => {
                         const s = imageStyles[name] || imageStyles[`{%${name}}`];
                         return s ? [s.imageWidth || 300, s.imageHeight || 200] : [300, 200];
-                    }});
-                    const doc = new Docxtemplater(zip, { modules: [imageModule], linebreaks: true });
-                    doc.setData(renderData); doc.render();
-                    blob = doc.getZip().generate({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+                    }
+                });
+
+                const doc = new Docxtemplater(zip, { modules: [imageModule], linebreaks: true });
+                doc.setData(renderData);
+                doc.render();
+                blob = doc.getZip().generate({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+
+                if (type === 'word') {
+                    saveAs(blob, `${fileName}.docx`);
+                } else {
+                    // For PDF from Word template: Use Mammoth converted HTML as source
+                    const html2pdf = (await import('html2pdf.js')).default;
+                    const element = document.createElement('div');
+                    element.innerHTML = previewContent;
+                    element.className = EDITOR_PREVIEW_STYLES + ' p-10 bg-white';
+                    element.style.width = '800px';
+                    await html2pdf().set({
+                        margin: 10,
+                        filename: `${fileName}.pdf`,
+                        image: { type: 'jpeg', quality: 0.98 },
+                        html2canvas: { scale: 2, useCORS: true },
+                        jsPDF: { unit: 'mm', format: 'a4' }
+                    }).from(element).save();
                 }
-                saveAs(blob, `${fileName}.docx`);
             } else {
-                const html2pdf = (await import('html2pdf.js')).default;
-                const element = document.createElement('div');
-                element.innerHTML = previewContent;
-                element.className = EDITOR_PREVIEW_STYLES + ' p-10 bg-white';
-                element.style.width = '800px';
-                await html2pdf().set({ margin: 10, filename: `${fileName}.pdf`, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: 'a4' }}).from(element).save();
+                // Scenario: HTML Template
+                if (type === 'word') {
+                    toast({ title: "Note", description: "Standard Word conversion for HTML templates is simplified." });
+                    // Basic blob generation for HTML content as Word
+                    blob = new Blob(['\ufeff', previewContent], { type: 'application/msword' });
+                    saveAs(blob, `${fileName}.doc`);
+                } else {
+                    const html2pdf = (await import('html2pdf.js')).default;
+                    const element = document.createElement('div');
+                    element.innerHTML = previewContent;
+                    element.className = EDITOR_PREVIEW_STYLES + ' p-10 bg-white';
+                    element.style.width = '800px';
+                    await html2pdf().set({ margin: 10, filename: `${fileName}.pdf`, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: 'a4' } }).from(element).save();
+                }
             }
             toast({ title: "Success", description: "Document exported successfully" });
         } catch (e) {
+            console.error(e);
             toast({ title: "Error", description: e.message, variant: "destructive" });
         } finally { setIsGenerating(false); }
     };
@@ -392,9 +443,10 @@ export default function TemplateGenerationDialog({
                                     <SelectContent>{availableTemplates.map(t => <SelectItem key={t.id} value={t.id}>{t.file_name}</SelectItem>)}</SelectContent>
                                 </Select>
                             ) : <div />}
-                            <TabsList className="grid w-[300px] grid-cols-2 h-8">
+                            <TabsList className="grid w-[300px] grid-cols-3 h-8">
                                 <TabsTrigger value="edit" className="text-xs"><Edit3 className="h-3.3 w-3.5 mr-1.5" />Editor</TabsTrigger>
                                 <TabsTrigger value="preview" className="text-xs"><Eye className="h-3.5 w-3.5 mr-1.5" />Full View</TabsTrigger>
+                                <TabsTrigger value="original" className="text-xs"><Eye className="h-3.5 w-3.5 mr-1.5" />Original Template</TabsTrigger>
                             </TabsList>
                         </div>
 
@@ -403,6 +455,49 @@ export default function TemplateGenerationDialog({
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 h-full">
                                     <ScrollArea className="h-full border-r bg-white">
                                         <div className="p-6 space-y-4">
+                                            {/* Original Word Doc UI Requested */}
+                                            {selectedTemplate?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && (
+                                                <div className="mb-6 space-y-2">
+                                                    <Label className="text-xs font-bold text-slate-500 uppercase">Master Template File</Label>
+                                                    <div className="w-full h-48 border rounded-md overflow-hidden bg-slate-50 relative group">
+                                                        {docPreviewUrl ? (
+                                                            <iframe
+                                                                src={docPreviewUrl}
+                                                                className="w-full h-full border-0"
+                                                                title="Original Template Preview"
+                                                                onError={(e) => {
+                                                                    console.error('Error loading document preview:', e);
+                                                                    setDocPreviewUrl(null);
+                                                                    toast({
+                                                                        title: 'Preview Error',
+                                                                        description: 'Could not load document preview. The file may not be accessible or the format is not supported.',
+                                                                        variant: 'destructive'
+                                                                    });
+                                                                }}
+                                                            />
+                                                        ) : template?.file_path ? (
+                                                            <div className="h-full w-full flex items-center justify-center">
+                                                                <div className="text-center p-4">
+                                                                    <FileText className="h-10 w-10 mx-auto text-slate-300 mb-2" />
+                                                                    <p className="text-xs text-slate-500">Loading Original Template...</p>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="h-full w-full flex items-center justify-center">
+                                                                <div className="text-center p-4">
+                                                                    <FileText className="h-10 w-10 mx-auto text-slate-300 mb-2" />
+                                                                    <p className="text-xs text-slate-500">No template file available</p>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            <Badge variant="secondary" className="bg-white/80 backdrop-blur">Original Layout</Badge>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            <Label className="text-xs font-bold text-slate-500 uppercase">Input Fields</Label>
                                             {selectedTemplate?.placeholders?.map(p => (
                                                 <div key={p.id} className="space-y-2 p-4 border rounded-lg bg-slate-50/50">
                                                     <div className="flex justify-between items-center">
@@ -417,7 +512,7 @@ export default function TemplateGenerationDialog({
                                                             <Button asChild variant="outline" size="sm" className="w-full h-8 text-xs">
                                                                 <label className="cursor-pointer"><FileUp className="h-3 w-3 mr-2" />Upload Image<input type="file" accept="image/*" className="sr-only" onChange={e => handleFileChange(p.name, e)} /></label>
                                                             </Button>
-                                                            <ImagePlaceholderControls styles={imageStyles[p.name] || {}} onStyleChange={(k,v) => handleImageStyleChange(p.name, k, v)} />
+                                                            <ImagePlaceholderControls styles={imageStyles[p.name] || {}} onStyleChange={(k, v) => handleImageStyleChange(p.name, k, v)} />
                                                         </div>
                                                     ) : (
                                                         <Input value={formData[p.name] || ''} onChange={e => handleInputChange(p.name, e.target.value)} className="bg-white h-9 text-sm" placeholder={`Enter ${p.name}...`} />
@@ -427,6 +522,10 @@ export default function TemplateGenerationDialog({
                                         </div>
                                     </ScrollArea>
                                     <div className="relative bg-slate-100 p-8 overflow-y-auto hidden lg:block">
+                                        <div className="sticky top-0 mb-4 flex items-center justify-between bg-white/50 backdrop-blur p-2 rounded-lg border text-[10px] font-bold text-slate-500">
+                                            <span>LIVE PREVIEW (GENERATED CONTENT)</span>
+                                            <Badge variant="outline" className="text-[10px]">A4 Format</Badge>
+                                        </div>
                                         {isPreviewLoading && <div className="absolute inset-0 z-10 bg-white/40 backdrop-blur-sm flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-blue-500" /></div>}
                                         <div className={`bg-white shadow-xl p-12 min-h-full mx-auto max-w-[800px] ${EDITOR_PREVIEW_STYLES}`} style={{ fontFamily: 'serif' }} dangerouslySetInnerHTML={{ __html: previewContent }} />
                                     </div>
@@ -437,6 +536,53 @@ export default function TemplateGenerationDialog({
                                     {isPreviewLoading && <div className="absolute inset-0 flex items-center justify-center bg-white/60"><Loader2 className="h-10 w-10 animate-spin text-blue-500" /></div>}
                                     <div dangerouslySetInnerHTML={{ __html: previewContent }} />
                                 </div>
+                            </TabsContent>
+                            <TabsContent value='original'>
+                                 <ScrollArea className="h-full border-r bg-white">
+                                        <div className="p-6 space-y-4">
+                                            {/* Original Word Doc UI Requested */}
+                                            {selectedTemplate?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && (
+                                                <div className="mb-6 space-y-2">
+                                                    <Label className="text-xs font-bold text-slate-500 uppercase">Master Template File</Label>
+                                                    <div className="w-full h-full border rounded-md overflow-hidden bg-slate-50 relative group">
+                                                        {docPreviewUrl ? (
+                                                            <iframe
+                                                                src={docPreviewUrl}
+                                                                className="w-full h-full border-0"
+                                                                title="Original Template Preview"
+                                                                onError={(e) => {
+                                                                    console.error('Error loading document preview:', e);
+                                                                    setDocPreviewUrl(null);
+                                                                    toast({
+                                                                        title: 'Preview Error',
+                                                                        description: 'Could not load document preview. The file may not be accessible or the format is not supported.',
+                                                                        variant: 'destructive'
+                                                                    });
+                                                                }}
+                                                            />
+                                                        ) : template?.file_path ? (
+                                                            <div className="h-full w-full flex items-center justify-center">
+                                                                <div className="text-center p-4">
+                                                                    <FileText className="h-10 w-10 mx-auto text-slate-300 mb-2" />
+                                                                    <p className="text-xs text-slate-500">Loading Original Template...</p>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="h-full w-full flex items-center justify-center">
+                                                                <div className="text-center p-4">
+                                                                    <FileText className="h-10 w-10 mx-auto text-slate-300 mb-2" />
+                                                                    <p className="text-xs text-slate-500">No template file available</p>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            <Badge variant="secondary" className="bg-white/80 backdrop-blur">Original Layout</Badge>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </ScrollArea>
                             </TabsContent>
                         </div>
                     </Tabs>
@@ -452,7 +598,7 @@ export default function TemplateGenerationDialog({
                             <DropdownMenuTrigger asChild>
                                 <Button size="sm" disabled={isGenerating || !selectedTemplate} className="bg-blue-600 hover:bg-blue-700">
                                     {isGenerating ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <Download className="mr-2 h-4 w-4" />}
-                                    Generate Document
+                                    Generate & Download
                                 </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-48">
