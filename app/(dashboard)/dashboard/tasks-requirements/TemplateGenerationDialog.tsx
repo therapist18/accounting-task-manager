@@ -185,6 +185,56 @@ const ImagePlaceholderControls = ({ styles, onStyleChange }) => {
     );
 };
 
+const resolveArrayData = (blockPlaceholder, allPlaceholders, sourceDataCache, masterFields, entityIdMap) => {
+    const entityType = blockPlaceholder.entity_type; 
+    const blockName = blockPlaceholder.name; 
+    
+    let sourceArray = [];
+    let record = null;
+    const potentialTables = ['tm_tasks', 'acc_portal_kyc'];
+    for (const table of potentialTables) {
+        if (sourceDataCache[table]) {
+            record = Object.values(sourceDataCache[table])[0];
+            if (record) break;
+        }
+    }
+
+    if (record) {
+        sourceArray = record[`${entityType}s_details`] || record[`${entityType}_details`] || record[blockName] || [];
+    }
+
+    if (!Array.isArray(sourceArray) || sourceArray.length === 0) return [];
+
+    // Filter child fields, excluding the block tag itself
+    const childFields = allPlaceholders.filter(p => 
+        (p.parent_name === blockName || (p.description && p.description.toLowerCase().includes(blockName.toLowerCase()))) 
+        && p.id !== blockPlaceholder.id 
+    );
+
+    return sourceArray.map((item) => {
+        const rowData = {};
+        childFields.forEach(field => {
+            let val = '';
+            if (field.master_field_ids?.length > 0) {
+                for (const mId of field.master_field_ids) {
+                    const mf = masterFields.get(parseInt(mId));
+                    if (mf && mf.sources?.[0]?.path) {
+                        val = parseJsonValue(item, mf.sources[0].path);
+                        if (val) break;
+                    }
+                }
+            }
+            if (!val) {
+                const fName = field.name.toLowerCase();
+                if (fName.includes('name')) val = item.full_name || item.name || '';
+                else if (fName.includes('role') || fName.includes('position')) val = item.role || item.position || (Array.isArray(item.roles) ? item.roles.join(', ') : '');
+                else val = item[field.name] || '';
+            }
+            rowData[field.name] = val;
+        });
+        return rowData;
+    });
+};
 export default function TemplateGenerationDialog({
     isOpen, onClose, template, availableTemplates = [], documentName, masterFields,
     entityIdMap, sourceDataCache, extractedData = {}, personData = {}, companyData = {},
@@ -204,10 +254,137 @@ export default function TemplateGenerationDialog({
     const docxTemplateBuffer = useRef(null);
     const isWordTemplate = selectedTemplate?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-    const populateHtmlContent = useCallback((data, placeholders, styles) => {
+    const groupedPlaceholders = useMemo(() => {
+        if (!selectedTemplate?.placeholders) return { topLevel: [], blocks: {} };
+        
+        const topLevel = [];
+        const blocks = {};
+        
+        selectedTemplate.placeholders.forEach(p => {
+            if (p.is_block_start) {
+                blocks[p.name] = { config: p, children: [] };
+            } else if (p.parent_name && blocks[p.parent_name]) {
+                blocks[p.parent_name].children.push(p);
+            } else if (!p.parent_name) {
+                topLevel.push(p);
+            }
+        });
+        
+        return { topLevel, blocks };
+    }, [selectedTemplate]);
+
+   useEffect(() => {
+    if (isOpen && selectedTemplate && Object.keys(sourceDataCache).length > 0) {
+        console.log('[Init] Resolving template data with cache:', sourceDataCache);
+        const initData = {};
+        const autoMap = new Map();
+
+        // 1. Resolve Top Level Fields
+        groupedPlaceholders.topLevel.forEach(p => {
+            let match = getPlaceholderValue(p);
+            if (!match.value) match = smartFieldMatch(p.name);
+            initData[p.name] = match.value || '';
+            if (match.value) autoMap.set(p.name, match.source);
+        });
+
+        // 2. Resolve Array Blocks
+        Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
+            const block = groupedPlaceholders.blocks[blockName];
+            const resolvedRows = resolveArrayData(
+                block.config, 
+                selectedTemplate.placeholders, 
+                sourceDataCache, 
+                masterFields, 
+                entityIdMap
+            );
+            
+            console.log(`[Init] Resolved Block: ${blockName}`, resolvedRows);
+            initData[blockName] = resolvedRows;
+            if (resolvedRows.length > 0) autoMap.set(blockName, 'Entity Details Array');
+        });
+
+        setFormData(initData);
+        setAutoPopulatedFields(autoMap);
+    }
+}, [isOpen, selectedTemplate?.id, groupedPlaceholders, sourceDataCache]);
+
+    // Update handleInputChange to handle array updates
+    const handleArrayInputChange = (blockName, index, fieldName, value) => {
+        setFormData(prev => {
+            const newArray = [...(prev[blockName] || [])];
+            newArray[index] = { ...newArray[index], [fieldName]: value };
+            const next = { ...prev, [blockName]: newArray };
+            
+            // Trigger preview refresh
+            if (docxTemplateBuffer.current) updateWordPreview(next, imageStyles);
+            else setPreviewContent(populateHtmlContent(next, selectedTemplate?.placeholders || [], imageStyles));
+            
+            return next;
+        });
+    };
+
+    // UI: Render Array Inputs
+   const renderArrayInputs = (blockName, blockData) => {
+        const rows = formData[blockName] || [];
+        return (
+            <div className="space-y-4 mt-2 border-l-2 border-blue-200 pl-4 py-2 bg-blue-50/20 rounded-r-lg">
+                <div className="flex items-center justify-between px-1">
+                    <Badge className="bg-blue-600 uppercase text-[9px] tracking-tighter">{blockName}</Badge>
+                    <Button variant="ghost" className="h-6 text-[10px] text-blue-600 hover:text-blue-700" onClick={() => {
+                        const emptyRow = {};
+                        blockData.children.forEach(c => emptyRow[c.name] = '');
+                        setFormData(prev => ({ ...prev, [blockName]: [...(prev[blockName] || []), emptyRow] }));
+                    }}>+ ADD ROW</Button>
+                </div>
+                
+                {rows.map((row, idx) => (
+                    <div key={idx} className="p-3 bg-white border rounded shadow-sm relative group mb-2">
+                        <Button variant="ghost" size="icon" className="absolute -right-2 -top-2 h-5 w-5 rounded-full bg-white border shadow-sm text-red-500 hover:bg-red-50" onClick={() => {
+                            const newRows = rows.filter((_, i) => i !== idx);
+                            setFormData(prev => ({ ...prev, [blockName]: newRows }));
+                        }}><X className="h-3 w-3" /></Button>
+                        
+                        <div className="space-y-3">
+                            {blockData.children.map(child => (
+                                <div key={child.id}>
+                                    <Label className="text-[9px] font-bold text-slate-400 uppercase">{child.name}</Label>
+                                    <Input 
+                                        value={row[child.name] || ''} 
+                                        onChange={(e) => handleArrayInputChange(blockName, idx, child.name, e.target.value)}
+                                        className="h-7 text-xs border-slate-100 focus:border-blue-200"
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        );
+    };
+
+  const populateHtmlContent = useCallback((data, placeholders, styles) => {
         if (!selectedTemplate?.content) return '';
         let content = selectedTemplate.content;
-        placeholders.forEach(placeholder => {
+
+        // Handle Array Blocks first
+        Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
+            const blockRegex = new RegExp(`\\{#${blockName}\\}([\\s\\S]*?)\\{/${blockName}\\}`, 'g');
+            const rows = data[blockName] || [];
+            
+            content = content.replace(blockRegex, (_, innerTemplate) => {
+                return rows.map(row => {
+                    let rowHtml = innerTemplate;
+                    groupedPlaceholders.blocks[blockName].children.forEach(child => {
+                        const val = row[child.name] || `[${child.name}]`;
+                        rowHtml = rowHtml.replace(new RegExp(`\\{${child.name}\\}`, 'g'), val);
+                    });
+                    return rowHtml;
+                }).join('');
+            });
+        });
+
+        // Handle remaining Top Level placeholders
+        groupedPlaceholders.topLevel.forEach(placeholder => {
             const value = data[placeholder.name];
             const regex = new RegExp(`\\{{1,2}${placeholder.name}\\}{1,2}`, 'g');
             if (value && String(value).trim() !== '') {
@@ -224,6 +401,40 @@ export default function TemplateGenerationDialog({
         });
         return content;
     }, [selectedTemplate]);
+
+    const prepareRenderData = useCallback(async (data) => {
+        const renderData = {};
+        const imagePromises = [];
+
+        // 1. Add Arrays (Blocks) - e.g., directors: [...]
+        Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
+            renderData[blockName] = data[blockName] || [];
+        });
+
+        // 2. Add Top-Level Fields ONLY
+        (selectedTemplate.placeholders || []).forEach(p => {
+            // CRITICAL: If the field is inside a block, SKIP it. 
+            // It will be handled by the array added in step 1.
+            const isChild = p.parent_name || (p.description && p.description.toLowerCase().includes('inside'));
+            if (isChild || p.is_block_start) return;
+
+            let val = data[p.name];
+            let key = p.name.replace(/[%#{}]/g, '');
+
+            if (p.type === 'image' && val) {
+                if (typeof val === 'string' && val.startsWith('http')) {
+                    imagePromises.push(fetchImageAsBase64(val).then(b64 => { renderData[key] = b64; }));
+                } else {
+                    renderData[key] = val;
+                }
+            } else {
+                renderData[key] = val || "";
+            }
+        });
+
+        await Promise.all(imagePromises);
+        return renderData;
+    }, [groupedPlaceholders, selectedTemplate]);
 
     const updateWordPreview = useCallback(async (data, styles) => {
         if (!docxTemplateBuffer.current) return;
@@ -467,60 +678,19 @@ export default function TemplateGenerationDialog({
     }, [formData, selectedTemplate]);
 
     const generateAndDownload = async (type) => {
-        console.log('\n╔════════════════════════════════════╗');
-        console.log('║   GENERATE AND DOWNLOAD START      ║');
-        console.log('╚════════════════════════════════════╝');
-        console.log('Type:', type);
         setIsGenerating(true);
         try {
             const fileName = `${documentName.replace(/[^\w\s-]/g, '_')}_${formatDate(new Date(), 'YYYYMMDD')}`;
 
             if (docxTemplateBuffer.current) {
-                console.log('\n[Using Word Template]');
                 const zip = new PizZip(docxTemplateBuffer.current);
-                const renderData = {};
-
-                const imagePromises = [];
-                (selectedTemplate.placeholders || []).forEach(p => {
-                    let val = formData[p.name];
-                    let key = p.name.replace(/^\{+/, '').replace(/\}+$/, '').replace(/^%/, '').replace(/^#/, '');
-
-                    console.log(`\n[Field: ${key}]`);
-                    console.log('  Type:', p.type);
-                    console.log('  Has value:', !!val);
-
-                    if (p.type === 'image' && val) {
-                        if (val.startsWith('data:image')) {
-                            console.log('  ✅ Base64');
-                            renderData[key] = val;
-                        } else if (val.startsWith('http')) {
-                            console.log('  📥 Fetching remote');
-                            imagePromises.push(
-                                fetchImageAsBase64(val).then(base64 => {
-                                    renderData[key] = base64;
-                                    console.log(`  ✅ ${key} fetched`);
-                                })
-                            );
-                        } else {
-                            console.log('  ❌ Unknown format');
-                            renderData[key] = null;
-                        }
-                    } else if (p.type === 'image') {
-                        renderData[key] = null;
-                    } else {
-                        renderData[key] = val || "";
-                    }
-                });
-
-                console.log(`\n[Waiting for ${imagePromises.length} image(s)...]`);
-                await Promise.all(imagePromises);
-                console.log('✅ All images processed');
+                const renderData = await prepareRenderData(formData);
 
                 const imageModule = new ImageModule({
                     centered: false,
                     getImage: (tag) => base64Parser(tag),
                     getSize: (img, tag, name) => {
-                        const s = imageStyles[name] || imageStyles[`{%${name}}`];
+                        const s = imageStyles[name];
                         return s ? [s.imageWidth || 300, s.imageHeight || 200] : [300, 200];
                     }
                 });
@@ -528,10 +698,10 @@ export default function TemplateGenerationDialog({
                 const doc = new Docxtemplater(zip, {
                     modules: [imageModule],
                     linebreaks: true,
+                    paragraphLoop: true,
                     nullGetter: () => ""
                 });
 
-                console.log('\n[Rendering final document...]');
                 doc.setData(renderData);
                 doc.render();
 
@@ -539,33 +709,12 @@ export default function TemplateGenerationDialog({
                     type: "blob",
                     mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 });
-                console.log('✅ Blob generated, size:', blob.size, 'bytes');
 
                 if (type === 'word') {
                     saveAs(blob, `${fileName}.docx`);
-                    toast({ title: "Success ✅", description: "Word document with images downloaded" });
+                    toast({ title: "Success", description: "Document downloaded" });
                 } else {
-                    console.log('[Converting to PDF...]');
-                    const html2pdf = (await import('html2pdf.js')).default;
-                    const element = document.createElement('div');
-                    element.innerHTML = previewContent;
-                    element.className = EDITOR_PREVIEW_STYLES + ' p-10 bg-white';
-                    element.style.width = '800px';
-                    await html2pdf().set({
-                        margin: 10,
-                        filename: `${fileName}.pdf`,
-                        image: { type: 'jpeg', quality: 0.98 },
-                        html2canvas: { scale: 2, useCORS: true },
-                        jsPDF: { unit: 'mm', format: 'a4' }
-                    }).from(element).save();
-                    toast({ title: "Success ✅", description: "PDF downloaded" });
-                }
-            } else {
-                console.log('\n[Using HTML Template]');
-                if (type === 'word') {
-                    const blob = new Blob(['\ufeff', previewContent], { type: 'application/msword' });
-                    saveAs(blob, `${fileName}.doc`);
-                } else {
+                    // PDF logic remains the same (converts current previewContent to PDF)
                     const html2pdf = (await import('html2pdf.js')).default;
                     const element = document.createElement('div');
                     element.innerHTML = previewContent;
@@ -578,14 +727,9 @@ export default function TemplateGenerationDialog({
                         jsPDF: { unit: 'mm', format: 'a4' }
                     }).from(element).save();
                 }
-                toast({ title: "Success ✅", description: "Document exported" });
             }
-            console.log('╔════════════════════════════════════╗');
-            console.log('║   GENERATE AND DOWNLOAD SUCCESS    ║');
-            console.log('╚════════════════════════════════════╝\n');
         } catch (e) {
-            console.error('❌ [Generation Error]:', e);
-            toast({ title: "Error ❌", description: e.message, variant: "destructive" });
+            toast({ title: "Error", description: e.message, variant: "destructive" });
         } finally {
             setIsGenerating(false);
         }
@@ -622,33 +766,32 @@ export default function TemplateGenerationDialog({
                     </div>
                 </DialogHeader>
 
-                <div className="flex-1 overflow-hidden grid grid-cols-12 gap-0">
+        <div className="flex-1 overflow-hidden grid grid-cols-12 gap-0">
                     <ScrollArea className="col-span-3 border-r bg-white">
-                        <div className="p-4 space-y-4">
-                            <Label className="text-xs font-bold text-slate-500 uppercase">Inputs</Label>
-                            {selectedTemplate?.placeholders?.map(p => (
-                                <div key={p.id} className="space-y-2 p-3 border rounded-lg bg-slate-50/50">
-                                    <div className="flex justify-between items-center">
-                                        <Label className="font-semibold uppercase">{p.name}</Label>
-                                        {autoPopulatedFields.has(p.name) && !manuallyEditedFields.has(p.name) && (
-                                            <Badge variant="secondary" className="text-[10px] bg-blue-50 text-blue-600">Auto</Badge>
-                                        )}
-                                    </div>
-                                    {p.type === 'image' ? (
-                                        <div className="space-y-2">
-                                            <div className="w-full h-24 border border-dashed rounded bg-white flex items-center justify-center overflow-hidden">
-                                                {formData[p.name] ? <img src={formData[p.name]} className="max-h-full max-w-full object-contain" alt="preview" /> : <ImageIcon className="h-6 w-6 text-slate-200" />}
-                                            </div>
-                                            <Button asChild variant="outline" size="sm" className="w-full h-8 text-xs">
-                                                <label className="cursor-pointer"><FileUp className="h-3 w-3 mr-2" />Upload<input type="file" accept="image/*" className="sr-only" onChange={e => handleFileChange(p.name, e)} /></label>
-                                            </Button>
-                                            <ImagePlaceholderControls styles={imageStyles[p.name] || {}} onStyleChange={(k, v) => handleImageStyleChange(p.name, k, v)} />
+                        <div className="p-4 space-y-6">
+                            {/* Top Level Fields */}
+                            <div className="space-y-4">
+                                <Label className="text-xs font-bold text-slate-400 uppercase tracking-widest">General Fields</Label>
+                                {groupedPlaceholders.topLevel.map(p => (
+                                    <div key={p.id} className="space-y-2 p-3 border rounded-lg bg-slate-50/50">
+                                        <div className="flex justify-between items-center">
+                                            <Label className="font-semibold uppercase text-[11px]">{p.name}</Label>
+                                            {autoPopulatedFields.has(p.name) && <Badge variant="secondary" className="text-[9px] bg-blue-50 text-blue-600">Auto</Badge>}
                                         </div>
-                                    ) : (
-                                        <Input value={formData[p.name] || ''} onChange={e => handleInputChange(p.name, e.target.value)} className="bg-white h-8 text-xs" placeholder={`Enter...`} />
-                                    )}
-                                </div>
-                            ))}
+                                        <Input value={formData[p.name] || ''} onChange={e => handleInputChange(p.name, e.target.value)} className="bg-white h-8 text-xs" />
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Array Blocks */}
+                            <div className="space-y-4 pt-4 border-t">
+                                <Label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Repeating Sections</Label>
+                                {Object.keys(groupedPlaceholders.blocks).map(blockName => (
+                                    <div key={blockName}>
+                                        {renderArrayInputs(blockName, groupedPlaceholders.blocks[blockName])}
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     </ScrollArea>
 
