@@ -78,6 +78,8 @@ export const ENHANCED_TABLE_HEADERS_IMMIGRATION: TableHeader[] = [
   { id: 'task_manager', label: 'Task Manager', default: false, width: 'w-32' },
   { id: 'officer', label: 'Officer', default: false, width: 'w-32' },
   { id: 'task_assistant', label: 'Task Assistant', default: false, width: 'w-32' },
+  { id: 'r_number', label: 'R Number', default: false, width: 'w-32' },
+  
 ];
 
 export const ENHANCED_TABLE_HEADERS: TableHeader[] = [
@@ -535,7 +537,7 @@ export const fetchAndEnhanceIndividuals = async (
 
     const { data, error } = await supabase
       .from('registry_individuals')
-      .select('id, full_name, nationality, date_of_birth, relationships')
+      .select('id, full_name, nationality, date_of_birth, relationships, r_number')
       .in('id', individualIds);
 
     if (error) {
@@ -586,7 +588,8 @@ export const createEnhancedTaskData = (
       applicant_data: applicantData,
       full_name: applicantData?.full_name || task.full_name,
       nationality: applicantData?.nationality || task.nationality,
-      age: applicantData?.age
+      age: applicantData?.age,
+      r_number: applicantData?.r_number
     });
 
     if (task.dependant_member && Array.isArray(task.dependant_member)) {
@@ -837,6 +840,7 @@ export const getCellContent = (
     nationality: enhancedTask.nationality || 'N/A',
     full_name: enhancedTask.full_name || 'N/A',
     age: enhancedTask.age?.toString() || 'N/A',
+    r_number: enhancedTask.r_number?.toString() || 'N/A',
     task_manager: task.task_manager_id ? getStaffName(task.task_manager_id) : <span className="text-red-500 font-semibold">Unallocated</span>,
     officer: task.officer_id ? getStaffName(task.officer_id) : <span className="text-red-500 font-semibold">Unallocated</span>,
     task_assistant: task.task_assistant_id ? getStaffName(task.task_assistant_id) : <span className="text-red-500 font-semibold">Unallocated</span>
@@ -900,6 +904,7 @@ export const getRawCellValue = (
     nationality: enhancedTask.nationality || 'N/A',
     full_name: enhancedTask.full_name || 'N/A',
     age: enhancedTask.age?.toString() || 'N/A',
+    r_number: enhancedTask.r_number?.toString() || 'N/A',
     task_manager: task.task_manager_id ? getStaffName(task.task_manager_id) : 'N/A',
     officer: task.officer_id ? getStaffName(task.officer_id) : 'N/A',
     task_assistant: task.task_assistant_id ? getStaffName(task.task_assistant_id) : 'N/A'
@@ -961,6 +966,7 @@ export const filterTasksBySearch = (
       task.renewal_status,
       enhancedTask.nationality,
       enhancedTask.age?.toString(),
+      enhancedTask.r_number?.toString(),
       companies.get(task.company_id),
       hierarchy?.department?.name,
       hierarchy?.subdepartment?.name,
@@ -976,7 +982,7 @@ export const filterTasksBySearch = (
     const dependants = taskDependants.get(task.id.toString()) || [];
     if (dependants.length > 0) {
       const dependantText = dependants
-        .map(dep => [dep.full_name, dep.nationality, dep.age, dep.relationship].filter(Boolean).join(' '))
+        .map(dep => [dep.full_name, dep.nationality, dep.age,dep.r_number, dep.relationship].filter(Boolean).join(' '))
         .join(' ').toLowerCase();
       if (dependantText.includes(term)) return true;
     }
