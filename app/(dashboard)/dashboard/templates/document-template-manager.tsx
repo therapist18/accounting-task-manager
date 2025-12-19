@@ -627,10 +627,21 @@ const extractPlaceholders = async (source: { type: 'file', content: File } | { t
     setCurrentTemplateIndex(updatedTemplates.length - 1);
   };
 
-  const handleEditorChange = (html: string) => {
+  const handleEditorChange = (content: { html: string; header?: string; footer?: string } | string) => {
     if (currentTemplateIndex === null) return;
     const updatedTemplates = [...templates];
-    updatedTemplates[currentTemplateIndex].content = html;
+    // Handle both string (legacy) and object (new) formats
+    if (typeof content === 'string') {
+      updatedTemplates[currentTemplateIndex].content = content;
+    } else {
+      // Combine header, main content, and footer with proper separation
+      const { html, header = '', footer = '' } = content;
+      updatedTemplates[currentTemplateIndex].content = [
+        header ? `<header>${header}</header>` : '',
+        html,
+        footer ? `<footer>${footer}</footer>` : ''
+      ].join('\n\n');
+    }
     updatedTemplates[currentTemplateIndex].isDirty = true;
     setTemplates(updatedTemplates);
   };

@@ -29,13 +29,21 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 interface TemplateEditorProps {
   initialContent?: string;
-  onChange?: (html: string) => void;
+  headerContent?: string;
+  footerContent?: string;
+  onChange?: (content: { 
+    html: string; 
+    header?: string; 
+    footer?: string;
+    placeholders?: string[];
+  }) => void;
   onBlur?: () => void;
   className?: string;
+  showHeaderFooterControls?: boolean;
 }
 
 const ToolbarButton = ({ onClick, isActive, tooltip, children, className = "" }) => (
@@ -63,12 +71,25 @@ const sanitizeClassName = (cls: string | undefined): string => {
 };
 
 export default function TemplateEditor({ 
-  initialContent = '', 
+  initialContent = '',
+  headerContent: initialHeader = '',
+  footerContent: initialFooter = '',
   onChange, 
   onBlur, 
-  className = '' 
+  className = '',
+  showHeaderFooterControls = true
 }: TemplateEditorProps) {
+  const [showHeader, setShowHeader] = useState(!!initialHeader);
+  const [showFooter, setShowFooter] = useState(!!initialFooter);
+  const [headerContent, setHeaderContent] = useState(initialHeader);
+  const [footerContent, setFooterContent] = useState(initialFooter);
   const editorClassName = `template-editor border rounded-md flex flex-col h-full overflow-hidden min-h-[400px] ${sanitizeClassName(className)}`.trim();
+  
+  // Initialize header/footer from initial props
+  useEffect(() => {
+    if (initialHeader) setHeaderContent(initialHeader);
+    if (initialFooter) setFooterContent(initialFooter);
+  }, [initialHeader, initialFooter]);
 
   // --- SMART EXTENSION RESOLVER ---
   // This memoized block ensures we find the actual Extension object regardless of how webpack packed it
@@ -115,11 +136,47 @@ export default function TemplateEditor({
     ].filter(Boolean); // Filter out any null/undefined entries
   }, []);
 
+  // Extract placeholders from content
+  const extractPlaceholders = useCallback((content: string): string[] => {
+    // Match placeholders in the format {{placeholder_name}}
+    const regex = /\{\{([^}]+)\}\}/g;
+    const matches = [];
+    let match;
+    while ((match = regex.exec(content)) !== null) {
+      if (!matches.includes(match[1])) {
+        matches.push(match[1]);
+      }
+    }
+    return matches;
+  }, []);
+
+  const handleContentChange = useCallback((content: string) => {
+    if (!onChange) return;
+
+    // Extract placeholders from all content sections
+    const mainPlaceholders = extractPlaceholders(content);
+    const headerPlaceholders = showHeader ? extractPlaceholders(headerContent) : [];
+    const footerPlaceholders = showFooter ? extractPlaceholders(footerContent) : [];
+
+    // Combine and deduplicate placeholders
+    const allPlaceholders = [
+      ...new Set([...mainPlaceholders, ...headerPlaceholders, ...footerPlaceholders])
+    ];
+
+    // Notify parent component of content changes with all placeholders
+    onChange({
+      html: content,
+      ...(showHeader && { header: headerContent }),
+      ...(showFooter && { footer: footerContent }),
+      placeholders: allPlaceholders
+    });
+  }, [onChange, showHeader, showFooter, headerContent, footerContent, extractPlaceholders]);
+
   const editor = useEditor({
     extensions,
     content: initialContent,
     onUpdate: ({ editor }) => {
-      onChange && onChange(editor.getHTML());
+      handleContentChange(editor.getHTML());
     },
     onBlur: () => {
       onBlur && onBlur();
@@ -163,7 +220,64 @@ export default function TemplateEditor({
 
   if (!editor) return null;
 
+  const handleHeaderChange = (content: string) => {
+    setHeaderContent(content);
+    if (editor) {
+      // Trigger content change to update placeholders
+      handleContentChange(editor.getHTML());
+    } else {
+      // If editor isn't ready yet, just notify with empty content
+      handleContentChange('');
+    }
+  };
+
+  const handleFooterChange = (content: string) => {
+    setFooterContent(content);
+    if (editor) {
+      // Trigger content change to update placeholders
+      handleContentChange(editor.getHTML());
+    } else {
+      // If editor isn't ready yet, just notify with empty content
+      handleContentChange('');
+    }
+  };
+
+  const toggleHeader = () => {
+    const newShowHeader = !showHeader;
+    setShowHeader(newShowHeader);
+    // If we're hiding the header, we need to update placeholders
+    if (!newShowHeader && editor) {
+      handleContentChange(editor.getHTML());
+    }
+  };
+
+  const toggleFooter = () => {
+    const newShowFooter = !showFooter;
+    setShowFooter(newShowFooter);
+    // If we're hiding the footer, we need to update placeholders
+    if (!newShowFooter && editor) {
+      handleContentChange(editor.getHTML());
+    }
+  };
+
   const toolbarItems = [
+    ...(showHeaderFooterControls ? [
+      { 
+        name: 'header', 
+        tooltip: showHeader ? 'Hide Header' : 'Show Header', 
+        icon: <span className="font-bold">H</span>, 
+        action: toggleHeader,
+        isActive: showHeader
+      },
+      { 
+        name: 'footer', 
+        tooltip: showFooter ? 'Hide Footer' : 'Show Footer', 
+        icon: <span className="font-bold">F</span>, 
+        action: toggleFooter,
+        isActive: showFooter
+      },
+      { type: 'divider' }
+    ] : []),
     { name: 'bold', tooltip: 'Bold', icon: <Bold className="h-4 w-4" />, action: () => editor.chain().focus().toggleBold().run() },
     { name: 'italic', tooltip: 'Italic', icon: <Italic className="h-4 w-4" />, action: () => editor.chain().focus().toggleItalic().run() },
     { name: 'underline', tooltip: 'Underline', icon: <UnderlineIcon className="h-4 w-4" />, action: () => editor.chain().focus().toggleUnderline().run() },
@@ -187,50 +301,117 @@ export default function TemplateEditor({
   ];
 
   return (
-    <TooltipProvider delayDuration={100}>
-      <div className={editorClassName}>
-        {/* Main Toolbar */}
-        <div className="sticky top-0 z-50 p-2 flex flex-wrap items-center gap-1 bg-background border-b rounded-t-md">
-          {toolbarItems.map((item, index) => (
-            item.type === 'divider' ? <div key={`divider-${index}`} className="w-[1px] h-6 bg-border mx-1" /> :
-              <ToolbarButton 
-                key={item.level ? `${item.name}-${item.level}` : item.name} 
-                onClick={item.action} 
-                isActive={
-                  item.name === 'alignLeft' ? editor.isActive({ textAlign: 'left' }) :
-                  item.name === 'alignCenter' ? editor.isActive({ textAlign: 'center' }) :
-                  item.name === 'alignRight' ? editor.isActive({ textAlign: 'right' }) :
-                  editor.isActive(item.name, item.level ? { level: item.level } : {})
-                } 
+    <div className={editorClassName}>
+      <TooltipProvider>
+        <div className="flex flex-wrap gap-1 p-2 border-b bg-muted/50">
+          {toolbarItems.map((item, index) => {
+            if (item.type === 'divider') {
+              return <div key={`divider-${index}`} className="w-px h-8 bg-border mx-1" />;
+            }
+            
+            const isActive = item.name === 'heading' 
+              ? editor.isActive('heading', { level: item.level })
+              : item.name === 'header' || item.name === 'footer'
+                ? item.isActive
+                : editor.isActive(item.name);
+
+            return (
+              <ToolbarButton
+                key={item.name + (item.level || '')}
+                onClick={item.action}
+                isActive={isActive}
                 tooltip={item.tooltip}
               >
                 {item.icon}
               </ToolbarButton>
-          ))}
+            );
+          })}
         </div>
 
         {/* Table Specific Toolbar (Only visible when table is active) */}
         {editor.isActive('table') && (
           <div className="p-1 flex flex-wrap items-center gap-1 bg-muted/30 border-b text-xs">
             <span className="text-muted-foreground ml-2 mr-2 font-medium text-xs">Table:</span>
-            <ToolbarButton onClick={() => editor.chain().focus().addColumnBefore().run()} tooltip="Add Column Before"><div className="flex"><Plus className="h-3 w-3" /><span className="text-[10px]">Col Left</span></div></ToolbarButton>
-            <ToolbarButton onClick={() => editor.chain().focus().addColumnAfter().run()} tooltip="Add Column After"><div className="flex"><Plus className="h-3 w-3" /><span className="text-[10px]">Col Right</span></div></ToolbarButton>
-            <ToolbarButton onClick={() => editor.chain().focus().deleteColumn().run()} tooltip="Delete Column"><div className="flex"><Minus className="h-3 w-3" /><span className="text-[10px]">Col</span></div></ToolbarButton>
+            <ToolbarButton onClick={() => editor.chain().focus().addColumnBefore().run()} tooltip="Add Column Before">
+              <div className="flex"><Plus className="h-3 w-3" /><span className="text-[10px]">Col Left</span></div>
+            </ToolbarButton>
+            <ToolbarButton onClick={() => editor.chain().focus().addColumnAfter().run()} tooltip="Add Column After">
+              <div className="flex"><Plus className="h-3 w-3" /><span className="text-[10px]">Col Right</span></div>
+            </ToolbarButton>
+            <ToolbarButton onClick={() => editor.chain().focus().deleteColumn().run()} tooltip="Delete Column">
+              <div className="flex"><Minus className="h-3 w-3" /><span className="text-[10px]">Col</span></div>
+            </ToolbarButton>
             <div className="w-[1px] h-4 bg-border mx-1" />
-            <ToolbarButton onClick={() => editor.chain().focus().addRowBefore().run()} tooltip="Add Row Before"><div className="flex"><Plus className="h-3 w-3" /><span className="text-[10px]">Row Up</span></div></ToolbarButton>
-            <ToolbarButton onClick={() => editor.chain().focus().addRowAfter().run()} tooltip="Add Row After"><div className="flex"><Plus className="h-3 w-3" /><span className="text-[10px]">Row Down</span></div></ToolbarButton>
-            <ToolbarButton onClick={() => editor.chain().focus().deleteRow().run()} tooltip="Delete Row"><div className="flex"><Minus className="h-3 w-3" /><span className="text-[10px]">Row</span></div></ToolbarButton>
+            <ToolbarButton onClick={() => editor.chain().focus().addRowBefore().run()} tooltip="Add Row Before">
+              <div className="flex"><Plus className="h-3 w-3" /><span className="text-[10px]">Row Up</span></div>
+            </ToolbarButton>
+            <ToolbarButton onClick={() => editor.chain().focus().addRowAfter().run()} tooltip="Add Row After">
+              <div className="flex"><Plus className="h-3 w-3" /><span className="text-[10px]">Row Down</span></div>
+            </ToolbarButton>
+            <ToolbarButton onClick={() => editor.chain().focus().deleteRow().run()} tooltip="Delete Row">
+              <div className="flex"><Minus className="h-3 w-3" /><span className="text-[10px]">Row</span></div>
+            </ToolbarButton>
             <div className="w-[1px] h-4 bg-border mx-1" />
-            <ToolbarButton onClick={() => editor.chain().focus().mergeCells().run()} tooltip="Merge Cells"><Merge className="h-3 w-3" /></ToolbarButton>
-            <ToolbarButton onClick={() => editor.chain().focus().splitCell().run()} tooltip="Split Cell"><Split className="h-3 w-3" /></ToolbarButton>
-            <ToolbarButton onClick={() => editor.chain().focus().deleteTable().run()} tooltip="Delete Table" className="text-red-500 hover:text-red-600"><Trash2 className="h-3 w-3" /></ToolbarButton>
+            <ToolbarButton onClick={() => editor.chain().focus().mergeCells().run()} tooltip="Merge Cells">
+              <Merge className="h-3 w-3" />
+            </ToolbarButton>
+            <ToolbarButton onClick={() => editor.chain().focus().splitCell().run()} tooltip="Split Cell">
+              <Split className="h-3 w-3" />
+            </ToolbarButton>
+            <ToolbarButton 
+              onClick={() => editor.chain().focus().deleteTable().run()} 
+              tooltip="Delete Table" 
+              className="text-red-500 hover:text-red-600"
+            >
+              <Trash2 className="h-3 w-3" />
+            </ToolbarButton>
           </div>
         )}
 
-        <div className="flex-1 overflow-auto" style={{ minHeight: '300px', maxHeight: 'calc(100vh - 200px)' }}>
-          <EditorContent editor={editor} className="p-4" />
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {showHeader && (
+            <div className="border-b border-border">
+              <div className="text-xs text-muted-foreground px-4 py-1 bg-muted/30">
+                Header
+              </div>
+              <div 
+                className="p-2 min-h-[60px] max-h-[200px] overflow-auto"
+                dangerouslySetInnerHTML={{ __html: headerContent }}
+                onClick={() => {
+                  const newContent = prompt('Edit header content:', headerContent);
+                  if (newContent !== null) {
+                    handleHeaderChange(newContent);
+                  }
+                }}
+                style={{ cursor: 'pointer' }}
+              />
+            </div>
+          )}
+          
+          <div className="flex-1 overflow-auto">
+            <EditorContent editor={editor} className="h-full" />
+          </div>
+          
+          {showFooter && (
+            <div className="border-t border-border">
+              <div className="text-xs text-muted-foreground px-4 py-1 bg-muted/30 text-right">
+                Footer
+              </div>
+              <div 
+                className="p-2 min-h-[60px] max-h-[200px] overflow-auto"
+                dangerouslySetInnerHTML={{ __html: footerContent }}
+                onClick={() => {
+                  const newContent = prompt('Edit footer content:', footerContent);
+                  if (newContent !== null) {
+                    handleFooterChange(newContent);
+                  }
+                }}
+                style={{ cursor: 'pointer' }}
+              />
+            </div>
+          )}
         </div>
-      </div>
-    </TooltipProvider>
+      </TooltipProvider>
+    </div>
   );
 }

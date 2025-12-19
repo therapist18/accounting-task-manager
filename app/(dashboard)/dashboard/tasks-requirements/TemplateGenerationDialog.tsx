@@ -14,10 +14,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
     AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp,
-    Loader2, Wand2, Expand, Eye, Edit3, CheckCircle2, X, Image as ImageIcon, AlertCircle
+    Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon
 } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Progress } from "@/components/ui/progress";
@@ -51,23 +50,56 @@ const formatDate = (date, formatStr) => {
 };
 
 const base64Parser = (dataURL) => {
-    if (typeof dataURL !== 'string') return null;
+    console.log('[base64Parser] Input type:', typeof dataURL, 'starts with:', String(dataURL).substring(0, 30));
+    if (typeof dataURL !== 'string') {
+        console.log('[base64Parser] ❌ Invalid - not a string');
+        return null;
+    }
     const regex = /^data:image\/(png|jpeg|jpg);base64,/;
-    if (!regex.test(dataURL)) return false;
+    if (!regex.test(dataURL)) {
+        console.log('[base64Parser] ❌ Invalid format - regex failed');
+        return false;
+    }
     const base64 = dataURL.replace(regex, "");
     const binaryStr = atob(base64);
     const len = binaryStr.length;
     const bytes = new Uint8Array(len);
     for (let i = 0; i < len; i++) { bytes[i] = binaryStr.charCodeAt(i); }
+    console.log('[base64Parser] ✅ Success, buffer size:', bytes.buffer.byteLength);
     return bytes.buffer;
 };
 
 const toBase64 = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = error => reject(error);
+    reader.onload = () => {
+        console.log('[toBase64] ✅ Conversion complete, length:', reader.result?.length);
+        resolve(reader.result);
+    };
+    reader.onerror = error => {
+        console.error('[toBase64] ❌ Failed:', error);
+        reject(error);
+    };
 });
+
+const fetchImageAsBase64 = async (url) => {
+    console.log('[fetchImageAsBase64] 📥 Fetching:', url);
+    try {
+        const response = await fetch(url, { mode: 'cors' });
+        if (!response.ok) {
+            console.error('[fetchImageAsBase64] ❌ HTTP error:', response.status);
+            return null;
+        }
+        const blob = await response.blob();
+        console.log('[fetchImageAsBase64] ✅ Blob received:', blob.type, blob.size, 'bytes');
+        const base64 = await toBase64(blob);
+        console.log('[fetchImageAsBase64] ✅ Converted to base64, length:', base64?.length);
+        return base64;
+    } catch (error) {
+        console.error('[fetchImageAsBase64] ❌ Error:', error);
+        return null;
+    }
+};
 
 const parseJsonValue = (data, path) => {
     if (!path || !data) return '';
@@ -119,12 +151,22 @@ const ImagePlaceholderControls = ({ styles, onStyleChange }) => {
                 <Select value={currentSizeKey} onValueChange={(size) => onStyleChange('maxWidth', sizeMap[size])}>
                     <SelectTrigger className="w-14 h-8"><SelectValue><Expand className="h-3 w-3" /></SelectValue></SelectTrigger>
                     <SelectContent>
-                        <SelectItem value="small">Small (25%)</SelectItem>
-                        <SelectItem value="medium">Medium (50%)</SelectItem>
-                        <SelectItem value="large">Large (75%)</SelectItem>
-                        <SelectItem value="full-width">Full Width</SelectItem>
+                        <SelectItem value="small">25%</SelectItem>
+                        <SelectItem value="medium">50%</SelectItem>
+                        <SelectItem value="large">75%</SelectItem>
+                        <SelectItem value="full-width">100%</SelectItem>
                     </SelectContent>
                 </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+                <div>
+                    <Label className="text-[10px]">Width (px)</Label>
+                    <Input type="number" min="50" max="600" value={styles.imageWidth || 300} onChange={(e) => onStyleChange('imageWidth', parseInt(e.target.value) || 300)} className="h-7 text-xs" />
+                </div>
+                <div>
+                    <Label className="text-[10px]">Height (px)</Label>
+                    <Input type="number" min="50" max="600" value={styles.imageHeight || 200} onChange={(e) => onStyleChange('imageHeight', parseInt(e.target.value) || 200)} className="h-7 text-xs" />
+                </div>
             </div>
         </div>
     );
@@ -145,11 +187,10 @@ export default function TemplateGenerationDialog({
     const [selectedTemplate, setSelectedTemplate] = useState(template);
     const [uploadedFiles, setUploadedFiles] = useState({});
     const [imageStyles, setImageStyles] = useState({});
-    const [activeTab, setActiveTab] = useState('edit');
 
     const docxTemplateBuffer = useRef(null);
+    const isWordTemplate = selectedTemplate?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-    // --- REUSE POPULATE CONTENT FOR HTML TEMPLATES ---
     const populateHtmlContent = useCallback((data, placeholders, styles) => {
         if (!selectedTemplate?.content) return '';
         let content = selectedTemplate.content;
@@ -165,41 +206,86 @@ export default function TemplateGenerationDialog({
                     content = content.replace(regex, formattedValue);
                 }
             } else {
-                content = content.replace(regex, `<span style="background-color: #fef08a; padding: 2px 4px; border: 1px dashed #eab308; color: #854d0e;">[${placeholder.name}]</span>`);
+                content = content.replace(regex, `<span style="background-color: #fef08a; padding: 2px 4px; color: #854d0e;">[${placeholder.name}]</span>`);
             }
         });
         return content;
     }, [selectedTemplate]);
 
-    // --- WORD PREVIEW GENERATOR ---
     const updateWordPreview = useCallback(async (data, styles) => {
         if (!docxTemplateBuffer.current) return;
         try {
+            console.log('\n=== [updateWordPreview] START ===');
             setIsPreviewLoading(true);
             const zip = new PizZip(docxTemplateBuffer.current);
             const renderData = {};
+            
+            const imagePromises = [];
             (selectedTemplate.placeholders || []).forEach(p => {
                 let val = data[p.name];
                 let key = p.name.replace(/^\{+/, '').replace(/\}+$/, '').replace(/^%/, '').replace(/^#/, '');
-                if (p.type === 'image') renderData[key] = val?.startsWith('data:image') ? val : null;
-                else renderData[key] = val || `[${p.name}]`;
+                
+                console.log(`\n[Placeholder: ${key}]`);
+                console.log('  Type:', p.type);
+                console.log('  Value type:', typeof val);
+                console.log('  Value preview:', String(val).substring(0, 50));
+                
+                if (p.type === 'image' && val) {
+                    if (val.startsWith('data:image')) {
+                        console.log('  ✅ Base64 image');
+                        renderData[key] = val;
+                    } else if (val.startsWith('http')) {
+                        console.log('  📥 Remote image - queuing fetch');
+                        imagePromises.push(
+                            fetchImageAsBase64(val).then(base64 => {
+                                renderData[key] = base64;
+                                console.log(`  ✅ Fetched ${key}`);
+                            })
+                        );
+                    } else {
+                        console.log('  ❌ Unknown format');
+                        renderData[key] = null;
+                    }
+                } else if (p.type === 'image') {
+                    console.log('  ⚪ No value');
+                    renderData[key] = null;
+                } else {
+                    renderData[key] = val || `[${p.name}]`;
+                }
             });
+
+            console.log(`\n[Waiting for ${imagePromises.length} image(s)...]`);
+            await Promise.all(imagePromises);
+            console.log('✅ All images ready');
+            console.log('RenderData keys:', Object.keys(renderData));
 
             const imageModule = new ImageModule({
                 centered: false,
-                getImage: (tag) => base64Parser(tag),
+                getImage: (tag) => {
+                    console.log('[ImageModule.getImage] Called');
+                    return base64Parser(tag);
+                },
                 getSize: (img, tag, name) => {
                     const s = styles[name] || styles[`{%${name}}`];
-                    return s ? [s.imageWidth || 300, s.imageHeight || 200] : [300, 200];
+                    const size = s ? [s.imageWidth || 300, s.imageHeight || 200] : [300, 200];
+                    console.log('[ImageModule.getSize]', name, '→', size);
+                    return size;
                 },
             });
 
-            const doc = new Docxtemplater(zip, { modules: [imageModule], paragraphLoop: true, linebreaks: true });
+            const doc = new Docxtemplater(zip, { 
+                modules: [imageModule], 
+                paragraphLoop: true, 
+                linebreaks: true,
+                nullGetter: () => ""
+            });
+            
+            console.log('\n[Rendering document...]');
             doc.setData(renderData);
             doc.render();
             const out = doc.getZip().generate({ type: "arraybuffer" });
+            console.log('✅ Document generated, size:', out.byteLength, 'bytes');
 
-            // Using mammoth with custom image handler for HTML preview
             const result = await mammoth.convertToHtml({ arrayBuffer: out }, {
                 styleMap: [
                     "p => p:fresh",
@@ -215,30 +301,33 @@ export default function TemplateGenerationDialog({
                     });
                 })
             });
+            console.log('✅ Mammoth HTML conversion complete');
+            console.log('=== [updateWordPreview] END ===\n');
             setPreviewContent(result.value);
         } catch (err) {
-            console.error("Word preview error", err);
+            console.error("❌ [updateWordPreview] Error:", err);
+            toast({ title: "Preview Error", description: err.message, variant: "destructive" });
         } finally {
             setIsPreviewLoading(false);
         }
-    }, [selectedTemplate]);
+    }, [selectedTemplate, toast]);
 
-    // --- INITIAL LOAD & TEMPLATE SWITCH ---
     useEffect(() => {
         if (!isOpen) return;
         const load = async () => {
             const current = availableTemplates.find(t => t.id === selectedTemplate?.id) || availableTemplates[0] || template;
             setSelectedTemplate(current);
 
-            if (current?.file_path) {
+            if (current?.file_path && current?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
                 setIsPreviewLoading(true);
                 const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${current.file_path}`;
+                console.log('[Template Load] Fetching:', publicUrl);
 
-                // Set iframe preview URL (Google Viewer)
                 setDocPreviewUrl(`https://docs.google.com/viewer?url=${encodeURIComponent(publicUrl)}&embedded=true`);
 
                 const res = await fetch(publicUrl);
                 docxTemplateBuffer.current = await res.arrayBuffer();
+                console.log('[Template Load] ✅ Loaded, size:', docxTemplateBuffer.current.byteLength);
                 updateWordPreview(formData, imageStyles);
             } else {
                 docxTemplateBuffer.current = null;
@@ -305,6 +394,7 @@ export default function TemplateGenerationDialog({
     const handleFileChange = (name, e) => {
         const file = e.target.files[0];
         if (file) {
+            console.log('[File Upload]', file.name, file.type, file.size, 'bytes');
             setUploadedFiles(prev => ({ ...prev, [name]: file }));
             const reader = new FileReader();
             reader.onloadend = () => handleInputChange(name, reader.result);
@@ -342,20 +432,54 @@ export default function TemplateGenerationDialog({
     }, [formData, selectedTemplate]);
 
     const generateAndDownload = async (type) => {
+        console.log('\n╔════════════════════════════════════╗');
+        console.log('║   GENERATE AND DOWNLOAD START      ║');
+        console.log('╚════════════════════════════════════╝');
+        console.log('Type:', type);
         setIsGenerating(true);
         try {
             const fileName = `${documentName.replace(/[^\w\s-]/g, '_')}_${formatDate(new Date(), 'YYYYMMDD')}`;
-            let blob;
 
             if (docxTemplateBuffer.current) {
-                // Scenario: Template is a Word file. Always generate Word first to preserve structure.
+                console.log('\n[Using Word Template]');
                 const zip = new PizZip(docxTemplateBuffer.current);
                 const renderData = {};
+                
+                const imagePromises = [];
                 (selectedTemplate.placeholders || []).forEach(p => {
                     let val = formData[p.name];
                     let key = p.name.replace(/^\{+/, '').replace(/\}+$/, '').replace(/^%/, '').replace(/^#/, '');
-                    renderData[key] = p.type === 'image' ? (val?.startsWith('data:image') ? val : null) : (val || "");
+                    
+                    console.log(`\n[Field: ${key}]`);
+                    console.log('  Type:', p.type);
+                    console.log('  Has value:', !!val);
+                    
+                    if (p.type === 'image' && val) {
+                        if (val.startsWith('data:image')) {
+                            console.log('  ✅ Base64');
+                            renderData[key] = val;
+                        } else if (val.startsWith('http')) {
+                            console.log('  📥 Fetching remote');
+                            imagePromises.push(
+                                fetchImageAsBase64(val).then(base64 => {
+                                    renderData[key] = base64;
+                                    console.log(`  ✅ ${key} fetched`);
+                                })
+                            );
+                        } else {
+                            console.log('  ❌ Unknown format');
+                            renderData[key] = null;
+                        }
+                    } else if (p.type === 'image') {
+                        renderData[key] = null;
+                    } else {
+                        renderData[key] = val || "";
+                    }
                 });
+
+                console.log(`\n[Waiting for ${imagePromises.length} image(s)...]`);
+                await Promise.all(imagePromises);
+                console.log('✅ All images processed');
 
                 const imageModule = new ImageModule({
                     centered: false,
@@ -366,15 +490,27 @@ export default function TemplateGenerationDialog({
                     }
                 });
 
-                const doc = new Docxtemplater(zip, { modules: [imageModule], linebreaks: true });
+                const doc = new Docxtemplater(zip, { 
+                    modules: [imageModule], 
+                    linebreaks: true,
+                    nullGetter: () => ""
+                });
+                
+                console.log('\n[Rendering final document...]');
                 doc.setData(renderData);
                 doc.render();
-                blob = doc.getZip().generate({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+                
+                const blob = doc.getZip().generate({ 
+                    type: "blob", 
+                    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" 
+                });
+                console.log('✅ Blob generated, size:', blob.size, 'bytes');
 
                 if (type === 'word') {
                     saveAs(blob, `${fileName}.docx`);
+                    toast({ title: "Success ✅", description: "Word document with images downloaded" });
                 } else {
-                    // For PDF from Word template: Use Mammoth converted HTML as source
+                    console.log('[Converting to PDF...]');
                     const html2pdf = (await import('html2pdf.js')).default;
                     const element = document.createElement('div');
                     element.innerHTML = previewContent;
@@ -387,13 +523,12 @@ export default function TemplateGenerationDialog({
                         html2canvas: { scale: 2, useCORS: true },
                         jsPDF: { unit: 'mm', format: 'a4' }
                     }).from(element).save();
+                    toast({ title: "Success ✅", description: "PDF downloaded" });
                 }
             } else {
-                // Scenario: HTML Template
+                console.log('\n[Using HTML Template]');
                 if (type === 'word') {
-                    toast({ title: "Note", description: "Standard Word conversion for HTML templates is simplified." });
-                    // Basic blob generation for HTML content as Word
-                    blob = new Blob(['\ufeff', previewContent], { type: 'application/msword' });
+                    const blob = new Blob(['\ufeff', previewContent], { type: 'application/msword' });
                     saveAs(blob, `${fileName}.doc`);
                 } else {
                     const html2pdf = (await import('html2pdf.js')).default;
@@ -401,209 +536,140 @@ export default function TemplateGenerationDialog({
                     element.innerHTML = previewContent;
                     element.className = EDITOR_PREVIEW_STYLES + ' p-10 bg-white';
                     element.style.width = '800px';
-                    await html2pdf().set({ margin: 10, filename: `${fileName}.pdf`, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: 'a4' } }).from(element).save();
+                    await html2pdf().set({ 
+                        margin: 10, 
+                        filename: `${fileName}.pdf`, 
+                        html2canvas: { scale: 2, useCORS: true }, 
+                        jsPDF: { unit: 'mm', format: 'a4' } 
+                    }).from(element).save();
                 }
+                toast({ title: "Success ✅", description: "Document exported" });
             }
-            toast({ title: "Success", description: "Document exported successfully" });
+            console.log('╔════════════════════════════════════╗');
+            console.log('║   GENERATE AND DOWNLOAD SUCCESS    ║');
+            console.log('╚════════════════════════════════════╝\n');
         } catch (e) {
-            console.error(e);
-            toast({ title: "Error", description: e.message, variant: "destructive" });
-        } finally { setIsGenerating(false); }
+            console.error('❌ [Generation Error]:', e);
+            toast({ title: "Error ❌", description: e.message, variant: "destructive" });
+        } finally { 
+            setIsGenerating(false); 
+        }
     };
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="max-w-[95vw] w-full h-[95vh] flex flex-col p-0">
-                <DialogHeader className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
+            <DialogContent className="max-w-[98vw] w-full h-[95vh] flex flex-col p-0">
+                <DialogHeader className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50 flex-shrink-0">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-blue-500 rounded-lg"><Wand2 className="h-5 w-5 text-white" /></div>
                             <div>
                                 <DialogTitle className="text-xl font-bold">{documentName}</DialogTitle>
-                                <DialogDescription className="text-sm">Auto-populate and live preview your template</DialogDescription>
+                                <DialogDescription className="text-sm">Auto-populate and generate</DialogDescription>
                             </div>
                         </div>
-                        <Button variant="ghost" size="icon" onClick={onClose}><X className="h-5 w-5" /></Button>
+                        <div className="flex items-center gap-2">
+                            {availableTemplates.length > 1 && (
+                                <Select value={selectedTemplate?.id} onValueChange={(v) => setSelectedTemplate(availableTemplates.find(t => t.id === v))}>
+                                    <SelectTrigger className="w-64 h-9"><SelectValue /></SelectTrigger>
+                                    <SelectContent>{availableTemplates.map(t => <SelectItem key={t.id} value={t.id}>{t.file_name}</SelectItem>)}</SelectContent>
+                                </Select>
+                            )}
+                            <Button variant="ghost" size="icon" onClick={onClose}><X className="h-5 w-5" /></Button>
+                        </div>
                     </div>
-                    <div className="mt-2 space-y-2">
+                    <div className="mt-2 space-y-1">
                         <div className="flex items-center justify-between text-xs">
-                            <span className="font-medium">Progress: {completionStats.filled}/{completionStats.total} Fields</span>
+                            <span className="font-medium">{completionStats.filled}/{completionStats.total} Fields</span>
                             <span>{completionStats.percentage}%</span>
                         </div>
                         <Progress value={completionStats.percentage} className="h-1.5" />
                     </div>
                 </DialogHeader>
 
-                <div className="flex-1 overflow-hidden">
-                    <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
-                        <div className="flex justify-between items-center bg-muted/20 px-4 py-2 border-b">
-                            {availableTemplates.length > 1 ? (
-                                <Select value={selectedTemplate?.id} onValueChange={(v) => setSelectedTemplate(availableTemplates.find(t => t.id === v))}>
-                                    <SelectTrigger className="w-64 h-8 text-xs"><SelectValue placeholder="Select Template" /></SelectTrigger>
-                                    <SelectContent>{availableTemplates.map(t => <SelectItem key={t.id} value={t.id}>{t.file_name}</SelectItem>)}</SelectContent>
-                                </Select>
-                            ) : <div />}
-                            <TabsList className="grid w-[300px] grid-cols-3 h-8">
-                                <TabsTrigger value="edit" className="text-xs"><Edit3 className="h-3.3 w-3.5 mr-1.5" />Editor</TabsTrigger>
-                                <TabsTrigger value="preview" className="text-xs"><Eye className="h-3.5 w-3.5 mr-1.5" />Full View</TabsTrigger>
-                                <TabsTrigger value="original" className="text-xs"><Eye className="h-3.5 w-3.5 mr-1.5" />Original Template</TabsTrigger>
-                            </TabsList>
-                        </div>
-
-                        <div className="flex-1 overflow-hidden">
-                            <TabsContent value="edit" className="h-full m-0 p-0">
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 h-full">
-                                    <ScrollArea className="h-full border-r bg-white">
-                                        <div className="p-6 space-y-4">
-                                            {/* Original Word Doc UI Requested */}
-                                            {selectedTemplate?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && (
-                                                <div className="mb-6 space-y-2">
-                                                    <Label className="text-xs font-bold text-slate-500 uppercase">Master Template File</Label>
-                                                    <div className="w-full h-48 border rounded-md overflow-hidden bg-slate-50 relative group">
-                                                        {docPreviewUrl ? (
-                                                            <iframe
-                                                                src={docPreviewUrl}
-                                                                className="w-full h-full border-0"
-                                                                title="Original Template Preview"
-                                                                onError={(e) => {
-                                                                    console.error('Error loading document preview:', e);
-                                                                    setDocPreviewUrl(null);
-                                                                    toast({
-                                                                        title: 'Preview Error',
-                                                                        description: 'Could not load document preview. The file may not be accessible or the format is not supported.',
-                                                                        variant: 'destructive'
-                                                                    });
-                                                                }}
-                                                            />
-                                                        ) : template?.file_path ? (
-                                                            <div className="h-full w-full flex items-center justify-center">
-                                                                <div className="text-center p-4">
-                                                                    <FileText className="h-10 w-10 mx-auto text-slate-300 mb-2" />
-                                                                    <p className="text-xs text-slate-500">Loading Original Template...</p>
-                                                                </div>
-                                                            </div>
-                                                        ) : (
-                                                            <div className="h-full w-full flex items-center justify-center">
-                                                                <div className="text-center p-4">
-                                                                    <FileText className="h-10 w-10 mx-auto text-slate-300 mb-2" />
-                                                                    <p className="text-xs text-slate-500">No template file available</p>
-                                                                </div>
-                                                            </div>
-                                                        )}
-                                                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                            <Badge variant="secondary" className="bg-white/80 backdrop-blur">Original Layout</Badge>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            )}
-
-                                            <Label className="text-xs font-bold text-slate-500 uppercase">Input Fields</Label>
-                                            {selectedTemplate?.placeholders?.map(p => (
-                                                <div key={p.id} className="space-y-2 p-4 border rounded-lg bg-slate-50/50">
-                                                    <div className="flex justify-between items-center">
-                                                        <Label className="font-semibold text-xs text-slate-700">{p.description || p.name}</Label>
-                                                        {autoPopulatedFields.has(p.name) && !manuallyEditedFields.has(p.name) && <Badge variant="secondary" className="text-[10px] bg-blue-50 text-blue-600 border-blue-100">Auto</Badge>}
-                                                    </div>
-                                                    {p.type === 'image' ? (
-                                                        <div className="space-y-2">
-                                                            <div className="w-full h-32 border border-dashed rounded bg-white flex items-center justify-center overflow-hidden">
-                                                                {formData[p.name] ? <img src={formData[p.name]} className="max-h-full object-contain" /> : <ImageIcon className="h-6 w-6 text-slate-200" />}
-                                                            </div>
-                                                            <Button asChild variant="outline" size="sm" className="w-full h-8 text-xs">
-                                                                <label className="cursor-pointer"><FileUp className="h-3 w-3 mr-2" />Upload Image<input type="file" accept="image/*" className="sr-only" onChange={e => handleFileChange(p.name, e)} /></label>
-                                                            </Button>
-                                                            <ImagePlaceholderControls styles={imageStyles[p.name] || {}} onStyleChange={(k, v) => handleImageStyleChange(p.name, k, v)} />
-                                                        </div>
-                                                    ) : (
-                                                        <Input value={formData[p.name] || ''} onChange={e => handleInputChange(p.name, e.target.value)} className="bg-white h-9 text-sm" placeholder={`Enter ${p.name}...`} />
-                                                    )}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </ScrollArea>
-                                    <div className="relative bg-slate-100 p-8 overflow-y-auto hidden lg:block">
-                                        <div className="sticky top-0 mb-4 flex items-center justify-between bg-white/50 backdrop-blur p-2 rounded-lg border text-[10px] font-bold text-slate-500">
-                                            <span>LIVE PREVIEW (GENERATED CONTENT)</span>
-                                            <Badge variant="outline" className="text-[10px]">A4 Format</Badge>
-                                        </div>
-                                        {isPreviewLoading && <div className="absolute inset-0 z-10 bg-white/40 backdrop-blur-sm flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-blue-500" /></div>}
-                                        <div className={`bg-white shadow-xl p-12 min-h-full mx-auto max-w-[800px] ${EDITOR_PREVIEW_STYLES}`} style={{ fontFamily: 'serif' }} dangerouslySetInnerHTML={{ __html: previewContent }} />
+                <div className="flex-1 overflow-hidden grid grid-cols-12 gap-0">
+                    <ScrollArea className="col-span-3 border-r bg-white">
+                        <div className="p-4 space-y-4">
+                            <Label className="text-xs font-bold text-slate-500 uppercase">Inputs</Label>
+                            {selectedTemplate?.placeholders?.map(p => (
+                                <div key={p.id} className="space-y-2 p-3 border rounded-lg bg-slate-50/50">
+                                    <div className="flex justify-between items-center">
+                                        <Label className="font-semibold text-xs">{p.description || p.name}</Label>
+                                        {autoPopulatedFields.has(p.name) && !manuallyEditedFields.has(p.name) && (
+                                            <Badge variant="secondary" className="text-[10px] bg-blue-50 text-blue-600">Auto</Badge>
+                                        )}
                                     </div>
-                                </div>
-                            </TabsContent>
-                            <TabsContent value="preview" className="h-full m-0 p-0 overflow-y-auto bg-slate-200 p-8">
-                                <div className={`max-w-[850px] mx-auto bg-white shadow-2xl p-20 min-h-[11in] relative ${EDITOR_PREVIEW_STYLES}`} style={{ fontFamily: 'serif' }}>
-                                    {isPreviewLoading && <div className="absolute inset-0 flex items-center justify-center bg-white/60"><Loader2 className="h-10 w-10 animate-spin text-blue-500" /></div>}
-                                    <div dangerouslySetInnerHTML={{ __html: previewContent }} />
-                                </div>
-                            </TabsContent>
-                            <TabsContent value='original'>
-                                 <ScrollArea className="h-full border-r bg-white">
-                                        <div className="p-6 space-y-4">
-                                            {/* Original Word Doc UI Requested */}
-                                            {selectedTemplate?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && (
-                                                <div className="mb-6 space-y-2">
-                                                    <Label className="text-xs font-bold text-slate-500 uppercase">Master Template File</Label>
-                                                    <div className="w-full h-full border rounded-md overflow-hidden bg-slate-50 relative group">
-                                                        {docPreviewUrl ? (
-                                                            <iframe
-                                                                src={docPreviewUrl}
-                                                                className="w-full h-full border-0"
-                                                                title="Original Template Preview"
-                                                                onError={(e) => {
-                                                                    console.error('Error loading document preview:', e);
-                                                                    setDocPreviewUrl(null);
-                                                                    toast({
-                                                                        title: 'Preview Error',
-                                                                        description: 'Could not load document preview. The file may not be accessible or the format is not supported.',
-                                                                        variant: 'destructive'
-                                                                    });
-                                                                }}
-                                                            />
-                                                        ) : template?.file_path ? (
-                                                            <div className="h-full w-full flex items-center justify-center">
-                                                                <div className="text-center p-4">
-                                                                    <FileText className="h-10 w-10 mx-auto text-slate-300 mb-2" />
-                                                                    <p className="text-xs text-slate-500">Loading Original Template...</p>
-                                                                </div>
-                                                            </div>
-                                                        ) : (
-                                                            <div className="h-full w-full flex items-center justify-center">
-                                                                <div className="text-center p-4">
-                                                                    <FileText className="h-10 w-10 mx-auto text-slate-300 mb-2" />
-                                                                    <p className="text-xs text-slate-500">No template file available</p>
-                                                                </div>
-                                                            </div>
-                                                        )}
-                                                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                            <Badge variant="secondary" className="bg-white/80 backdrop-blur">Original Layout</Badge>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            )}
+                                    {p.type === 'image' ? (
+                                        <div className="space-y-2">
+                                            <div className="w-full h-24 border border-dashed rounded bg-white flex items-center justify-center overflow-hidden">
+                                                {formData[p.name] ? <img src={formData[p.name]} className="max-h-full max-w-full object-contain" alt="preview" /> : <ImageIcon className="h-6 w-6 text-slate-200" />}
+                                            </div>
+                                            <Button asChild variant="outline" size="sm" className="w-full h-8 text-xs">
+                                                <label className="cursor-pointer"><FileUp className="h-3 w-3 mr-2" />Upload<input type="file" accept="image/*" className="sr-only" onChange={e => handleFileChange(p.name, e)} /></label>
+                                            </Button>
+                                            <ImagePlaceholderControls styles={imageStyles[p.name] || {}} onStyleChange={(k, v) => handleImageStyleChange(p.name, k, v)} />
                                         </div>
-                                    </ScrollArea>
-                            </TabsContent>
+                                    ) : (
+                                        <Input value={formData[p.name] || ''} onChange={e => handleInputChange(p.name, e.target.value)} className="bg-white h-8 text-xs" placeholder={`Enter...`} />
+                                    )}
+                                </div>
+                            ))}
                         </div>
-                    </Tabs>
+                    </ScrollArea>
+
+                    <div className="col-span-5 border-r relative bg-slate-100 overflow-y-auto">
+                        <div className="sticky top-0 z-10 bg-white/90 backdrop-blur px-4 py-2 border-b flex justify-between">
+                            <span className="text-[10px] font-bold text-slate-500">LIVE PREVIEW</span>
+                            {isPreviewLoading && <Loader2 className="h-4 w-4 animate-spin text-blue-500" />}
+                        </div>
+                        <div className="p-8">
+                            <div className={`bg-white shadow-xl p-12 min-h-[11in] ${EDITOR_PREVIEW_STYLES}`} dangerouslySetInnerHTML={{ __html: previewContent }} />
+                        </div>
+                    </div>
+
+                    {isWordTemplate ? (
+                        <div className="col-span-4 bg-slate-50 overflow-y-auto">
+                            <div className="sticky top-0 z-10 bg-white/90 backdrop-blur px-4 py-2 border-b">
+                                <span className="text-[10px] font-bold text-slate-500">ORIGINAL TEMPLATE</span>
+                            </div>
+                            <div className="p-4">
+                                {docPreviewUrl ? (
+                                    <iframe src={docPreviewUrl} className="w-full h-[calc(100vh-200px)] border-0 rounded shadow" title="Original" onError={() => setDocPreviewUrl(null)} />
+                                ) : (
+                                    <div className="h-[calc(100vh-200px)] flex items-center justify-center">
+                                        <FileText className="h-12 w-12 text-slate-300" />
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="col-span-4 bg-slate-50 p-8">
+                            <div className="bg-white rounded border p-6">
+                                <FileText className="h-8 w-8 text-blue-500 mb-3" />
+                                <h3 className="font-semibold mb-2">HTML Template</h3>
+                                <p className="text-xs text-slate-600">Preview shows generated output</p>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
-                <DialogFooter className="border-t px-6 py-3 bg-white flex items-center justify-between">
-                    <div className="text-[10px] text-muted-foreground flex items-center gap-1.5 font-medium">
-                        <CheckCircle2 className="h-3 w-3 text-green-500" /> Real-time preview active
+                <DialogFooter className="border-t px-6 py-3 bg-white flex justify-between flex-shrink-0">
+                    <div className="text-[10px] flex items-center gap-1.5">
+                        <CheckCircle2 className="h-3 w-3 text-green-500" /> 
+                        {isWordTemplate ? 'Word + Images' : 'HTML'}
                     </div>
                     <div className='flex gap-2'>
                         <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                                <Button size="sm" disabled={isGenerating || !selectedTemplate} className="bg-blue-600 hover:bg-blue-700">
+                                <Button size="sm" disabled={isGenerating} className="bg-blue-600">
                                     {isGenerating ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <Download className="mr-2 h-4 w-4" />}
-                                    Generate & Download
+                                    Download
                                 </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-48">
-                                <DropdownMenuItem onClick={() => generateAndDownload('word')}><FileText className="h-4 w-4 mr-2 text-blue-600" />Word Document (.docx)</DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => generateAndDownload('pdf')}><FileText className="h-4 w-4 mr-2 text-red-600" />PDF Document (.pdf)</DropdownMenuItem>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => generateAndDownload('word')}><FileText className="h-4 w-4 mr-2 text-blue-600" />Word</DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => generateAndDownload('pdf')}><FileText className="h-4 w-4 mr-2 text-red-600" />PDF</DropdownMenuItem>
                             </DropdownMenuContent>
                         </DropdownMenu>
                     </div>
