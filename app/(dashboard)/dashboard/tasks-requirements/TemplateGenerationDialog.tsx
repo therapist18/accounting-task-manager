@@ -186,54 +186,137 @@ const ImagePlaceholderControls = ({ styles, onStyleChange }) => {
 };
 
 const resolveArrayData = (blockPlaceholder, allPlaceholders, sourceDataCache, masterFields, entityIdMap) => {
-    const entityType = blockPlaceholder.entity_type; 
+    const entityType = blockPlaceholder.entity_type || 'director'; 
     const blockName = blockPlaceholder.name; 
+    const isPrimaryOnly = blockPlaceholder.director_type === 'primary';
     
     let sourceArray = [];
-    let record = null;
-    const potentialTables = ['tm_tasks', 'acc_portal_kyc'];
-    for (const table of potentialTables) {
-        if (sourceDataCache[table]) {
-            record = Object.values(sourceDataCache[table])[0];
-            if (record) break;
+    
+    // 1. Find the raw data array (Existing Logic)
+    const potentialPaths = [`${entityType}s_details`, `${entityType}_details`, blockName, 'directors', 'contacts'];
+    
+    Object.entries(sourceDataCache).forEach(([key, tableData]) => {
+        if (!tableData) return;
+        const records = Array.isArray(tableData) ? tableData : Object.values(tableData);
+        for (const record of records) {
+            for (const path of potentialPaths) {
+                if (record[path] && Array.isArray(record[path])) {
+                    sourceArray = isPrimaryOnly 
+                        ? record[path].filter(item => item?.is_primary === true || item?.is_primary === 'true')
+                        : record[path];
+                    break;
+                }
+            }
+            if (sourceArray.length > 0) break;
         }
-    }
+    });
 
-    if (record) {
-        sourceArray = record[`${entityType}s_details`] || record[`${entityType}_details`] || record[blockName] || [];
-    }
+    if (sourceArray.length === 0) return [];
 
-    if (!Array.isArray(sourceArray) || sourceArray.length === 0) return [];
-
-    // Filter child fields, excluding the block tag itself
+    // 2. Filter child fields
     const childFields = allPlaceholders.filter(p => 
         (p.parent_name === blockName || (p.description && p.description.toLowerCase().includes(blockName.toLowerCase()))) 
         && p.id !== blockPlaceholder.id 
     );
-
+    
     return sourceArray.map((item) => {
         const rowData = {};
+        const individualId = item.id || item.director_id || item.individual_id;
+        
         childFields.forEach(field => {
             let val = '';
-            if (field.master_field_ids?.length > 0) {
-                for (const mId of field.master_field_ids) {
+            const isImage = field.name.startsWith('%') || field.type === 'image';
+
+            // --- IMAGE RESOLUTION LOGIC ---
+            if (isImage && individualId) {
+                const mIds = field.master_field_ids || [];
+                for (const mId of mIds) {
                     const mf = masterFields.get(parseInt(mId));
-                    if (mf && mf.sources?.[0]?.path) {
-                        val = parseJsonValue(item, mf.sources[0].path);
-                        if (val) break;
+                    if (!mf?.sources) continue;
+
+                    // Find which KYC document ID this master field expects
+                    const requiredKycIds = mf.sources
+                        .filter(s => s.document_id)
+                        .flatMap(s => Array.isArray(s.document_id) ? s.document_id : [s.document_id]);
+
+                    if (requiredKycIds.length > 0) {
+                        // Look in acc_portal_directors_documents (individual docs) 
+                        // or acc_portal_kyc_uploads (company docs)
+                        const allDocs = [
+                            ...(Object.values(sourceDataCache['acc_portal_directors_documents'] || {})),
+                            ...(Object.values(sourceDataCache['acc_portal_kyc_uploads'] || {}))
+                        ];
+
+                        const matchingDoc = allDocs.find(doc => {
+                            const docKycId = doc.kyc_document_id || doc.document_id;
+                            const docOwnerId = doc.director_id || doc.individual_id || doc.company_id;
+                            
+                            return requiredKycIds.includes(docKycId) && 
+                                   String(docOwnerId) === String(individualId);
+                        });
+
+                        if (matchingDoc?.file_path) {
+                            val = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${matchingDoc.file_path}`;
+                            break;
+                        }
+                    }
+                }
+            } 
+            // --- TEXT RESOLUTION LOGIC (Existing) ---
+            else {
+                if (field.master_field_ids?.length > 0) {
+                    for (const mId of field.master_field_ids) {
+                        const mf = masterFields.get(parseInt(mId));
+                        if (mf?.sources?.[0]?.path) {
+                            val = parseJsonValue(item, mf.sources[0].path);
+                            if (val) break;
+                        }
+                    }
+                }
+                
+                if (!val) {
+                    const fieldName = field.name.toLowerCase();
+                    if (item[field.name] !== undefined) val = item[field.name];
+                    else {
+                        const matchingKey = Object.keys(item).find(k => k.toLowerCase() === fieldName);
+                        if (matchingKey) val = item[matchingKey];
+                        else if (fieldName.includes('name')) val = item.full_name || item.name || item.director_name || '';
+                        else if (fieldName.includes('role')) val = item.role || (Array.isArray(item.roles) ? item.roles.join(', ') : '');
                     }
                 }
             }
-            if (!val) {
-                const fName = field.name.toLowerCase();
-                if (fName.includes('name')) val = item.full_name || item.name || '';
-                else if (fName.includes('role') || fName.includes('position')) val = item.role || item.position || (Array.isArray(item.roles) ? item.roles.join(', ') : '');
-                else val = item[field.name] || '';
-            }
-            rowData[field.name] = val;
+
+            rowData[field.name] = val || '';
         });
         return rowData;
     });
+};
+
+const findPrimaryDirector = (sourceDataCache) => {
+    const potentialPaths = ['directors_details', 'director_details', 'directors', 'registry_individuals'];
+    
+    for (const key of Object.keys(sourceDataCache)) {
+        const tableData = sourceDataCache[key];
+        if (!tableData) continue;
+        
+        const records = Array.isArray(tableData) ? tableData : Object.values(tableData);
+        
+        for (const record of records) {
+            // Check if the record itself is the primary director
+            if (record.is_primary === true || record.is_primary === 'true') {
+                return record;
+            }
+            
+            // Check if the record contains a nested array of directors (common in company objects)
+            for (const path of potentialPaths) {
+                if (record[path] && Array.isArray(record[path])) {
+                    const primary = record[path].find(d => d.is_primary === true || d.is_primary === 'true');
+                    if (primary) return primary;
+                }
+            }
+        }
+    }
+    return null;
 };
 export default function TemplateGenerationDialog({
     isOpen, onClose, template, availableTemplates = [], documentName, masterFields,
@@ -273,91 +356,183 @@ export default function TemplateGenerationDialog({
         return { topLevel, blocks };
     }, [selectedTemplate]);
 
-   useEffect(() => {
-    if (isOpen && selectedTemplate && Object.keys(sourceDataCache).length > 0) {
-        console.log('[Init] Resolving template data with cache:', sourceDataCache);
-        const initData = {};
-        const autoMap = new Map();
+    useEffect(() => {
+        if (isOpen && selectedTemplate && Object.keys(sourceDataCache).length > 0) {
+            console.log('[Init] Resolving template data with cache:', sourceDataCache);
+            const initData = {};
+            const autoMap = new Map();
 
-        // 1. Resolve Top Level Fields
-        groupedPlaceholders.topLevel.forEach(p => {
-            let match = getPlaceholderValue(p);
-            if (!match.value) match = smartFieldMatch(p.name);
-            initData[p.name] = match.value || '';
-            if (match.value) autoMap.set(p.name, match.source);
-        });
+            // 1. Resolve Top Level Fields
+            groupedPlaceholders.topLevel.forEach(p => {
+                let match = getPlaceholderValue(p);
+                if (!match.value) match = smartFieldMatch(p.name);
+                initData[p.name] = match.value || '';
+                if (match.value) autoMap.set(p.name, match.source);
+            });
 
-        // 2. Resolve Array Blocks
-        Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
-            const block = groupedPlaceholders.blocks[blockName];
-            const resolvedRows = resolveArrayData(
-                block.config, 
-                selectedTemplate.placeholders, 
-                sourceDataCache, 
-                masterFields, 
-                entityIdMap
-            );
+            // 2. Resolve Array Blocks
+            Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
+                const block = groupedPlaceholders.blocks[blockName];
+                const resolvedRows = resolveArrayData(
+                    block.config, 
+                    selectedTemplate.placeholders, 
+                    sourceDataCache, 
+                    masterFields, 
+                    entityIdMap
+                );
+                
+                console.log(`[Init] Resolved Block: ${blockName}`, resolvedRows);
+                
+                // Ensure we have an array with at least one empty object if no data
+                if (resolvedRows.length === 0 && blockName === 'directors') {
+                    // For directors, we want to show the rows even if they're empty
+                    initData[blockName] = [{}];
+                    console.log(`[Init] Initialized empty directors array`);
+                } else {
+                    initData[blockName] = resolvedRows;
+                }
+                
+                if (resolvedRows.length > 0) {
+                    autoMap.set(blockName, 'Entity Details Array');
+                    console.log(`[Init] Set ${blockName} in formData with ${resolvedRows.length} rows`, resolvedRows);
+                }
+            });
+
+            console.log('[Init] Setting initial form data:', initData);
+            setFormData(initData);
+            setAutoPopulatedFields(autoMap);
             
-            console.log(`[Init] Resolved Block: ${blockName}`, resolvedRows);
-            initData[blockName] = resolvedRows;
-            if (resolvedRows.length > 0) autoMap.set(blockName, 'Entity Details Array');
-        });
-
-        setFormData(initData);
-        setAutoPopulatedFields(autoMap);
-    }
-}, [isOpen, selectedTemplate?.id, groupedPlaceholders, sourceDataCache]);
+            // Force update the preview after a short delay to ensure formData is set
+            setTimeout(() => {
+                if (docxTemplateBuffer.current) {
+                    updateWordPreview(initData, imageStyles);
+                } else {
+                    setPreviewContent(populateHtmlContent(initData, selectedTemplate.placeholders || [], imageStyles));
+                }
+            }, 100);
+        }
+    }, [isOpen, selectedTemplate?.id, groupedPlaceholders, sourceDataCache]);
 
     // Update handleInputChange to handle array updates
     const handleArrayInputChange = (blockName, index, fieldName, value) => {
         setFormData(prev => {
-            const newArray = [...(prev[blockName] || [])];
-            newArray[index] = { ...newArray[index], [fieldName]: value };
-            const next = { ...prev, [blockName]: newArray };
+            // Create a new array with the updated value
+            const updatedArray = [...(prev[blockName] || [])];
             
-            // Trigger preview refresh
-            if (docxTemplateBuffer.current) updateWordPreview(next, imageStyles);
-            else setPreviewContent(populateHtmlContent(next, selectedTemplate?.placeholders || [], imageStyles));
+            // Ensure we have an object at this index
+            if (!updatedArray[index]) {
+                updatedArray[index] = {};
+            }
             
-            return next;
+            // Update the specific field
+            updatedArray[index] = {
+                ...updatedArray[index],
+                [fieldName]: value
+            };
+            
+            // Create the new state
+            const newState = {
+                ...prev,
+                [blockName]: updatedArray
+            };
+            
+            // Log the update for debugging
+            console.log(`[handleArrayInputChange] Updated ${blockName}[${index}].${fieldName}`, {
+                value,
+                newState
+            });
+            
+            // Trigger preview update
+            if (docxTemplateBuffer.current) {
+                updateWordPreview(newState, imageStyles);
+            } else {
+                setPreviewContent(populateHtmlContent(newState, selectedTemplate?.placeholders || [], imageStyles));
+            }
+            
+            return newState;
         });
     };
 
     // UI: Render Array Inputs
-   const renderArrayInputs = (blockName, blockData) => {
+    const renderArrayInputs = (blockName, blockData) => {
         const rows = formData[blockName] || [];
+        console.log(`[renderArrayInputs] Rendering ${blockName} with ${rows.length} rows`, rows);
+        
         return (
             <div className="space-y-4 mt-2 border-l-2 border-blue-200 pl-4 py-2 bg-blue-50/20 rounded-r-lg">
                 <div className="flex items-center justify-between px-1">
                     <Badge className="bg-blue-600 uppercase text-[9px] tracking-tighter">{blockName}</Badge>
-                    <Button variant="ghost" className="h-6 text-[10px] text-blue-600 hover:text-blue-700" onClick={() => {
-                        const emptyRow = {};
-                        blockData.children.forEach(c => emptyRow[c.name] = '');
-                        setFormData(prev => ({ ...prev, [blockName]: [...(prev[blockName] || []), emptyRow] }));
-                    }}>+ ADD ROW</Button>
+                    <Button 
+                        variant="ghost" 
+                        className="h-6 text-[10px] text-blue-600 hover:text-blue-700" 
+                        onClick={() => {
+                            const emptyRow = {};
+                            blockData.children.forEach(c => emptyRow[c.name] = '');
+                            setFormData(prev => ({ 
+                                ...prev, 
+                                [blockName]: [...(prev[blockName] || []), emptyRow] 
+                            }));
+                        }}
+                    >
+                        + ADD ROW
+                    </Button>
                 </div>
                 
-                {rows.map((row, idx) => (
-                    <div key={idx} className="p-3 bg-white border rounded shadow-sm relative group mb-2">
-                        <Button variant="ghost" size="icon" className="absolute -right-2 -top-2 h-5 w-5 rounded-full bg-white border shadow-sm text-red-500 hover:bg-red-50" onClick={() => {
-                            const newRows = rows.filter((_, i) => i !== idx);
-                            setFormData(prev => ({ ...prev, [blockName]: newRows }));
-                        }}><X className="h-3 w-3" /></Button>
-                        
-                        <div className="space-y-3">
-                            {blockData.children.map(child => (
-                                <div key={child.id}>
-                                    <Label className="text-[9px] font-bold text-slate-400 uppercase">{child.name}</Label>
-                                    <Input 
-                                        value={row[child.name] || ''} 
-                                        onChange={(e) => handleArrayInputChange(blockName, idx, child.name, e.target.value)}
-                                        className="h-7 text-xs border-slate-100 focus:border-blue-200"
-                                    />
-                                </div>
-                            ))}
-                        </div>
+                {rows.length === 0 ? (
+                    <div className="text-xs text-muted-foreground italic p-2">
+                        No {blockName} found. Click "ADD ROW" to add one.
                     </div>
-                ))}
+                ) : (
+                    rows.map((row, idx) => (
+                        <div key={idx} className="p-3 bg-white border rounded shadow-sm relative group mb-2">
+                            <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="absolute -right-2 -top-2 h-5 w-5 rounded-full bg-white border shadow-sm text-red-500 hover:bg-red-50" 
+                                onClick={() => {
+                                    const newRows = rows.filter((_, i) => i !== idx);
+                                    setFormData(prev => ({ ...prev, [blockName]: newRows }));
+                                }}
+                            >
+                                <X className="h-3 w-3" />
+                            </Button>
+                            
+                            <div className="space-y-3">
+                                {blockData.children.map(child => {
+                                    // Special handling for director_name field
+                                    const fieldName = child.name.toLowerCase();
+                                    let fieldValue = '';
+                                    
+                                    // Try different possible field names to find the value
+                                    if (row[child.name]) {
+                                        fieldValue = row[child.name];
+                                    } else if (row[fieldName]) {
+                                        fieldValue = row[fieldName];
+                                    } else if (fieldName.includes('name') && row.director_name) {
+                                        fieldValue = row.director_name;
+                                    } else if (fieldName.includes('position') && row.position) {
+                                        fieldValue = row.position;
+                                    } else if (fieldName.includes('role') && row.role) {
+                                        fieldValue = row.role;
+                                    }
+                                    
+                                    return (
+                                        <div key={child.id}>
+                                            <Label className="text-[9px] font-bold text-slate-400 uppercase">
+                                                {child.name}
+                                            </Label>
+                                            <Input 
+                                                value={fieldValue || ''} 
+                                                onChange={(e) => handleArrayInputChange(blockName, idx, child.name, e.target.value)}
+                                                className="h-7 text-xs border-slate-100 focus:border-blue-200"
+                                            />
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    ))
+                )}
             </div>
         );
     };
@@ -388,10 +563,20 @@ export default function TemplateGenerationDialog({
             const value = data[placeholder.name];
             const regex = new RegExp(`\\{{1,2}${placeholder.name}\\}{1,2}`, 'g');
             if (value && String(value).trim() !== '') {
-                if (placeholder.type === 'image') {
-                    const style = styles[placeholder.name] || { maxWidth: '100%', textAlign: 'center' };
-                    content = content.replace(regex, `<div style="text-align: ${style.textAlign}; margin: 16px 0;"><img src="${value}" style="max-width: 100%; width: ${style.maxWidth}; height: auto;" /></div>`);
-                } else {
+              // Inside populateHtmlContent
+if (placeholder.type === 'image') {
+    const style = styles[placeholder.name] || { maxWidth: '100%', textAlign: 'center' };
+    const imgWidth = style.imageWidth ? `${style.imageWidth}px` : (style.maxWidth || '100%');
+    
+    content = content.replace(regex, `
+        <div style="text-align: ${style.textAlign || 'center'}; margin: 10px 0; width: 100%;">
+            <img 
+                src="${value}" 
+                style="width: ${imgWidth}; height: auto; max-width: 100%; display: inline-block;" 
+            />
+        </div>
+    `);
+} else {
                     const formattedValue = /<[a-z][\s\S]*>/i.test(String(value)) ? value : String(value).replace(/\n/g, '<br />');
                     content = content.replace(regex, formattedValue);
                 }
@@ -536,22 +721,30 @@ export default function TemplateGenerationDialog({
         }
     }, [selectedTemplate, toast]);
 
+    // Update preview when form data or template changes
     useEffect(() => {
         if (!isOpen) return;
-        const load = async () => {
+        
+        const updatePreview = async () => {
             const current = availableTemplates.find(t => t.id === selectedTemplate?.id) || availableTemplates[0] || template;
-            setSelectedTemplate(current);
-
+            
             if (current?.file_path && current?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-                setIsPreviewLoading(true);
-                const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${current.file_path}`;
-                console.log('[Template Load] Fetching:', publicUrl);
+                if (!docxTemplateBuffer.current) {
+                    setIsPreviewLoading(true);
+                    const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${current.file_path}`;
+                    console.log('[Template Load] Fetching:', publicUrl);
 
-                setDocPreviewUrl(`https://docs.google.com/viewer?url=${encodeURIComponent(publicUrl)}&embedded=true`);
+                    setDocPreviewUrl(`https://docs.google.com/viewer?url=${encodeURIComponent(publicUrl)}&embedded=true`);
 
-                const res = await fetch(publicUrl);
-                docxTemplateBuffer.current = await res.arrayBuffer();
-                console.log('[Template Load] ✅ Loaded, size:', docxTemplateBuffer.current.byteLength);
+                    try {
+                        const res = await fetch(publicUrl);
+                        docxTemplateBuffer.current = await res.arrayBuffer();
+                        console.log('[Template Load] ✅ Loaded, size:', docxTemplateBuffer.current.byteLength);
+                    } catch (error) {
+                        console.error('Error loading template:', error);
+                        return;
+                    }
+                }
                 updateWordPreview(formData, imageStyles);
             } else {
                 docxTemplateBuffer.current = null;
@@ -559,62 +752,148 @@ export default function TemplateGenerationDialog({
                 setPreviewContent(populateHtmlContent(formData, current?.placeholders || [], imageStyles));
             }
         };
-        load();
-    }, [isOpen, selectedTemplate?.id]);
 
-    const getPlaceholderValue = useCallback((placeholder) => {
-        const ids = placeholder.master_field_ids || [];
-        if (ids.length === 0 || !masterFields) return { value: '', source: null };
+        updatePreview();
+    }, [isOpen, selectedTemplate?.id, formData, imageStyles]);
 
-        // The placeholder defines which entity it belongs to (e.g., 'company' or 'individual')
-        const targetEntityType = placeholder.entity_type || 'individual';
+    // Add these at the top of your component state declarations
+const [additionalCache, setAdditionalCache] = useState({});
+const [fetchingTables, setFetchingTables] = useState(new Set());
 
-        for (const id of ids) {
-            const masterField = masterFields.get(parseInt(id, 10));
-            if (!masterField) continue;
+// Function to fetch missing tables dynamically
+const fetchMissingTable = useCallback(async (tableName) => {
+    if (fetchingTables.has(tableName) || sourceDataCache[tableName] || additionalCache[tableName]) return;
 
-            // 1. Handle special Date Config
-            if (masterField.date_config?.useCurrentDate) {
-                return { value: formatDate(new Date(), masterField.date_config.format), source: 'System' };
+    setFetchingTables(prev => new Set(prev).add(tableName));
+    console.log(`[Dynamic Fetch] 📡 Fetching missing table: ${tableName}`);
+
+    try {
+        // Construct query - we filter by company_id or director_id if possible to keep it efficient
+        // We use the entityIdMap to know which records to fetch
+        const companyId = entityIdMap.company;
+        const directorId = entityIdMap.director || entityIdMap.principal;
+
+        let query = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/${tableName}?select=*`;
+        
+        // Add basic filters based on common column names to avoid fetching entire tables
+        if (tableName.includes('director')) {
+            if (directorId) query += `&director_id=eq.${directorId}`;
+        } else if (tableName.includes('kyc') || tableName.includes('company')) {
+            if (companyId) query += `&company_id=eq.${companyId}`;
+        }
+
+        const response = await fetch(query, {
+            headers: {
+                'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+            }
+        });
+
+        if (!response.ok) throw new Error(`Failed to fetch ${tableName}`);
+        
+        const data = await response.json();
+        console.log(`[Dynamic Fetch] ✅ received ${data.length} rows for ${tableName}`);
+
+        setAdditionalCache(prev => ({
+            ...prev,
+            [tableName]: data.reduce((acc, row) => ({ ...acc, [row.id || row.director_id]: row }), {})
+        }));
+    } catch (err) {
+        console.error(`[Dynamic Fetch] ❌ Error fetching ${tableName}:`, err);
+    } finally {
+        setFetchingTables(prev => {
+            const next = new Set(prev);
+            next.delete(tableName);
+            return next;
+        });
+    }
+}, [entityIdMap, sourceDataCache, additionalCache, fetchingTables]);
+
+// Effect to scan for missing tables whenever the template or cache changes
+useEffect(() => {
+    if (!isOpen || !selectedTemplate || !masterFields) return;
+
+    selectedTemplate.placeholders?.forEach(p => {
+        const ids = p.master_field_ids || [];
+        ids.forEach(mId => {
+            const mf = masterFields.get(parseInt(mId));
+            mf?.sources?.forEach(source => {
+                if (source.table && !sourceDataCache[source.table] && !additionalCache[source.table]) {
+                    fetchMissingTable(source.table);
+                }
+            });
+        });
+    });
+}, [isOpen, selectedTemplate, masterFields, sourceDataCache, additionalCache, fetchMissingTable]);
+
+const getPlaceholderValue = useCallback((placeholder) => {
+    const ids = placeholder.master_field_ids || [];
+    if (ids.length === 0 || !masterFields) return { value: '', source: null };
+
+    // Combine the base cache with the dynamically fetched cache
+    const combinedCache = { ...sourceDataCache, ...additionalCache };
+
+    const isImageType = placeholder.type === 'image' || placeholder.name.startsWith('%');
+    const isPrimaryDirectorReq = placeholder.director_type === 'primary';
+
+    // --- RESOLVE TARGET ID ---
+    let targetId = entityIdMap[placeholder.entity_type || 'company'];
+    let primaryDirector = null;
+
+    if (isPrimaryDirectorReq) {
+        primaryDirector = findPrimaryDirector(combinedCache); // Use combined cache here too
+        if (primaryDirector) {
+            targetId = primaryDirector.id || primaryDirector.director_id || primaryDirector.individual_id;
+        } else {
+            return { value: '', source: null };
+        }
+    }
+
+    for (const id of ids) {
+        const masterField = masterFields.get(parseInt(id, 10));
+        if (!masterField || !masterField.sources) continue;
+
+        for (const source of masterField.sources) {
+            const tableName = source.table || (isPrimaryDirectorReq ? 'acc_portal_directors_documents' : 'acc_portal_kyc_uploads');
+            const tableData = combinedCache[tableName]; // Look in combined cache
+
+            if (!tableData) {
+                // If table is still missing, the useEffect above will trigger a fetch
+                // This call will return empty for now, but will re-run once additionalCache updates
+                continue; 
             }
 
-            const entityId = entityIdMap[targetEntityType];
-            if (!entityId) continue;
+            if (isImageType) {
+                const linkingVar = source.linking_variable || (isPrimaryDirectorReq ? 'director_id' : 'company_id');
+                const requiredDocIds = Array.isArray(source.document_id) ? source.document_id : [source.document_id];
 
-            if (masterField.sources) {
-                // FILTER: Only look at sources that match the placeholder's entity_type
-                const validSources = masterField.sources.filter(s => s.source_type === targetEntityType);
+                const docs = Object.values(tableData);
+                const foundDoc = docs.find(d => {
+                    const docKycId = d.kyc_document_id || d.document_id;
+                    const docOwnerId = d[linkingVar] || d.director_id || d.individual_id || d.company_id;
+                    return String(docOwnerId) === String(targetId) && requiredDocIds.includes(docKycId);
+                });
 
-                for (const source of validSources) {
-                    // 2. Handle Document Path Sources (Placeholders starting with %)
-                    if (placeholder.name.startsWith('%')) {
-                        const uploads = Object.values(sourceDataCache?.acc_portal_kyc_uploads || {});
-                        const docIds = source.document_id || [];
-                        const doc = uploads.find(d =>
-                            docIds.includes(d.kyc_document_id) &&
-                            d.company_id === entityIdMap?.company
-                        );
-                        if (doc?.file_path) {
-                            return {
-                                value: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${doc.file_path}`,
-                                source: 'Document'
-                            };
-                        }
-                    }
-                    // 3. Handle Table Sources
-                    else if (source.table && sourceDataCache[source.table]) {
-                        const records = Object.values(sourceDataCache[source.table]);
-                        const record = records.find(r => String(r[source.linking_variable || 'id']) === String(entityId));
-                        if (record) {
-                            const val = parseJsonValue(record, source.path);
-                            if (val) return { value: val, source: `Master Field (${targetEntityType})` };
-                        }
-                    }
+                if (foundDoc?.file_path) {
+                    return {
+                        value: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${foundDoc.file_path}`,
+                        source: `${isPrimaryDirectorReq ? 'Primary ' : ''}${masterField.label}`
+                    };
+                }
+            } else {
+                // Text resolution...
+                const records = Object.values(tableData);
+                const record = records.find(r => String(r[source.linking_variable || 'id']) === String(targetId));
+                if (record) {
+                    const val = parseJsonValue(record, source.path);
+                    if (val) return { value: val, source: masterField.label };
                 }
             }
         }
-        return { value: '', source: null };
-    }, [masterFields, entityIdMap, sourceDataCache]);
+    }
+    return { value: '', source: null };
+}, [masterFields, entityIdMap, sourceDataCache, additionalCache]); // Added additionalCache to deps
+
     const smartFieldMatch = useCallback((placeholderName) => {
         const normalized = normalizeString(placeholderName);
         const sources = [{ data: extractedData }, { data: personData }, { data: companyData }];
@@ -711,8 +990,8 @@ export default function TemplateGenerationDialog({
                 });
 
                 if (type === 'word') {
-                    saveAs(blob, `${fileName}.docx`);
-                    toast({ title: "Success", description: "Document downloaded" });
+                    saveAs(blob, fileName);
+                    toast({ title: "Success", description: `Document downloaded as ${fileName}` });
                 } else {
                     // PDF logic remains the same (converts current previewContent to PDF)
                     const html2pdf = (await import('html2pdf.js')).default;
@@ -722,7 +1001,7 @@ export default function TemplateGenerationDialog({
                     element.style.width = '800px';
                     await html2pdf().set({
                         margin: 10,
-                        filename: `${fileName}.pdf`,
+                        filename: fileName,
                         html2canvas: { scale: 2, useCORS: true },
                         jsPDF: { unit: 'mm', format: 'a4' }
                     }).from(element).save();
@@ -770,18 +1049,72 @@ export default function TemplateGenerationDialog({
                     <ScrollArea className="col-span-3 border-r bg-white">
                         <div className="p-4 space-y-6">
                             {/* Top Level Fields */}
-                            <div className="space-y-4">
-                                <Label className="text-xs font-bold text-slate-400 uppercase tracking-widest">General Fields</Label>
-                                {groupedPlaceholders.topLevel.map(p => (
-                                    <div key={p.id} className="space-y-2 p-3 border rounded-lg bg-slate-50/50">
-                                        <div className="flex justify-between items-center">
-                                            <Label className="font-semibold uppercase text-[11px]">{p.name}</Label>
-                                            {autoPopulatedFields.has(p.name) && <Badge variant="secondary" className="text-[9px] bg-blue-50 text-blue-600">Auto</Badge>}
-                                        </div>
-                                        <Input value={formData[p.name] || ''} onChange={e => handleInputChange(p.name, e.target.value)} className="bg-white h-8 text-xs" />
-                                    </div>
-                                ))}
+                       {/* Inside the sidebar ScrollArea */}
+<div className="space-y-4">
+    <Label className="text-xs font-bold text-slate-400 uppercase tracking-widest">General Fields</Label>
+    {groupedPlaceholders.topLevel.map(p => (
+        <div key={p.id} className="space-y-2 p-3 border rounded-lg bg-slate-50/50">
+            <div className="flex justify-between items-center">
+                <Label className="font-semibold uppercase text-[11px]">{p.name.replace(/_/g, ' ')}</Label>
+                {autoPopulatedFields.has(p.name) && (
+                    <Badge variant="secondary" className="text-[9px] bg-blue-50 text-blue-600">
+                        {autoPopulatedFields.get(p.name)}
+                    </Badge>
+                )}
+            </div>
+
+            {p.type === 'image' ? (
+                <div className="space-y-3">
+                    {formData[p.name] ? (
+                        <div className="relative group rounded-md overflow-hidden border bg-white aspect-video flex items-center justify-center">
+                            <img 
+                                src={formData[p.name]} 
+                                alt={p.name} 
+                                className="max-h-full object-contain"
+                            />
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                <Button size="sm" variant="secondary" className="h-7 text-[10px]" onClick={() => document.getElementById(`file-${p.id}`).click()}>
+                                    Replace
+                                </Button>
+                                <Button size="sm" variant="destructive" className="h-7 text-[10px]" onClick={() => handleInputChange(p.name, '')}>
+                                    Remove
+                                </Button>
                             </div>
+                        </div>
+                    ) : (
+                        <Button 
+                            variant="outline" 
+                            className="w-full h-20 border-dashed border-2 flex flex-col gap-1"
+                            onClick={() => document.getElementById(`file-${p.id}`).click()}
+                        >
+                            <ImageIcon className="h-4 w-4 text-slate-400" />
+                            <span className="text-[10px] text-slate-500">Upload {p.name}</span>
+                        </Button>
+                    )}
+                    <input 
+                        id={`file-${p.id}`} 
+                        type="file" 
+                        className="hidden" 
+                        accept="image/*" 
+                        onChange={(e) => handleFileChange(p.name, e)} 
+                    />
+                    
+                    {/* Size and Alignment Controls */}
+                    <ImagePlaceholderControls 
+                        styles={imageStyles[p.name] || {}} 
+                        onStyleChange={(key, val) => handleImageStyleChange(p.name, key, val)} 
+                    />
+                </div>
+            ) : (
+                <Input 
+                    value={formData[p.name] || ''} 
+                    onChange={e => handleInputChange(p.name, e.target.value)} 
+                    className="bg-white h-8 text-xs" 
+                />
+            )}
+        </div>
+    ))}
+</div>
 
                             {/* Array Blocks */}
                             <div className="space-y-4 pt-4 border-t">
