@@ -21,6 +21,7 @@ const SPECIFICATION_OPTIONS = [
     { id: "Company", label: "Company" },
     { id: "Principal", label: "Principal" },
     { id: "Dependant", label: "Dependant" },
+    { id: "Understudy", label: "Understudy" },
     { id: "Directors", label: "Directors" },
     { id: "Shareholders", label: "Shareholders" },
     { id: "Employees", label: "Employees" },

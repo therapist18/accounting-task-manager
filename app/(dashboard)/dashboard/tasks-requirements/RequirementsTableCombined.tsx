@@ -82,6 +82,48 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
   const classDocsAndFields = useMemo(() => classRequirements?.[0]?.documents_and_fields || [], [classRequirements]);
 
+  const columnDefinitions = useMemo(() => {
+    const cols = [];
+    filteredGroupedTasks.forEach((group, groupIndex) => {
+      const task = group.tasks[0];
+   const isCompanyApplicant = task?.applicant_type === 'company';
+    const companyName = task?.company_name || 'Company'
+      
+      // 1. Company Column
+        cols.push({ 
+      type: 'company', 
+      id: task?.company_id, 
+      label: companyName, 
+      task, 
+      groupIndex 
+    });
+
+      // 2. Individual Target Columns
+      if (isCompanyApplicant) {
+        // If company, individual requirements apply to Directors
+        (task?.directors_details || []).forEach(director => {
+          cols.push({ type: 'director', id: director.id, label: director.full_name, subLabel: director.role, task, groupIndex });
+        });
+      } else {
+        // If individual, apply to Principal
+        cols.push({ type: 'principal', id: task?.individual_id, label: individualNames[task?.individual_id] || 'Principal', subLabel: 'Principal', task, groupIndex });
+      }
+
+      // 3. Dependant Columns
+      (group.dependantIds || []).forEach((depId, idx) => {
+        cols.push({ type: 'dependant', id: depId, label: individualNames[depId] || `Dependant ${idx + 1}`, subLabel: 'Dependant', task, groupIndex });
+      });
+
+      // 4. Understudy Column
+      if (group.tasks.some(t => t.class_id === CLASS_D_ID)) {
+        cols.push({ type: 'understudy', id: task?.understudy_id, label: individualNames[task?.understudy_id] || 'Understudy', subLabel: 'Understudy', task, groupIndex });
+      }
+    });
+    return cols;
+  }, [filteredGroupedTasks, individualNames]);
+
+  const totalColumns = columnDefinitions.length + 2; // + index and name columns
+
   useEffect(() => {
     const fetchMasterFields = async () => {
       try {
@@ -350,17 +392,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     return Array.from(referencesMap.values());
   }, [filteredGroupedTasks, individualNames]);
 
-  const totalColumns = useMemo(() => {
-    const baseColumns = 2;
-    const applicantColumns = filteredGroupedTasks.reduce((acc, group) => {
-      const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-      const dependantCount = (group.dependantIds || []).length;
-      return acc + 1 + 1 + dependantCount + (hasClassD ? 1 : 0);
-    }, 0);
-    const referenceColumns = hasReferencesColumn ? allReferences.length : 0;
-    return baseColumns + applicantColumns + referenceColumns;
-  }, [filteredGroupedTasks, hasReferencesColumn, allReferences]);
-
   const handleExportChecklist = () => {
     const worksheetData: any[] = [];
     const headers = ["#", "Requirement"];
@@ -455,226 +486,80 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     XLSX.writeFile(workbook, "Requirements_Data_Export.xlsx");
   };
 
-  const renderDocumentSection = (documents: any[], sectionName: string, classDocsAndFields: any[]) => {
+   const renderDocumentSection = (documents: any[], sectionName: string) => {
     return documents
       .filter(docItem => !!docItem?.document?.id)
       .sort((a, b) => (a.document.custom_order || 999) - (b.document.custom_order || 999))
       .map((docItem, docIndex) => {
         const documentId = docItem.document.id;
         const isExpanded = expandedDocuments.has(documentId);
-        const allPossibleFields = docItem.document.fields || [];
-        let fieldsToRender = [];
-
+        const docCategory = docItem.document?.category || '';
+        const isCompanyDoc = docCategory === 'company-docs' || docCategory === 'company';
+        
         const requirementConfig = classDocsAndFields.find(d => d.id === documentId);
-        const whitelistedFields = requirementConfig?.fields || [];
-
-        if (whitelistedFields.length > 0) {
-          const whitelistedFieldIds = new Set(whitelistedFields.map(f => f.id));
-          fieldsToRender = allPossibleFields.filter(field => whitelistedFieldIds.has(field.id));
-        }
-
-        const hasFields = fieldsToRender.length > 0;
-        if (sectionName === 'letters') {
-          return (
-            <TableRow key={`letter-doc-${docItem.document.id}`} className="group bg-white hover:bg-gray-50">
-              <TableCell className="sticky left-0 bg-white group-hover:bg-gray-50 border-r z-[5] text-center">{docIndex + 1}.</TableCell>
-              <TableCell className="sticky left-16 bg-white group-hover:bg-gray-50 border-r z-[5] px-4">{docItem.document.display_name}</TableCell>
-              {filteredGroupedTasks.map((group, groupIndex) => {
-                const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                const dependantIds = group.dependantIds || [];
-                const task = group.tasks[0];
-                return (
-                  <React.Fragment key={`letter-group-${groupIndex}`}>
-                    {[
-                      { type: 'company' }, { type: 'principal' },
-                      ...dependantIds.map(id => ({ type: 'dependant', id })),
-                      ...(hasClassD ? [{ type: 'understudy' }] : [])
-                    ].map(col => {
-                      const docCategory = docItem.document.category;
-                      let isApplicableForColumn = false;
-                      let cellContent;
-
-                      if (col.type === 'company') {
-                        isApplicableForColumn = docCategory === 'company-docs';
-                      } else {
-                        isApplicableForColumn = docCategory !== 'company-docs';
-                      }
-
-                      if (!isApplicableForColumn) {
-                        cellContent = <span className="text-xs text-gray-500">N/A</span>;
-                      } else {
-                        const docForPreview = getDocumentDataForPreview(task, docItem.document, col.type, col.id);
-                        if (docForPreview) {
-                          cellContent = renderDocumentStatus(task, docItem.document, col.type, col.id);
-                        } else {
-                          cellContent = (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleOpenTemplateGenerator(docItem, task, col.type, col.id)}
-                              disabled={isPreparingTemplate}
-                            >
-                              {isPreparingTemplate ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-                              Generate
-                            </Button>
-                          );
-                        }
-                      }
-
-                      return (
-                        <TableCell key={`letter-cell-${col.type}-${col.id || groupIndex}`} className="text-center border p-1">
-                          {cellContent}
-                        </TableCell>
-                      );
-                    })}
-                  </React.Fragment>
-                );
-              })}
-              {hasReferencesColumn && allReferences.map(ref => <TableCell key={`letter-ref-${ref.id}`} />)}
-            </TableRow>
-          );
-        }
+        const whitelistedFieldIds = new Set(requirementConfig?.fields?.map(f => f.id) || []);
+        const fieldsToRender = (docItem.document.fields || []).filter(f => whitelistedFieldIds.has(f.id));
 
         return (
-          <React.Fragment key={`${sectionName}-doc-fragment-${docItem.document.id}`}>
+          <React.Fragment key={`${sectionName}-${documentId}`}>
             <TableRow className="group bg-white hover:bg-gray-50">
-              <TableCell className="sticky left-0 bg-white group-hover:bg-gray-50 border-r z-[5] text-center">{docIndex + 1}.</TableCell>
-              <TableCell className="sticky left-16 bg-white group-hover:bg-gray-50 border-r z-[5]">
-                <div className="flex items-center px-2">
-                  <span>{docItem.document.display_name}</span>
-                  {hasFields && (
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 ml-2" onClick={() => toggleDocumentExpansion(docItem.document.id)}>
+              <TableCell className="sticky left-0 bg-white group-hover:bg-gray-50 border-r z-10 text-center">{docIndex + 1}</TableCell>
+              <TableCell className="sticky left-16 bg-white group-hover:bg-gray-50 border-r z-10">
+                <div className="flex items-center gap-2">
+                  <span className="truncate max-w-[250px] font-medium">{docItem.document.display_name}</span>
+                  {fieldsToRender.length > 0 && (
+                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => toggleDocumentExpansion(documentId)}>
                       {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
                     </Button>
                   )}
                 </div>
               </TableCell>
 
-              {filteredGroupedTasks.map((group, groupIndex) => {
-                const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                const dependantIds = group.dependantIds || [];
-                const task = group.tasks[0];
-                const isCompany = task?.applicant_type === 'company';
-                const directors = task?.directors_details || [];
-                const docCategory = docItem.document?.category || '';
-                const isCompanyDoc = docCategory === 'company-docs' || docCategory === 'company';
-
+              {columnDefinitions.map((col, colIdx) => {
+                const isApplicable = isCompanyDoc ? col.type === 'company' : col.type !== 'company';
+                const docData = getDocumentDataForPreview(col.task, docItem.document, col.type, col.id);
+                
                 return (
-                  <React.Fragment key={`${sectionName}-doc-group-${groupIndex}`}>
-                    {/* Company Column - Only show if document is a company document */}
-                    <TableCell className="text-center border p-1">
-                      {isCompanyDoc ? (
-                        renderDocumentStatus(task, docItem.document, 'company')
-                      ) : (
-                        <span className="text-xs text-gray-500">N/A</span>
-                      )}
-                    </TableCell>
-
-                    {/* Directors/Principal Column(s) */}
-                    {isCompany && directors.length > 0 ? (
-                      // For company with directors, show director columns
-                      directors.map((director, idx) => (
-                        <TableCell key={`${sectionName}-director-${director.id || idx}`} className="text-center border p-1">
-                          {!isCompanyDoc ? (
-                            renderDocumentStatus(task, docItem.document, 'director', director.id)
-                          ) : (
-                            <span className="text-xs text-gray-500">N/A</span>
-                          )}
-                        </TableCell>
-                      ))
+                  <TableCell key={`${documentId}-col-${colIdx}`} className="text-center border p-2">
+                    {!isApplicable ? (
+                      <span className="text-[10px] text-gray-400">N/A</span>
+                    ) : docData ? (
+                      renderDocumentStatus(col.task, docItem.document, col.type, col.id)
+                    ) : (sectionName === 'letters' || docCategory === 'letters') ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                        onClick={() => handleOpenTemplateGenerator(docItem, col.task, col.type, col.id)}
+                        disabled={isPreparingTemplate}
+                      >
+                        {isPreparingTemplate ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3 mr-1" />}
+                        <span className="text-[10px] font-bold">GENERATE</span>
+                      </Button>
                     ) : (
-                      // For individual, show principal column
-                      <TableCell className="text-center border p-1">
-                        {!isCompanyDoc ? (
-                          renderDocumentStatus(task, docItem.document, 'principal')
-                        ) : (
-                          <span className="text-xs text-gray-500">N/A</span>
-                        )}
-                      </TableCell>
+                      renderDocumentStatus(col.task, docItem.document, col.type, col.id)
                     )}
-
-                    {/* Dependant Columns */}
-                    {dependantIds.map(id => (
-                      <TableCell key={`${sectionName}-dependant-${id}`} className="text-center border p-1">
-                        {!isCompanyDoc ? (
-                          renderDocumentStatus(task, docItem.document, 'dependant', id)
-                        ) : (
-                          <span className="text-xs text-gray-500">N/A</span>
-                        )}
-                      </TableCell>
-                    ))}
-
-                    {/* Understudy Column */}
-                    {hasClassD && (
-                      <TableCell className="text-center border p-1">
-                        {!isCompanyDoc ? (
-                          renderDocumentStatus(task, docItem.document, 'understudy')
-                        ) : (
-                          <span className="text-xs text-gray-500">N/A</span>
-                        )}
-                      </TableCell>
-                    )}
-                  </React.Fragment>
-                );
-              })}
-              {hasReferencesColumn && allReferences.map(ref => {
-                const docForPreview = getDocumentDataForPreview(filteredGroupedTasks[0]?.tasks[0], docItem.document, 'reference', ref.member);
-                const statusNode = renderDocumentStatus(filteredGroupedTasks[0]?.tasks[0], docItem.document, 'reference', ref.member);
-                return (
-                  <TableCell key={`${sectionName}-d-ref-${ref.id}`} className="text-center border p-1">
-                    {docForPreview ? (
-                      <div className="cursor-pointer" onClick={() => handleViewDocuments([docForPreview], docItem.document, { full_name: ref.name })} title="Click to view document">
-                        {statusNode}
-                      </div>
-                    ) : (statusNode)}
                   </TableCell>
-                )
+                );
               })}
             </TableRow>
 
-            {isExpanded && hasFields && fieldsToRender.map((field, fieldIndex) => {
-              return (
-                <TableRow key={`${sectionName}-field-${docItem.document.id}-${field.id}`} className="bg-gray-50 hover:bg-gray-100">
-                  <TableCell className="sticky left-0 bg-gray-50 hover:bg-gray-100 border-r z-[5] text-center text-sm text-gray-500">{`${docIndex + 1}.${fieldIndex + 1}`}</TableCell>
-                  <TableCell className="sticky left-16 bg-gray-50 hover:bg-gray-100 border-r z-[5] pl-8 text-sm">{field.name || field.fieldName}</TableCell>
-
-                  {filteredGroupedTasks.map((group, groupIndex) => {
-                    const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                    const dependantIds = group.dependantIds || [];
-                    const task = group.tasks[0];
-                    return (
-                      <React.Fragment key={`${sectionName}-field-group-${groupIndex}`}>
-                        {[
-                          { type: 'company' }, { type: 'principal' },
-                          ...dependantIds.map(id => ({ type: 'dependant', id })),
-                          ...(hasClassD ? [{ type: 'understudy' }] : [])
-                        ].map(col => {
-                          const docData = getDocumentDataForPreview(task, docItem.document, col.type, col.id);
-                          const extractedData = docData?.extracted_details || {};
-                          const fieldValue = extractedData[field.name] || extractedData[field.id] || '-';
-
-                          return (
-                            <TableCell key={`${sectionName}-df-${col.type}-${col.id || groupIndex}`} className="text-center border p-1 text-sm">
-                              {fieldValue}
-                            </TableCell>
-                          );
-                        })}
-                      </React.Fragment>
-                    );
-                  })}
-                  {hasReferencesColumn && allReferences.map(ref => {
-                    const docData = getDocumentDataForPreview(filteredGroupedTasks[0]?.tasks[0], docItem.document, 'reference', ref.member);
-                    const extractedData = docData?.extracted_details || {};
-                    const fieldValue = extractedData[field.name] || extractedData[field.id] || '-';
-                    return (
-                      <TableCell key={`${sectionName}-df-ref-${ref.id}`} className="text-center border p-1 text-sm">
-                        {fieldValue}
-                      </TableCell>
-                    );
-                  })}
-                </TableRow>
-              );
-            })}
+            {/* Field Rows */}
+            {isExpanded && fieldsToRender.map((field, fIdx) => (
+              <TableRow key={`${documentId}-field-${field.id}`} className="bg-gray-50/50">
+                <TableCell className="sticky left-0 bg-gray-50 border-r text-center text-[10px] text-gray-400">{docIndex + 1}.{fIdx + 1}</TableCell>
+                <TableCell className="sticky left-16 bg-gray-50 border-r pl-8 text-[11px] text-gray-600 italic">{field.name}</TableCell>
+                {columnDefinitions.map((col, colIdx) => {
+                  const isApplicable = isCompanyDoc ? col.type === 'company' : col.type !== 'company';
+                  const docData = isApplicable ? getDocumentDataForPreview(col.task, docItem.document, col.type, col.id) : null;
+                  return (
+                    <TableCell key={`${field.id}-val-${colIdx}`} className="text-center border p-1 text-[11px]">
+                      {docData?.extracted_details?.[field.name] || docData?.extracted_details?.[field.id] || '-'}
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+            ))}
           </React.Fragment>
         );
       });
@@ -783,217 +668,83 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         </Dialog>
       )}
 
+   <div className="rounded-md border bg-white shadow-sm overflow-hidden">
+        <div className="overflow-x-auto overflow-y-auto max-h-[75vh]">
+          <Table className="border-separate border-spacing-0">
+            <TableHeader className="sticky top-0 z-20">
+              <TableRow className="h-20 bg-blue-600">
+                <TableHead className="sticky left-0 bg-blue-700 text-white w-16 border-r border-blue-500 text-center z-30 font-bold">#</TableHead>
+                <TableHead className="sticky left-16 bg-blue-700 text-white w-[300px] border-r border-blue-500 z-30 font-bold">Requirement Mapping</TableHead>
+                {columnDefinitions.map((col, idx) => {
+                  let bgColor = 'bg-blue-400';
+                  if (col.type === 'company') bgColor = 'bg-gray-700';
+                  else if (['director', 'principal', 'shareholder'].includes(col.type)) bgColor = 'bg-blue-600';
+                  else if (col.type === 'dependant') bgColor = 'bg-blue-500';
+
+                  return (
+                    <TableHead key={`header-${idx}`} className={`${bgColor} text-white border-r border-white/20 min-w-[180px] p-2 text-center`}>
+                      <div className="flex flex-col items-center gap-1">
+                        {col.type === 'company' ? <Briefcase className="h-4 w-4 opacity-70" /> : <UserCheck className="h-4 w-4 opacity-70" />}
+                        <span className="text-xs font-bold uppercase line-clamp-1">{col.label}</span>
+                        <span className="text-[9px] opacity-60 tracking-widest">{col.subLabel || 'ENTITY'}</span>
+                      </div>
+                    </TableHead>
+                  );
+                })}
+              </TableRow>
+            </TableHeader>
+
+            <TableBody>
+              {loading ? (
+                <TableRow><TableCell colSpan={totalColumns} className="h-32 text-center"><Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" /></TableCell></TableRow>
+              ) : (
+                <>
+                  <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('company')}>
+                    <TableCell colSpan={totalColumns} className="py-2 px-4 font-bold text-slate-700 uppercase text-xs tracking-wider">
+                      <div className="flex items-center gap-2">
+                        {expandedSections.company ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />} Company Requirements
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                  {expandedSections.company && renderDocumentSection(organizedRequirements.documents.company, 'company')}
+
+                  <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('individual')}>
+                    <TableCell colSpan={totalColumns} className="py-2 px-4 font-bold text-slate-700 border-t-2 border-white uppercase text-xs tracking-wider">
+                      <div className="flex items-center gap-2">
+                        {expandedSections.individual ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />} Individual Requirements
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                  {expandedSections.individual && renderDocumentSection(organizedRequirements.documents.individual, 'individual')}
+
+                  <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('letters')}>
+                    <TableCell colSpan={totalColumns} className="py-2 px-4 font-bold text-slate-700 border-t-2 border-white uppercase text-xs tracking-wider">
+                      <div className="flex items-center gap-2">
+                        {expandedSections.letters ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />} Letters & Forms
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                  {expandedSections.letters && renderDocumentSection(organizedRequirements.documents.letters, 'letters')}
+                </>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+
       {showTemplateGenerator && selectedLetterInfo && (
         <TemplateGenerationDialog
           isOpen={showTemplateGenerator}
           onClose={() => setShowTemplateGenerator(false)}
-          template={selectedLetterInfo.template} // This is the pre-selected one, or null
-          availableTemplates={selectedLetterInfo.availableTemplates} // The full list
+          template={selectedLetterInfo.template}
+          availableTemplates={selectedLetterInfo.availableTemplates}
           documentName={selectedLetterInfo.document.display_name}
           onSave={handleSaveGeneratedLetter}
           masterFields={selectedLetterInfo.masterFields}
           entityIdMap={selectedLetterInfo.entityIdMap}
           sourceDataCache={selectedLetterInfo.sourceDataCache}
-          personData={selectedLetterInfo.personData}
-          companyData={selectedLetterInfo.companyData}
-          extractedData={selectedLetterInfo.extractedData}
         />
       )}
-
-      <Table className="min-w-full w-full border-collapse">
-        <TableHeader className="sticky top-0 z-10">
-          <TableRow className="h-16">
-            <TableHead className="sticky left-0 bg-blue-600 border-r border-blue-500 w-16 z-20 text-white text-center font-semibold">#</TableHead>
-            <TableHead className="sticky left-16 bg-blue-600 border-r border-blue-500 w-[300px] z-20 text-white font-semibold">Requirements</TableHead>
-            {filteredGroupedTasks.map((group, groupIndex) => {
-              const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-              const task = group.tasks[0];
-              const isCompany = task?.applicant_type === 'company';
-              const { principalId, understudyId } = group.tasks.reduce((acc, task) => {
-                if (task.applicant_type === 'principal') acc.principalId = task.individual_id;
-                if (task.applicant_type === 'understudy') acc.understudyId = task.individual_id;
-                return acc;
-              }, { principalId: null, understudyId: null });
-              const principalName = principalId && individualNames[principalId];
-              const understudyName = understudyId && individualNames[understudyId];
-              const companyId = task?.company_id;
-              const company = companyId ? companyData[companyId] : null;
-              const directors = task?.directors_details || [];
-
-              const headerCells = [
-                <TableHead key={`${groupIndex}-company`} className="bg-gray-600 border-r border-gray-400 text-white text-center font-semibold min-w-[170px] px-2 py-2">
-                  <div className="flex flex-col items-center justify-center gap-1.5 h-full">
-                    <Briefcase className="h-4 w-4" />
-                    {company ? (
-                      <span className="text-sm font-bold truncate max-w-[150px]" title={company.company_name}>
-                        {company.company_name}
-                      </span>
-                    ) : (
-                      <span className="text-xs opacity-80">Company</span>
-                    )}
-                  </div>
-                </TableHead>
-              ];
-
-              // Add director columns for company or principal column for individual
-              if (isCompany && directors.length > 0) {
-                directors.forEach((director, idx) => {
-                  headerCells.push(
-                    <TableHead
-                      key={`${groupIndex}-director-${director.id || idx}`}
-                      className="bg-blue-600 border-r border-blue-400 text-white text-center font-semibold min-w-[170px] px-2 py-2"
-                    >
-                      <div className="flex flex-col items-center justify-center gap-1.5 h-full">
-                        <UserCheck className="h-4 w-4" />
-                        <span className="text-sm font-bold truncate max-w-[150px]" title={director.full_name}>
-                          {director.full_name}
-                        </span>
-                        <span className="text-xs opacity-80 capitalize">
-                          {director.role?.toLowerCase()}
-                        </span>
-                      </div>
-                    </TableHead>
-                  );
-                });
-              } else {
-                headerCells.push(
-                  <TableHead key={`${groupIndex}-principal`} className="bg-blue-600 border-r border-blue-400 text-white text-center font-semibold min-w-[170px] px-2 py-2">
-                    <div className="flex flex-col items-center justify-center gap-1.5 h-full">
-                      <UserCheck className="h-4 w-4" />
-                      {principalName ? (
-                        <>
-                          <span className="text-sm font-bold truncate max-w-[150px]" title={principalName}>
-                            {principalName}
-                          </span>
-                          <span className="text-xs opacity-80">Principal</span>
-                        </>
-                      ) : (
-                        <span className="text-xs opacity-80">Principal</span>
-                      )}
-                    </div>
-                  </TableHead>
-                );
-              }
-
-              // Add dependant columns
-              (group.dependantIds || []).forEach((dependantId, depIndex) => {
-                const dependantName = individualNames[dependantId];
-                headerCells.push(
-                  <TableHead
-                    key={`${groupIndex}-dependant-${dependantId}`}
-                    className="bg-blue-500 border-r border-blue-400 text-white text-center font-semibold min-w-[170px] px-2 py-2"
-                  >
-                    <div className="flex flex-col items-center justify-center gap-1.5 h-full">
-                      <Users className="h-4 w-4" />
-                      {dependantName ? (
-                        <>
-                          <span className="text-sm font-bold truncate max-w-[150px]" title={dependantName}>
-                            {dependantName}
-                          </span>
-                          <span className="text-xs opacity-80">
-                            Dependant {depIndex + 1}
-                          </span>
-                        </>
-                      ) : (
-                        <span className="text-xs opacity-80">
-                          Dependant {depIndex + 1}
-                        </span>
-                      )}
-                    </div>
-                  </TableHead>
-                );
-              });
-
-              // Add understudy column if applicable
-              if (hasClassD) {
-                headerCells.push(
-                  <TableHead
-                    key={`${groupIndex}-understudy`}
-                    className="bg-blue-400 border-r border-blue-400 text-white text-center font-semibold min-w-[170px] px-2 py-2"
-                  >
-                    <div className="flex flex-col items-center justify-center gap-1.5 h-full">
-                      <UserCheck className="h-4 w-4" />
-                      {understudyName ? (
-                        <>
-                          <span className="text-sm font-bold truncate max-w-[150px]" title={understudyName}>
-                            {understudyName}
-                          </span>
-                          <span className="text-xs opacity-80">Understudy</span>
-                        </>
-                      ) : (
-                        <span className="text-xs opacity-80">Understudy</span>
-                      )}
-                    </div>
-                  </TableHead>
-                );
-              }
-
-              return headerCells;
-            })}
-            {hasReferencesColumn && allReferences.map((reference, refIndex) => (
-              <TableHead key={`reference-${reference.id}`} className="bg-purple-600 border-r border-purple-400 text-white text-center font-semibold min-w-[170px] px-2 py-2">
-                <div className="flex flex-col items-center justify-center gap-1.5 h-full">
-                  <Users className="h-4 w-4" />
-                  <span className="text-sm font-bold truncate max-w-[150px]" title={reference.name}>{reference.name}</span>
-                  <span className="text-xs opacity-80">Reference {refIndex + 1}</span>
-                </div>
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody className="divide-y">
-          {loading ? (<TableRow><TableCell colSpan={totalColumns} className="h-24 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin" /></TableCell></TableRow>)
-            : error ? (<TableRow><TableCell colSpan={totalColumns} className="h-24 text-center text-destructive"><AlertTriangle className="mx-auto h-6 w-6" />{error}</TableCell></TableRow>)
-              : (<>
-                {organizedRequirements.documents.company.length > 0 && (
-                  <>
-                    <TableRow className="bg-gray-100 hover:bg-gray-200 cursor-pointer" onClick={() => toggleSectionExpansion('company')}>
-                      <TableCell colSpan={totalColumns} className="px-4 py-2 font-semibold text-gray-700">
-                        <div className="flex items-center gap-2">
-                          {expandedSections.company ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />} Company Documents
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                    {expandedSections.company && renderDocumentSection(organizedRequirements.documents.company, 'company', classDocsAndFields)}
-                  </>
-                )}
-
-                {organizedRequirements.documents.individual.length > 0 && (
-                  <>
-                    <TableRow className="bg-gray-100 hover:bg-gray-200 cursor-pointer" onClick={() => toggleSectionExpansion('individual')}>
-                      <TableCell colSpan={totalColumns} className="px-4 py-2 font-semibold text-gray-700">
-                        <div className="flex items-center gap-2">
-                          {expandedSections.individual ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />} Individual Documents
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                    {expandedSections.individual && renderDocumentSection(organizedRequirements.documents.individual, 'individual', classDocsAndFields)}
-                  </>
-                )}
-
-                {organizedRequirements.documents.letters.length > 0 && (
-                  <>
-                    <TableRow className="bg-gray-100 hover:bg-gray-200 cursor-pointer" onClick={() => toggleSectionExpansion('letters')}>
-                      <TableCell colSpan={totalColumns} className="px-4 py-2 font-semibold text-gray-700">
-                        <div className="flex items-center gap-2">
-                          {expandedSections.letters ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />} Letters & Forms
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                    {expandedSections.letters && renderDocumentSection(organizedRequirements.documents.letters, 'letters', classDocsAndFields)}
-                  </>
-                )}
-
-                {organizedRequirements.documents.company.length === 0 && organizedRequirements.documents.individual.length === 0 && organizedRequirements.documents.letters.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={totalColumns} className="text-center p-8 text-muted-foreground">
-                      No requirements found for this applicant.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </>)}
-        </TableBody>
-      </Table>
     </div>
   );
 }

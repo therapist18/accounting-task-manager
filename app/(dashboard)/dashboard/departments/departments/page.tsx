@@ -1120,7 +1120,7 @@ export default function Departments() {
         </CardContent>
       </Card>
 
-      <div className="rounded-lg border bg-white shadow-sm">
+      <div className="rounded-lg border bg-white shadow-sm overflow-auto max-h-[calc(100vh-300px)]">
         <Table>
           <TableHeader className="bg-blue-600">
             <TableRow>
