@@ -88,7 +88,7 @@ type Placeholder = {
   type: 'text' | 'number' | 'date' | 'select' | 'array' | 'image';
   required: boolean;
   options?: string[];
-  entity_type: EntityType;
+  entity_type: EntityType[]; // Always an array now
   master_field_ids?: number[];
   parent_name?: string; // If this field is inside a {#block}
   is_block_start?: boolean; // If this is the {#block} tag itself
@@ -256,12 +256,12 @@ export default function DocumentTemplateManager({
   const [isPlaceholderFormOpen, setIsPlaceholderFormOpen] = useState(false);
   const [isEditingPlaceholder, setIsEditingPlaceholder] = useState<number | null>(null);
   const [newPlaceholder, setNewPlaceholder] = useState<Placeholder>({
+    id: '',
     name: '',
     description: '',
     type: 'text',
     required: false,
-    entity_type: 'client',
-    director_type: 'all'
+    entity_type: []
   });
   const [directorType, setDirectorType] = useState<'all' | 'primary'>('all');
   const [templateFiles, setTemplateFiles] = useState<Map<string, File>>(new Map());
@@ -922,7 +922,10 @@ export default function DocumentTemplateManager({
 
     const placeholderToSave = {
       ...newPlaceholder,
-      ...(newPlaceholder.entity_type === 'director' && { director_type: directorType })
+      entity_type: Array.isArray(newPlaceholder.entity_type) 
+        ? newPlaceholder.entity_type 
+        : newPlaceholder.entity_type ? [newPlaceholder.entity_type] : [],
+      ...(newPlaceholder.entity_type?.includes('director') && { director_type: directorType })
     };
 
     if (isEditingPlaceholder !== null) {
@@ -944,12 +947,12 @@ export default function DocumentTemplateManager({
     setIsPlaceholderFormOpen(false);
 
     setNewPlaceholder({
+      id: '',
       name: '',
       description: '',
       type: 'text',
       required: false,
-      entity_type: 'client',
-      director_type: 'all'
+      entity_type: []
     });
 
     setIsEditingPlaceholder(null);
@@ -960,7 +963,14 @@ export default function DocumentTemplateManager({
     const placeholder = currentTemplate.placeholders?.[index];
     if (!placeholder) return;
 
-    setNewPlaceholder({ ...placeholder });
+    // Ensure entity_type is always an array
+    setNewPlaceholder({ 
+      ...placeholder,
+      entity_type: Array.isArray(placeholder.entity_type) 
+        ? placeholder.entity_type 
+        : placeholder.entity_type ? [placeholder.entity_type] : []
+    });
+    
     if (placeholder.entity_type === 'director' && 'director_type' in placeholder) {
       setDirectorType(placeholder.director_type as 'all' | 'primary');
     } else {
@@ -1528,23 +1538,77 @@ export default function DocumentTemplateManager({
               </div>
 
               <div className="space-y-2">
-                <Label>Entity</Label>
-                <Select
-                  value={newPlaceholder.entity_type}
-                  onValueChange={(v) => setNewPlaceholder({ ...newPlaceholder, entity_type: v })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {ENTITY_TYPES.map(t => (
-                      <SelectItem key={t.value} value={t.value}>
-                        {t.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex items-center justify-between">
+                  <Label>Entity</Label>
+                  {newPlaceholder.entity_type?.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs text-muted-foreground"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setNewPlaceholder(prev => ({
+                          ...prev,
+                          entity_type: []
+                        }));
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        className="w-full justify-between"
+                      >
+                        {newPlaceholder.entity_type && newPlaceholder.entity_type.length > 0
+                          ? newPlaceholder.entity_type
+                              .map(et => ENTITY_TYPES.find(t => t.value === et)?.label || et)
+                              .join(', ')
+                          : 'Select entities...'}
+                        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                  <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Search entities..." />
+                      <CommandList>
+                        <CommandGroup className="max-h-[300px] overflow-y-auto">
+                          {ENTITY_TYPES.map((type) => {
+                            const isSelected = newPlaceholder.entity_type?.some(et => et === type.value);
+                            return (
+                              <CommandItem
+                                key={type.value}
+                                onSelect={() => {
+                                  setNewPlaceholder(prev => ({
+                                    ...prev,
+                                    entity_type: isSelected
+                                      ? prev.entity_type.filter(et => et !== type.value)
+                                      : [...prev.entity_type, type.value]
+                                  }));
+                                }}
+                                className="cursor-pointer"
+                              >
+                                <div className="flex items-center">
+                                  <div className={`mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary ${isSelected ? 'bg-primary text-primary-foreground' : 'opacity-50'}`}>
+                                    {isSelected && <Check className="h-3 w-3" />}
+                                  </div>
+                                  <span>{type.label}</span>
+                                </div>
+                              </CommandItem>
+                            );
+                          })}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
+            </div>
             </div>
 
             {newPlaceholder.type === 'select' && (

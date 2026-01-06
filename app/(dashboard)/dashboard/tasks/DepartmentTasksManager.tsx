@@ -2885,20 +2885,20 @@ export default function DepartmentTasksManager({
         allDocuments={allDocuments}
         onTaskUpdate={handleTaskUpdate}
       />
-{companyInquiryDialogOpen && editingTask && (
-  <NewCompanyInquiryDialog
-    open={companyInquiryDialogOpen}
-    onOpenChange={setCompanyInquiryDialogOpen}
-    initialData={editingTask}  // Pass the task data as initialData
-    departments={departments}
-    users={Array.from(tmUsers.values())}
-    officers={subdepartmentOfficers}
-    onEnquiryCreated={(updatedTask) => {
-      handleTaskUpdate(updatedTask);
-      setCompanyInquiryDialogOpen(false);
-    }}
-  />
-)}
+      {companyInquiryDialogOpen && editingTask && (
+        <NewCompanyInquiryDialog
+          open={companyInquiryDialogOpen}
+          onOpenChange={setCompanyInquiryDialogOpen}
+          initialData={editingTask}  // Pass the task data as initialData
+          departments={departments}
+          users={Array.from(tmUsers.values())}
+          officers={subdepartmentOfficers}
+          onEnquiryCreated={(updatedTask) => {
+            handleTaskUpdate(updatedTask);
+            setCompanyInquiryDialogOpen(false);
+          }}
+        />
+      )}
       <StageUploadDialog
         key={stageDialogKey} // <--- THIS IS THE CRITICAL FIX
         open={isStageUploadDialogOpen}

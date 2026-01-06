@@ -76,9 +76,9 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
 
         if (error) throw error
 
-        const formattedDocTypes = docTypes.map((dt: { id: string; name: string }) => ({
+        const formattedDocTypes = docTypes.map((dt: any) => ({
           value: dt.id,
-          label: dt.name
+          label: dt.display_name || dt.name || `Document ${dt.id}`
         }))
 
         setFormData(prev => ({
