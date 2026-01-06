@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -203,46 +203,33 @@ export const ExtractionPreview = ({
   onSave,
   documentId,
 }: ExtractionPreviewProps) => {
+  console.log('🔍 ExtractionPreview - Props:', {
+    documentName,
+    hasFileUrl: !!fileUrl,
+    hasFields: fields?.length > 0,
+    expanded,
+    showSaveButton,
+    documentId
+  });
 
-  const [isOpen, setIsOpen] = useState(expanded)
+  const [isOpen, setIsOpen] = useState(() => {
+    console.log('🔍 ExtractionPreview - Initial isOpen state:', expanded);
+    return expanded;
+  });
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isRetrying, setIsRetrying] = useState(false)
   const [isSaving, setIsSaving] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
 
-  // Initialize localData
-  const [localData, setLocalData] = useState<Record<string, any>>(() => {
-    const initialData: Record<string, any> = {};
-    fields.forEach(field => {
-      const fieldName = field?.name || field?.id || 'field';
-      const snakeCase = fieldName
-        .toString()
-        .toLowerCase()
-        .replace(/[^a-zA-Z0-9]+(.)/g, (_, chr) => '_' + chr.toLowerCase())
-        .replace(/^_/, '');
+ const [localData, setLocalData] = useState<Record<string, any>>({});
+ const lastSyncedData = useRef(null);
 
-      let value = extractedData[snakeCase] ||
-        extractedData[field?.id] ||
-        (field?.name ? extractedData[field.name] : '') ||
-        (field?.name ? extractedData[field.name.toLowerCase()] : '') ||
-        '';
-
-      if (field?.name?.toLowerCase() === 'sex' || field?.name?.toLowerCase() === 'gender') {
-        value = value.toString().toUpperCase() === 'FEMALE' ? 'F' :
-          value.toString().toUpperCase() === 'MALE' ? 'M' : value;
-      } else if (field?.name?.toLowerCase() === 'surname' && value) {
-        value = value.toString().toUpperCase();
-      }
-
-      initialData[field.name] = value;
-    });
-    return initialData;
-  });
-
-  const formattedData = useMemo(() => {
-    const result: Record<string, any> = {};
-    fields.forEach(field => {
+ const formattedData = useMemo(() => {
+  const result: Record<string, any> = {};
+  const safeFields = fields || []; // Fallback
+  
+  safeFields.forEach(field => {
       if (!field?.name) return;
 
       const fieldName = field?.name || field?.id || 'field';
@@ -286,13 +273,13 @@ export const ExtractionPreview = ({
   }, [extractedData, fields]);
 
   useEffect(() => {
-    setLocalData(prevData => ({
-      ...prevData,
-      ...Object.fromEntries(
-        Object.entries(formattedData).filter(([key]) => prevData[key] === undefined || prevData[key] === '')
-      )
-    }));
-  }, [formattedData]);
+  // Only sync if the source data reference has actually changed 
+  // (e.g., parent fetched new data from DB)
+  if (extractedData !== lastSyncedData.current) {
+    setLocalData(formattedData);
+    lastSyncedData.current = extractedData;
+  }
+}, [formattedData, extractedData]);
 
   const handleFieldChange = (field: string, value: any) => {
     setLocalData(prev => ({
@@ -648,8 +635,10 @@ const handleSave = async () => {
               {fields
                 .sort((a, b) => {
                   const order = ['name', 'company_name', 'date', 'reference_number', 'file_number'];
-                  const aIndex = order.indexOf(a.name.toLowerCase());
-                  const bIndex = order.indexOf(b.name.toLowerCase());
+                  const aName = a?.name?.toLowerCase?.() || '';
+                  const bName = b?.name?.toLowerCase?.() || '';
+                  const aIndex = order.indexOf(aName);
+                  const bIndex = order.indexOf(bName);
                   return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
                 })
                 .map((field, index) => renderField(field, index))}

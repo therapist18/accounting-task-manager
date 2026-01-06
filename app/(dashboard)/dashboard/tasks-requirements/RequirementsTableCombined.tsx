@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState, useMemo, useCallback, useEffect } from "react"
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { AlertTriangle, Briefcase, Users, Plus, Minus, UserCheck, Loader2, Download, FileText, FileUp, Trash2, RefreshCw, Wand2, Save } from "lucide-react"
@@ -72,6 +72,15 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   const [selectedDocForUpload, setSelectedDocForUpload] = useState<any>(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [previewingDocuments, setPreviewingDocuments] = useState<any>(null);
+  
+  // Debug effect for preview modal state
+  useEffect(() => {
+    console.log('🔍 Preview Modal State:', {
+      isOpen: showPreviewModal,
+      hasPreviewData: !!previewingDocuments,
+      documentCount: previewingDocuments?.documents?.length || 0
+    });
+  }, [showPreviewModal, previewingDocuments]);
 
   // State for the unified template generation dialog
   const [showTemplateGenerator, setShowTemplateGenerator] = useState(false);
@@ -79,6 +88,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
   const [isPreparingTemplate, setIsPreparingTemplate] = useState(false);
   const [masterFields, setMasterFields] = useState<Map<number, any>>(new Map());
+  const hasFetchedMasterFields = useRef(false);
 
   const classDocsAndFields = useMemo(() => classRequirements?.[0]?.documents_and_fields || [], [classRequirements]);
 
@@ -86,17 +96,17 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     const cols = [];
     filteredGroupedTasks.forEach((group, groupIndex) => {
       const task = group.tasks[0];
-   const isCompanyApplicant = task?.applicant_type === 'company';
-    const companyName = task?.company_name || 'Company'
-      
+      const isCompanyApplicant = task?.applicant_type === 'company';
+      const companyName = task?.company_name || 'Company'
+
       // 1. Company Column
-        cols.push({ 
-      type: 'company', 
-      id: task?.company_id, 
-      label: companyName, 
-      task, 
-      groupIndex 
-    });
+      cols.push({
+        type: 'company',
+        id: task?.company_id,
+        label: companyName,
+        task,
+        groupIndex
+      });
 
       // 2. Individual Target Columns
       if (isCompanyApplicant) {
@@ -124,18 +134,28 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
   const totalColumns = columnDefinitions.length + 2; // + index and name columns
 
+  // Fetch master fields once on mount
   useEffect(() => {
+    if (hasFetchedMasterFields.current) return;
+
     const fetchMasterFields = async () => {
       try {
-        const { data, error } = await supabase.from('tm_job_fields').select('*');
+        const { data, error } = await supabase.from('tm_job_fields').select('*').order('id', { ascending: true });
         if (error) throw error;
+
         const fieldsMap = new Map(data.map(field => [field.id, field]));
         setMasterFields(fieldsMap);
+        hasFetchedMasterFields.current = true;
       } catch (error) {
         console.error("Failed to fetch master fields:", error);
-        toast({ title: "Could not load master fields", variant: "destructive" });
+        toast({
+          title: "Could not load master fields",
+          description: error.message,
+          variant: "destructive"
+        });
       }
     };
+
     fetchMasterFields();
   }, []);
 
@@ -353,25 +373,38 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     handleUploadSubmit(uploadData);
   };
 
-  const handleViewDocuments = (documents: any[], docInfo: any, person: any) => {
-    setPreviewingDocuments({
-      documents: documents.map(d => ({ ...d, edited_details: d.extracted_details || {} })),
-      document_display_name: docInfo.display_name,
-      person_full_name: person.full_name,
-      document_fields: docInfo.fields,
+const handleViewDocuments = (documents: any[], docInfo: any, column: any) => {
+  if (!documents || documents.length === 0) return;
+
+  const previewData = {
+    documents: documents.map(d => ({
+      ...d,
+      // Ensure we have the details even if nested
+      edited_details: d.edited_details || d.extracted_details || {},
+      file_path: d.file_path || d.url || d.document_url,
+      file_name: d.file_name || d.name || 'document.pdf',
+      id: d.id
+    })),
+    document_display_name: docInfo?.display_name || 'Document',
+    person_full_name: column?.label || '', // Use the column label (Name of person/company)
+    document_fields: docInfo?.fields || []
+  };
+
+  setPreviewingDocuments(previewData);
+  setShowPreviewModal(true);
+};
+
+  const handlePreviewDataChange = useCallback((docId, fieldName, value) => {
+    setPreviewingDocuments(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        documents: prev.documents.map(d =>
+          d.id === docId ? { ...d, edited_details: { ...d.edited_details, [fieldName]: value } } : d
+        ),
+      };
     });
-    setShowPreviewModal(true);
-  };
-
-  const handlePreviewDataChange = (docId, fieldName, value) => {
-    setPreviewingDocuments(prev => ({
-      ...prev,
-      documents: prev.documents.map(d =>
-        d.id === docId ? { ...d, edited_details: { ...d.edited_details, [fieldName]: value } } : d
-      ),
-    }));
-  };
-
+  }, []);
   const toggleSectionExpansion = (section: 'company' | 'individual' | 'letters') => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
@@ -486,7 +519,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     XLSX.writeFile(workbook, "Requirements_Data_Export.xlsx");
   };
 
-   const renderDocumentSection = (documents: any[], sectionName: string) => {
+  const renderDocumentSection = (documents: any[], sectionName: string) => {
     return documents
       .filter(docItem => !!docItem?.document?.id)
       .sort((a, b) => (a.document.custom_order || 999) - (b.document.custom_order || 999))
@@ -495,7 +528,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         const isExpanded = expandedDocuments.has(documentId);
         const docCategory = docItem.document?.category || '';
         const isCompanyDoc = docCategory === 'company-docs' || docCategory === 'company';
-        
+
         const requirementConfig = classDocsAndFields.find(d => d.id === documentId);
         const whitelistedFieldIds = new Set(requirementConfig?.fields?.map(f => f.id) || []);
         const fieldsToRender = (docItem.document.fields || []).filter(f => whitelistedFieldIds.has(f.id));
@@ -518,14 +551,24 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
               {columnDefinitions.map((col, colIdx) => {
                 const isApplicable = isCompanyDoc ? col.type === 'company' : col.type !== 'company';
                 const docData = getDocumentDataForPreview(col.task, docItem.document, col.type, col.id);
-                
-                return (
-                  <TableCell key={`${documentId}-col-${colIdx}`} className="text-center border p-2">
-                    {!isApplicable ? (
-                      <span className="text-[10px] text-gray-400">N/A</span>
-                    ) : docData ? (
-                      renderDocumentStatus(col.task, docItem.document, col.type, col.id)
-                    ) : (sectionName === 'letters' || docCategory === 'letters') ? (
+
+               return (
+  <TableCell key={`${documentId}-col-${colIdx}`} className="text-center border p-2">
+    {!isApplicable ? (
+      <span className="text-[10px] text-gray-400">N/A</span>
+    ) : docData ? (
+      // THIS IS THE FIX: Wrap the status in a clickable container
+      <div 
+        className="cursor-pointer hover:opacity-70 transition-opacity"
+        onClick={() => {
+          // docData usually contains the uploaded document record(s)
+          const docsArray = Array.isArray(docData) ? docData : [docData];
+          handleViewDocuments(docsArray, docItem.document, col);
+        }}
+      >
+        {renderDocumentStatus(col.task, docItem.document, col.type, col.id)}
+      </div>
+    ) : (sectionName === 'letters' || docCategory === 'letters') ? (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -564,7 +607,14 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         );
       });
   };
-
+// In RequirementsTableCombined.tsx, inside the render method where the ExtractionPreview is used
+console.log('🔍 Rendering ExtractionPreview with data:', {
+  showPreviewModal,
+  hasPreviewData: !!previewingDocuments,
+  documentName: previewingDocuments?.document_display_name,
+  hasDocuments: previewingDocuments?.documents?.length > 0,
+  firstDocument: previewingDocuments?.documents?.[0]
+});
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
@@ -604,147 +654,154 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         />
       )}
 
-      {showPreviewModal && previewingDocuments && (
-        <Dialog open={showPreviewModal} onOpenChange={setShowPreviewModal}>
-          <DialogContent className="max-w-[95vw] w-full max-h-[95vh] flex flex-col p-0">
-            <DialogHeader className="p-4 border-b">
-              <DialogTitle>
-                Preview: {previewingDocuments.document_display_name} - {previewingDocuments.person_full_name}
-              </DialogTitle>
-            </DialogHeader>
-            <div className="flex-grow overflow-y-auto p-4 space-y-4">
-              {previewingDocuments.documents.map((doc, index) => {
-                const hasChanges = !deepEqual(doc.extracted_details, doc.edited_details);
-                return (
-                  <div key={doc.id} className="border rounded-lg shadow-sm">
-                    <div className="p-3 bg-gray-50 border-b flex justify-between items-center">
-                      <h3 className="font-medium text-sm">Document {index + 1}</h3>
-                      <div className="flex space-x-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="hover:bg-red-100"
-                          onClick={() => handleDeleteDocument(doc)}
-                        >
-                          <Trash2 className="h-3 w-3 mr-1" /> Delete
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="hover:bg-blue-100"
-                          onClick={() => handleRetryExtraction(doc)}
-                        >
-                          <RefreshCw className="h-3 w-3 mr-1" /> Retry
-                        </Button>
-                        <Button
-                          variant="default"
-                          size="sm"
-                          disabled={!hasChanges}
-                          className="bg-green-500 hover:bg-green-700"
-                          onClick={() => handleSaveEditedDocument(doc)}
-                        >
-                          {hasChanges ? 'Save Changes' : 'Saved'}
-                        </Button>
-                      </div>
-                    </div>
-                    <div className="p-4">
-                      <ExtractionPreview
-                        extractedData={doc.edited_details || {}}
-                        fields={previewingDocuments.document_fields || []}
-                        fileUrl={doc.file_path}
-                        fileName={doc.file_name}
-                        expanded
-                        showSaveButton={false}
-                        onDataChange={(fieldName, value) =>
-                          handlePreviewDataChange(doc.id, fieldName, value)
-                        }
-                      />
-                    </div>
-                  </div>
-                );
-              })}
+<Dialog open={showPreviewModal} onOpenChange={setShowPreviewModal}>
+  <DialogContent className="max-w-[95vw] w-full max-h-[95vh] flex flex-col p-0 overflow-hidden">
+    <DialogHeader className="p-4 border-b shrink-0">
+      <DialogTitle>
+        {previewingDocuments?.document_display_name || 'Document Preview'}
+        {previewingDocuments?.person_full_name && ` - ${previewingDocuments.person_full_name}`}
+      </DialogTitle>
+      {/* ADD THIS: Fixes accessibility warning and helps Radix render reliably */}
+      <DialogDescription className="sr-only">
+        Previewing extracted data and document images.
+      </DialogDescription>
+    </DialogHeader>
+
+    {/* Ensure this container has a set height and allows children to grow */}
+    <div className="flex-1 overflow-y-auto p-4 bg-gray-50/50">
+      {previewingDocuments?.documents?.length > 0 ? (
+        <div className="space-y-6 max-w-[1600px] mx-auto"> 
+          {previewingDocuments.documents.map((doc, index) => (
+            <div key={doc.id || `doc-${index}`} className="border rounded-xl bg-white shadow-md overflow-hidden">
+              <div className="p-3 bg-slate-100 border-b flex justify-between items-center sticky top-0 z-10">
+                <span className="font-bold text-sm text-slate-700">File: {doc.file_name}</span>
+                <div className="flex space-x-2">
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="h-8"
+                    onClick={() => handleDeleteDocument?.(doc)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
+                  </Button>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="h-8 bg-green-600 hover:bg-green-700"
+                    onClick={() => handleSaveEditedDocument?.(doc)}
+                  >
+                    <Save className="h-3.5 w-3.5 mr-1" /> Save
+                  </Button>
+                </div>
+              </div>
+              
+              <div className="p-4">
+                <ExtractionPreview
+                  documentName={previewingDocuments.document_display_name}
+                  extractedData={doc.edited_details || doc.extracted_details || {}}
+                  fields={previewingDocuments.document_fields || []}
+                  fileUrl={doc.file_path}
+                  fileName={doc.file_name}
+                  expanded={true} // Crucial
+                  showSaveButton={false}
+                  documentId={doc.id}
+                  onDataChange={(fieldName, value) => {
+                    handlePreviewDataChange(doc.id, fieldName, value);
+                  }}
+                />
+              </div>
             </div>
-          </DialogContent>
-        </Dialog>
-      )}
-
-   <div className="rounded-md border bg-white shadow-sm overflow-hidden">
-        <div className="overflow-x-auto overflow-y-auto max-h-[75vh]">
-          <Table className="border-separate border-spacing-0">
-            <TableHeader className="sticky top-0 z-20">
-              <TableRow className="h-20 bg-blue-600">
-                <TableHead className="sticky left-0 bg-blue-700 text-white w-16 border-r border-blue-500 text-center z-30 font-bold">#</TableHead>
-                <TableHead className="sticky left-16 bg-blue-700 text-white w-[300px] border-r border-blue-500 z-30 font-bold">Requirement Mapping</TableHead>
-                {columnDefinitions.map((col, idx) => {
-                  let bgColor = 'bg-blue-400';
-                  if (col.type === 'company') bgColor = 'bg-gray-700';
-                  else if (['director', 'principal', 'shareholder'].includes(col.type)) bgColor = 'bg-blue-600';
-                  else if (col.type === 'dependant') bgColor = 'bg-blue-500';
-
-                  return (
-                    <TableHead key={`header-${idx}`} className={`${bgColor} text-white border-r border-white/20 min-w-[180px] p-2 text-center`}>
-                      <div className="flex flex-col items-center gap-1">
-                        {col.type === 'company' ? <Briefcase className="h-4 w-4 opacity-70" /> : <UserCheck className="h-4 w-4 opacity-70" />}
-                        <span className="text-xs font-bold uppercase line-clamp-1">{col.label}</span>
-                        <span className="text-[9px] opacity-60 tracking-widest">{col.subLabel || 'ENTITY'}</span>
-                      </div>
-                    </TableHead>
-                  );
-                })}
-              </TableRow>
-            </TableHeader>
-
-            <TableBody>
-              {loading ? (
-                <TableRow><TableCell colSpan={totalColumns} className="h-32 text-center"><Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" /></TableCell></TableRow>
-              ) : (
-                <>
-                  <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('company')}>
-                    <TableCell colSpan={totalColumns} className="py-2 px-4 font-bold text-slate-700 uppercase text-xs tracking-wider">
-                      <div className="flex items-center gap-2">
-                        {expandedSections.company ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />} Company Requirements
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                  {expandedSections.company && renderDocumentSection(organizedRequirements.documents.company, 'company')}
-
-                  <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('individual')}>
-                    <TableCell colSpan={totalColumns} className="py-2 px-4 font-bold text-slate-700 border-t-2 border-white uppercase text-xs tracking-wider">
-                      <div className="flex items-center gap-2">
-                        {expandedSections.individual ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />} Individual Requirements
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                  {expandedSections.individual && renderDocumentSection(organizedRequirements.documents.individual, 'individual')}
-
-                  <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('letters')}>
-                    <TableCell colSpan={totalColumns} className="py-2 px-4 font-bold text-slate-700 border-t-2 border-white uppercase text-xs tracking-wider">
-                      <div className="flex items-center gap-2">
-                        {expandedSections.letters ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />} Letters & Forms
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                  {expandedSections.letters && renderDocumentSection(organizedRequirements.documents.letters, 'letters')}
-                </>
-              )}
-            </TableBody>
-          </Table>
+          ))}
         </div>
-      </div>
-
-      {showTemplateGenerator && selectedLetterInfo && (
-        <TemplateGenerationDialog
-          isOpen={showTemplateGenerator}
-          onClose={() => setShowTemplateGenerator(false)}
-          template={selectedLetterInfo.template}
-          availableTemplates={selectedLetterInfo.availableTemplates}
-          documentName={selectedLetterInfo.document.display_name}
-          onSave={handleSaveGeneratedLetter}
-          masterFields={selectedLetterInfo.masterFields}
-          entityIdMap={selectedLetterInfo.entityIdMap}
-          sourceDataCache={selectedLetterInfo.sourceDataCache}
-        />
+      ) : (
+        <div className="h-64 flex flex-col items-center justify-center text-muted-foreground">
+          <Loader2 className="h-8 w-8 animate-spin mb-2" />
+          <p>Loading document content...</p>
+        </div>
       )}
     </div>
-  );
+  </DialogContent>
+</Dialog>
+
+      <div className="rounded-md border bg-white shadow-sm overflow-hidden">
+              <div className="overflow-x-auto overflow-y-auto max-h-[75vh]">
+                <Table className="border-separate border-spacing-0">
+                  <TableHeader className="sticky top-0 z-20">
+                    <TableRow className="h-20 bg-blue-600">
+                      <TableHead className="sticky left-0 bg-blue-700 text-white w-16 border-r border-blue-500 text-center z-30 font-bold">#</TableHead>
+                      <TableHead className="sticky left-16 bg-blue-700 text-white w-[300px] border-r border-blue-500 z-30 font-bold">Requirement Mapping</TableHead>
+                      {columnDefinitions.map((col, idx) => {
+                        let bgColor = 'bg-blue-400';
+                        if (col.type === 'company') bgColor = 'bg-gray-700';
+                        else if (['director', 'principal', 'shareholder'].includes(col.type)) bgColor = 'bg-blue-600';
+                        else if (col.type === 'dependant') bgColor = 'bg-blue-500';
+
+                        return (
+                          <TableHead key={`header-${idx}`} className={`${bgColor} text-white border-r border-white/20 min-w-[180px] p-2 text-center`}>
+                            <div className="flex flex-col items-center gap-1">
+                              {col.type === 'company' ? <Briefcase className="h-4 w-4 opacity-70" /> : <UserCheck className="h-4 w-4 opacity-70" />}
+                              <span className="text-xs font-bold uppercase line-clamp-1">{col.label}</span>
+                              <span className="text-[9px] opacity-60 tracking-widest">{col.subLabel || 'ENTITY'}</span>
+                            </div>
+                          </TableHead>
+                        );
+                      })}
+                    </TableRow>
+                  </TableHeader>
+
+                  <TableBody>
+                    {loading ? (
+                      <TableRow><TableCell colSpan={totalColumns} className="h-32 text-center"><Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" /></TableCell></TableRow>
+                    ) : (
+                      <>
+                        <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('company')}>
+                          <TableCell colSpan={totalColumns} className="py-2 px-4 font-bold text-slate-700 uppercase text-xs tracking-wider">
+                            <div className="flex items-center gap-2">
+                              {expandedSections.company ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />} Company Requirements
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                        {expandedSections.company && renderDocumentSection(organizedRequirements.documents.company, 'company')}
+
+                        <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('individual')}>
+                          <TableCell colSpan={totalColumns} className="py-2 px-4 font-bold text-slate-700 border-t-2 border-white uppercase text-xs tracking-wider">
+                            <div className="flex items-center gap-2">
+                              {expandedSections.individual ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />} Individual Requirements
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                        {expandedSections.individual && renderDocumentSection(organizedRequirements.documents.individual, 'individual')}
+
+                        <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('letters')}>
+                          <TableCell colSpan={totalColumns} className="py-2 px-4 font-bold text-slate-700 border-t-2 border-white uppercase text-xs tracking-wider">
+                            <div className="flex items-center gap-2">
+                              {expandedSections.letters ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />} Letters & Forms
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                        {expandedSections.letters && renderDocumentSection(organizedRequirements.documents.letters, 'letters')}
+                      </>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+
+            {
+    showTemplateGenerator && selectedLetterInfo && (
+      <TemplateGenerationDialog
+        isOpen={showTemplateGenerator}
+        onClose={() => setShowTemplateGenerator(false)}
+        template={selectedLetterInfo.template}
+        availableTemplates={selectedLetterInfo.availableTemplates}
+        documentName={selectedLetterInfo.document.display_name}
+        onSave={handleSaveGeneratedLetter}
+        masterFields={selectedLetterInfo.masterFields}
+        entityIdMap={selectedLetterInfo.entityIdMap}
+        sourceDataCache={selectedLetterInfo.sourceDataCache}
+      />
+    )
+  }
+          </div >
+          );
 }
