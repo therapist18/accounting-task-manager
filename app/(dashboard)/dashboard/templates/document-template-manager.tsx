@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Loader2, PlusCircle, Trash2, FileText, Pencil, Save, RefreshCw, ChevronDown, Check, ChevronsUpDown, Link2, X, Search, View, Download, UserCog, Users, User } from "lucide-react";
+import { Loader2, PlusCircle, Trash2, FileText, Pencil, Save, RefreshCw, ChevronDown, Check, ChevronsUpDown, Link2, X, Search, View, Download, UserCog, Users, User, Code } from "lucide-react";
 import { DocxLivePreview } from "@/components/DocxLivePreview";
 import { DocumentTemplate as BaseDocumentTemplate } from "./types";
 import { TableHeader, Table, TableBody, TableCell, TableHead, TableRow } from "@/components/ui/table";
@@ -71,7 +71,7 @@ interface DocumentTemplateManagerProps {
 
 const PLACEHOLDER_TYPES = [
   { value: 'text', label: 'Text' }, { value: 'date', label: 'Date' }, { value: 'number', label: 'Number' },
-  { value: 'select', label: 'Dropdown' }, { value: 'array', label: 'Array/List' }, { value: 'image', label: 'Image' },
+  { value: 'select', label: 'Dropdown' }, { value: 'array', label: 'Array/List' },{ value: 'conditional', label: 'Conditional' }, { value: 'image', label: 'Image' },
 ];
 
 const ENTITY_TYPES: { value: EntityType; label: string }[] = [
@@ -80,18 +80,38 @@ const ENTITY_TYPES: { value: EntityType; label: string }[] = [
   { value: 'dependent', label: 'Dependent' }, { value: 'employee', label: 'Employee' },
 ];
 
+const DEPENDANT_RELATIONSHIPS = [
+  { value: 'father', label: 'Father' },
+  { value: 'mother', label: 'Mother' },
+  { value: 'daughter', label: 'Daughter' },
+  { value: 'son', label: 'Son' },
+  { value: 'husband', label: 'Husband' },
+  { value: 'wife', label: 'Wife' },
+  { value: 'mother_in_law', label: 'Mother-in-law' },
+  { value: 'father_in_law', label: 'Father-in-law' },
+];
+
 // Update the Placeholder type to handle hierarchy
+type ConditionalCondition = {
+  tag: string;           // e.g., 'child_kenyan_id_no'
+  label: string;         // e.g., 'Kenyan ID No: '
+  master_field_id?: number; // The specific master field for this condition
+};
+
 type Placeholder = {
   id: string;
   name: string;
   description?: string;
-  type: 'text' | 'number' | 'date' | 'select' | 'array' | 'image';
+  type: 'text' | 'number' | 'date' | 'select' | 'array' | 'conditional' | 'image';
   required: boolean;
   options?: string[];
   entity_type: EntityType[]; // Always an array now
   master_field_ids?: number[];
   parent_name?: string; // If this field is inside a {#block}
   is_block_start?: boolean; // If this is the {#block} tag itself
+  director_type?: 'all' | 'primary'; // For director fields
+  dependant_relationship?: string[]; // For dependant fields
+  conditions?: ConditionalCondition[]; // For conditional fields
 };
 
 // Helper to strip XML/HTML tags to find placeholders in split nodes
@@ -264,6 +284,7 @@ export default function DocumentTemplateManager({
     entity_type: []
   });
   const [directorType, setDirectorType] = useState<'all' | 'primary'>('all');
+  const [dependantRelationship, setDependantRelationship] = useState<string[]>([]);
   const [templateFiles, setTemplateFiles] = useState<Map<string, File>>(new Map());
   const [masterFields, setMasterFields] = useState<JobField[]>([]);
   const [placeholderSearch, setPlaceholderSearch] = useState('');
@@ -272,6 +293,101 @@ export default function DocumentTemplateManager({
   const masterFieldMap = useMemo(() => new Map(masterFields.map(f => [f.id, f.label])), [masterFields]);
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const [docPreviewUrl, setDocPreviewUrl] = useState<string | null>(null);
+
+  // Conditional builder state
+  const [availableFields, setAvailableFields] = useState<string[]>([]);
+  const [showLinkPrompt, setShowLinkPrompt] = useState(false);
+
+  // Extract scalar fields from conditional template
+  const extractScalarFields = (templateContent: string): string[] => {
+    // Simple regex to match {#field_name} patterns
+    const scalarFieldRegex = /\{#([^{}]+)\}/g;
+    const fields: string[] = [];
+    let match;
+    
+    console.log('[SCALAR FIELD DETECTION] Template content:', templateContent);
+    console.log('[SCALAR FIELD DETECTION] Regex pattern:', scalarFieldRegex);
+    
+    while ((match = scalarFieldRegex.exec(templateContent)) !== null) {
+      fields.push(match[1]); // Extracts field name between {# and }
+      console.log('[SCALAR FIELD DETECTION] Found scalar field:', match[1]);
+    }
+    
+    console.log('[SCALAR FIELD DETECTION] Extracted fields:', fields);
+    return fields;
+  };
+
+  // Handle auto-linking of scalar fields to master fields
+  const handleAutoLinkFields = async (scalarFields: string[]) => {
+    const linkingPromises = scalarFields.map(async (fieldName) => {
+      // Find existing master field
+      const existingField = masterFields.find(f => 
+        f.field_key === fieldName || 
+        f.label.toLowerCase().includes(fieldName.toLowerCase())
+      );
+      
+      if (existingField) {
+        return { fieldName, masterFieldId: existingField.id, alreadyLinked: true };
+      } else {
+        // Create new master field prompt
+        return { fieldName, masterFieldId: null, needsCreation: true };
+      }
+    });
+
+    const linkingResults = await Promise.all(linkingPromises);
+    
+    // Process results
+    const needsCreation = linkingResults.filter(r => r.needsCreation);
+    const alreadyLinked = linkingResults.filter(r => r.alreadyLinked);
+    
+    if (needsCreation.length > 0) {
+      const fieldsToCreate = needsCreation.map(r => r.fieldName).join(', ');
+      toast({
+        title: "Master Fields Required",
+        description: `The following master fields need to be created:\n\n${fieldsToCreate}\n\nPlease create them in the Master Fields section first.`,
+        variant: "destructive",
+        duration: 8000,
+        action: (
+          <div className="flex gap-2">
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => handleAutoLinkFields(scalarFields)}
+            >
+              Link All
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="sm"
+              onClick={() => setShowLinkPrompt(false)}
+            >
+              Skip
+            </Button>
+          </div>
+        ),
+      });
+      return;
+    }
+    
+    if (alreadyLinked.length > 0) {
+      const linkedFields = alreadyLinked.map(r => r.fieldName).join(', ');
+      const masterFieldIds = alreadyLinked.map(r => r.masterFieldId).filter(id => id !== null);
+      
+      // Add the linked fields to the placeholder
+      setNewPlaceholder(prev => ({
+        ...prev,
+        master_field_ids: [...(prev.master_field_ids || []), ...masterFieldIds]
+      }));
+      
+      toast({
+        title: "Fields Linked Successfully",
+        description: `Successfully linked ${linkedFields} to existing master fields.`,
+        duration: 3000,
+      });
+    }
+    
+    setShowLinkPrompt(false);
+  };
 
   const [panelsVisible, setPanelsVisible] = useState({
     left: true,
@@ -462,8 +578,9 @@ export default function DocumentTemplateManager({
         rawTextContent = getCleanText(source.content).replace(/[\u200B-\u200D\uFEFF]/g, '');
       }
 
-      // Regex: Matches {#block}, {/block}, {field}, and {%image}
-      const tagRegex = /\{([#\/%])?([a-zA-Z0-9_]+)\}/g;
+      // Regex: Matches {#block}, {/block}, {field}, {%image}, and {#condition} blocks
+      // Updated to handle patterns like {# father_kenyan_id_no} and {/ father_kenyan_id_no}
+      const tagRegex = /\{([#\/%])?\s*([a-zA-Z0-9_]+)\s*\}/g;
 
       const results: Placeholder[] = [];
       const blockStack: string[] = [];
@@ -480,15 +597,47 @@ export default function DocumentTemplateManager({
           console.log(`%c[ARRAY DETECTED] {#${tagName}}`, "color: #059669");
           blockStack.push(tagName);
           if (!processedTags.has(contextKey)) {
-            results.push({
-              id: `block_${tagName}_${Date.now()}`,
-              name: tagName,
-              type: 'array',
-              required: true,
-              entity_type: (tagName.endsWith('s') ? tagName.slice(0, -1) : tagName) as EntityType,
-              is_block_start: true,
-              description: `Repeating section: {#${tagName}}`
-            });
+            // Check if this is a conditional block (starts with 'condition_')
+            if (tagName.startsWith('condition_')) {
+              const conditionName = tagName.replace('condition_', '');
+              results.push({
+                id: `block_${tagName}_${Date.now()}`,
+                name: tagName,
+                type: 'conditional',
+                required: true,
+                entity_type: ['company', 'principal', 'director', 'shareholder', 'dependent', 'employee'], // Conditional can apply to any entity
+                is_block_start: true,
+                description: `Conditional block: {#${tagName}}`
+              });
+            } else {
+              // Regular array block - determine entity type
+              let blockEntity: EntityType = (tagName.endsWith('s') ? tagName.slice(0, -1) : tagName) as EntityType;
+              let blockRelationships: string[] = [];
+              
+              if (blockEntity === 'dependent') {
+                const relationshipPrefixes = ['father', 'mother', 'daughter', 'son', 'husband', 'wife', 'mother_in_law', 'father_in_law'];
+                const tagNameLower = tagName.toLowerCase();
+                
+                for (const prefix of relationshipPrefixes) {
+                  if (tagNameLower.startsWith(prefix + '_')) {
+                    blockRelationships = [prefix];
+                    console.log(`[BLOCK RELATIONSHIP DETECTED] ${tagName} -> ${prefix} (dependent)`);
+                    break;
+                  }
+                }
+              }
+            
+              results.push({
+                id: `block_${tagName}_${Date.now()}`,
+                name: tagName,
+                type: 'array',
+                required: true,
+                entity_type: blockEntity,
+                ...(blockRelationships.length > 0 && { dependant_relationship: blockRelationships }),
+                is_block_start: true,
+                description: `Repeating section: {#${tagName}}`
+              });
+            }
             processedTags.add(contextKey);
           }
         }
@@ -503,12 +652,27 @@ export default function DocumentTemplateManager({
           const { ids: matchingFieldIds, sourceType } = findMatchingMasterFields(tagName, masterFields);
 
           let inferredEntity: EntityType = 'principal';
+          let inferredRelationships: string[] = [];
+          
           if (currentParent) {
             // Priority 1: Map to plural parent (e.g. #directors -> director)
             inferredEntity = (currentParent.endsWith('s') ? currentParent.slice(0, -1) : currentParent) as EntityType;
           } else if (sourceType) {
             // Priority 2: Use DB metadata
             inferredEntity = sourceType as EntityType;
+          } else {
+            // Priority 3: Check for relationship prefixes in tag name
+            const relationshipPrefixes = ['father', 'mother', 'daughter', 'son', 'husband', 'wife', 'mother_in_law', 'father_in_law'];
+            const tagNameLower = tagName.toLowerCase();
+            
+            for (const prefix of relationshipPrefixes) {
+              if (tagNameLower.startsWith(prefix + '_')) {
+                inferredEntity = 'dependent';
+                inferredRelationships = [prefix];
+                console.log(`[RELATIONSHIP DETECTED] ${tagName} -> ${prefix} (dependent)`);
+                break;
+              }
+            }
           }
 
           results.push({
@@ -519,6 +683,7 @@ export default function DocumentTemplateManager({
             required: true,
             entity_type: inferredEntity,
             master_field_ids: matchingFieldIds,
+            ...(inferredRelationships.length > 0 && { dependant_relationship: inferredRelationships }),
             description: currentParent ? `Inside ${currentParent}` : ''
           });
           processedTags.add(contextKey);
@@ -920,12 +1085,18 @@ export default function DocumentTemplateManager({
   const savePlaceholder = () => {
     if (!newPlaceholder.name.trim()) return;
 
-    const placeholderToSave = {
-      ...newPlaceholder,
+    const processedOptions = newPlaceholder.type === 'conditional' 
+    ? (newPlaceholder.conditions || []).map(c => `{#${c.tag}}${c.label}{${c.tag}}{/${c.tag}}`)
+    : newPlaceholder.options;
+
+  const placeholderToSave = {
+    ...newPlaceholder,
+    options: processedOptions,
       entity_type: Array.isArray(newPlaceholder.entity_type) 
         ? newPlaceholder.entity_type 
         : newPlaceholder.entity_type ? [newPlaceholder.entity_type] : [],
-      ...(newPlaceholder.entity_type?.includes('director') && { director_type: directorType })
+      ...(newPlaceholder.entity_type?.includes('director') && { director_type: directorType }),
+      ...(newPlaceholder.entity_type?.includes('dependent') && { dependant_relationship: dependantRelationship })
     };
 
     if (isEditingPlaceholder !== null) {
@@ -952,9 +1123,13 @@ export default function DocumentTemplateManager({
       description: '',
       type: 'text',
       required: false,
-      entity_type: []
+      entity_type: [],
+      conditions: []
     });
 
+    setDirectorType('all');
+    setDependantRelationship([]);
+    setAvailableFields([]);
     setIsEditingPlaceholder(null);
   };
 
@@ -968,14 +1143,24 @@ export default function DocumentTemplateManager({
       ...placeholder,
       entity_type: Array.isArray(placeholder.entity_type) 
         ? placeholder.entity_type 
-        : placeholder.entity_type ? [placeholder.entity_type] : []
+        : placeholder.entity_type ? [placeholder.entity_type] : [],
+      conditions: placeholder.conditions || []
     });
     
-    if (placeholder.entity_type === 'director' && 'director_type' in placeholder) {
+    // Set director type if applicable
+    if (placeholder.entity_type?.includes('director') && placeholder.director_type) {
       setDirectorType(placeholder.director_type as 'all' | 'primary');
     } else {
       setDirectorType('all');
     }
+    
+    // Set dependant relationship if applicable
+    if (placeholder.entity_type?.includes('dependent') && placeholder.dependant_relationship) {
+      setDependantRelationship(Array.isArray(placeholder.dependant_relationship) ? placeholder.dependant_relationship : []);
+    } else {
+      setDependantRelationship([]);
+    }
+    
     setIsEditingPlaceholder(index);
     setIsPlaceholderFormOpen(true);
   };
@@ -985,6 +1170,45 @@ export default function DocumentTemplateManager({
     const updatedTemplates = [...templates];
     updatedTemplates[currentTemplateIndex].placeholders = updatedTemplates[currentTemplateIndex].placeholders?.filter((_, i) => i !== index);
     setTemplates(updatedTemplates);
+  };
+
+  // Conditional builder functions
+  const addCondition = () => {
+    const newCondition: ConditionalCondition = {
+      field: '',
+      operator: 'exists',
+      master_field_ids: [],
+      value: ''
+    };
+    setNewPlaceholder(prev => ({
+      ...prev,
+      conditions: [...(prev.conditions || []), newCondition]
+    }));
+  };
+
+  const updateCondition = (index: number, field: keyof ConditionalCondition, value: any) => {
+    setNewPlaceholder(prev => {
+      const updatedConditions = [...(prev.conditions || [])];
+      updatedConditions[index] = {
+        ...updatedConditions[index],
+        [field]: value
+      };
+      return {
+        ...prev,
+        conditions: updatedConditions
+      };
+    });
+  };
+
+  const removeCondition = (index: number) => {
+    setNewPlaceholder(prev => {
+      const updatedConditions = [...(prev.conditions || [])];
+      updatedConditions.splice(index, 1);
+      return {
+        ...prev,
+        conditions: updatedConditions
+      };
+    });
   };
 
   const uploadAndSaveAll = async () => {
@@ -1630,7 +1854,130 @@ export default function DocumentTemplateManager({
               </div>
             )}
 
-            {newPlaceholder.entity_type === 'director' && (
+          {newPlaceholder.type === 'conditional' && (
+  <div className="space-y-4">
+    <div className="flex items-center justify-between border-b pb-2">
+      <div className="space-y-0.5">
+        <Label className="text-base">Logic Blocks</Label>
+        <p className="text-xs text-muted-foreground">
+          Define sections that only appear if data exists.
+        </p>
+      </div>
+      <Button 
+        type="button" 
+        variant="outline" 
+        size="sm" 
+        onClick={() => {
+          const newCond: ConditionalCondition = { tag: '', label: '' };
+          setNewPlaceholder(prev => ({
+            ...prev,
+            conditions: [...(prev.conditions || []), newCond]
+          }));
+        }}
+      >
+        <PlusCircle className="h-4 w-4 mr-2" />
+        Add Logic Block
+      </Button>
+    </div>
+
+    <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
+      {(newPlaceholder.conditions || []).length === 0 && (
+        <div className="text-center py-8 border-2 border-dashed rounded-lg bg-muted/20">
+          <Code className="h-8 w-8 mx-auto text-muted-foreground/50 mb-2" />
+          <p className="text-sm text-muted-foreground">No logic blocks added yet.</p>
+        </div>
+      )}
+
+      {(newPlaceholder.conditions || []).map((cond, idx) => (
+        <div key={idx} className="relative p-4 rounded-lg border bg-card shadow-sm space-y-3">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="absolute -right-2 -top-2 h-6 w-6 rounded-full bg-destructive text-white hover:bg-destructive/90"
+            onClick={() => {
+              const updated = [...(newPlaceholder.conditions || [])];
+              updated.splice(idx, 1);
+              setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+            }}
+          >
+            <X className="h-3 w-3" />
+          </Button>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-[10px] uppercase font-bold text-muted-foreground">
+                Variable Tag (e.g. child_id)
+              </Label>
+              <Input
+                placeholder="tag_name"
+                value={cond.tag}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/\s+/g, '_').toLowerCase();
+                  const updated = [...(newPlaceholder.conditions || [])];
+                  updated[idx].tag = val;
+                  setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                }}
+                className="h-8 text-xs font-mono"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] uppercase font-bold text-muted-foreground">
+                Display Prefix (e.g. ID No:)
+              </Label>
+              <Input
+                placeholder="Label text..."
+                value={cond.label}
+                onChange={(e) => {
+                  const updated = [...(newPlaceholder.conditions || [])];
+                  updated[idx].label = e.target.value;
+                  setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                }}
+                className="h-8 text-xs"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-[10px] uppercase font-bold text-muted-foreground">
+              Link to Master Field
+            </Label>
+            <MasterFieldPicker
+              masterFields={masterFields}
+              selectedFieldIds={cond.master_field_id ? [cond.master_field_id] : []}
+              onSelect={(fieldId) => {
+                const updated = [...(newPlaceholder.conditions || [])];
+                updated[idx].master_field_id = fieldId;
+                setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+              }}
+              onRemove={() => {
+                const updated = [...(newPlaceholder.conditions || [])];
+                delete updated[idx].master_field_id;
+                setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+              }}
+              onClear={() => {
+                const updated = [...(newPlaceholder.conditions || [])];
+                delete updated[idx].master_field_id;
+                setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+              }}
+            />
+          </div>
+
+          <div className="pt-1 border-t">
+            <code className="text-[10px] text-blue-600">
+              Preview: {"{#"}{cond.tag || '...'}{"}"}{cond.label || ''}{"{"}{cond.tag || '...'}{"}"}{"{/"}{cond.tag || '...'}{"}"}
+            </code>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+)}
+            {/* Debug logging */}
+            <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
+              Debug: entity_type = {JSON.stringify(newPlaceholder.entity_type)}
+            </div>
+
+            {(newPlaceholder.entity_type || []).includes('director') && (
               <div className="space-y-3 p-4 rounded-lg bg-blue-50 border border-blue-200 shadow-sm">
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2">
@@ -1659,6 +2006,81 @@ export default function DocumentTemplateManager({
                     </SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+            )}
+
+            {(newPlaceholder.entity_type || []).includes('dependent') && (
+              <div className="space-y-3 p-4 rounded-lg bg-green-50 border border-green-200 shadow-sm">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <Users className="h-5 w-5 text-green-600" />
+                    <h4 className="font-medium text-green-800">Dependant Relationships</h4>
+                  </div>
+                  <p className="text-sm text-green-700 pl-7">
+                    Select the relationship types this field applies to
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        className="w-full justify-between bg-white border-green-200 hover:border-green-300 focus:ring-2 focus:ring-green-100"
+                      >
+                        {dependantRelationship.length > 0
+                          ? dependantRelationship
+                              .map(rel => DEPENDANT_RELATIONSHIPS.find(r => r.value === rel)?.label || rel)
+                              .join(', ')
+                          : 'Select relationships...'}
+                        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Search relationships..." />
+                        <CommandList>
+                          <CommandEmpty>No relationships found.</CommandEmpty>
+                          <CommandGroup className="max-h-[300px] overflow-y-auto">
+                            {DEPENDANT_RELATIONSHIPS.map((relationship) => {
+                              const isSelected = dependantRelationship.includes(relationship.value);
+                              return (
+                                <CommandItem
+                                  key={relationship.value}
+                                  onSelect={() => {
+                                    setDependantRelationship(prev =>
+                                      isSelected
+                                        ? prev.filter(r => r !== relationship.value)
+                                        : [...prev, relationship.value]
+                                    );
+                                  }}
+                                  className="cursor-pointer"
+                                >
+                                  <div className="flex items-center">
+                                    <div className={`mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-green-600 ${isSelected ? 'bg-green-600 text-white' : 'opacity-50'}`}>
+                                      {isSelected && <Check className="h-3 w-3" />}
+                                    </div>
+                                    <span className="text-green-900">{relationship.label}</span>
+                                  </div>
+                                </CommandItem>
+                              );
+                            })}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  {dependantRelationship.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-green-600 hover:text-green-700 hover:bg-green-50"
+                      onClick={() => setDependantRelationship([])}
+                    >
+                      Clear all
+                    </Button>
+                  )}
+                </div>
               </div>
             )}
 

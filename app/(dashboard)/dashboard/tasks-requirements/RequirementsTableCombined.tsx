@@ -105,7 +105,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         // Principal usually maps to Individual, Principal, or Directors flag in individual tasks
         return !!(docConfig.Principal || docConfig.Individual || docConfig.Directors || docConfig.Employees);
       case 'dependant':
-        return !!docConfig.Dependants;
+        return !!(docConfig.Dependants || docConfig.Dependant); // Handle both spellings
       case 'understudy':
         return !!docConfig.Understudy;
       case 'shareholder':
@@ -190,19 +190,20 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         });
       } else {
         // For individual applicants, get role from applicant_details
-        const applicantRole = applicantDetails.role || 'Individual';
+        const applicantRole = applicantDetails.role || 'individual';
         const roleLabel = typeof applicantRole === 'string'
           ? applicantRole.charAt(0).toUpperCase() + applicantRole.slice(1).toLowerCase()
           : 'Individual';
 
+        // Use the role as the type for the column (e.g., 'director' instead of 'individual')
         cols.push({
-          type: 'individual',
+          type: applicantRole.toLowerCase(),
           id: applicantDetails.id,
           label: applicantDetails.name || 'Applicant',
           subLabel: roleLabel,
           task,
           groupIndex,
-          role: applicantDetails.role // Include the raw role data for reference
+          role: applicantRole // Include the raw role data for reference
         });
 
         // Add any dependants if they exist
@@ -320,35 +321,48 @@ const fetchDocumentTemplates = async (documentId: string) => {
 };
 
 const handleOpenTemplateGenerator = async (docItem, task, colType, colId) => {
-  console.log("🚀 Starting template generation process...", { document: docItem.document.display_name, task_id: task.id, colType, colId });
   setIsPreparingTemplate(true);
   try {
-    // Get the participant details for the current column
-    let participant;
-    if (colType === 'company') {
-      participant = task.participants_details?.find(p => p.type === 'company');
-    } else if (colType === 'dependant' && colId) {
-      participant = task.participants_details?.find(p => p.id === colId);
-    } else if (colType === 'understudy') {
-      participant = task.participants_details?.find(p =>
-        p.id === (colId || task.understudy_id) ||
-        (Array.isArray(p.role) ? p.role.includes('understudy') : p.role === 'understudy')
-      );
-    } else if (colType === 'principal' || colType === 'director') {
-      // For principal/director, find by individual_id or role
-      participant = task.participants_details?.find(p =>
-        p.id === task.individual_id ||
-        (Array.isArray(p.role) ? p.role.includes(colType) : p.role === colType)
-      );
+    // 1. Find the specific participant for THIS column
+    const participant = task.participants_details?.find(p => p.id === colId);
+    
+    // 2. Resolve Company ID robustly
+    let companyId = task.company_id;
+    if (!companyId && task.participants_details) {
+      companyId = task.participants_details.find(p => p.type === 'company')?.id;
+    }
+    if (!companyId && task.applicant_details?.type === 'company') {
+      companyId = task.applicant_details.id;
     }
 
-    const entityIdMap = {
-      principal: colType === 'principal' ? (participant?.id || task.individual_id) : undefined,
-      company: task.company_id,
-      dependant: colType === 'dependant' ? (participant?.id || colId) : undefined,
-      understudy: colType === 'understudy' ? (participant?.id || colId || task.understudy_id) : undefined,
-    };
-    console.log("✅ Step 1: Entity ID Map created", entityIdMap);
+    // 3. Map all categories for context
+    const directorsIds = task.participants_details
+      ?.filter(p => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('director') : p.role === 'director'))
+      ?.map(d => d.id) || [];
+
+    const dependantsIds = task.participants_details
+      ?.filter(p => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('dependant') || p.role.includes('dependent') : p.role === 'dependant' || p.role === 'dependent'))
+      ?.map(d => d.id) || [];
+
+// Get relationship data for the current company
+const companyRelationships = getRelationshipData()?.find(rel => 
+  rel.company?.id === companyId || rel.company?.name === companyName
+);
+
+// Add relationship information to the entity ID map
+const entityIdMap = {
+  company: companyRelationships?.company?.id,  // Extract just the ID
+  directors: companyRelationships?.directors?.map(d => d.id) || [],  // Array of IDs only
+  director: companyRelationships?.directors?.[0]?.id,  // First director ID
+  principal: companyRelationships?.principal?.id,
+  dependants: companyRelationships?.dependants?.map(d => ({
+    id: d.id,
+    relationship: d.relationship  // Keep relationship for matching
+  })) || [],
+  understudy: companyRelationships?.understudy?.id
+}
+
+console.log("✅ Step 1: Entity ID Map created", entityIdMap);
 
     const templates = await fetchDocumentTemplates(docItem.document.id);
     console.log(`✅ Step 2: Found ${templates.length} available templates.`);
@@ -392,7 +406,24 @@ const handleOpenTemplateGenerator = async (docItem, task, colType, colId) => {
                 if (!tableQueries.links.has(linkVar)) {
                   tableQueries.links.set(linkVar, new Set());
                 }
-                tableQueries.links.get(linkVar).add(entityId);
+                // Handle both single entity IDs and arrays of entity IDs (for directors)
+               if (Array.isArray(entityId)) {
+  entityId.forEach(id => {
+    if (id) {
+      // Extract ID if it's an object, otherwise use as is
+      const idValue = id && typeof id === 'object' ? (id.id || id.director_id || id.individual_id || id.company_id) : id;
+      if (idValue) tableQueries.links.get(linkVar).add(idValue);
+    }
+  });
+} else {
+  if (entityId) {
+    // Extract ID if it's an object, otherwise use as is
+    const idValue = entityId && typeof entityId === 'object' ? 
+      (entityId.id || entityId.director_id || entityId.individual_id || entityId.company_id) : 
+      entityId;
+    if (idValue) tableQueries.links.get(linkVar).add(idValue);
+  }
+}
               });
             }
           }
@@ -472,27 +503,35 @@ const handleOpenTemplateGenerator = async (docItem, task, colType, colId) => {
           }
         }
 
-        for (const [linkVar, entityIdsSet] of links.entries()) {
-          const entityIds = [...entityIdsSet];
-          if (entityIds.length > 0) {
-            console.log(`    - by linking_variable '${linkVar}':`, entityIds);
-            const { data, error } = await supabase
-              .from(table)
-              .select('*')
-              .in(linkVar, entityIds);
+     for (const [linkVar, entityIdsSet] of links.entries()) {
+  // Convert Set to array and ensure all values are primitives
+  const entityIds = Array.from(entityIdsSet).map(id => {
+    // If it's an object with id property, extract it
+    if (id && typeof id === 'object') {
+      return id.id || id.director_id || id.individual_id || id.company_id;
+    }
+    return id;
+  }).filter(id => id != null && id !== ''); // Remove any null/undefined/empty values
 
-            if (error) {
-              console.error(`    - ❌ ERROR fetching by ${linkVar}:`, error);
-              toast({
-                title: `Failed to fetch from ${table}`,
-                description: error.message,
-                variant: "destructive"
-              });
-            } else {
-              (data || []).forEach(rec => records.set(rec.id, rec));
-            }
-          }
-        }
+  if (entityIds.length > 0) {
+    console.log(`    - by linking_variable '${linkVar}':`, entityIds);
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .in(linkVar, entityIds);
+
+    if (error) {
+      console.error(`    - ❌ ERROR fetching by ${linkVar}:`, error);
+      toast({
+        title: `Failed to fetch from ${table}`,
+        description: error.message,
+        variant: "destructive"
+      });
+    } else {
+      (data || []).forEach(rec => records.set(rec.id, rec));
+    }
+  }
+}
       }
 
       sourceDataCache[table] = Array.from(records.values()).reduce((acc, rec) => {
@@ -504,6 +543,70 @@ const handleOpenTemplateGenerator = async (docItem, task, colType, colId) => {
 
     console.log("✅ Step 4: Data fetching complete. Final source data cache:", sourceDataCache);
 
+    // Extract relationship data for the dialog
+    console.log("🔍 Debug: task.participants_details:", task.participants_details);
+    console.log("🔍 Debug: Looking for director ID:", entityIdMap.director);
+    
+ const relationshipData = {
+  company: task.participants_details?.find(p => p.type === 'company'),
+  directors: (() => {
+    // If this is a specific director column, use the entityIdMap to find the director
+    if (colType === 'director' && entityIdMap.directors && entityIdMap.directors.length > 0) {
+      // For director columns, get the specific director by matching the column ID
+      const directorId = colId;
+      console.log("🔍 Debug: Searching for director with ID:", directorId);
+      
+      // First try to find in participants_details
+      let specificDirector = task.participants_details?.find(p => 
+        p.type === 'individual' && 
+        p.id === directorId
+      );
+      
+      console.log("🔍 Debug: Found in participants_details:", specificDirector);
+      
+      // If not found in participants_details, try the sourceDataCache
+      if (!specificDirector && sourceDataCache['registry_individuals']) {
+        specificDirector = sourceDataCache['registry_individuals'][directorId];
+        console.log("🔍 Debug: Found in registry_individuals:", specificDirector);
+        
+        // If found in cache, add the type field for consistency
+        if (specificDirector) {
+          specificDirector = {
+            ...specificDirector,
+            type: 'individual',
+            is_primary: specificDirector.is_primary || false
+          };
+        }
+      }
+      
+      return specificDirector ? [specificDirector] : [];
+    }
+    // Otherwise, get all directors from participants
+    const allDirectors = task.participants_details?.filter(p => 
+      p.type === 'individual' && 
+      (Array.isArray(p.role) ? p.role.includes('director') : p.role === 'director')
+    ) || [];
+    
+    console.log("🔍 Debug: All directors found:", allDirectors);
+    return allDirectors;
+  })(),
+  principal: task.participants_details?.find(p => 
+    p.type === 'individual' && 
+    (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')
+  ),
+  dependants: task.participants_details?.filter(p => 
+    p.type === 'individual' && 
+    (Array.isArray(p.role) ? p.role.includes('dependant') || p.role.includes('dependent') : p.role === 'dependant' || p.role === 'dependent')
+  ) || [],
+  understudy: task.participants_details?.find(p => 
+    p.type === 'individual' && 
+    (Array.isArray(p.role) ? p.role.includes('understudy') : p.role === 'understudy')
+  ),
+};
+    
+    console.log("🔗 Relationship Data Extracted:", relationshipData);
+    console.log("🔗 Directors found:", relationshipData.directors.length, relationshipData.directors);
+
     const letterInfo = {
       document: docItem.document,
       task: task,
@@ -514,6 +617,7 @@ const handleOpenTemplateGenerator = async (docItem, task, colType, colId) => {
       // Pre-select template if only one exists, otherwise null to trigger selection screen
       template: templates.length === 1 ? templates[0] : null,
       personData: {}, companyData: {}, extractedData: {},
+      relationshipData: relationshipData,
     };
     console.log("✅ Step 5: Final data package prepared for dialog.");
 
@@ -546,6 +650,7 @@ const handleSaveGeneratedLetter = (file) => {
 };
 
 // Function to get relationship data
+// Update around line 715
 const getRelationshipData = useCallback(() => {
   if (columnDefinitions.length === 0) return null;
 
@@ -560,8 +665,6 @@ const getRelationshipData = useCallback(() => {
   return Array.from(groups.entries()).map(([groupIndex, columns]) => {
     const companyCol = columns.find(col => col.type === 'company');
     if (!companyCol) return null;
-
-    console.log(`=== Company: ${companyCol.label} ===`);
 
     return {
       company: {
@@ -585,7 +688,8 @@ const getRelationshipData = useCallback(() => {
         .filter(col => col.type === 'dependant')
         .map(d => ({
           name: d.label,
-          id: d.id
+          id: d.id,
+          relationship: d.relationship // ADDED: Capture relationship type
         })),
       understudy: columns
         .filter(col => col.type === 'understudy')
@@ -1102,6 +1206,7 @@ return (
           masterFields={selectedLetterInfo.masterFields}
           entityIdMap={selectedLetterInfo.entityIdMap}
           sourceDataCache={selectedLetterInfo.sourceDataCache}
+          relationshipData={selectedLetterInfo.relationshipData}
         />
       )
     }

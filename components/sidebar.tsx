@@ -121,6 +121,11 @@ const navItems = [
     href: "/dashboard/master-fields",
     icon: FileText,
   },
+    {
+    title: "Letters",
+    href: "/dashboard/letters-james",
+    icon: FileText,
+  },
   {
     title: "Diary",
     href: "/dashboard/diary",

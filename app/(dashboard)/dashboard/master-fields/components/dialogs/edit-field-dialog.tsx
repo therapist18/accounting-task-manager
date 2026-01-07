@@ -101,13 +101,15 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
   }, [open])
 
   useEffect(() => {
+    console.log('🔍 EditFieldDialog: Field data changed:', field)
     if (field) {
       const isDropdown = field.type === 'select'
       const dependentField = field.sources?.find(s => s.source_type === 'field')
       const documentSource = field.sources?.find(s => s.source_type === 'document')
 
-      setFormData(prev => ({
-        ...prev,
+      console.log('🔍 EditFieldDialog: Parsed field data - isDropdown:', isDropdown, 'dependentField:', dependentField, 'documentSource:', documentSource)
+
+      const newFormData = {
         field_key: field.field_key,
         label: field.label,
         type: field.type,
@@ -120,20 +122,24 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
           useCurrentDate: true,
           format: 'YYYY-MM-DD'
         }
-      }))
+      }
+
+      console.log('🔍 EditFieldDialog: Setting form data:', newFormData)
+      setFormData(newFormData)
 
       setIsDependent(!!dependentField)
 
       if (field.options) {
-        setOptionsText(
-          Array.isArray(field.options)
-            ? JSON.stringify(field.options, null, 2)
-            : JSON.stringify(field.options, null, 2),
-        )
+        const optionsString = Array.isArray(field.options)
+          ? JSON.stringify(field.options, null, 2)
+          : JSON.stringify(field.options, null, 2)
+        setOptionsText(optionsString)
+        console.log('🔍 EditFieldDialog: Set options text:', optionsString)
       } else {
         setOptionsText("")
       }
     } else {
+      console.log('🔍 EditFieldDialog: No field data, resetting form')
       setFormData(prev => ({
         ...prev,
         fieldType: 'normal',
@@ -160,28 +166,39 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
 
   // Prepare sources array
   const sources: any[] = []
+  console.log('🔍 EditFieldDialog: Building sources array, isDependent:', isDependent, 'formData.dependentFieldId:', formData.dependentFieldId)
 
   // Add dependent field source if this is a dependent dropdown
   if (isDependent && formData.dependentFieldId) {
-    sources.push({
+    const dependentSource = {
       source_type: 'field',
       table: formData.dependentFieldId,
       path: 'id',
       priority: 1
-    })
+    }
+    sources.push(dependentSource)
+    console.log('🔍 EditFieldDialog: Added dependent field source:', dependentSource)
   }
 
-  // Add document source if source type is document
-  if (field) {
-    const documentSource = field.sources?.find(s => s.source_type === 'document')
-    if (documentSource) {
-      sources.push({
-        ...documentSource,
-        document_id: formData.selectedDocumentTypes?.length ? formData.selectedDocumentTypes : null,
-        linking_variable: formData.linkingVariable || null
-      })
+  // Add document source if source type is document or if document types are selected
+  if (formData.source_type === 'document' || (formData.selectedDocumentTypes && formData.selectedDocumentTypes.length > 0)) {
+    const documentSource = field?.sources?.find(s => s.source_type === 'document')
+    console.log('🔍 EditFieldDialog: Existing document source:', documentSource)
+    
+    const newDocumentSource = {
+      source_type: 'document',
+      table: 'acc_portal_directors_documents',
+      path: '',
+      priority: 1,
+      document_id: formData.selectedDocumentTypes?.length ? formData.selectedDocumentTypes : null,
+      linking_variable: formData.linkingVariable || null
     }
+    
+    sources.push(newDocumentSource)
+    console.log('🔍 EditFieldDialog: Added document source:', newDocumentSource)
   }
+
+  console.log('🔍 EditFieldDialog: Final sources array:', sources)
 
   const updateData: JobFieldUpdate = {
     field_key: formData.field_key || field?.field_key || '',
@@ -198,37 +215,63 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
     updated_at: new Date().toISOString()
   }
 
+  console.log('🔍 EditFieldDialog: Built updateData object:', updateData)
+  console.log('🔍 EditFieldDialog: formData state:', formData)
+  console.log('🔍 EditFieldDialog: options parsed:', options)
+  console.log('🔍 EditFieldDialog: field data:', field)
+
   delete updateData.fieldType
   delete updateData.dependentFieldId
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!field) return
+    console.log('🔍 EditFieldDialog: Form submission started')
+    console.log('🔍 EditFieldDialog: Field data:', field)
+    
+    if (!field) {
+      console.error('❌ EditFieldDialog: No field data available')
+      return
+    }
 
     setLoading(true)
+    console.log('🔍 EditFieldDialog: Loading state set to true')
 
     try {
-      const { error } = await supabase
+      console.log('🔍 EditFieldDialog: Update data being sent:', updateData)
+      console.log('🔍 EditFieldDialog: Field ID:', field.id)
+      
+      const { data, error } = await supabase
         .from('tm_job_fields')
         .update(updateData)
         .eq('id', field.id)
+        .select()
 
-      if (error) throw error
+      console.log('🔍 EditFieldDialog: Supabase response data:', data)
+      console.log('🔍 EditFieldDialog: Supabase response error:', error)
 
+      if (error) {
+        console.error('❌ EditFieldDialog: Supabase error:', error)
+        throw error
+      }
+
+      console.log('✅ EditFieldDialog: Field updated successfully')
       toast({
         title: "Success",
         description: "Field updated successfully",
       })
+      console.log('🔍 EditFieldDialog: Calling onSuccess callback')
       onSuccess()
+      console.log('🔍 EditFieldDialog: Closing dialog')
       onOpenChange(false)
     } catch (error) {
-      console.error("Error updating field:", error)
+      console.error('❌ EditFieldDialog: Error updating field:', error)
       toast({
         title: "Error",
         description: "Failed to update field",
         variant: "destructive",
       })
     } finally {
+      console.log('🔍 EditFieldDialog: Setting loading to false')
       setLoading(false)
     }
   }
