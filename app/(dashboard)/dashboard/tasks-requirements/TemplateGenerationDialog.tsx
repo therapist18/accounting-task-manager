@@ -153,196 +153,90 @@ const findPrimaryDirector = (sourceDataCache) => {
     return null;
 };
 
-const resolveArrayData = (blockPlaceholder, allPlaceholders, sourceDataCache, masterFields, entityIdMap, relationshipData) => {
-    const entityType = Array.isArray(blockPlaceholder.entity_type)
-        ? blockPlaceholder.entity_type[0]
-        : (blockPlaceholder.entity_type || 'director');
+const resolveConditionalValue = (conditions, targetEntity, combinedCache, masterFields) => {
+    if (!conditions || !targetEntity) return null;
+    const targetId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id);
+
+    for (const condition of conditions) {
+        const tag = condition.tag;
+
+        // 1. Check direct field on entity
+        if (targetEntity[tag]) return { value: `${condition.label || ''}${targetEntity[tag]}`, source: 'Direct' };
+        const matchingKey = Object.keys(targetEntity).find(k => k.toLowerCase() === tag.toLowerCase());
+        if (matchingKey && targetEntity[matchingKey]) return { value: `${condition.label || ''}${targetEntity[matchingKey]}`, source: 'Direct (Case-Insensitive)' };
+
+        // 2. Check Master Field sources in Cache
+        if (condition.master_field_id && masterFields) {
+            const mf = masterFields.get(parseInt(condition.master_field_id, 10));
+            if (mf?.sources) {
+                for (const source of mf.sources) {
+                    const tableData = combinedCache[source.table];
+                    if (!tableData) continue;
+
+                    let records = Object.values(tableData);
+
+                    // Filter by document_id if provided
+                    if (source.document_id) {
+                        const requiredIds = Array.isArray(source.document_id) ? source.document_id : [source.document_id];
+                        records = records.filter(r => requiredIds.includes(r.document_id || r.kyc_document_id));
+                    }
+
+                    const linkingVar = source.linking_variable || 'id';
+                    const record = records.find(rec => {
+                        const recId = String(rec[linkingVar] || rec.id || rec.individual_id || rec.director_id);
+                        return recId === targetId || recId.startsWith(targetId + ' ');
+                    });
+
+                    if (record) {
+                        const rawVal = source.path ? parseJsonValue(record, source.path) : record[tag];
+                        if (rawVal) return { value: `${condition.label || ''}${rawVal}`, source: `Fresh DB: ${mf.label || source.table}` };
+                    }
+                }
+            }
+        }
+    }
+    return null;
+};
+
+const resolveArrayData = (blockPlaceholder, allPlaceholders, combinedCache, masterFields, entityIdMap, relationshipData) => {
+    const entityType = Array.isArray(blockPlaceholder.entity_type) ? blockPlaceholder.entity_type[0] : (blockPlaceholder.entity_type || 'director');
     const blockName = blockPlaceholder.name;
     const isPrimaryOnly = blockPlaceholder.director_type === 'primary';
 
     let sourceArray = [];
-
-    // Special handling for directors block
-    if (blockName === 'directors' && entityType === 'director' && relationshipData?.directors) {
-        sourceArray = isPrimaryOnly
-            ? relationshipData.directors.filter(item => item?.is_primary === true || item?.is_primary === 'true')
-            : relationshipData.directors;
-
-    }
-
-    // Special handling for contacts block
-    if (blockName === 'contacts' && entityType === 'director' && relationshipData?.directors) {
-        sourceArray = isPrimaryOnly
-            ? relationshipData.directors.filter(item => item?.is_primary === true || item?.is_primary === 'true')
-            : relationshipData.directors;
-    }
-
-    // **NEW: Special handling for dependant blocks (spouse, child, etc.)**
-    const isDependantType = ['dependant', 'dependent'].includes(entityType?.toLowerCase());
-    if (isDependantType && relationshipData?.dependants) {
-        // Check if block has specific relationship requirement
+    if (blockName === 'directors' || blockName === 'contacts') {
+        sourceArray = (relationshipData?.directors || []).filter(d => !isPrimaryOnly || d.is_primary === true || d.is_primary === 'true');
+    } else if (['dependant', 'dependent'].includes(entityType?.toLowerCase()) && relationshipData?.dependants) {
         if (blockPlaceholder.dependant_relationship) {
-            const targetRelationships = Array.isArray(blockPlaceholder.dependant_relationship)
-                ? blockPlaceholder.dependant_relationship.map(r => r.toLowerCase())
-                : [blockPlaceholder.dependant_relationship.toLowerCase()];
-
-            sourceArray = relationshipData.dependants.filter(d =>
-                targetRelationships.includes(d.relationship?.toLowerCase())
-            );
-        } else {
-            // No specific relationship - use all dependants
-            sourceArray = relationshipData.dependants;
-        }
+            const targets = Array.isArray(blockPlaceholder.dependant_relationship) ? blockPlaceholder.dependant_relationship.map(r => r.toLowerCase()) : [blockPlaceholder.dependant_relationship.toLowerCase()];
+            sourceArray = relationshipData.dependants.filter(d => targets.includes(d.relationship?.toLowerCase()));
+        } else sourceArray = relationshipData.dependants;
     }
 
-    // Fallback: search in sourceDataCache if no data found yet
-    if (sourceArray.length === 0) {
-        const potentialPaths = [`${entityType}s_details`, `${entityType}_details`, blockName, 'directors', 'contacts', 'dependants'];
+    if (sourceArray.length === 0) return [];
 
-        Object.entries(sourceDataCache).forEach(([key, tableData]) => {
-            if (!tableData || sourceArray.length > 0) return;
-            const records = Array.isArray(tableData) ? tableData : Object.values(tableData);
+    const childFields = allPlaceholders.filter(p => (p.parent_name === blockName || (p.description && p.description.toLowerCase().includes(blockName.toLowerCase()))) && p.id !== blockPlaceholder.id && !p.is_block_start);
 
-            for (const record of records) {
-                for (const path of potentialPaths) {
-                    if (record[path] && Array.isArray(record[path])) {
-                        sourceArray = isPrimaryOnly
-                            ? record[path].filter(item => item?.is_primary === true || item?.is_primary === 'true')
-                            : record[path];
-
-                        if (sourceArray.length > 0) {
-                            break;
-                        }
-                    }
-                }
-                if (sourceArray.length > 0) break;
-            }
-        });
-    }
-
-    if (sourceArray.length === 0) {
-        return [];
-    }
-
-    const childFields = allPlaceholders.filter(p => {
-        if (p.director_type === 'primary') return false;
-
-        const belongsToBlock = (
-            p.parent_name === blockName ||
-            (p.description && p.description.toLowerCase().includes(blockName.toLowerCase()))
-        );
-
-        const isNotBlockTag = p.id !== blockPlaceholder.id && !p.is_block_start;
-        return belongsToBlock && isNotBlockTag;
-    });
-
-    return sourceArray.map((item, itemIdx) => {
+    return sourceArray.map(item => {
         const rowData = {};
-        const individualId = item.id || item.director_id || item.individual_id;
-
         childFields.forEach(field => {
             let val = '';
-            const isImage = field.name.startsWith('%') || field.type === 'image';
-            const isConditional = field.type === 'conditional';
-
-            // Handle conditional fields
-            if (isConditional && field.conditions) {
-                // Try each condition until we find a value
-                for (const condition of field.conditions) {
-                    const conditionTag = condition.tag;
-                    const masterFieldId = condition.master_field_id;
-
-                    // Try to get value from master field
-                    if (masterFieldId && masterFields) {
-                        const mf = masterFields.get(parseInt(masterFieldId, 10));
-                        if (mf?.sources?.[0]?.path) {
-                            const condVal = parseJsonValue(item, mf.sources[0].path);
-                            if (condVal) {
-                                val = `${condition.label || ''}${condVal}`;
-                                break;
-                            }
-                        }
-                    }
-
-                    // Try direct field access
-                    if (item[conditionTag]) {
-                        val = `${condition.label || ''}${item[conditionTag]}`;
-                        break;
-                    }
-                }
-            }
-            // ... inside resolveArrayData mapping function
-            else if (isImage && individualId) {
-                const mIds = field.master_field_ids || [];
-                for (const mId of mIds) {
+            if (field.type === 'conditional') {
+                const res = resolveConditionalValue(field.conditions, item, combinedCache, masterFields);
+                val = res ? res.value : '';
+            } else if (field.name.toLowerCase().includes('name')) {
+                val = item.full_name || item.name || '';
+            } else if (field.master_field_ids?.length > 0) {
+                // Simplified lookup for array text fields
+                for (const mId of field.master_field_ids) {
                     const mf = masterFields.get(parseInt(mId));
-                    if (!mf?.sources) continue;
-
-                    for (const source of mf.sources) {
-                        // Check if this source is document-based
-                        const isDocSource = source.source_type === 'document' ||
-                            source.table?.includes('document') ||
-                            source.table?.includes('uploads');
-
-                        if (isDocSource && source.document_id) {
-                            const requiredDocIds = Array.isArray(source.document_id)
-                                ? source.document_id.map(id => String(id))
-                                : [String(source.document_id)];
-
-                            const linkingVar = source.linking_variable || 'director_id';
-
-                            // Look through all cached document tables
-                            const docTables = ['acc_portal_directors_documents', 'acc_portal_kyc_uploads'];
-                            let matchingDoc = null;
-
-                            for (const tableName of docTables) {
-                                const tableData = sourceDataCache[tableName] || {};
-                                matchingDoc = Object.values(tableData).find(doc => {
-                                    const docKycId = String(doc.kyc_document_id || doc.document_id);
-                                    const docOwnerId = String(doc[linkingVar] || doc.director_id || doc.individual_id);
-
-                                    // NARROW DOWN: Must match BOTH document_id AND the specific person's ID
-                                    return requiredDocIds.includes(docKycId) && docOwnerId === String(individualId);
-                                });
-                                if (matchingDoc) break;
-                            }
-
-                            if (matchingDoc?.file_path) {
-                                val = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${matchingDoc.file_path}`;
-                                break;
-                            }
-                        }
-                    }
+                    mf?.sources?.forEach(s => {
+                        const table = combinedCache[s.table];
+                        if (!table) return;
+                        const record = Object.values(table).find(r => String(r[s.linking_variable || 'id']) === String(item.id));
+                        if (record) val = s.path ? parseJsonValue(record, s.path) : record[field.name];
+                    });
                     if (val) break;
-                }
-            }
-            // Handle text fields
-            else {
-                if (field.master_field_ids?.length > 0) {
-                    for (const mId of field.master_field_ids) {
-                        const mf = masterFields.get(parseInt(mId));
-                        if (mf?.sources?.[0]?.path) {
-                            val = parseJsonValue(item, mf.sources[0].path);
-                            if (val) break;
-                        }
-                    }
-                }
-
-                if (!val) {
-                    const fieldName = field.name.toLowerCase();
-
-                    if (item[field.name] !== undefined) {
-                        val = item[field.name];
-                    } else {
-                        const matchingKey = Object.keys(item).find(k => k.toLowerCase() === fieldName);
-                        if (matchingKey) {
-                            val = item[matchingKey];
-                        } else if (fieldName.includes('name')) {
-                            val = item.full_name || item.name || '';
-                        } else if (fieldName.includes('relationship')) {
-                            val = item.relationship || '';
-                        }
-                    }
                 }
             }
             rowData[field.name] = val || '';
@@ -350,6 +244,7 @@ const resolveArrayData = (blockPlaceholder, allPlaceholders, sourceDataCache, ma
         return rowData;
     });
 };
+
 
 const ImagePlaceholderControls = ({ styles, onStyleChange }) => {
     const sizeMap = { small: '25%', medium: '50%', large: '75%', 'full-width': '100%' };
@@ -530,6 +425,10 @@ export default function TemplateGenerationDialog({
 }) {
     const { toast } = useToast();
 
+    // Log relationship data to verify directors are received
+    console.log("🎯 TemplateGenerationDialog received relationshipData:", relationshipData);
+    console.log("🎯 Directors count:", relationshipData?.directors?.length || 0);
+
     // Initialize form data with relationship data
     const [formData, setFormData] = useState(() => ({
         ...extractedData,
@@ -576,282 +475,162 @@ export default function TemplateGenerationDialog({
         return { topLevel, blocks };
     }, [selectedTemplate]);
 
-    useEffect(() => {
-        if (isOpen && selectedTemplate?.placeholders && masterFields) {
-            const conditionals = selectedTemplate.placeholders.filter(p => p.type === 'conditional');
-            if (conditionals.length > 0) {
-                console.group(`%c 🛡️ Conditional Fields Debug: ${documentName} `, 'background: #222; color: #bada55; font-size: 12px;');
-                conditionals.forEach(p => {
-                    const resolvedValue = formData[p.name];
-
-                    // Attempt to find who this field belongs to for the log
-                    const entityType = Array.isArray(p.entity_type) ? p.entity_type[0] : (p.entity_type || 'individual');
-                    let targetInfo = "Primary/Company";
-
-                    if (['dependant', 'dependent'].includes(entityType.toLowerCase()) ||
-                        ['father', 'mother', 'spouse', 'child'].some(k => p.name.includes(k))) {
-
-                        // Extract the base relationship from the field name (e.g., "spouse" from "spouse_id_number")
-                        const targetRelKey = p.name.split('_')[0].toLowerCase();
-
-                        const person = relationshipData.dependants?.find(d => {
-                            const rel = d.relationship?.toLowerCase() || '';
-                            const spouseSyns = ['spouse', 'wife', 'husband'];
-                            const childSyns = ['child', 'son', 'daughter'];
-
-                            if (targetRelKey === 'spouse') return spouseSyns.includes(rel);
-                            if (targetRelKey === 'child') return childSyns.includes(rel);
-                            return rel.includes(targetRelKey);
-                        });
-                        console.log(`[Dependant Debug] Looking for: ${p.name}, Found:`, person);
-                        if (person) {
-                            console.log(`[Dependant Debug] Person details:`, {
-                                id: person.id,
-                                name: person.name,
-                                relationship: person.relationship,
-                                hasIdNumber: !!person.id_number || !!person.kenyan_id_no || !!person.passport_no,
-                                allFields: Object.keys(person)
-                            });
-                        }
-                        targetInfo = person ? `${person.relationship}: ${person.name} (ID: ${person.id})` : `Relationship: ${rel} (Not Found)`;
-                    }
-
-                    const conditionDetails = (p.conditions || []).map(cond => {
-                        const mf = cond.master_field_id ? masterFields.get(parseInt(cond.master_field_id)) : null;
-                        return {
-                            tag: cond.tag,
-                            label: cond.label,
-                            masterField: mf?.label || 'Direct Tag',
-                            sources: mf?.sources || []
-                        };
-                    });
-
-                    console.log(`Field: %c${p.name}`, 'font-weight: bold; color: #3b82f6;');
-                    console.log(`Target: %c${targetInfo}`, 'color: #a855f7;');
-                    console.log(`Value: %c"${resolvedValue || 'EMPTY'}"`, resolvedValue ? 'color: green;' : 'color: orange;');
-                    console.log(`Config:`, conditionDetails);
-                    console.log('-----------------------------------');
-                });
-                console.groupEnd();
-            }
-        }
-    }, [isOpen, selectedTemplate, formData, masterFields, documentName, relationshipData]);
-
     const fetchMissingDataSources = useCallback(async () => {
         if (!isOpen || !selectedTemplate || !masterFields) return;
-        const requiredSources = new Map();
 
-        const primaryDirector = findPrimaryDirector({ ...sourceDataCache, ...additionalCache });
-        const rawPrimaryId = primaryDirector?.id || primaryDirector?.director_id || primaryDirector?.individual_id;
-        const primaryDirectorId = typeof rawPrimaryId === 'string' && rawPrimaryId.includes(' ')
-            ? rawPrimaryId.split(' ')[0]
-            : rawPrimaryId;
+        const allIds = new Set();
+        if (entityIdMap.company) allIds.add(String(entityIdMap.company));
+        const dirIds = Array.isArray(entityIdMap.directors) ? entityIdMap.directors : [entityIdMap.director];
+        dirIds.forEach(id => id && allIds.add(String(id)));
+        relationshipData?.dependants?.forEach(d => d.id && allIds.add(String(d.id)));
 
-  const getEntityId = (placeholder) => {
-    const entityType = Array.isArray(placeholder.entity_type) ? placeholder.entity_type[0] : (placeholder.entity_type || 'company');
-    const isDep = ['dependant', 'dependent'].includes(entityType?.toLowerCase());
-
-    if (isDep && relationshipData?.dependants) {
-        const targetRel = placeholder.dependant_relationship?.[0]?.toLowerCase() || 
-                         placeholder.name.split('_')[0]?.toLowerCase();
-        
-        const spouseSyns = ['spouse', 'wife', 'husband', 'partner'];
-        const childSyns = ['child', 'son', 'daughter', 'kid'];
-
-        const matching = relationshipData.dependants.find(d => {
-            const rel = d.relationship?.toLowerCase() || '';
-            if (spouseSyns.includes(targetRel)) return spouseSyns.includes(rel);
-            if (childSyns.includes(targetRel)) return childSyns.includes(rel);
-            return rel.includes(targetRel);
-        });
-
-        if (matching) return matching.id;
-        // Fallback: if no specific match found, return all dependant IDs to be safe
-        return relationshipData.dependants.map(d => d.id);
-    }
-            return entityIdMap[entityType];
-        };
-
-        selectedTemplate.placeholders?.forEach(placeholder => {
-            // **NEW: Collect Master Field IDs from both Top Level and Nested Conditions**
-            const mIds = new Set(placeholder.master_field_ids || []);
-            if (placeholder.conditions) {
-                placeholder.conditions.forEach(c => {
-                    if (c.master_field_id) mIds.add(parseInt(c.master_field_id));
-                });
-            }
-
-            const entityId = getEntityId(placeholder);
-            const entityType = Array.isArray(placeholder.entity_type)
-                ? placeholder.entity_type[0]?.toLowerCase() || 'company'
-                : (placeholder.entity_type?.toLowerCase() || 'company');
-
-            mIds.forEach(mId => {
-                const masterField = masterFields.get(mId);
-                if (!masterField?.sources) return;
-
-                const relevantSources = masterField.sources.filter(source => {
-                    if (placeholder.director_type === 'primary' || entityType === 'primary') {
-                        return ['individual', 'director'].includes(source.source_type?.toLowerCase());
-                    }
-                    if (entityType.includes(',')) {
-                        return entityType.split(',').some(type =>
-                            type.trim() === source.source_type?.toLowerCase()
-                        );
-                    }
-                    return source.source_type?.toLowerCase() === entityType || source.source_type === 'document';
-                });
-
-                relevantSources.forEach(source => {
-                    if (!source.table) return;
-                    if (!requiredSources.has(source.table)) {
-                        requiredSources.set(source.table, { linkingVars: new Set(), entityIds: new Map() });
-                    }
-                    const tableInfo = requiredSources.get(source.table);
-                    const linkingVar = source.linking_variable || 'id';
-                    tableInfo.linkingVars.add(linkingVar);
-
-                    if (!tableInfo.entityIds.has(entityType)) tableInfo.entityIds.set(entityType, new Set());
-
-                    const ids = Array.isArray(entityId) ? entityId : [entityId];
-                    ids.forEach(id => {
-                        if (id) tableInfo.entityIds.get(entityType).add(id);
-                    });
+        const tables = new Map();
+        selectedTemplate.placeholders?.forEach(p => {
+            p.master_field_ids?.forEach(mId => {
+                masterFields.get(parseInt(mId))?.sources?.forEach(s => {
+                    if (!s.table) return;
+                    if (!tables.has(s.table)) tables.set(s.table, s.linking_variable || 'id');
                 });
             });
         });
 
-        for (const [tableName, tableInfo] of requiredSources.entries()) {
-            if (fetchingTables.has(tableName)) continue;
-
-            // Collect all IDs we need for this table
-            const allRequiredIds = new Set();
-            tableInfo.entityIds.forEach(ids => ids.forEach(id => {
-                const clean = (id && typeof id === 'object' ? (id.id || id.director_id) : id);
-                if (clean) allRequiredIds.add(String(clean));
-            }));
-
-            // Check which IDs we ALREADY have in cache
-            const existingCache = { ...sourceDataCache[tableName], ...additionalCache[tableName] };
-            const cachedIds = new Set(Object.values(existingCache).map(row =>
-                String(row.id || row.director_id || row.individual_id || row.company_id)
-            ));
-
-            // Only fetch if there are IDs we don't have yet
-            const missingIds = Array.from(allRequiredIds).filter(id => !cachedIds.has(id));
-
-            if (missingIds.length === 0 && cachedIds.size > 0) continue;
-
-            setFetchingTables(prev => new Set(prev).add(tableName));
-
+        const idList = Array.from(allIds).filter(Boolean);
+        for (const [table, linkVar] of tables.entries()) {
+            if (fetchingTables.has(table)) continue;
+            setFetchingTables(prev => new Set(prev).add(table));
             try {
-                const idList = missingIds.length > 0
-                    ? missingIds.map(id => `"${id}"`).join(',')
-                    : Array.from(allRequiredIds).map(id => `"${id}"`).join(',');
-
-                if (!idList) {
-                    setFetchingTables(prev => { const n = new Set(prev); n.delete(tableName); return n; });
-                    continue;
-                };
-
-                const orConditions = [];
-                const columnsToCheck = new Set([...Array.from(tableInfo.linkingVars), 'director_id',]);
-                columnsToCheck.forEach(lVar => {
-                    orConditions.push(`${lVar}.in.(${idList})`);
-                });
-
-                let query = supabase.from(tableName).select('*');
-                if (orConditions.length > 0) query = query.or(orConditions.join(','));
-
-                const { data, error } = await query;
+                const { data, error } = await supabase.from(table).select('*').in(linkVar, idList);
                 if (error) throw error;
-                setAdditionalCache(prev => ({
-                    ...prev,
-                    [tableName]: (data || []).reduce((acc, row) => {
-                        const key = row.id || row.director_id || row.individual_id || row.company_id;
-                        if (key) acc[key] = row;
-                        return acc;
-                    }, {})
-                }));
-            } catch (err) {
-                console.error(`[fetchMissingDataSources] ❌ Error fetching ${tableName}:`, err);
-            } finally {
-                setFetchingTables(prev => { const next = new Set(prev); next.delete(tableName); return next; });
-            }
+                setAdditionalCache(prev => {
+                    const cache = { ...(prev[table] || {}) };
+                    data?.forEach(row => {
+                        const id = row.id || row.director_id || row.individual_id;
+                        if (id) cache[id] = row;
+                        if (row[linkVar]) cache[row[linkVar]] = row;
+                    });
+                    return { ...prev, [table]: cache };
+                });
+            } catch (err) { console.error(`Fetch Error ${table}:`, err); }
+            finally { setFetchingTables(prev => { const n = new Set(prev); n.delete(table); return n; }); }
         }
-    }, [isOpen, selectedTemplate, masterFields, entityIdMap, sourceDataCache, additionalCache, fetchingTables]);
+    }, [isOpen, selectedTemplate, masterFields, entityIdMap, relationshipData]);
+    
+useEffect(() => {
+        if (isOpen) {
+            setAdditionalCache({});
+            setTimeout(fetchMissingDataSources, 50);
+        }
+    }, [isOpen, selectedTemplate?.id]);
 
-    useEffect(() => { fetchMissingDataSources(); }, [fetchMissingDataSources]);
 
-  const getPlaceholderValue = useCallback((placeholder) => {
+    const getPlaceholderValue = useCallback((placeholder) => {
     const ids = placeholder.master_field_ids || [];
     const combinedCache = { ...sourceDataCache, ...additionalCache };
     const isPrimaryDirectorReq = placeholder.director_type === 'primary';
 
-    let pEntityType = Array.isArray(placeholder.entity_type) ? placeholder.entity_type[0] : (placeholder.entity_type || 'company');
+    console.log(`🔍 getPlaceholderValue: Processing ${placeholder.name}`, {
+        entity_type: placeholder.entity_type,
+        type: placeholder.type
+    });
+
+    // 1. Normalize Placeholder Entity Type
+    let pEntityType = 'company';
+    if (Array.isArray(placeholder.entity_type)) {
+        pEntityType = placeholder.entity_type[0];
+    } else if (placeholder.entity_type) {
+        pEntityType = placeholder.entity_type;
+    }
     const isDependantType = ['dependant', 'dependent'].includes(pEntityType.toLowerCase());
 
-    // 1. Resolve Target Entity (Who are we looking for?)
+    // 2. Resolve the Target Subject (The person/entity this field refers to)
     let targetEntity = null;
+    let sourceLabel = "";
+
     if (isDependantType && relationshipData?.dependants) {
-        const targetRelationship = placeholder.dependant_relationship?.[0]?.toLowerCase() || 
-                                 placeholder.name.split('_')[0]?.toLowerCase();
-        
-        targetEntity = relationshipData.dependants.find(d => {
-            if (!d.relationship) return false;
-            const rel = d.relationship.toLowerCase();
-            const spouseGroup = ['spouse', 'wife', 'husband', 'partner'];
-            const childGroup = ['child', 'son', 'daughter', 'kid', 'children'];
-            return (spouseGroup.includes(targetRelationship) && spouseGroup.includes(rel)) ||
-                   (childGroup.includes(targetRelationship) && childGroup.includes(rel)) ||
-                   rel === targetRelationship || rel.includes(targetRelationship);
-        });
-    } else if (pEntityType === 'director' || isPrimaryDirectorReq) {
-        targetEntity = isPrimaryDirectorReq 
-            ? (relationshipData.directors.find(d => d.is_primary === true || d.is_primary === 'true') || 
-               relationshipData.directors.find(d => d.role?.toLowerCase() === 'principal') || 
-               relationshipData.directors[0])
+        // Try to match by dependant_relationship or infer from field name keywords
+        if (placeholder.dependant_relationship?.[0]) {
+            const targetRel = placeholder.dependant_relationship[0].toLowerCase();
+            targetEntity = relationshipData.dependants.find(d => d.relationship?.toLowerCase() === targetRel);
+        }
+        if (!targetEntity) {
+            const fieldName = placeholder.name.toLowerCase();
+            const relKeywords = { 'father': ['father'], 'mother': ['mother'], 'wife': ['wife', 'spouse'], 'husband': ['husband', 'spouse'], 'child': ['child'] };
+            for (const [rel, keywords] of Object.entries(relKeywords)) {
+                if (keywords.some(k => fieldName.includes(k))) {
+                    targetEntity = relationshipData.dependants.find(d => d.relationship?.toLowerCase() === rel);
+                    if (targetEntity) break;
+                }
+            }
+        }
+        sourceLabel = targetEntity ? `Dependant (${targetEntity.relationship})` : "";
+    } else if (pEntityType === 'director' && relationshipData?.directors) {
+        targetEntity = (isPrimaryDirectorReq || placeholder.name.toLowerCase().includes('primary'))
+            ? relationshipData.directors.find(d => d.is_primary === true || d.is_primary === 'true')
             : relationshipData.directors[0];
+        sourceLabel = "Director";
     } else if (pEntityType === 'company') {
         targetEntity = relationshipData.company;
+        sourceLabel = "Company";
+    }
+
+    // 3. Handle System/Date fields (don't need an entity)
+    if (ids.length > 0 && masterFields) {
+        for (const id of ids) {
+            const mf = masterFields.get(parseInt(id, 10));
+            if (mf?.date_config?.useCurrentDate) {
+                return {
+                    value: formatDate(new Date(), mf.date_config.format || 'DD/MM/YYYY'),
+                    source: 'System Date'
+                };
+            }
+        }
     }
 
     if (!targetEntity) return { value: '', source: null };
-    const currentTargetId = targetEntity.id;
 
-    // 2. Handle Name Fields (Quick return)
-    if (placeholder.name.toLowerCase().includes('name') && !placeholder.type === 'conditional') {
-        return { value: targetEntity.name || targetEntity.full_name || '', source: 'Relationship Data' };
-    }
-
-    // 3. UNIVERSAL CONDITIONAL LOGIC (Passport, ID, Alien No, etc.)
+    // 4. UNIFIED LOGIC: Process field based on the resolved targetEntity
+    
+    // --- CASE A: Conditional Fields (The core fix) ---
     if (placeholder.type === 'conditional' && placeholder.conditions) {
+        console.log(`🔀 Processing Unified Conditional: ${placeholder.name} for ${sourceLabel}`);
+        
         for (const condition of placeholder.conditions) {
-            const { tag, master_field_id, label } = condition;
-            
-            // Check direct tag on person object first
-            if (targetEntity[tag]) return { value: `${label || ''}${targetEntity[tag]}`, source: 'Direct Data' };
+            const tag = condition.tag;
+            const mId = condition.master_field_id;
 
-            // Check Master Field Sources in Cache
-            if (master_field_id && masterFields) {
-                const mf = masterFields.get(parseInt(master_field_id));
+            // P1: Direct field access on entity
+            if (targetEntity[tag]) return { value: `${condition.label || ''}${targetEntity[tag]}`, source: `${sourceLabel} Direct` };
+            
+            // P2: Case-insensitive direct access
+            const matchKey = Object.keys(targetEntity).find(k => k.toLowerCase() === tag.toLowerCase());
+            if (matchKey && targetEntity[matchKey]) return { value: `${condition.label || ''}${targetEntity[matchKey]}`, source: `${sourceLabel} Direct (Inferred)` };
+
+            // P3: Master Field Broad Cache Lookup
+            if (mId && masterFields) {
+                const mf = masterFields.get(parseInt(mId, 10));
                 if (mf?.sources) {
                     for (const source of mf.sources) {
                         const tableData = combinedCache[source.table];
                         if (!tableData) continue;
 
-                        const record = Object.values(tableData).find(rec => {
-                            const matchesDoc = !source.document_id || (Array.isArray(source.document_id)
-                                ? source.document_id.map(String).includes(String(rec.kyc_document_id || rec.document_id))
-                                : String(rec.kyc_document_id || rec.document_id) === String(source.document_id));
-                            
-                            const possibleOwnerIds = [String(rec[source.linking_variable || 'id']), String(rec.individual_id), String(rec.director_id), String(rec.id)];
-                            return matchesDoc && possibleOwnerIds.includes(String(currentTargetId));
+                        let records = Object.values(tableData);
+                        if (source.document_id) {
+                            const reqDocIds = Array.isArray(source.document_id) ? source.document_id : [source.document_id];
+                            records = records.filter(rec => reqDocIds.includes(rec.document_id || rec.kyc_document_id));
+                        }
+
+                        const linkingVar = source.linking_variable || 'id';
+                        const searchId = String(targetEntity.id);
+                        const record = records.find(rec => {
+                            const recId = String(rec[linkingVar] || rec.id || rec.individual_id);
+                            return recId === searchId || recId.startsWith(searchId + ' ');
                         });
 
                         if (record) {
-                            const val = source.path ? parseJsonValue(record, source.path) : record[tag];
-                            if (val) return { value: `${label || ''}${val}`, source: mf.label || source.table };
+                            const condVal = source.path ? parseJsonValue(record, source.path) : record[tag];
+                            if (condVal && typeof condVal !== 'object') {
+                                return { value: `${condition.label || ''}${condVal}`, source: `Conditional - ${mf.label} (Fresh)` };
+                            }
                         }
                     }
                 }
@@ -860,265 +639,57 @@ export default function TemplateGenerationDialog({
         return { value: '', source: null };
     }
 
-        // Special handling for director fields using relationshipData
-        if (pEntityType === 'director' && relationshipData?.directors) {
-            let targetDirector = null;
-            if (isPrimaryDirectorReq) {
-                targetDirector = relationshipData.directors.find(d => d.is_primary === true || d.is_primary === 'true');
-            } else if (placeholder.name.toLowerCase().includes('primary')) {
-                targetDirector = relationshipData.directors.find(d => d.is_primary === true || d.is_primary === 'true');
-            } else {
-                targetDirector = relationshipData.directors[0];
-            }
-
-            if (targetDirector) {
-                // Handle name fields
-                if (placeholder.name.toLowerCase().includes('name')) {
-                    const result = {
-                        value: targetDirector.name || targetDirector.full_name || '',
-                        source: 'Director - Relationship Data'
-                    };
-                    return result;
-                }
-
-                // Handle signature/image fields
-                if (placeholder.type === 'image' || placeholder.name.startsWith('%')) {
-                    if (ids.length > 0 && masterFields) {
-                        for (const id of ids) {
-                            const mf = masterFields.get(parseInt(id, 10));
-                            if (mf?.sources) {
-                                for (const source of mf.sources) {
-                                    if (source.table === 'acc_portal_directors_documents' && source.document_id) {
-                                        const requiredDocIds = Array.isArray(source.document_id) ? source.document_id : [source.document_id];
-                                        const linkingVar = source.linking_variable || 'director_id';
-
-                                        const allDocs = Object.values(combinedCache['acc_portal_directors_documents'] || {})
-                                            .concat(Object.values(combinedCache['acc_portal_kyc_uploads'] || {}));
-
-                                        const matchingDoc = allDocs.find(doc => {
-                                            const docKycId = doc.kyc_document_id || doc.document_id;
-                                            const docOwnerId = doc[linkingVar] || doc.director_id || doc.individual_id;
-
-                                            return requiredDocIds.includes(docKycId) &&
-                                                String(docOwnerId) === String(targetDirector.id);
-                                        });
-
-                                        if (matchingDoc?.file_path) {
-                                            const result = {
-                                                value: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${matchingDoc.file_path}`,
-                                                source: 'Director Signature - Documents'
-                                            };
-                                            return result;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    const result = { value: '', source: null };
-                    return result;
-                }
-
-                if (placeholder.type === 'conditional' && placeholder.conditions) {
-                    // Get the target entity based on entity_type
-                    let targetEntity = null;
-
-                    if (isDependantType && relationshipData?.dependants) {
-                        // For dependants, try to match by relationship
-                        if (placeholder.dependant_relationship?.[0]) {
-                            const targetRelationship = placeholder.dependant_relationship[0].toLowerCase();
-                            targetEntity = relationshipData.dependants.find(
-                                d => d.relationship?.toLowerCase() === targetRelationship
-                            );
-                        }
-                    } else if (pEntityType === 'director' && relationshipData?.directors) {
-                        targetEntity = isPrimaryDirectorReq
-                            ? relationshipData.directors.find(d => d.is_primary === true || d.is_primary === 'true')
-                            : relationshipData.directors[0];
-
-                    } else if (pEntityType === 'company' && relationshipData?.company) {
-                        targetEntity = relationshipData.company;
-                    }
-
-                    if (!targetEntity) {
-                        return { value: '', source: null };
-                    }
-                    for (const condition of placeholder.conditions) {
-                        const conditionTag = condition.tag;
-                        const masterFieldId = condition.master_field_id;
-
-                        // Log search attempt
-                        console.debug(`[Conditional Check] Placeholder: ${placeholder.name}, Checking Tag: ${conditionTag}`);
-
-                        // Try direct field match
-                        if (targetEntity[conditionTag]) {
-                            const result = {
-                                value: `${condition.label || ''}${targetEntity[conditionTag]}`,
-                                source: `Conditional - Direct (${conditionTag})`
-                            };
-                            console.log(`%c[MATCHED] Direct tag "${conditionTag}" found value: ${targetEntity[conditionTag]}`, 'color: #10b981');
-                            return result;
-                        }
-
-                        // Try Master Field Sources
-                        if (masterFieldId && masterFields) {
-                            const mf = masterFields.get(parseInt(masterFieldId, 10));
-                            if (mf?.sources) {
-                                for (const source of mf.sources) {
-                                    const tableData = combinedCache[source.table];
-                                    if (!tableData) continue;
-
-                                    const records = Object.values(tableData);
-                                    const linkingVar = source.linking_variable || 'id';
-                                    const record = records.find(rec => {
-                                        const recordId = String(rec[linkingVar] || rec.id || rec.individual_id);
-                                        const searchId = String(targetEntity.id);
-                                        return recordId === searchId || recordId.startsWith(searchId + ' ');
-                                    });
-
-                                    if (record) {
-                                        const condVal = source.path ? parseJsonValue(record, source.path) : record[conditionTag];
-                                        if (condVal) {
-                                            console.log(`%c[MATCHED] Master Field ${masterFieldId} (Source: ${source.table}) found: ${condVal}`, 'color: #10b981');
-                                            return {
-                                                value: `${condition.label || ''}${condVal}`,
-                                                source: `Conditional - ${mf.label || source.table}`
-                                            };
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    return { value: '', source: null };
-                }
-            }
-        }
-
-        // 1. Handle Current Date
-        if (ids.length > 0 && masterFields) {
-            for (const id of ids) {
-                const mf = masterFields.get(parseInt(id, 10));
-                if (mf?.date_config?.useCurrentDate) {
-                    return {
-                        value: formatDate(new Date(), mf.date_config.format || 'DD/MM/YYYY'),
-                        source: 'System Date'
-                    };
-                }
-            }
-        }
-
-        if (ids.length === 0 || !masterFields) return { value: '', source: null };
-
-        const primaryDirectorRecord = isPrimaryDirectorReq ? findPrimaryDirector(combinedCache) : null;
-
-        if (isPrimaryDirectorReq) {
-            if (!primaryDirectorRecord) return { value: '', source: null };
-            currentTargetId = primaryDirectorRecord.id || primaryDirectorRecord.director_id || primaryDirectorRecord.individual_id;
-        } else if (pEntityType === 'director' && !currentTargetId) {
-            currentTargetId = entityIdMap.director;
-        }
-
-        const isImageType = placeholder.type === 'image' || placeholder.name.startsWith('%');
-
-        for (const id of ids) {
-            const masterField = masterFields.get(parseInt(id, 10));
-            if (!masterField?.sources) continue;
-
-           // --- Inside getPlaceholderValue -> General loop starting at line 1038 ---
-const relevantSources = masterField.sources.filter(source => {
-    const sType = (source.source_type || '').toLowerCase();
-    const pType = pEntityType.toLowerCase();
-
-    if (pType === 'company') return sType === 'company';
-    
-    // ALLOW dependants to use individual/director sources
-    if (pType === 'director' || pType === 'dependant' || pType === 'dependent' || isPrimaryDirectorReq) {
-        return ['individual', 'director', 'dependant', 'dependent'].includes(sType);
+    // --- CASE B: Name Fields ---
+    if (placeholder.name.toLowerCase().includes('name')) {
+        return { value: targetEntity.full_name || targetEntity.name || '', source: `${sourceLabel} - Relationship Data` };
     }
-    
-    return sType === pType;
-}).sort((a, b) => (a.priority || 99) - (b.priority || 99));
 
-            const sourcesToTry = relevantSources.length > 0 ? relevantSources :
-                (pEntityType !== 'company' ? masterField.sources.filter(s => s.source_type === 'individual') : []);
-
-            for (const source of sourcesToTry) {
+    // --- CASE C: Image/Signature Fields ---
+    if (placeholder.type === 'image' || placeholder.name.startsWith('%')) {
+        for (const id of ids) {
+            const mf = masterFields.get(parseInt(id, 10));
+            if (!mf?.sources) continue;
+            for (const source of mf.sources) {
                 const tableData = combinedCache[source.table];
                 if (!tableData) continue;
-
-                const records = Object.values(tableData);
                 const linkingVar = source.linking_variable || 'id';
-
-            // --- Inside getPlaceholderValue -> doesRecordMatchTarget (line 1073) ---
-const doesRecordMatchTarget = (record) => {
-    if (!currentTargetId || !record) return false;
-    
-    const searchId = String(currentTargetId);
-    // Check all possible columns for the ID
-    const possibleOwnerIds = [
-        String(record[linkingVar] || ''),
-        String(record.individual_id || ''),
-        String(record.director_id || ''),
-        String(record.id || '')
-    ];
-    
-    return possibleOwnerIds.some(id => id === searchId || id.startsWith(searchId + ' '));
-};
-
-                // ... inside getPlaceholderValue (around line 590)
-                if (isImageType) {
-                    const requiredDocIds = Array.isArray(source.document_id)
-                        ? source.document_id.map(id => String(id))
-                        : [String(source.document_id)].filter(Boolean);
-
-                    const linkingVar = source.linking_variable || 'id';
-
-                    const foundDoc = records.find(d => {
-                        // 1. Get the Document ID from the record
-                        const docKycId = String(d.kyc_document_id || d.document_id);
-
-                        // 2. Get the Owner ID using the specified linking_variable
-                        const docOwnerId = String(d[linkingVar] || d.director_id || d.individual_id);
-
-                        // 3. Narrow down by matching BOTH
-                        const matchesDocType = requiredDocIds.length === 0 || requiredDocIds.includes(docKycId);
-                        const matchesEntity = String(currentTargetId) === docOwnerId;
-
-                        return matchesDocType && matchesEntity;
-                    });
-
-                    if (foundDoc?.file_path) {
-                        return {
-                            value: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${foundDoc.file_path}`,
-                            source: `${isPrimaryDirectorReq ? 'Primary Director - ' : ''}${masterField.label || 'Document'}`
-                        };
-                    }
-                } else {
-                    const record = records.find(doesRecordMatchTarget);
-
-                    if (record) {
-                        let val = source.path ? parseJsonValue(record, source.path) : '';
-
-                        if (!val && (placeholder.name.toLowerCase().includes('name') || (source.path && source.path.includes('name')))) {
-                            val = [record.first_name, record.middle_name, record.last_name]
-                                .filter(Boolean).join(' ').trim() || record.full_name || record.name || '';
-                        }
-
-                        if (val) {
-                            return {
-                                value: val,
-                                source: `${isPrimaryDirectorReq ? 'Primary Director - ' : ''}${masterField.label || 'Field'}`
-                            };
-                        }
-                    }
+                const searchId = String(targetEntity.id);
+                const reqDocIds = Array.isArray(source.document_id) ? source.document_id : [source.document_id];
+                
+                const match = Object.values(tableData).find(d => 
+                    reqDocIds.includes(d.document_id || d.kyc_document_id) && 
+                    String(d[linkingVar] || d.id) === searchId
+                );
+                
+                if (match?.file_path) {
+                    return { 
+                        value: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${match.file_path}`, 
+                        source: 'Fresh Image Cache' 
+                    };
                 }
             }
         }
-        const result = { value: '', source: null };
-        return result;
-    }, [masterFields, entityIdMap, sourceDataCache, additionalCache, relationshipData]);
+    }
+
+    // --- CASE D: Standard Master Field Text Lookup ---
+    for (const id of ids) {
+        const mf = masterFields.get(parseInt(id, 10));
+        if (!mf?.sources) continue;
+        for (const source of mf.sources) {
+            const tableData = combinedCache[source.table];
+            if (!tableData) continue;
+            const linkingVar = source.linking_variable || 'id';
+            const searchId = String(targetEntity.id);
+            const record = Object.values(tableData).find(r => String(r[linkingVar] || r.id) === searchId);
+            if (record) {
+                const val = source.path ? parseJsonValue(record, source.path) : record[placeholder.name];
+                if (val) return { value: val, source: `Broad Fresh Lookup` };
+            }
+        }
+    }
+
+    return { value: '', source: null };
+}, [masterFields, entityIdMap, sourceDataCache, additionalCache, relationshipData]);
 
     const smartFieldMatch = useCallback((placeholderName) => {
         const normalized = normalizeString(placeholderName);
@@ -1136,8 +707,8 @@ const doesRecordMatchTarget = (record) => {
         if (isOpen && selectedTemplate && Object.keys(sourceDataCache).length > 0) {
             const initData = {};
             const autoMap = new Map();
+            const combinedCache = { ...sourceDataCache, ...additionalCache };
 
-            // 1. Resolve Top Level Fields
             groupedPlaceholders.topLevel.forEach(p => {
                 let match = getPlaceholderValue(p);
                 if (!match.value) match = smartFieldMatch(p.name);
@@ -1145,33 +716,27 @@ const doesRecordMatchTarget = (record) => {
                 if (match.value) autoMap.set(p.name, match.source);
             });
 
-            // 2. Resolve Array Blocks
             Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
                 const block = groupedPlaceholders.blocks[blockName];
                 const resolvedRows = resolveArrayData(
                     block.config,
                     selectedTemplate.placeholders,
-                    { ...sourceDataCache, ...additionalCache },
+                    combinedCache,
                     masterFields,
                     entityIdMap,
                     relationshipData
                 );
                 initData[blockName] = resolvedRows;
-
-                if (resolvedRows.length > 0) {
-                    autoMap.set(blockName, `${resolvedRows.length} row${resolvedRows.length > 1 ? 's' : ''} auto-populated`);
-                }
+                if (resolvedRows.length > 0) autoMap.set(blockName, `Auto-populated`);
             });
+
             setFormData(initData);
             setOriginalFormData(JSON.parse(JSON.stringify(initData)));
             setAutoPopulatedFields(autoMap);
 
             setTimeout(() => {
-                if (docxTemplateBuffer.current) {
-                    updateWordPreview(initData, imageStyles);
-                } else {
-                    setPreviewContent(populateHtmlContent(initData, selectedTemplate.placeholders || [], imageStyles));
-                }
+                if (docxTemplateBuffer.current) updateWordPreview(initData, imageStyles);
+                else setPreviewContent(populateHtmlContent(initData, selectedTemplate.placeholders || [], imageStyles));
             }, 100);
         }
     }, [isOpen, selectedTemplate?.id, groupedPlaceholders, sourceDataCache, additionalCache]);
