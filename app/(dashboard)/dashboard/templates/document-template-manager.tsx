@@ -20,7 +20,6 @@ import { TableHeader, Table, TableBody, TableCell, TableHead, TableRow } from "@
 import supabase from "@/lib/supabase/client";
 import TemplateEditor from "@/components/TemplateEditor";
 import { Textarea } from "@/components/ui/textarea";
-
 import Docxtemplater from "docxtemplater";
 import PizZip from "pizzip";
 import InspectModule from 'docxtemplater/js/inspect-module';
@@ -46,8 +45,6 @@ interface JobField {
   }>;
 }
 
-// --- MODIFICATION: Updated props to accept jobLevel object instead of string classId ---
-// Helper function to sanitize class names
 const sanitizeClassName = (cls: string | undefined): string => {
   if (!cls) return '';
   return String(cls).replace(/\s+/g, ' ').trim();
@@ -70,8 +67,14 @@ interface DocumentTemplateManagerProps {
 }
 
 const PLACEHOLDER_TYPES = [
-  { value: 'text', label: 'Text' }, { value: 'date', label: 'Date' }, { value: 'number', label: 'Number' },
-  { value: 'select', label: 'Dropdown' }, { value: 'array', label: 'Array/List' },{ value: 'conditional', label: 'Conditional' }, { value: 'image', label: 'Image' },
+  { value: 'text', label: 'Text' },
+  { value: 'date', label: 'Date' },
+  { value: 'number', label: 'Number' },
+  { value: 'select', label: 'Dropdown' },
+  { value: 'array', label: 'Array/List' },
+  { value: 'conditional', label: 'Conditional' },
+  { value: 'boolean', label: 'Boolean/Checkbox' },
+  { value: 'image', label: 'Image' },
 ];
 
 const ENTITY_TYPES: { value: EntityType; label: string }[] = [
@@ -98,11 +101,25 @@ type ConditionalCondition = {
   master_field_id?: number; // The specific master field for this condition
 };
 
+type BooleanCondition = {
+  tag: string;              // e.g., 'is_male', 'daily_frequency'
+  label: string;            // Display text: 'Male', 'Daily'
+  master_field_id?: number; // Optional - for DB-driven fields
+  comparison?: {            // For DB fields
+    field: string;          // e.g., 'gender'
+    operator: 'equals' | 'not_equals' | 'contains';
+    value: string;          // e.g., 'Male'
+  };
+};
+
 type Placeholder = {
   id: string;
   name: string;
   description?: string;
-  type: 'text' | 'number' | 'date' | 'select' | 'array' | 'conditional' | 'image';
+  type: 'text' | 'number' | 'date' | 'select' | 'array' | 'conditional' | 'image' | 'boolean';
+  array_direction?: 'horizontal' | 'vertical';
+  boolean_conditions?: BooleanCondition[];
+  boolean_type?: 'single' | 'multiple'; // single = radio, multiple = checkboxes
   required: boolean;
   options?: string[];
   entity_type: EntityType[]; // Always an array now
@@ -114,7 +131,6 @@ type Placeholder = {
   conditions?: ConditionalCondition[]; // For conditional fields
 };
 
-// Helper to strip XML/HTML tags to find placeholders in split nodes
 const getCleanText = (str: string) => str.replace(/<[^>]+>/g, '');
 function MasterFieldPicker({
   masterFields,
@@ -243,7 +259,6 @@ function MasterFieldPicker({
   );
 }
 
-// --- MODIFICATION: Destructure jobLevel instead of classId ---
 export default function DocumentTemplateManager({
   document,
   isOpen,
@@ -253,10 +268,7 @@ export default function DocumentTemplateManager({
   jobLevel = null,
   className = ''
 }: DocumentTemplateManagerProps) {
-  // Sanitize the className prop
   const containerClassName = `document-template-manager ${sanitizeClassName(className)}`.trim();
-
-  // Ensure jobLevel is properly typed and has all required properties
   const safeJobLevel = useMemo(() => {
     if (!jobLevel) {
       return {
@@ -281,7 +293,8 @@ export default function DocumentTemplateManager({
     description: '',
     type: 'text',
     required: false,
-    entity_type: []
+    entity_type: [],
+    array_direction: 'vertical'
   });
   const [directorType, setDirectorType] = useState<'all' | 'primary'>('all');
   const [dependantRelationship, setDependantRelationship] = useState<string[]>([]);
@@ -293,8 +306,6 @@ export default function DocumentTemplateManager({
   const masterFieldMap = useMemo(() => new Map(masterFields.map(f => [f.id, f.label])), [masterFields]);
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const [docPreviewUrl, setDocPreviewUrl] = useState<string | null>(null);
-
-  // Conditional builder state
   const [availableFields, setAvailableFields] = useState<string[]>([]);
   const [showLinkPrompt, setShowLinkPrompt] = useState(false);
 
@@ -304,15 +315,15 @@ export default function DocumentTemplateManager({
     const scalarFieldRegex = /\{#([^{}]+)\}/g;
     const fields: string[] = [];
     let match;
-    
+
     console.log('[SCALAR FIELD DETECTION] Template content:', templateContent);
     console.log('[SCALAR FIELD DETECTION] Regex pattern:', scalarFieldRegex);
-    
+
     while ((match = scalarFieldRegex.exec(templateContent)) !== null) {
       fields.push(match[1]); // Extracts field name between {# and }
       console.log('[SCALAR FIELD DETECTION] Found scalar field:', match[1]);
     }
-    
+
     console.log('[SCALAR FIELD DETECTION] Extracted fields:', fields);
     return fields;
   };
@@ -321,11 +332,11 @@ export default function DocumentTemplateManager({
   const handleAutoLinkFields = async (scalarFields: string[]) => {
     const linkingPromises = scalarFields.map(async (fieldName) => {
       // Find existing master field
-      const existingField = masterFields.find(f => 
-        f.field_key === fieldName || 
+      const existingField = masterFields.find(f =>
+        f.field_key === fieldName ||
         f.label.toLowerCase().includes(fieldName.toLowerCase())
       );
-      
+
       if (existingField) {
         return { fieldName, masterFieldId: existingField.id, alreadyLinked: true };
       } else {
@@ -335,11 +346,11 @@ export default function DocumentTemplateManager({
     });
 
     const linkingResults = await Promise.all(linkingPromises);
-    
+
     // Process results
     const needsCreation = linkingResults.filter(r => r.needsCreation);
     const alreadyLinked = linkingResults.filter(r => r.alreadyLinked);
-    
+
     if (needsCreation.length > 0) {
       const fieldsToCreate = needsCreation.map(r => r.fieldName).join(', ');
       toast({
@@ -349,15 +360,15 @@ export default function DocumentTemplateManager({
         duration: 8000,
         action: (
           <div className="flex gap-2">
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               size="sm"
               onClick={() => handleAutoLinkFields(scalarFields)}
             >
               Link All
             </Button>
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               size="sm"
               onClick={() => setShowLinkPrompt(false)}
             >
@@ -368,24 +379,24 @@ export default function DocumentTemplateManager({
       });
       return;
     }
-    
+
     if (alreadyLinked.length > 0) {
       const linkedFields = alreadyLinked.map(r => r.fieldName).join(', ');
       const masterFieldIds = alreadyLinked.map(r => r.masterFieldId).filter(id => id !== null);
-      
+
       // Add the linked fields to the placeholder
       setNewPlaceholder(prev => ({
         ...prev,
         master_field_ids: [...(prev.master_field_ids || []), ...masterFieldIds]
       }));
-      
+
       toast({
         title: "Fields Linked Successfully",
         description: `Successfully linked ${linkedFields} to existing master fields.`,
         duration: 3000,
       });
     }
-    
+
     setShowLinkPrompt(false);
   };
 
@@ -578,9 +589,8 @@ export default function DocumentTemplateManager({
         rawTextContent = getCleanText(source.content).replace(/[\u200B-\u200D\uFEFF]/g, '');
       }
 
-      // Regex: Matches {#block}, {/block}, {field}, {%image}, and {#condition} blocks
-      // Updated to handle patterns like {# father_kenyan_id_no} and {/ father_kenyan_id_no}
       const tagRegex = /\{([#\/%])?\s*([a-zA-Z0-9_]+)\s*\}/g;
+      const sequences = new Map(); // To track em_1, em_2 groups
 
       const results: Placeholder[] = [];
       const blockStack: string[] = [];
@@ -592,6 +602,24 @@ export default function DocumentTemplateManager({
         const tagName = match[2];
         const currentParent = blockStack.length > 0 ? blockStack[blockStack.length - 1] : undefined;
         const contextKey = currentParent ? `${currentParent}_${tagName}` : tagName;
+
+        if (!prefix) {
+          // Check if this is a numbered sequence (e.g., em_1)
+          const digitMatch = tagName.match(/^(.+)_(\d+)$/);
+          if (digitMatch) {
+            const groupName = digitMatch[1]; // "em"
+            const index = parseInt(digitMatch[2]); // 1, 2, 3...
+
+            if (!sequences.has(groupName)) {
+              sequences.set(groupName, { max: index, count: 1 });
+            } else {
+              const seq = sequences.get(groupName);
+              seq.max = Math.max(seq.max, index);
+              seq.count++;
+            }
+            continue; // Skip individual processing for now
+          }
+        }
 
         if (prefix === '#') {
           console.log(`%c[ARRAY DETECTED] {#${tagName}}`, "color: #059669");
@@ -613,11 +641,11 @@ export default function DocumentTemplateManager({
               // Regular array block - determine entity type
               let blockEntity: EntityType = (tagName.endsWith('s') ? tagName.slice(0, -1) : tagName) as EntityType;
               let blockRelationships: string[] = [];
-              
+
               if (blockEntity === 'dependent') {
                 const relationshipPrefixes = ['father', 'mother', 'daughter', 'son', 'husband', 'wife', 'mother_in_law', 'father_in_law'];
                 const tagNameLower = tagName.toLowerCase();
-                
+
                 for (const prefix of relationshipPrefixes) {
                   if (tagNameLower.startsWith(prefix + '_')) {
                     blockRelationships = [prefix];
@@ -626,7 +654,7 @@ export default function DocumentTemplateManager({
                   }
                 }
               }
-            
+
               results.push({
                 id: `block_${tagName}_${Date.now()}`,
                 name: tagName,
@@ -653,7 +681,7 @@ export default function DocumentTemplateManager({
 
           let inferredEntity: EntityType = 'principal';
           let inferredRelationships: string[] = [];
-          
+
           if (currentParent) {
             // Priority 1: Map to plural parent (e.g. #directors -> director)
             inferredEntity = (currentParent.endsWith('s') ? currentParent.slice(0, -1) : currentParent) as EntityType;
@@ -664,7 +692,7 @@ export default function DocumentTemplateManager({
             // Priority 3: Check for relationship prefixes in tag name
             const relationshipPrefixes = ['father', 'mother', 'daughter', 'son', 'husband', 'wife', 'mother_in_law', 'father_in_law'];
             const tagNameLower = tagName.toLowerCase();
-            
+
             for (const prefix of relationshipPrefixes) {
               if (tagNameLower.startsWith(prefix + '_')) {
                 inferredEntity = 'dependent';
@@ -689,7 +717,21 @@ export default function DocumentTemplateManager({
           processedTags.add(contextKey);
         }
       }
-
+      sequences.forEach((data, groupName) => {
+        // Only treat as a sequence if we found more than 1 (e.g., em_1 and em_2)
+        if (data.count > 1) {
+          results.push({
+            id: `seq_${groupName}_${Date.now()}`,
+            name: groupName,
+            type: 'text', // Generator will handle splitting
+            is_digit_split: true, // Custom flag
+            digit_count: data.max,
+            required: true,
+            entity_type: 'company', // Default
+            description: `Grouped Sequence (${groupName}_1 to ${groupName}_${data.max})`
+          });
+        }
+      })
       console.groupEnd();
       return results;
     } catch (err) {
@@ -820,6 +862,13 @@ export default function DocumentTemplateManager({
             isBlock && "bg-blue-50/40 hover:bg-blue-50/60"
           )}
         >
+            <TableCell className="border-r">
+    <div className="flex items-center gap-2 font-mono text-sm">
+      <FileText className="h-3.5 w-3.5" />
+      <span>{p.is_digit_split ? `${p.name}_[1-${p.digit_count}]` : `{${p.name}}`}</span>
+      {p.is_digit_split && <Badge className="bg-orange-500">DIGIT SPLIT</Badge>}
+    </div>
+  </TableCell>
           <TableCell className="border-r">
             <div className={cn(
               "flex items-center gap-2 font-mono text-sm",
@@ -839,7 +888,26 @@ export default function DocumentTemplateManager({
           </TableCell>
 
           <TableCell className="border-r">
-            <Badge variant="outline" className="capitalize text-[10px]">{p.type}</Badge>
+            <div className="flex items-center gap-1">
+              <Badge variant="outline" className="capitalize text-[10px]">
+                {p.type}
+              </Badge>
+              {p.type === 'boolean' && p.boolean_type && (
+                <Badge variant="secondary" className="text-[8px] bg-purple-100 text-purple-700">
+                  {p.boolean_type === 'single' ? 'Radio' : 'Multi'}
+                </Badge>
+              )}
+              {p.type === 'boolean' && p.boolean_conditions?.length > 0 && (
+                <Badge variant="outline" className="text-[8px]">
+                  {p.boolean_conditions.length} opts
+                </Badge>
+              )}
+              {p.type === 'array' && (
+                <Badge className="text-[8px] bg-orange-100 text-orange-700 hover:bg-orange-100">
+                  {p.array_direction === 'horizontal' ? '→ Horizontal' : '↓ Vertical'}
+                </Badge>
+              )}
+            </div>
           </TableCell>
 
           <TableCell className="border-r">
@@ -849,7 +917,20 @@ export default function DocumentTemplateManager({
           </TableCell>
 
           <TableCell className="border-r">
-            {p.master_field_ids?.length > 0 ? (
+            {p.type === 'boolean' && p.boolean_conditions?.length > 0 ? (
+              <div className="flex flex-wrap gap-1">
+                {p.boolean_conditions.slice(0, 3).map((cond, idx) => (
+                  <Badge key={idx} variant="outline" className="text-[9px] bg-purple-50 text-purple-700">
+                    {cond.label}
+                  </Badge>
+                ))}
+                {p.boolean_conditions.length > 3 && (
+                  <Badge variant="outline" className="text-[9px]">
+                    +{p.boolean_conditions.length - 3}
+                  </Badge>
+                )}
+              </div>
+            ) : p.master_field_ids?.length > 0 ? (
               <div className="flex flex-wrap gap-1">
                 {p.master_field_ids.map(id => (
                   <Badge key={id} variant="outline" className="text-[9px] bg-white">
@@ -1085,18 +1166,23 @@ export default function DocumentTemplateManager({
   const savePlaceholder = () => {
     if (!newPlaceholder.name.trim()) return;
 
-    const processedOptions = newPlaceholder.type === 'conditional' 
-    ? (newPlaceholder.conditions || []).map(c => `{#${c.tag}}${c.label}{${c.tag}}{/${c.tag}}`)
-    : newPlaceholder.options;
+    const processedOptions = newPlaceholder.type === 'conditional'
+      ? (newPlaceholder.conditions || []).map(c => `{#${c.tag}}${c.label}{${c.tag}}{/${c.tag}}`)
+      : newPlaceholder.options;
 
-  const placeholderToSave = {
-    ...newPlaceholder,
-    options: processedOptions,
-      entity_type: Array.isArray(newPlaceholder.entity_type) 
-        ? newPlaceholder.entity_type 
+    const placeholderToSave = {
+      ...newPlaceholder,
+      options: processedOptions,
+      entity_type: Array.isArray(newPlaceholder.entity_type)
+        ? newPlaceholder.entity_type
         : newPlaceholder.entity_type ? [newPlaceholder.entity_type] : [],
       ...(newPlaceholder.entity_type?.includes('director') && { director_type: directorType }),
-      ...(newPlaceholder.entity_type?.includes('dependent') && { dependant_relationship: dependantRelationship })
+      ...(newPlaceholder.entity_type?.includes('dependent') && { dependant_relationship: dependantRelationship }),
+      // Add boolean fields
+      ...(newPlaceholder.type === 'boolean' && {
+        boolean_conditions: newPlaceholder.boolean_conditions || [],
+        boolean_type: newPlaceholder.boolean_type || 'single'
+      })
     };
 
     if (isEditingPlaceholder !== null) {
@@ -1124,7 +1210,10 @@ export default function DocumentTemplateManager({
       type: 'text',
       required: false,
       entity_type: [],
-      conditions: []
+      conditions: [],
+      boolean_conditions: [],
+      boolean_type: 'single',
+      array_direction: 'vertical'
     });
 
     setDirectorType('all');
@@ -1139,28 +1228,30 @@ export default function DocumentTemplateManager({
     if (!placeholder) return;
 
     // Ensure entity_type is always an array
-    setNewPlaceholder({ 
+    setNewPlaceholder({
       ...placeholder,
-      entity_type: Array.isArray(placeholder.entity_type) 
-        ? placeholder.entity_type 
+      entity_type: Array.isArray(placeholder.entity_type)
+        ? placeholder.entity_type
         : placeholder.entity_type ? [placeholder.entity_type] : [],
-      conditions: placeholder.conditions || []
+      conditions: placeholder.conditions || [],
+      boolean_conditions: placeholder.boolean_conditions || [],
+      boolean_type: placeholder.boolean_type || 'single'
     });
-    
+
     // Set director type if applicable
     if (placeholder.entity_type?.includes('director') && placeholder.director_type) {
       setDirectorType(placeholder.director_type as 'all' | 'primary');
     } else {
       setDirectorType('all');
     }
-    
+
     // Set dependant relationship if applicable
     if (placeholder.entity_type?.includes('dependent') && placeholder.dependant_relationship) {
       setDependantRelationship(Array.isArray(placeholder.dependant_relationship) ? placeholder.dependant_relationship : []);
     } else {
       setDependantRelationship([]);
     }
-    
+
     setIsEditingPlaceholder(index);
     setIsPlaceholderFormOpen(true);
   };
@@ -1791,48 +1882,48 @@ export default function DocumentTemplateManager({
                       >
                         {newPlaceholder.entity_type && newPlaceholder.entity_type.length > 0
                           ? newPlaceholder.entity_type
-                              .map(et => ENTITY_TYPES.find(t => t.value === et)?.label || et)
-                              .join(', ')
+                            .map(et => ENTITY_TYPES.find(t => t.value === et)?.label || et)
+                            .join(', ')
                           : 'Select entities...'}
                         <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>
                     </PopoverTrigger>
-                  <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-                    <Command>
-                      <CommandInput placeholder="Search entities..." />
-                      <CommandList>
-                        <CommandGroup className="max-h-[300px] overflow-y-auto">
-                          {ENTITY_TYPES.map((type) => {
-                            const isSelected = newPlaceholder.entity_type?.some(et => et === type.value);
-                            return (
-                              <CommandItem
-                                key={type.value}
-                                onSelect={() => {
-                                  setNewPlaceholder(prev => ({
-                                    ...prev,
-                                    entity_type: isSelected
-                                      ? prev.entity_type.filter(et => et !== type.value)
-                                      : [...prev.entity_type, type.value]
-                                  }));
-                                }}
-                                className="cursor-pointer"
-                              >
-                                <div className="flex items-center">
-                                  <div className={`mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary ${isSelected ? 'bg-primary text-primary-foreground' : 'opacity-50'}`}>
-                                    {isSelected && <Check className="h-3 w-3" />}
+                    <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Search entities..." />
+                        <CommandList>
+                          <CommandGroup className="max-h-[300px] overflow-y-auto">
+                            {ENTITY_TYPES.map((type) => {
+                              const isSelected = newPlaceholder.entity_type?.some(et => et === type.value);
+                              return (
+                                <CommandItem
+                                  key={type.value}
+                                  onSelect={() => {
+                                    setNewPlaceholder(prev => ({
+                                      ...prev,
+                                      entity_type: isSelected
+                                        ? prev.entity_type.filter(et => et !== type.value)
+                                        : [...prev.entity_type, type.value]
+                                    }));
+                                  }}
+                                  className="cursor-pointer"
+                                >
+                                  <div className="flex items-center">
+                                    <div className={`mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary ${isSelected ? 'bg-primary text-primary-foreground' : 'opacity-50'}`}>
+                                      {isSelected && <Check className="h-3 w-3" />}
+                                    </div>
+                                    <span>{type.label}</span>
                                   </div>
-                                  <span>{type.label}</span>
-                                </div>
-                              </CommandItem>
-                            );
-                          })}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
+                                </CommandItem>
+                              );
+                            })}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
               </div>
-            </div>
             </div>
 
             {newPlaceholder.type === 'select' && (
@@ -1854,124 +1945,337 @@ export default function DocumentTemplateManager({
               </div>
             )}
 
-          {newPlaceholder.type === 'conditional' && (
-  <div className="space-y-4">
-    <div className="flex items-center justify-between border-b pb-2">
-      <div className="space-y-0.5">
-        <Label className="text-base">Logic Blocks</Label>
-        <p className="text-xs text-muted-foreground">
-          Define sections that only appear if data exists.
-        </p>
-      </div>
-      <Button 
-        type="button" 
-        variant="outline" 
-        size="sm" 
-        onClick={() => {
-          const newCond: ConditionalCondition = { tag: '', label: '' };
-          setNewPlaceholder(prev => ({
-            ...prev,
-            conditions: [...(prev.conditions || []), newCond]
-          }));
-        }}
-      >
-        <PlusCircle className="h-4 w-4 mr-2" />
-        Add Logic Block
-      </Button>
-    </div>
+            {newPlaceholder.type === 'conditional' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b pb-2">
+                  <div className="space-y-0.5">
+                    <Label className="text-base">Logic Blocks</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Define sections that only appear if data exists.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const newCond: ConditionalCondition = { tag: '', label: '' };
+                      setNewPlaceholder(prev => ({
+                        ...prev,
+                        conditions: [...(prev.conditions || []), newCond]
+                      }));
+                    }}
+                  >
+                    <PlusCircle className="h-4 w-4 mr-2" />
+                    Add Logic Block
+                  </Button>
+                </div>
 
-    <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
-      {(newPlaceholder.conditions || []).length === 0 && (
-        <div className="text-center py-8 border-2 border-dashed rounded-lg bg-muted/20">
-          <Code className="h-8 w-8 mx-auto text-muted-foreground/50 mb-2" />
-          <p className="text-sm text-muted-foreground">No logic blocks added yet.</p>
-        </div>
-      )}
+                <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
+                  {(newPlaceholder.conditions || []).length === 0 && (
+                    <div className="text-center py-8 border-2 border-dashed rounded-lg bg-muted/20">
+                      <Code className="h-8 w-8 mx-auto text-muted-foreground/50 mb-2" />
+                      <p className="text-sm text-muted-foreground">No logic blocks added yet.</p>
+                    </div>
+                  )}
 
-      {(newPlaceholder.conditions || []).map((cond, idx) => (
-        <div key={idx} className="relative p-4 rounded-lg border bg-card shadow-sm space-y-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="absolute -right-2 -top-2 h-6 w-6 rounded-full bg-destructive text-white hover:bg-destructive/90"
-            onClick={() => {
-              const updated = [...(newPlaceholder.conditions || [])];
-              updated.splice(idx, 1);
-              setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
-            }}
-          >
-            <X className="h-3 w-3" />
-          </Button>
+                  {(newPlaceholder.conditions || []).map((cond, idx) => (
+                    <div key={idx} className="relative p-4 rounded-lg border bg-card shadow-sm space-y-3">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute -right-2 -top-2 h-6 w-6 rounded-full bg-destructive text-white hover:bg-destructive/90"
+                        onClick={() => {
+                          const updated = [...(newPlaceholder.conditions || [])];
+                          updated.splice(idx, 1);
+                          setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-[10px] uppercase font-bold text-muted-foreground">
-                Variable Tag (e.g. child_id)
-              </Label>
-              <Input
-                placeholder="tag_name"
-                value={cond.tag}
-                onChange={(e) => {
-                  const val = e.target.value.replace(/\s+/g, '_').toLowerCase();
-                  const updated = [...(newPlaceholder.conditions || [])];
-                  updated[idx].tag = val;
-                  setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
-                }}
-                className="h-8 text-xs font-mono"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-[10px] uppercase font-bold text-muted-foreground">
-                Display Prefix (e.g. ID No:)
-              </Label>
-              <Input
-                placeholder="Label text..."
-                value={cond.label}
-                onChange={(e) => {
-                  const updated = [...(newPlaceholder.conditions || [])];
-                  updated[idx].label = e.target.value;
-                  setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
-                }}
-                className="h-8 text-xs"
-              />
-            </div>
-          </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-[10px] uppercase font-bold text-muted-foreground">
+                            Variable Tag (e.g. child_id)
+                          </Label>
+                          <Input
+                            placeholder="tag_name"
+                            value={cond.tag}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/\s+/g, '_').toLowerCase();
+                              const updated = [...(newPlaceholder.conditions || [])];
+                              updated[idx].tag = val;
+                              setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                            }}
+                            className="h-8 text-xs font-mono"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-[10px] uppercase font-bold text-muted-foreground">
+                            Display Prefix (e.g. ID No:)
+                          </Label>
+                          <Input
+                            placeholder="Label text..."
+                            value={cond.label}
+                            onChange={(e) => {
+                              const updated = [...(newPlaceholder.conditions || [])];
+                              updated[idx].label = e.target.value;
+                              setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                            }}
+                            className="h-8 text-xs"
+                          />
+                        </div>
+                      </div>
 
-          <div className="space-y-1.5">
-            <Label className="text-[10px] uppercase font-bold text-muted-foreground">
-              Link to Master Field
-            </Label>
-            <MasterFieldPicker
-              masterFields={masterFields}
-              selectedFieldIds={cond.master_field_id ? [cond.master_field_id] : []}
-              onSelect={(fieldId) => {
-                const updated = [...(newPlaceholder.conditions || [])];
-                updated[idx].master_field_id = fieldId;
-                setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
-              }}
-              onRemove={() => {
-                const updated = [...(newPlaceholder.conditions || [])];
-                delete updated[idx].master_field_id;
-                setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
-              }}
-              onClear={() => {
-                const updated = [...(newPlaceholder.conditions || [])];
-                delete updated[idx].master_field_id;
-                setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
-              }}
-            />
-          </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">
+                          Link to Master Field
+                        </Label>
+                        <MasterFieldPicker
+                          masterFields={masterFields}
+                          selectedFieldIds={cond.master_field_id ? [cond.master_field_id] : []}
+                          onSelect={(fieldId) => {
+                            const updated = [...(newPlaceholder.conditions || [])];
+                            updated[idx].master_field_id = fieldId;
+                            setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                          }}
+                          onRemove={() => {
+                            const updated = [...(newPlaceholder.conditions || [])];
+                            delete updated[idx].master_field_id;
+                            setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                          }}
+                          onClear={() => {
+                            const updated = [...(newPlaceholder.conditions || [])];
+                            delete updated[idx].master_field_id;
+                            setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                          }}
+                        />
+                      </div>
 
-          <div className="pt-1 border-t">
-            <code className="text-[10px] text-blue-600">
-              Preview: {"{#"}{cond.tag || '...'}{"}"}{cond.label || ''}{"{"}{cond.tag || '...'}{"}"}{"{/"}{cond.tag || '...'}{"}"}
-            </code>
-          </div>
-        </div>
-      ))}
-    </div>
-  </div>
-)}
+                      <div className="pt-1 border-t">
+                        <code className="text-[10px] text-blue-600">
+                          Preview: {"{#"}{cond.tag || '...'}{"}"}{cond.label || ''}{"{"}{cond.tag || '...'}{"}"}{"{/"}{cond.tag || '...'}{"}"}
+                        </code>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {newPlaceholder.type === 'boolean' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b pb-2">
+                  <div className="space-y-0.5">
+                    <Label className="text-base">Boolean Options</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Create checkbox/radio options. Link to DB field for auto-population or leave unlinked for user input.
+                    </p>
+                  </div>
+                  <Select
+                    value={newPlaceholder.boolean_type || 'single'}
+                    onValueChange={(v) => setNewPlaceholder(prev => ({ ...prev, boolean_type: v }))}
+                  >
+                    <SelectTrigger className="w-32">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="single">Radio (One)</SelectItem>
+                      <SelectItem value="multiple">Checkboxes (Many)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const newCond: BooleanCondition = { tag: '', label: '' };
+                    setNewPlaceholder(prev => ({
+                      ...prev,
+                      boolean_conditions: [...(prev.boolean_conditions || []), newCond]
+                    }));
+                  }}
+                >
+                  <PlusCircle className="h-4 w-4 mr-2" />
+                  Add Option
+                </Button>
+
+                <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
+                  {(newPlaceholder.boolean_conditions || []).map((cond, idx) => (
+                    <div key={idx} className="relative p-4 rounded-lg border bg-card shadow-sm space-y-3">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute -right-2 -top-2 h-6 w-6 rounded-full bg-white border shadow-sm text-red-500 hover:bg-red-50"
+                        onClick={() => {
+                          const updated = [...(newPlaceholder.boolean_conditions || [])];
+                          updated.splice(idx, 1);
+                          setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-[10px] uppercase font-bold text-muted-foreground">
+                            Variable Tag (e.g., is_male)
+                          </Label>
+                          <Input
+                            placeholder="tag_name"
+                            value={cond.tag}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/\s+/g, '_').toLowerCase();
+                              const updated = [...(newPlaceholder.boolean_conditions || [])];
+                              updated[idx].tag = val;
+                              setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
+                            }}
+                            className="h-8 text-xs font-mono"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-[10px] uppercase font-bold text-muted-foreground">
+                            Display Label (e.g., Male)
+                          </Label>
+                          <Input
+                            placeholder="Label text..."
+                            value={cond.label}
+                            onChange={(e) => {
+                              const updated = [...(newPlaceholder.boolean_conditions || [])];
+                              updated[idx].label = e.target.value;
+                              setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
+                            }}
+                            className="h-8 text-xs"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="text-[10px] uppercase font-bold text-muted-foreground flex items-center gap-2">
+                          Link to Master Field (Optional)
+                          <Badge variant="outline" className="text-[8px]">Leave empty for user input</Badge>
+                        </Label>
+                        <MasterFieldPicker
+                          masterFields={masterFields}
+                          selectedFieldIds={cond.master_field_id ? [cond.master_field_id] : []}
+                          onSelect={(fieldId) => {
+                            const updated = [...(newPlaceholder.boolean_conditions || [])];
+                            updated[idx].master_field_id = fieldId;
+                            setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
+                          }}
+                          onRemove={() => {
+                            const updated = [...(newPlaceholder.boolean_conditions || [])];
+                            delete updated[idx].master_field_id;
+                            setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
+                          }}
+                          onClear={() => {
+                            const updated = [...(newPlaceholder.boolean_conditions || [])];
+                            delete updated[idx].master_field_id;
+                            setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
+                          }}
+                        />
+                      </div>
+
+                      {cond.master_field_id && (
+                        <div className="space-y-2 p-3 bg-blue-50 rounded border border-blue-200">
+                          <Label className="text-[10px] font-bold text-blue-800">Comparison Rule</Label>
+                          <div className="grid grid-cols-3 gap-2">
+                            <Select
+                              value={cond.comparison?.operator || 'equals'}
+                              onValueChange={(v) => {
+                                const updated = [...(newPlaceholder.boolean_conditions || [])];
+                                updated[idx].comparison = {
+                                  ...updated[idx].comparison,
+                                  operator: v,
+                                  field: updated[idx].comparison?.field || '',
+                                  value: updated[idx].comparison?.value || ''
+                                };
+                                setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
+                              }}
+                            >
+                              <SelectTrigger className="h-7 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="equals">Equals</SelectItem>
+                                <SelectItem value="not_equals">Not Equals</SelectItem>
+                                <SelectItem value="contains">Contains</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <Input
+                              placeholder="Expected value"
+                              value={cond.comparison?.value || ''}
+                              onChange={(e) => {
+                                const updated = [...(newPlaceholder.boolean_conditions || [])];
+                                updated[idx].comparison = {
+                                  ...updated[idx].comparison,
+                                  operator: updated[idx].comparison?.operator || 'equals',
+                                  field: updated[idx].comparison?.field || '',
+                                  value: e.target.value
+                                };
+                                setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
+                              }}
+                              className="h-7 text-xs col-span-2"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="pt-1 border-t">
+                        <code className="text-[10px] text-blue-600">
+                          Preview: {cond.label || '...'} {"{"}
+                          {cond.master_field_id ? `#${cond.tag}` : cond.tag}
+                          {"}"}
+                        </code>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Array Direction Selection */}
+            {newPlaceholder.type === 'array' && (
+              <div className="space-y-3 p-4 rounded-lg bg-orange-50 border border-orange-200 shadow-sm">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="h-5 w-5 text-orange-600" />
+                    <h4 className="font-medium text-orange-800">Array Direction</h4>
+                  </div>
+                  <p className="text-xs text-orange-700 pl-7">
+                    Specify how the repeating data should flow in the document.
+                  </p>
+                </div>
+                <Select
+                  value={newPlaceholder.array_direction || 'vertical'}
+                  onValueChange={(v: 'horizontal' | 'vertical') =>
+                    setNewPlaceholder({ ...newPlaceholder, array_direction: v })
+                  }
+                >
+                  <SelectTrigger className="bg-white border-orange-200">
+                    <SelectValue placeholder="Select direction" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="vertical">
+                      <div className="flex flex-col">
+                        <span className="font-medium">Vertical (Default)</span>
+                        <span className="text-[10px] text-muted-foreground">Repeats as new rows or paragraphs</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="horizontal">
+                      <div className="flex flex-col">
+                        <span className="font-medium">Horizontal</span>
+                        <span className="text-[10px] text-muted-foreground">Repeats across columns in a single row</span>
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             {/* Debug logging */}
             <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
               Debug: entity_type = {JSON.stringify(newPlaceholder.entity_type)}
@@ -2030,8 +2334,8 @@ export default function DocumentTemplateManager({
                       >
                         {dependantRelationship.length > 0
                           ? dependantRelationship
-                              .map(rel => DEPENDANT_RELATIONSHIPS.find(r => r.value === rel)?.label || rel)
-                              .join(', ')
+                            .map(rel => DEPENDANT_RELATIONSHIPS.find(r => r.value === rel)?.label || rel)
+                            .join(', ')
                           : 'Select relationships...'}
                         <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>

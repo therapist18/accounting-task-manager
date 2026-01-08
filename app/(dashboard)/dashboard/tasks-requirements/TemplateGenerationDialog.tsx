@@ -29,6 +29,7 @@ import Docxtemplater from "docxtemplater";
 import PizZip from "pizzip";
 import ImageModule from 'docxtemplater-image-module-free';
 import * as mammoth from "mammoth";
+import { Checkbox } from '@/components/ui/checkbox';
 
 // --- SHARED STYLING ---
 const EDITOR_PREVIEW_STYLES = `
@@ -202,21 +203,72 @@ const resolveArrayData = (blockPlaceholder, allPlaceholders, combinedCache, mast
     const entityType = Array.isArray(blockPlaceholder.entity_type) ? blockPlaceholder.entity_type[0] : (blockPlaceholder.entity_type || 'director');
     const blockName = blockPlaceholder.name;
     const isPrimaryOnly = blockPlaceholder.director_type === 'primary';
+    const isHorizontal = blockPlaceholder.array_direction === 'horizontal';
 
     let sourceArray = [];
+
+    // Identify child fields
+    const childFields = allPlaceholders.filter(p =>
+        (p.parent_name === blockName || (p.description && p.description.toLowerCase().includes(blockName.toLowerCase())))
+        && p.id !== blockPlaceholder.id
+        && !p.is_block_start
+    );
+
+    // --- NEW/UPDATED: Handle Horizontal/Digit-splitting blocks ---
+    // If explicit "horizontal" OR detection logic for single-child splitting
+    const isDigitSplitting = isHorizontal || (
+        childFields.length === 1 &&
+        childFields[0].master_field_ids?.[0] === blockPlaceholder.master_field_ids?.[0]
+    );
+
+    if (isDigitSplitting && blockPlaceholder.master_field_ids?.[0]) {
+        const masterFieldId = blockPlaceholder.master_field_ids[0];
+        const mf = masterFields.get(parseInt(masterFieldId, 10));
+
+        if (mf?.sources) {
+            let targetEntity = entityType === 'company' ? relationshipData.company :
+                (isPrimaryOnly ? relationshipData.directors?.find(d => d.is_primary === true) : relationshipData.directors?.[0]);
+
+            if (targetEntity) {
+                for (const source of mf.sources) {
+                    const tableData = combinedCache[source.table];
+                    if (!tableData) continue;
+                    const record = Object.values(tableData).find(r => String(r[source.linking_variable || 'id']) === String(targetEntity.id));
+
+                    if (record) {
+                        let value = source.path ? parseJsonValue(record, source.path) : record[mf.field_key];
+                        if (value) {
+                            // Split string into characters for the horizontal boxes
+                            const chars = String(value).split('');
+                            return chars.map(char => ({
+                                [childFields[0]?.name || 'value']: char
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // **EXISTING LOGIC FOR NORMAL BLOCKS**
     if (blockName === 'directors' || blockName === 'contacts') {
         sourceArray = (relationshipData?.directors || []).filter(d => !isPrimaryOnly || d.is_primary === true || d.is_primary === 'true');
     } else if (['dependant', 'dependent'].includes(entityType?.toLowerCase()) && relationshipData?.dependants) {
         if (blockPlaceholder.dependant_relationship) {
-            const targets = Array.isArray(blockPlaceholder.dependant_relationship) ? blockPlaceholder.dependant_relationship.map(r => r.toLowerCase()) : [blockPlaceholder.dependant_relationship.toLowerCase()];
+            const targets = Array.isArray(blockPlaceholder.dependant_relationship)
+                ? blockPlaceholder.dependant_relationship.map(r => r.toLowerCase())
+                : [blockPlaceholder.dependant_relationship.toLowerCase()];
             sourceArray = relationshipData.dependants.filter(d => targets.includes(d.relationship?.toLowerCase()));
-        } else sourceArray = relationshipData.dependants;
+        } else {
+            sourceArray = relationshipData.dependants;
+        }
     }
 
-    if (sourceArray.length === 0) return [];
+    if (sourceArray.length === 0) {
+        console.log(`[resolveArrayData] ⚠️ No source array found for block: ${blockName}`);
+        return [];
+    }
 
-    const childFields = allPlaceholders.filter(p => (p.parent_name === blockName || (p.description && p.description.toLowerCase().includes(blockName.toLowerCase()))) && p.id !== blockPlaceholder.id && !p.is_block_start);
-
+    // Map each entity to row data
     return sourceArray.map(item => {
         const rowData = {};
         childFields.forEach(field => {
@@ -227,7 +279,6 @@ const resolveArrayData = (blockPlaceholder, allPlaceholders, combinedCache, mast
             } else if (field.name.toLowerCase().includes('name')) {
                 val = item.full_name || item.name || '';
             } else if (field.master_field_ids?.length > 0) {
-                // Simplified lookup for array text fields
                 for (const mId of field.master_field_ids) {
                     const mf = masterFields.get(parseInt(mId));
                     mf?.sources?.forEach(s => {
@@ -244,7 +295,6 @@ const resolveArrayData = (blockPlaceholder, allPlaceholders, combinedCache, mast
         return rowData;
     });
 };
-
 
 const ImagePlaceholderControls = ({ styles, onStyleChange }) => {
     const sizeMap = { small: '25%', medium: '50%', large: '75%', 'full-width': '100%' };
@@ -350,7 +400,13 @@ const UpdateProfileDialog = ({ open, onOpenChange, changedFields, onSave, isSavi
                                         <span className="text-xs font-medium text-muted-foreground">Original:</span>
                                         <div className="p-2 bg-red-50 border border-red-200 rounded text-xs min-h-[40px] flex items-center">
                                             {field.oldValue ? (
-                                                <span>{field.oldValue}</span>
+                                                typeof field.oldValue === 'object' ? (
+                                                    <pre className="text-xs whitespace-pre-wrap break-words">
+                                                        {JSON.stringify(field.oldValue, null, 2)}
+                                                    </pre>
+                                                ) : (
+                                                    <span>{String(field.oldValue)}</span>
+                                                )
                                             ) : (
                                                 <span className="italic text-gray-400">Empty</span>
                                             )}
@@ -359,7 +415,17 @@ const UpdateProfileDialog = ({ open, onOpenChange, changedFields, onSave, isSavi
                                     <div className="space-y-1">
                                         <span className="text-xs font-medium text-muted-foreground">New:</span>
                                         <div className="p-2 bg-green-50 border border-green-200 rounded text-xs font-medium min-h-[40px] flex items-center">
-                                            {field.newValue}
+                                            {field.newValue ? (
+                                                typeof field.newValue === 'object' ? (
+                                                    <pre className="text-xs whitespace-pre-wrap break-words">
+                                                        {JSON.stringify(field.newValue, null, 2)}
+                                                    </pre>
+                                                ) : (
+                                                    <span>{String(field.newValue)}</span>
+                                                )
+                                            ) : (
+                                                <span className="italic text-gray-400">Empty</span>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -424,10 +490,6 @@ export default function TemplateGenerationDialog({
     relationshipData = { directors: [] },
 }) {
     const { toast } = useToast();
-
-    // Log relationship data to verify directors are received
-    console.log("🎯 TemplateGenerationDialog received relationshipData:", relationshipData);
-    console.log("🎯 Directors count:", relationshipData?.directors?.length || 0);
 
     // Initialize form data with relationship data
     const [formData, setFormData] = useState(() => ({
@@ -514,8 +576,8 @@ export default function TemplateGenerationDialog({
             finally { setFetchingTables(prev => { const n = new Set(prev); n.delete(table); return n; }); }
         }
     }, [isOpen, selectedTemplate, masterFields, entityIdMap, relationshipData]);
-    
-useEffect(() => {
+
+    useEffect(() => {
         if (isOpen) {
             setAdditionalCache({});
             setTimeout(fetchMissingDataSources, 50);
@@ -524,128 +586,214 @@ useEffect(() => {
 
 
     const getPlaceholderValue = useCallback((placeholder) => {
-    const ids = placeholder.master_field_ids || [];
-    const combinedCache = { ...sourceDataCache, ...additionalCache };
-    const isPrimaryDirectorReq = placeholder.director_type === 'primary';
+        const ids = placeholder.master_field_ids || [];
+        const combinedCache = { ...sourceDataCache, ...additionalCache };
+        const isPrimaryDirectorReq = placeholder.director_type === 'primary';
 
-    console.log(`🔍 getPlaceholderValue: Processing ${placeholder.name}`, {
-        entity_type: placeholder.entity_type,
-        type: placeholder.type
-    });
-
-    // 1. Normalize Placeholder Entity Type
-    let pEntityType = 'company';
-    if (Array.isArray(placeholder.entity_type)) {
-        pEntityType = placeholder.entity_type[0];
-    } else if (placeholder.entity_type) {
-        pEntityType = placeholder.entity_type;
-    }
-    const isDependantType = ['dependant', 'dependent'].includes(pEntityType.toLowerCase());
-
-    // 2. Resolve the Target Subject (The person/entity this field refers to)
-    let targetEntity = null;
-    let sourceLabel = "";
-
-    if (isDependantType && relationshipData?.dependants) {
-        // Try to match by dependant_relationship or infer from field name keywords
-        if (placeholder.dependant_relationship?.[0]) {
-            const targetRel = placeholder.dependant_relationship[0].toLowerCase();
-            targetEntity = relationshipData.dependants.find(d => d.relationship?.toLowerCase() === targetRel);
+        // 1. Normalize Placeholder Entity Type
+        let pEntityType = 'company';
+        if (Array.isArray(placeholder.entity_type)) {
+            pEntityType = placeholder.entity_type[0];
+        } else if (placeholder.entity_type) {
+            pEntityType = placeholder.entity_type;
         }
-        if (!targetEntity) {
-            const fieldName = placeholder.name.toLowerCase();
-            const relKeywords = { 'father': ['father'], 'mother': ['mother'], 'wife': ['wife', 'spouse'], 'husband': ['husband', 'spouse'], 'child': ['child'] };
-            for (const [rel, keywords] of Object.entries(relKeywords)) {
-                if (keywords.some(k => fieldName.includes(k))) {
-                    targetEntity = relationshipData.dependants.find(d => d.relationship?.toLowerCase() === rel);
-                    if (targetEntity) break;
+        const isDependantType = pEntityType && ['dependant', 'dependent'].includes(pEntityType.toLowerCase()?.trim());
+
+        // 2. Resolve the Target Subject (The person/entity this field refers to)
+        let targetEntity = null;
+        let sourceLabel = "";
+
+        if (isDependantType && relationshipData?.dependants) {
+            // Try to match by dependant_relationship or infer from field name keywords
+            if (placeholder.dependant_relationship?.[0]) {
+                const targetRel = placeholder.dependant_relationship[0].toLowerCase();
+                targetEntity = relationshipData.dependants.find(d => d.relationship?.toLowerCase() === targetRel);
+            }
+            if (!targetEntity) {
+                const fieldName = placeholder.name.toLowerCase();
+                const relKeywords = { 'father': ['father'], 'mother': ['mother'], 'wife': ['wife', 'spouse'], 'husband': ['husband', 'spouse'], 'child': ['child'] };
+                for (const [rel, keywords] of Object.entries(relKeywords)) {
+                    if (keywords.some(k => fieldName.includes(k))) {
+                        targetEntity = relationshipData.dependants.find(d => d.relationship?.toLowerCase() === rel);
+                        if (targetEntity) break;
+                    }
+                }
+            }
+            sourceLabel = targetEntity ? `Dependant (${targetEntity.relationship})` : "";
+        } else if (pEntityType === 'director' && relationshipData?.directors) {
+            targetEntity = (isPrimaryDirectorReq || placeholder.name.toLowerCase().includes('primary'))
+                ? relationshipData.directors.find(d => d.is_primary === true || d.is_primary === 'true')
+                : relationshipData.directors[0];
+            sourceLabel = "Director";
+        } else if (pEntityType === 'company') {
+            targetEntity = relationshipData.company;
+            sourceLabel = "Company";
+        }
+
+        // 3. Handle System/Date fields (don't need an entity)
+        if (ids.length > 0 && masterFields) {
+            for (const id of ids) {
+                const mf = masterFields.get(parseInt(id, 10));
+                if (mf?.date_config?.useCurrentDate) {
+                    return {
+                        value: formatDate(new Date(), mf.date_config.format || 'DD/MM/YYYY'),
+                        source: 'System Date'
+                    };
                 }
             }
         }
-        sourceLabel = targetEntity ? `Dependant (${targetEntity.relationship})` : "";
-    } else if (pEntityType === 'director' && relationshipData?.directors) {
-        targetEntity = (isPrimaryDirectorReq || placeholder.name.toLowerCase().includes('primary'))
-            ? relationshipData.directors.find(d => d.is_primary === true || d.is_primary === 'true')
-            : relationshipData.directors[0];
-        sourceLabel = "Director";
-    } else if (pEntityType === 'company') {
-        targetEntity = relationshipData.company;
-        sourceLabel = "Company";
-    }
 
-    // 3. Handle System/Date fields (don't need an entity)
-    if (ids.length > 0 && masterFields) {
-        for (const id of ids) {
-            const mf = masterFields.get(parseInt(id, 10));
-            if (mf?.date_config?.useCurrentDate) {
-                return {
-                    value: formatDate(new Date(), mf.date_config.format || 'DD/MM/YYYY'),
-                    source: 'System Date'
-                };
-            }
-        }
-    }
+        if (!targetEntity) return { value: '', source: null };
 
-    if (!targetEntity) return { value: '', source: null };
+        if (placeholder.type === 'conditional' && placeholder.conditions) {
 
-    // 4. UNIFIED LOGIC: Process field based on the resolved targetEntity
-    
-    // --- CASE A: Conditional Fields (The core fix) ---
-    if (placeholder.type === 'conditional' && placeholder.conditions) {
-        console.log(`🔀 Processing Unified Conditional: ${placeholder.name} for ${sourceLabel}`);
-        
-        for (const condition of placeholder.conditions) {
-            const tag = condition.tag;
-            const mId = condition.master_field_id;
+            for (const condition of placeholder.conditions) {
+                const tag = condition.tag;
+                const mId = condition.master_field_id;
 
-            // P1: Direct field access on entity
-            if (targetEntity[tag]) return { value: `${condition.label || ''}${targetEntity[tag]}`, source: `${sourceLabel} Direct` };
-            
-            // P2: Case-insensitive direct access
-            const matchKey = Object.keys(targetEntity).find(k => k.toLowerCase() === tag.toLowerCase());
-            if (matchKey && targetEntity[matchKey]) return { value: `${condition.label || ''}${targetEntity[matchKey]}`, source: `${sourceLabel} Direct (Inferred)` };
+                // P1: Direct field access on entity
+                if (targetEntity[tag]) return { value: `${condition.label || ''}${targetEntity[tag]}`, source: `${sourceLabel} Direct` };
 
-            // P3: Master Field Broad Cache Lookup
-            if (mId && masterFields) {
-                const mf = masterFields.get(parseInt(mId, 10));
-                if (mf?.sources) {
-                    for (const source of mf.sources) {
-                        const tableData = combinedCache[source.table];
-                        if (!tableData) continue;
+                // P2: Case-insensitive direct access
+                const matchKey = Object.keys(targetEntity).find(k => k.toLowerCase() === tag.toLowerCase());
+                if (matchKey && targetEntity[matchKey]) return { value: `${condition.label || ''}${targetEntity[matchKey]}`, source: `${sourceLabel} Direct (Inferred)` };
 
-                        let records = Object.values(tableData);
-                        if (source.document_id) {
-                            const reqDocIds = Array.isArray(source.document_id) ? source.document_id : [source.document_id];
-                            records = records.filter(rec => reqDocIds.includes(rec.document_id || rec.kyc_document_id));
-                        }
+                // P3: Master Field Broad Cache Lookup
+                if (mId && masterFields) {
+                    const mf = masterFields.get(parseInt(mId, 10));
+                    if (mf?.sources) {
+                        for (const source of mf.sources) {
+                            const tableData = combinedCache[source.table];
+                            if (!tableData) continue;
 
-                        const linkingVar = source.linking_variable || 'id';
-                        const searchId = String(targetEntity.id);
-                        const record = records.find(rec => {
-                            const recId = String(rec[linkingVar] || rec.id || rec.individual_id);
-                            return recId === searchId || recId.startsWith(searchId + ' ');
-                        });
+                            let records = Object.values(tableData);
+                            if (source.document_id) {
+                                const reqDocIds = Array.isArray(source.document_id) ? source.document_id : [source.document_id];
+                                records = records.filter(rec => reqDocIds.includes(rec.document_id || rec.kyc_document_id));
+                            }
 
-                        if (record) {
-                            const condVal = source.path ? parseJsonValue(record, source.path) : record[tag];
-                            if (condVal && typeof condVal !== 'object') {
-                                return { value: `${condition.label || ''}${condVal}`, source: `Conditional - ${mf.label} (Fresh)` };
+                            const linkingVar = source.linking_variable || 'id';
+                            const searchId = String(targetEntity.id);
+                            const record = records.find(rec => {
+                                const recId = String(rec[linkingVar] || rec.id || rec.individual_id);
+                                return recId === searchId || recId.startsWith(searchId + ' ');
+                            });
+
+                            if (record) {
+                                const condVal = source.path ? parseJsonValue(record, source.path) : record[tag];
+                                if (condVal && typeof condVal !== 'object') {
+                                    return { value: `${condition.label || ''}${condVal}`, source: `Conditional - ${mf.label} (Fresh)` };
+                                }
                             }
                         }
                     }
                 }
             }
+            return { value: '', source: null };
         }
-        return { value: '', source: null };
-    }
 
-    // --- CASE B: Name Fields ---
-    if (placeholder.name.toLowerCase().includes('name')) {
-        return { value: targetEntity.full_name || targetEntity.name || '', source: `${sourceLabel} - Relationship Data` };
-    }
+        // Add to getPlaceholderValue function
+        if (placeholder.type === 'boolean' && placeholder.boolean_conditions) {
+            const results = [];
 
-    // --- CASE C: Image/Signature Fields ---
-    if (placeholder.type === 'image' || placeholder.name.startsWith('%')) {
+            for (const condition of placeholder.boolean_conditions) {
+                let isChecked = false;
+
+                // Scenario 1: DB-driven (has master_field_id)
+                if (condition.master_field_id) {
+                    const mf = masterFields.get(parseInt(condition.master_field_id, 10));
+                    if (mf?.sources) {
+                        for (const source of mf.sources) {
+                            const tableData = combinedCache[source.table];
+                            if (!tableData) continue;
+
+                            const searchId = String(targetEntity.id);
+                            const record = Object.values(tableData).find(r =>
+                                String(r[source.linking_variable || 'id']) === searchId
+                            );
+
+                            if (record) {
+                                const fieldValue = source.path
+                                    ? parseJsonValue(record, source.path)
+                                    : record[condition.comparison?.field || condition.tag];
+
+                                // Evaluate comparison
+                                if (condition.comparison) {
+                                    const { operator, value } = condition.comparison;
+                                    const strValue = String(fieldValue).toLowerCase();
+                                    const compareValue = String(value).toLowerCase();
+
+                                    switch (operator) {
+                                        case 'equals':
+                                            isChecked = strValue === compareValue;
+                                            break;
+                                        case 'not_equals':
+                                            isChecked = strValue !== compareValue;
+                                            break;
+                                        case 'contains':
+                                            isChecked = strValue.includes(compareValue);
+                                            break;
+                                    }
+                                } else {
+                                    // If no comparison, treat as boolean
+                                    isChecked = Boolean(fieldValue);
+                                }
+
+                                if (isChecked) break;
+                            }
+                        }
+                    }
+                }
+                // Scenario 2: User input (no master_field_id)
+                // Value will be set manually in form
+
+                results.push({
+                    tag: condition.tag,
+                    label: condition.label,
+                    checked: isChecked,
+                    hasDbLink: Boolean(condition.master_field_id)
+                });
+            }
+
+            return {
+                value: results,
+                source: results.some(r => r.hasDbLink) ? 'Boolean (DB)' : 'Boolean (User Input)'
+            };
+        }
+
+        // --- CASE B: Name Fields ---
+        if (placeholder.name.toLowerCase().includes('name')) {
+            return { value: targetEntity.full_name || targetEntity.name || '', source: `${sourceLabel} - Relationship Data` };
+        }
+
+        // --- CASE C: Image/Signature Fields ---
+        if (placeholder.type === 'image' || placeholder.name.startsWith('%')) {
+            for (const id of ids) {
+                const mf = masterFields.get(parseInt(id, 10));
+                if (!mf?.sources) continue;
+                for (const source of mf.sources) {
+                    const tableData = combinedCache[source.table];
+                    if (!tableData) continue;
+                    const linkingVar = source.linking_variable || 'id';
+                    const searchId = String(targetEntity.id);
+                    const reqDocIds = Array.isArray(source.document_id) ? source.document_id : [source.document_id];
+
+                    const match = Object.values(tableData).find(d =>
+                        reqDocIds.includes(d.document_id || d.kyc_document_id) &&
+                        String(d[linkingVar] || d.id) === searchId
+                    );
+
+                    if (match?.file_path) {
+                        return {
+                            value: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${match.file_path}`,
+                            source: 'Fresh Image Cache'
+                        };
+                    }
+                }
+            }
+        }
+
+        // --- CASE D: Standard Master Field Text Lookup ---
         for (const id of ids) {
             const mf = masterFields.get(parseInt(id, 10));
             if (!mf?.sources) continue;
@@ -654,42 +802,16 @@ useEffect(() => {
                 if (!tableData) continue;
                 const linkingVar = source.linking_variable || 'id';
                 const searchId = String(targetEntity.id);
-                const reqDocIds = Array.isArray(source.document_id) ? source.document_id : [source.document_id];
-                
-                const match = Object.values(tableData).find(d => 
-                    reqDocIds.includes(d.document_id || d.kyc_document_id) && 
-                    String(d[linkingVar] || d.id) === searchId
-                );
-                
-                if (match?.file_path) {
-                    return { 
-                        value: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${match.file_path}`, 
-                        source: 'Fresh Image Cache' 
-                    };
+                const record = Object.values(tableData).find(r => String(r[linkingVar] || r.id) === searchId);
+                if (record) {
+                    const val = source.path ? parseJsonValue(record, source.path) : record[placeholder.name];
+                    if (val) return { value: val, source: `Broad Fresh Lookup` };
                 }
             }
         }
-    }
 
-    // --- CASE D: Standard Master Field Text Lookup ---
-    for (const id of ids) {
-        const mf = masterFields.get(parseInt(id, 10));
-        if (!mf?.sources) continue;
-        for (const source of mf.sources) {
-            const tableData = combinedCache[source.table];
-            if (!tableData) continue;
-            const linkingVar = source.linking_variable || 'id';
-            const searchId = String(targetEntity.id);
-            const record = Object.values(tableData).find(r => String(r[linkingVar] || r.id) === searchId);
-            if (record) {
-                const val = source.path ? parseJsonValue(record, source.path) : record[placeholder.name];
-                if (val) return { value: val, source: `Broad Fresh Lookup` };
-            }
-        }
-    }
-
-    return { value: '', source: null };
-}, [masterFields, entityIdMap, sourceDataCache, additionalCache, relationshipData]);
+        return { value: '', source: null };
+    }, [masterFields, entityIdMap, sourceDataCache, additionalCache, relationshipData]);
 
     const smartFieldMatch = useCallback((placeholderName) => {
         const normalized = normalizeString(placeholderName);
@@ -711,8 +833,26 @@ useEffect(() => {
 
             groupedPlaceholders.topLevel.forEach(p => {
                 let match = getPlaceholderValue(p);
-                if (!match.value) match = smartFieldMatch(p.name);
-                initData[p.name] = match.value || '';
+
+                // Special handling for boolean types
+                if (p.type === 'boolean') {
+                    if (match.value && Array.isArray(match.value)) {
+                        // Already in correct format from getPlaceholderValue
+                        initData[p.name] = match.value;
+                    } else if (p.boolean_conditions) {
+                        // Initialize with unchecked options for user input
+                        initData[p.name] = p.boolean_conditions.map(cond => ({
+                            tag: cond.tag,
+                            label: cond.label,
+                            checked: false,
+                            hasDbLink: false
+                        }));
+                    }
+                } else {
+                    if (!match.value) match = smartFieldMatch(p.name);
+                    initData[p.name] = match.value || '';
+                }
+
                 if (match.value) autoMap.set(p.name, match.source);
             });
 
@@ -759,45 +899,50 @@ useEffect(() => {
         });
         setManuallyEditedFields(prev => new Set(prev).add(`${blockName}[${index}].${fieldName}`));
     };
-
     const renderArrayInputs = (blockName, blockData) => {
-        const rows = formData[blockName] || [];
+        const rows = Array.isArray(formData[blockName]) ? formData[blockName] : [];
+        const isHorizontal = blockData?.config?.array_direction === 'horizontal';
 
         return (
             <div className="space-y-4 mt-2 border-l-2 border-blue-200 pl-4 py-2 bg-blue-50/20 rounded-r-lg">
                 <div className="flex items-center justify-between px-1">
                     <div className="flex items-center gap-2">
-                        <Badge className="bg-blue-600 uppercase text-[9px] tracking-tighter">
-                            {blockName}
+                        <Badge className={`${isHorizontal ? 'bg-orange-600' : 'bg-blue-600'} uppercase text-[9px] tracking-tighter`}>
+                            {blockName} {isHorizontal && '(Horizontal)'}
                         </Badge>
-                        {rows.length > 0 && (
-                            <Badge variant="outline" className="text-[9px]">
-                                {rows.length} row{rows.length > 1 ? 's' : ''}
-                            </Badge>
-                        )}
                     </div>
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 text-[10px] text-blue-600 hover:text-blue-700"
-                        onClick={() => {
-                            const emptyRow = {};
-                            blockData.children.forEach(c => emptyRow[c.name] = '');
-                            setFormData(prev => ({
-                                ...prev,
-                                [blockName]: [...(prev[blockName] || []), emptyRow]
-                            }));
-                        }}
-                    >
-                        + ADD ROW
-                    </Button>
                 </div>
 
                 {rows.length === 0 ? (
-                    <div className="text-xs text-muted-foreground italic p-3 bg-white/50 rounded border border-dashed text-center">
-                        No {blockName} found. Click "ADD ROW" to create entries.
+                    <div className="text-xs text-muted-foreground italic p-3 text-center">No data found.</div>
+                ) : isHorizontal ? (
+                    /* HORIZONTAL UI - Character Boxes */
+                    <div className="p-3 bg-white border rounded shadow-sm">
+                        <Label className="text-[9px] font-bold text-slate-400 uppercase block mb-2">
+                            {blockData.children[0]?.name.replace(/_/g, ' ')}
+                        </Label>
+                        <div className="flex flex-wrap gap-1">
+                            {rows.map((row, idx) => {
+                                const rowValue = row && typeof row === 'object' ? Object.values(row)[0] : row;
+                                return (
+                                    <input
+                                        key={idx}
+                                        value={rowValue || ''}
+                                        onChange={(e) => {
+                                            if (blockData?.children?.[0]?.name) {
+                                                handleArrayInputChange(blockName, idx, blockData.children[0].name, e.target.value);
+                                            }
+                                        }}
+                                        className="w-7 h-9 text-center border rounded font-mono font-bold text-sm focus:border-orange-400 focus:ring-1 focus:ring-orange-100 outline-none"
+                                        maxLength={1}
+                                    />
+                                );
+                            })}
+                        </div>
+                        <p className="text-[8px] text-muted-foreground mt-2 italic">Data is split across horizontal boxes</p>
                     </div>
                 ) : (
+                    /* **NORMAL RENDERING FOR REGULAR BLOCKS** */
                     rows.map((row, idx) => (
                         <div key={idx} className="p-3 bg-white border rounded shadow-sm relative group mb-2">
                             <Button
@@ -860,33 +1005,74 @@ useEffect(() => {
             </div>
         );
     };
+    function createCell(value) {
+        const displayValue = value !== undefined && value !== null ? value : '&nbsp;';
+        console.log('Creating cell with value:', { value, displayValue });
+        return `<span style="
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 30px;
+    height: 30px;
+    border: 1px solid #000;
+    text-align: center;
+    line-height: 1;
+    font-family: monospace;
+    font-weight: bold;
+    background: #fff;
+    padding: 0 8px;
+  ">${displayValue}</span>`;
+    }
+    // Debug function to log with timestamp and style
+    const debugLog = (...args) => {
+        const timestamp = new Date().toISOString();
+        console.log(`[${timestamp}] [TEMPLATE_DEBUG]`, ...args);
+    };
 
     const populateHtmlContent = useCallback((data, placeholders, styles) => {
-        if (!selectedTemplate?.content) return '';
+             if (!selectedTemplate?.content) {
+            console.error('❌ No template content available!', {
+                selectedTemplate: selectedTemplate ? {
+                    ...selectedTemplate,
+                    content: selectedTemplate.content ? '[CONTENT PRESENT]' : '[NO CONTENT]'
+                } : 'No template',
+                stack: new Error().stack
+            });
+            return '[NO TEMPLATE CONTENT]';
+        }
+        if (!selectedTemplate?.content) {
+             return '';
+        }
         let content = selectedTemplate.content;
+               Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
+            const block = groupedPlaceholders.blocks[blockName];
+            const blockConfig = block.config || {};
+            const isHorizontal = blockConfig.array_direction === 'horizontal';
 
-        Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
             const blockRegex = new RegExp(`\\{#${blockName}\\}([\\s\\S]*?)\\{/${blockName}\\}`, 'g');
-            const rows = data[blockName] || [];
+            const rows = Array.isArray(data[blockName]) ? data[blockName] : [];
 
             content = content.replace(blockRegex, (_, innerTemplate) => {
-                if (rows.length === 0) {
-                    return `<div class="text-gray-400 italic text-sm my-2">[No ${blockName} data]</div>`;
-                }
+                if (rows.length === 0) return '';
 
+                if (isHorizontal) {
+                    // We don't want to repeat the 'innerTemplate' (which might contain the label)
+                    // We just want to render the digits side-by-side
+                    const childName = block.children[0]?.name || 'd';
+                    const cells = rows.map(row => {
+                        const value = row[childName] ?? '';
+                        return `<span style="display:inline-block;width:25px;height:30px;border:1px solid #000;text-align:center;line-height:30px;font-weight:bold;margin-right:2px;background:#fff;color:#000;">${value}</span>`;
+                    }).join('');
+
+                    return `<div style="display:flex;align-items:center;margin:5px 0;">${cells}</div>`;
+                }
+                // Standard Vertical/Row repetition
                 return rows.map(row => {
                     let rowHtml = innerTemplate;
-                    groupedPlaceholders.blocks[blockName].children.forEach(child => {
-                        const val = row[child.name] || `[${child.name}]`;
-
-                        if (child.type === 'image' && val && val.startsWith('http')) {
-                            rowHtml = rowHtml.replace(
-                                new RegExp(`\\{${child.name}\\}`, 'g'),
-                                `<img src="${val}" style="max-width: 200px; height: auto;" />`
-                            );
-                        } else {
-                            rowHtml = rowHtml.replace(new RegExp(`\\{${child.name}\\}`, 'g'), val);
-                        }
+                    block.children.forEach(child => {
+                        const value = row?.[child.name] ?? '';
+                        const childRegex = new RegExp(`\\{+\\s*${child.name}\\s*\\}+`, 'g');
+                        rowHtml = rowHtml.replace(childRegex, value);
                     });
                     return rowHtml;
                 }).join('');
@@ -895,62 +1081,172 @@ useEffect(() => {
 
         groupedPlaceholders.topLevel.forEach(placeholder => {
             const value = data[placeholder.name];
-            const regex = new RegExp(`\\{{1,2}${placeholder.name}\\}{1,2}`, 'g');
+            const cleanName = placeholder.name.replace(/[{}]/g, '').trim();
+// In the populateHtmlContent function, replace the digit-split handling with:
+// Inside populateHtmlContent loop for topLevel placeholders
+if (placeholder.is_digit_split) {
+    const chars = String(value || '').split('');
+    const count = placeholder.digit_count || 8;
+    for (let i = 1; i <= count; i++) {
+        // This Regex matches {em_1}, {EM_1}, {{ em_1 }}, etc.
+        const seqRegex = new RegExp(`\\{+\\s*${cleanName}_${i}\\s*\\}+`, 'gi');
+        const charVal = chars[i - 1] || '&nbsp;';
+        content = content.replace(seqRegex, charVal);
+    }
+    // Also try to replace the root tag {em} if used as a backup
+    const baseRegex = new RegExp(`\\{+\\s*${cleanName}\\s*\\}+`, 'gi');
+    content = content.replace(baseRegex, value || '');
+    return; 
+}
+            // ✅ BOOLEAN / CHECKBOX LOGIC
+            if (placeholder.type === 'boolean') {
+                const options = Array.isArray(value)
+                    ? value
+                    : placeholder.boolean_conditions || [];
 
-            if (value && String(value).trim() !== '') {
+                options.forEach(option => {
+                    const rawTag = option.tag.replace(/[{}]/g, '').trim();
+
+                    const optRegex = new RegExp(
+                        `\\{+\\s*(?:<[^>]*>)*\\s*${rawTag}\\s*(?:<[^>]*>)*\\s*\\}+`,
+                        'gi'
+                    );
+
+                    const checkedHTML = `<b style="
+          color:#16a34a;
+          background:#dcfce7;
+          border:1px solid #16a34a;
+          padding:0 2px;
+          font-family:monospace;
+        ">[X]</b>`;
+
+                    const uncheckedHTML = `<span style="
+          color:#6b7280;
+          border:1px solid #d1d5db;
+          padding:0 2px;
+          font-family:monospace;
+        ">[&nbsp;&nbsp;]</span>`;
+
+                    content = content.replace(
+                        optRegex,
+                        option.checked ? checkedHTML : uncheckedHTML
+                    );
+                });
+
+                // Replace parent summary placeholder (e.g. {gender})
+                const parentName = placeholder.name.replace(/[{}]/g, '').trim();
+                const parentRegex = new RegExp(`\\{+\\s*${parentName}\\s*\\}+`, 'gi');
+
+                const summary = options
+                    .filter(o => o.checked)
+                    .map(o => o.label)
+                    .join(', ');
+
+                content = content.replace(parentRegex, summary || '');
+                return;
+            }
+
+            // ✅ STANDARD TEXT / IMAGE PLACEHOLDERS
+            const regex = new RegExp(`\\{+\\s*${cleanName}\\s*\\}+`, 'gi');
+
+            if (value !== undefined && value !== null && String(value).trim() !== '') {
                 if (placeholder.type === 'image') {
-                    const style = styles[placeholder.name] || { maxWidth: '100%', textAlign: 'center' };
-                    const imgWidth = style.imageWidth ? `${style.imageWidth}px` : (style.maxWidth || '100%');
+                    const style = styles[placeholder.name] || {};
+                    const imgWidth = style.imageWidth
+                        ? `${style.imageWidth}px`
+                        : style.maxWidth || '100%';
 
-                    content = content.replace(regex, `
-                        <div style="text-align: ${style.textAlign || 'center'}; margin: 10px 0; width: 100%;">
-                            <img 
-                                src="${value}" 
-                                style="width: ${imgWidth}; height: auto; max-width: 100%; display: inline-block;" 
-                            />
-                        </div>
-                    `);
+                    content = content.replace(
+                        regex,
+                        `<div style="text-align:${style.textAlign || 'center'};margin:5px 0;">
+            <img src="${value}" style="width:${imgWidth};height:auto;max-width:100%;" />
+          </div>`
+                    );
                 } else {
-                    const formattedValue = /<[a-z][\s\S]*>/i.test(String(value)) ? value : String(value).replace(/\n/g, '<br />');
+                    const formattedValue = /<[a-z][\s\S]*>/i.test(String(value))
+                        ? value
+                        : String(value).replace(/\n/g, '<br />');
+
                     content = content.replace(regex, formattedValue);
                 }
             } else {
-                content = content.replace(regex, `<span style="background-color: #fef08a; padding: 2px 4px; color: #854d0e;">[${placeholder.name}]</span>`);
+                content = content.replace(
+                    regex,
+                    `<span style="background:#fef08a;padding:2px 4px;color:#854d0e;">
+          [${placeholder.name}]
+        </span>`
+                );
             }
         });
 
         return content;
     }, [selectedTemplate, groupedPlaceholders]);
 
-    const prepareRenderData = useCallback(async (data) => {
-        const renderData = {};
-        const imagePromises = [];
+const prepareRenderData = useCallback(async (data) => {
+    const renderData = {};
+    const imagePromises = [];
 
-        Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
-            renderData[blockName] = data[blockName] || [];
-        });
+    // 1. Process standard Array Blocks (Relationship arrays)
+    Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
+        renderData[blockName] = data[blockName] || [];
+    });
 
-        (selectedTemplate.placeholders || []).forEach(p => {
-            const isChild = p.parent_name || p.is_block_start;
-            if (isChild) return;
+    if (!selectedTemplate) return renderData;
 
-            let val = data[p.name];
-            let key = p.name.replace(/[%#{}]/g, '');
+    // 2. Process All Placeholders
+    (selectedTemplate.placeholders || []).forEach(p => {
+        const val = data[p.name];
+        const baseKey = p.name.replace(/[%#{}]/g, '').trim();
 
-            if (p.type === 'image' && val) {
-                if (typeof val === 'string' && val.startsWith('http')) {
-                    imagePromises.push(fetchImageAsBase64(val).then(b64 => { renderData[key] = b64; }));
-                } else {
-                    renderData[key] = val;
-                }
-            } else {
-                renderData[key] = val || "";
+        // --- FIX: Handle Digit Split Flattening ---
+        // We handle this for ANY placeholder marked is_digit_split
+        if (p.is_digit_split) {
+            const strVal = String(val || '');
+            const count = p.digit_count || 8;
+            
+            for (let i = 1; i <= count; i++) {
+                const char = strVal[i - 1] || "";
+                // We provide BOTH lowercase and uppercase keys to ensure it matches 
+                // exactly what you typed in Microsoft Word ({em_1} or {EM_1})
+                renderData[`${baseKey.toLowerCase()}_${i}`] = char;
+                renderData[`${baseKey.toUpperCase()}_${i}`] = char;
             }
-        });
+            // Also keep the base key
+            renderData[baseKey] = strVal;
+        }
 
-        await Promise.all(imagePromises);
-        return renderData;
-    }, [groupedPlaceholders, selectedTemplate]);
+        // Standard processing: skip children if they were handled by block logic
+        const isChild = p.parent_name || p.is_block_start;
+        if (isChild && !p.is_digit_split) return;
+
+        // --- Process other types ---
+        if (p.type === 'boolean') {
+            const options = Array.isArray(val) ? val : [];
+            options.forEach(option => {
+                const optKey = option.tag.replace(/[{}]/g, '').trim();
+                const mark = option.checked ? '[X]' : '[  ]';
+                renderData[optKey.toLowerCase()] = mark;
+                renderData[optKey.toUpperCase()] = mark;
+            });
+            const summary = options.filter(o => o.checked).map(o => o.label).join(', ');
+            renderData[baseKey] = summary || "";
+        } 
+        else if (p.type === 'image' && val) {
+            if (typeof val === 'string' && val.startsWith('http')) {
+                imagePromises.push(fetchImageAsBase64(val).then(b64 => { renderData[baseKey] = b64; }));
+            } else {
+                renderData[baseKey] = val;
+            }
+        } 
+        else if (!p.is_digit_split) {
+            // Standard text
+            renderData[baseKey] = val || "";
+        }
+    });
+
+    await Promise.all(imagePromises);
+    return renderData;
+}, [groupedPlaceholders, selectedTemplate]);
 
     const updateWordPreview = useCallback(async (data, styles) => {
         if (!docxTemplateBuffer.current) return;
@@ -1062,43 +1358,94 @@ useEffect(() => {
         const changes = [];
 
         groupedPlaceholders.topLevel.forEach(placeholder => {
-            const original = originalFormData[placeholder.name] || '';
-            const current = formData[placeholder.name] || '';
+            const original = originalFormData[placeholder.name];
+            const current = formData[placeholder.name];
 
-            if (original !== current && (current.trim() !== '' || original.trim() !== '')) {
-                let targetInfo = null;
+            // Handle boolean fields differently
+            if (placeholder.type === 'boolean') {
+                if (Array.isArray(original) && Array.isArray(current)) {
+                    // Check if any checkbox state changed
+                    const hasChanged = current.some((opt, idx) => {
+                        const origOpt = original[idx];
+                        return origOpt?.checked !== opt?.checked;
+                    });
 
-                if (placeholder.master_field_ids?.length > 0) {
-                    const masterField = masterFields.get(parseInt(placeholder.master_field_ids[0]));
-                    if (masterField?.sources?.[0]) {
-                        // Find the source matching the entity type
-                        const source = masterField.sources.find(s =>
-                            s.source_type === (placeholder.entity_type || 'company')
-                        ) || masterField.sources[0];
+                    if (hasChanged) {
+                        // For boolean, store the entire options array
+                        let targetInfo = null;
 
-                        let entityId = entityIdMap[placeholder.entity_type || 'company'];
+                        if (placeholder.master_field_ids?.length > 0) {
+                            const masterField = masterFields.get(parseInt(placeholder.master_field_ids[0]));
+                            if (masterField?.sources?.[0]) {
+                                const source = masterField.sources.find(s =>
+                                    s.source_type === (placeholder.entity_type || 'company')
+                                ) || masterField.sources[0];
 
-                        if (placeholder.director_type === 'primary') {
-                            const primaryDir = findPrimaryDirector({ ...sourceDataCache, ...additionalCache });
-                            entityId = primaryDir?.id || primaryDir?.director_id || primaryDir?.individual_id;
+                                let entityId = entityIdMap[placeholder.entity_type || 'company'];
+
+                                if (placeholder.director_type === 'primary') {
+                                    const primaryDir = findPrimaryDirector({ ...sourceDataCache, ...additionalCache });
+                                    entityId = primaryDir?.id || primaryDir?.director_id || primaryDir?.individual_id;
+                                }
+
+                                targetInfo = {
+                                    table: source.table,
+                                    path: source.path,
+                                    linkingVariable: source.linking_variable || 'id',
+                                    entityId: entityId
+                                };
+                            }
                         }
 
-                        targetInfo = {
-                            table: source.table,
-                            path: source.path,
-                            linkingVariable: source.linking_variable || 'id',
-                            entityId: entityId
-                        };
+                        changes.push({
+                            placeholder,
+                            oldValue: original,
+                            newValue: current,
+                            targetInfo,
+                            source: autoPopulatedFields.get(placeholder.name)
+                        });
                     }
                 }
+            } else {
+                // Original logic for non-boolean fields
+                const originalStr = String(original || '');
+                const currentStr = String(current || '');
 
-                changes.push({
-                    placeholder,
-                    oldValue: original,
-                    newValue: current,
-                    targetInfo,
-                    source: autoPopulatedFields.get(placeholder.name)
-                });
+                if (original !== current && (currentStr.trim() !== '' || originalStr.trim() !== '')) {
+                    let targetInfo = null;
+
+                    if (placeholder.master_field_ids?.length > 0) {
+                        const masterField = masterFields.get(parseInt(placeholder.master_field_ids[0]));
+                        if (masterField?.sources?.[0]) {
+                            // Find the source matching the entity type
+                            const source = masterField.sources.find(s =>
+                                s.source_type === (placeholder.entity_type || 'company')
+                            ) || masterField.sources[0];
+
+                            let entityId = entityIdMap[placeholder.entity_type || 'company'];
+
+                            if (placeholder.director_type === 'primary') {
+                                const primaryDir = findPrimaryDirector({ ...sourceDataCache, ...additionalCache });
+                                entityId = primaryDir?.id || primaryDir?.director_id || primaryDir?.individual_id;
+                            }
+
+                            targetInfo = {
+                                table: source.table,
+                                path: source.path,
+                                linkingVariable: source.linking_variable || 'id',
+                                entityId: entityId
+                            };
+                        }
+                    }
+
+                    changes.push({
+                        placeholder,
+                        oldValue: original,
+                        newValue: current,
+                        targetInfo,
+                        source: autoPopulatedFields.get(placeholder.name)
+                    });
+                }
             }
         });
 
@@ -1192,15 +1539,17 @@ useEffect(() => {
         ).length;
 
         Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
-            const rows = formData[blockName] || [];
+            const rows = Array.isArray(formData[blockName]) ? formData[blockName] : [];
             if (rows.length > 0) {
                 totalFields += rows.length * groupedPlaceholders.blocks[blockName].children.length;
                 rows.forEach(row => {
-                    groupedPlaceholders.blocks[blockName].children.forEach(child => {
-                        if (row[child.name] && String(row[child.name]).trim() !== '') {
-                            filledFields++;
-                        }
-                    });
+                    if (row && typeof row === 'object') {
+                        groupedPlaceholders.blocks[blockName].children.forEach(child => {
+                            if (row[child.name] && String(row[child.name]).trim() !== '') {
+                                filledFields++;
+                            }
+                        });
+                    }
                 });
             }
         });
@@ -1343,7 +1692,28 @@ useEffect(() => {
                                                 )}
                                             </div>
 
-                                            {p.type === 'image' ? (
+                                            {p.is_digit_split ? (
+                                                /* DIGIT SPLIT INPUT BOXES */
+                                                <div className="flex flex-wrap gap-1 mt-1">
+                                                    {Array.from({ length: p.digit_count || 8 }).map((_, idx) => {
+                                                        const val = String(formData[p.name] || '');
+                                                        return (
+                                                            <input
+                                                                key={idx}
+                                                                maxLength={1}
+                                                                value={val[idx] || ''}
+                                                                onChange={(e) => {
+                                                                    const char = e.target.value.slice(-1);
+                                                                    let currentStr = val.padEnd(p.digit_count, ' ');
+                                                                    const newStr = currentStr.substring(0, idx) + char + currentStr.substring(idx + 1);
+                                                                    handleInputChange(p.name, newStr.trimEnd());
+                                                                }}
+                                                                className="w-7 h-8 text-center border rounded font-mono font-bold text-sm focus:border-blue-400 outline-none bg-white"
+                                                            />
+                                                        );
+                                                    })}
+                                                </div>
+                                            ) : p.type === 'image' ? (
                                                 <div className="space-y-3">
                                                     {formData[p.name] ? (
                                                         <div className="relative group rounded-md overflow-hidden border bg-white aspect-video flex items-center justify-center">
@@ -1394,7 +1764,78 @@ useEffect(() => {
                                                         onStyleChange={(key, val) => handleImageStyleChange(p.name, key, val)}
                                                     />
                                                 </div>
+                                            ) : p.type === 'boolean' ? (
+                                                <div className="space-y-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <Label className="font-semibold uppercase text-[11px]">
+                                                            {p.name.replace(/_/g, ' ')}
+                                                        </Label>
+                                                        {autoPopulatedFields.has(p.name) && (
+                                                            <Badge variant="secondary" className="text-[9px] bg-green-50 text-green-600">
+                                                                Auto
+                                                            </Badge>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="space-y-2 pl-2">
+                                                        {(Array.isArray(formData[p.name]) ? formData[p.name] : p.boolean_conditions || []).map((option, idx) => {
+                                                            const isChecked = Array.isArray(formData[p.name])
+                                                                ? formData[p.name][idx]?.checked
+                                                                : false;
+
+                                                            const isDisabled = Array.isArray(formData[p.name])
+                                                                ? formData[p.name][idx]?.hasDbLink
+                                                                : false;
+
+                                                            return (
+                                                                <div key={idx} className="flex items-center gap-2 p-2 border rounded bg-white">
+                                                                    <Checkbox
+                                                                        id={`${p.name}-${idx}`}
+                                                                        checked={isChecked}
+                                                                        disabled={isDisabled}
+                                                                        onCheckedChange={(checked) => {
+                                                                            setFormData(prev => {
+                                                                                const options = [...(Array.isArray(prev[p.name]) ? prev[p.name] : p.boolean_conditions || [])];
+
+                                                                                if (p.boolean_type === 'single') {
+                                                                                    // Radio behavior - uncheck others
+                                                                                    options.forEach((opt, i) => {
+                                                                                        if (!opt.hasDbLink) {
+                                                                                            opt.checked = i === idx ? checked : false;
+                                                                                        }
+                                                                                    });
+                                                                                } else {
+                                                                                    // Checkbox behavior
+                                                                                    if (!options[idx].hasDbLink) {
+                                                                                        options[idx].checked = checked;
+                                                                                    }
+                                                                                }
+
+                                                                                return { ...prev, [p.name]: options };
+                                                                            });
+                                                                        }}
+                                                                    />
+                                                                    <Label
+                                                                        htmlFor={`${p.name}-${idx}`}
+                                                                        className={`text-xs cursor-pointer ${isDisabled ? 'text-muted-foreground' : ''}`}
+                                                                    >
+                                                                        {option.label}
+                                                                        {isDisabled && (
+                                                                            <Badge variant="outline" className="ml-2 text-[8px]">
+                                                                                Auto-filled
+                                                                            </Badge>
+                                                                        )}
+                                                                    </Label>
+                                                                    {isChecked && (
+                                                                        <CheckCircle2 className="h-3 w-3 text-green-500 ml-auto" />
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
                                             ) : (
+                                                /* TEXT/OTHER TYPES */
                                                 <Input
                                                     value={formData[p.name] || ''}
                                                     onChange={e => handleInputChange(p.name, e.target.value)}
