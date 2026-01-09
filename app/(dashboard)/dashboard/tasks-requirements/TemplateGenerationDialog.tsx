@@ -244,18 +244,11 @@ const resolveArrayData = (blockPlaceholder, allPlaceholders, combinedCache, mast
         && p.id !== blockPlaceholder.id
         && !p.is_block_start
     );
-    
-    // Log field types for debugging
     console.log(`👶 Child Fields (${childFields.length}):`, childFields.map(f => ({
         name: f.name,
-        type: f.type || 'text', // Default to 'text' if type is not specified
-        isArray: f.is_array || false,
-        entityType: f.entity_type,
+        type: f.type,
         master_field_ids: f.master_field_ids || []
     })));
-    
-    // Log the block's type information
-    console.log(`📌 Block '${blockName}' has entityType: '${entityType}', type: '${blockPlaceholder.type || 'block'}'`);
 
     // --- Handle Horizontal/Digit-splitting blocks ---
     const isDigitSplitting = isHorizontal || (
@@ -366,7 +359,6 @@ const resolveArrayData = (blockPlaceholder, allPlaceholders, combinedCache, mast
     // Map each entity to row data
     const result = sourceArray.map((item, index) => {
         console.group(`📝 Item ${index + 1}/${sourceArray.length}: ${item.name || item.full_name || `ID: ${item.id}`}`);
-        console.log(`🔤 Item type: ${typeof item}`, item);
         const rowData = {};
 
         childFields.forEach(field => {
@@ -374,10 +366,41 @@ const resolveArrayData = (blockPlaceholder, allPlaceholders, combinedCache, mast
             let val = '';
 
             if (field.type === 'conditional') {
-                console.log('🔄 Resolving conditional field with conditions:', field.conditions);
                 const res = resolveConditionalValue(field.conditions, item, combinedCache, masterFields);
                 val = res ? res.value : '';
-                console.log(`✅ Resolved value:`, { value: val, source: res?.source || 'No match' });
+            }
+            else if (field.type === 'boolean' && field.boolean_conditions) {
+                // Apply the same logic used for top-level booleans
+                val = field.boolean_conditions.map(condition => {
+                    let isChecked = false;
+                    if (condition.master_field_id) {
+                        const mf = masterFields.get(parseInt(condition.master_field_id, 10));
+                        if (mf?.sources) {
+                            for (const source of mf.sources) {
+                                const tableData = combinedCache[source.table];
+                                if (!tableData) continue;
+                                const record = Object.values(tableData).find(r =>
+                                    String(r[source.linking_variable || 'id']) === String(item.id)
+                                );
+                                if (record) {
+                                    const fieldValue = source.path ? parseJsonValue(record, source.path) : record[condition.comparison?.field || condition.tag];
+                                    if (condition.comparison) {
+                                        const { operator, value: compVal } = condition.comparison;
+                                        const strValue = String(fieldValue).toLowerCase();
+                                        const compareValue = String(compVal).toLowerCase();
+                                        if (operator === 'equals') isChecked = strValue === compareValue;
+                                        else if (operator === 'not_equals') isChecked = strValue !== compareValue;
+                                        else if (operator === 'contains') isChecked = strValue.includes(compareValue);
+                                    } else {
+                                        isChecked = Boolean(fieldValue);
+                                    }
+                                    if (isChecked) break;
+                                }
+                            }
+                        }
+                    }
+                    return { ...condition, checked: isChecked, hasDbLink: !!condition.master_field_id };
+                });
             }
             else if (field.name.toLowerCase().includes('name')) {
                 val = item.full_name || item.name || '';
@@ -455,10 +478,6 @@ const resolveArrayData = (blockPlaceholder, allPlaceholders, combinedCache, mast
             }
 
             rowData[field.name] = val || '';
-            console.log(`   💾 Setting field '${field.name}' (type: ${field.type || 'text'}) to:`, 
-                field.type === 'image' ? '[Image Data]' : 
-                typeof val === 'string' && val.length > 50 ? val.substring(0, 50) + '...' : val
-            );
             console.groupEnd(); // Field group
             return val;
         });
@@ -1313,7 +1332,56 @@ export default function TemplateGenerationDialog({
                                             <Label className="text-[9px] font-bold text-slate-400 uppercase">
                                                 {child.name.replace(/_/g, ' ')}
                                             </Label>
-                                            {child.type === 'image' ? (
+                                            {child.type === 'boolean' ? (
+                                                <div className="space-y-1 mt-1 bg-slate-50 p-2 rounded border">
+                                                    {(Array.isArray(row[child.name]) ? row[child.name] : child.boolean_conditions || []).map((option, optIdx) => (
+                                                        <div key={optIdx} className="flex items-center gap-2">
+                                                            <Checkbox
+                                                                checked={option.checked}
+                                                                disabled={option.hasDbLink}
+                                                                onCheckedChange={(checked) => {
+                                                                    const currentOptions = [...(Array.isArray(row[child.name]) ? row[child.name] : child.boolean_conditions)];
+                                                                    if (child.boolean_type === 'single') {
+                                                                        currentOptions.forEach((o, i) => { if (!o.hasDbLink) o.checked = i === optIdx ? checked : false; });
+                                                                    } else {
+                                                                        if (!currentOptions[optIdx].hasDbLink) currentOptions[optIdx].checked = checked;
+                                                                    }
+                                                                    handleArrayInputChange(blockName, idx, child.name, currentOptions);
+                                                                }}
+                                                            />
+                                                            <span className="text-[10px]">
+                                                                {(() => {
+                                                                    if (!option) return '';
+                                                                    if (typeof option === 'string') return option;
+                                                                    
+                                                                    // Try common property names
+                                                                    const possibleProps = ['label', 'display', 'text', 'value', 'name', 'title'];
+                                                                    for (const prop of possibleProps) {
+                                                                        if (option[prop] && typeof option[prop] === 'string') {
+                                                                            return option[prop];
+                                                                        }
+                                                                    }
+                                                                    
+                                                                    // Try nested structures
+                                                                    if (option.label && typeof option.label === 'object') {
+                                                                        if (option.label.label) return option.label.label;
+                                                                        if (option.label.display) return option.label.display;
+                                                                    }
+                                                                    
+                                                                    // If it's a simple object with one string property, use that
+                                                                    const keys = Object.keys(option);
+                                                                    const stringProps = keys.filter(key => typeof option[key] === 'string');
+                                                                    if (stringProps.length === 1) {
+                                                                        return option[stringProps[0]];
+                                                                    }
+                                                                    
+                                                                    return option.tag || 'Option';
+                                                                })()}
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : child.type === 'image' ? (
                                                 <div className="space-y-2">
                                                     {fieldValue ? (
                                                         <div className="relative group rounded overflow-hidden border aspect-video flex items-center justify-center bg-gray-50">
@@ -1403,8 +1471,6 @@ export default function TemplateGenerationDialog({
                 if (rows.length === 0) return '';
 
                 if (isHorizontal) {
-                    // We don't want to repeat the 'innerTemplate' (which might contain the label)
-                    // We just want to render the digits side-by-side
                     const childName = block.children[0]?.name || 'd';
                     const cells = rows.map(row => {
                         const value = row[childName] ?? '';
@@ -1419,6 +1485,50 @@ export default function TemplateGenerationDialog({
                         let value = row?.[child.name] ?? '';
                         const childRegex = new RegExp(`\\{+\\s*${child.name}\\s*\\}+`, 'g');
 
+                        // Logic for booleans inside arrays
+                        if (child.type === 'boolean' && Array.isArray(value)) {
+                            // Use the same summary logic as top-level booleans
+                            const getLabelText = (opt) => {
+                                if (!opt) return '';
+                                if (typeof opt === 'string') return opt;
+                                
+                                console.log('Debugging opt object in array-level boolean:', opt);
+                                
+                                // Helper function to extract text from various object structures
+                                const extractText = (obj) => {
+                                    if (typeof obj === 'string') return obj;
+                                    if (typeof obj !== 'object' || obj === null) return '';
+                                    
+                                    // Try common property names
+                                    const possibleProps = ['label', 'display', 'text', 'value', 'name', 'title'];
+                                    for (const prop of possibleProps) {
+                                        if (obj[prop] && typeof obj[prop] === 'string') {
+                                            return obj[prop];
+                                        }
+                                    }
+                                    
+                                    // Try nested structures
+                                    if (obj.label && typeof obj.label === 'object') {
+                                        return extractText(obj.label);
+                                    }
+                                    
+                                    // If it's a simple object with one string property, use that
+                                    const keys = Object.keys(obj);
+                                    const stringProps = keys.filter(key => typeof obj[key] === 'string');
+                                    if (stringProps.length === 1) {
+                                        return obj[stringProps[0]];
+                                    }
+                                    
+                                    // Last resort: JSON stringify but clean it up
+                                    const jsonStr = JSON.stringify(obj);
+                                    return jsonStr.replace(/[{}"]/g, '').trim();
+                                };
+                                
+                                const labelText = extractText(opt.label || opt);
+                                return labelText || opt.tag || '';
+                            };
+                            value = value.filter(o => o.checked).map(o => getLabelText(o)).join(', ');
+                        }
                         // ADD THIS CHECK:
                         if (child.type === 'image' && value && typeof value === 'string' && value.startsWith('http')) {
                             const style = styles[child.name] || {};
@@ -1471,50 +1581,74 @@ export default function TemplateGenerationDialog({
             }
             // ✅ BOOLEAN / CHECKBOX LOGIC
             if (placeholder.type === 'boolean') {
-                const options = Array.isArray(value)
-                    ? value
-                    : placeholder.boolean_conditions || [];
+                const options = Array.isArray(value) ? value : placeholder.boolean_conditions || [];
+
+                const getLabelText = (opt) => {
+                    if (!opt) return '';
+                    if (typeof opt === 'string') return opt;
+                    
+                    console.log('Debugging opt object in top-level boolean:', opt);
+                    
+                    // Helper function to extract text from various object structures
+                    const extractText = (obj) => {
+                        if (typeof obj === 'string') return obj;
+                        if (typeof obj !== 'object' || obj === null) return '';
+                        
+                        // Try common property names
+                        const possibleProps = ['label', 'display', 'text', 'value', 'name', 'title'];
+                        for (const prop of possibleProps) {
+                            if (obj[prop] && typeof obj[prop] === 'string') {
+                                return obj[prop];
+                            }
+                        }
+                        
+                        // Try nested structures
+                        if (obj.label && typeof obj.label === 'object') {
+                            return extractText(obj.label);
+                        }
+                        
+                        // If it's a simple object with one string property, use that
+                        const keys = Object.keys(obj);
+                        const stringProps = keys.filter(key => typeof obj[key] === 'string');
+                        if (stringProps.length === 1) {
+                            return obj[stringProps[0]];
+                        }
+                        
+                        // Last resort: JSON stringify but clean it up
+                        const jsonStr = JSON.stringify(obj);
+                        return jsonStr.replace(/[{}"]/g, '').trim();
+                    };
+                    
+                    const labelText = extractText(opt.label || opt);
+                    return labelText || opt.tag || '';
+                };
 
                 options.forEach(option => {
-                    const rawTag = option.tag.replace(/[{}]/g, '').trim();
+                    const optionTag = option.tag || '';
+                    if (!optionTag) return;
+                    const rawTag = String(optionTag).replace(/[{}]/g, '').trim();
+                    const optRegex = new RegExp(`\\{+\\s*${rawTag}\\s*\\}+`, 'gi');
 
-                    const optRegex = new RegExp(
-                        `\\{+\\s*(?:<[^>]*>)*\\s*${rawTag}\\s*(?:<[^>]*>)*\\s*\\}+`,
-                        'gi'
-                    );
+                    const displayLabel = getLabelText(option);
 
-                    const checkedHTML = `<b style="
-          color:#16a34a;
-          background:#dcfce7;
-          border:1px solid #16a34a;
-          padding:0 2px;
-          font-family:monospace;
-        ">[X]</b>`;
-
-                    const uncheckedHTML = `<span style="
-          color:#6b7280;
-          border:1px solid #d1d5db;
-          padding:0 2px;
-          font-family:monospace;
-        ">[&nbsp;&nbsp;]</span>`;
-
-                    content = content.replace(
-                        optRegex,
-                        option.checked ? checkedHTML : uncheckedHTML
-                    );
+                    if (option.checked) {
+                        content = content.replace(optRegex, `<span style="color:#16a34a; font-weight:bold;">${displayLabel}</span>`);
+                    } else {
+                        content = content.replace(optRegex, `<span style="color:#ccc;">[ ]</span>`);
+                    }
                 });
 
-                // Replace parent summary placeholder (e.g. {gender})
                 const parentName = placeholder.name.replace(/[{}]/g, '').trim();
                 const parentRegex = new RegExp(`\\{+\\s*${parentName}\\s*\\}+`, 'gi');
 
+                // THIS IS THE CRITICAL LINE: Ensure we map to strings only
                 const summary = options
                     .filter(o => o.checked)
-                    .map(o => o.label)
+                    .map(o => getLabelText(o))
                     .join(', ');
 
                 content = content.replace(parentRegex, summary || '');
-                return;
+                return; // Exit to prevent standard text replacement logic from running on the array
             }
 
             // ✅ STANDARD TEXT / IMAGE PLACEHOLDERS
@@ -1557,14 +1691,23 @@ export default function TemplateGenerationDialog({
         const renderData = {};
         const imagePromises = [];
 
+        // Helper to get string label
+        const getLabelText = (opt) => {
+            if (!opt) return '';
+            if (typeof opt === 'string') return opt;
+            const label = opt.label;
+            if (typeof label === 'string') return label;
+            if (typeof label === 'object' && label?.label) return String(label.label);
+            return opt.tag || '';
+        };
+
         // 1. Process Array Blocks and nested images
         for (const blockName of Object.keys(groupedPlaceholders.blocks)) {
             const block = groupedPlaceholders.blocks[blockName];
-            const rows = JSON.parse(JSON.stringify(data[blockName] || [])); // Deep clone to avoid mutating state
+            const rows = JSON.parse(JSON.stringify(data[blockName] || []));
 
             for (const row of rows) {
                 for (const child of block.children) {
-                    // If child is an image, convert its URL to Base64 for Docxtemplater
                     if (child.type === 'image' && row[child.name] && String(row[child.name]).startsWith('http')) {
                         const promise = fetchImageAsBase64(row[child.name]).then(b64 => {
                             row[child.name] = b64;
@@ -1583,7 +1726,6 @@ export default function TemplateGenerationDialog({
             const val = data[p.name];
             const baseKey = p.name.replace(/[%#{}]/g, '').trim();
 
-            // Skip children (handled above)
             if (p.parent_name || p.is_block_start) return;
 
             if (p.is_digit_split) {
@@ -1594,7 +1736,25 @@ export default function TemplateGenerationDialog({
                     renderData[`${baseKey.toUpperCase()}_${i}`] = strVal[i - 1] || "";
                 }
                 renderData[baseKey] = strVal;
-            } else if (p.type === 'image' && val) {
+            }
+            // ✅ FIX FOR BOOLEAN IN DOCX
+            else if (p.type === 'boolean') {
+                const options = Array.isArray(val) ? val : [];
+
+                // Map individual option tags (e.g., {daily_tick} -> "✓" or "")
+                options.forEach(opt => {
+                    if (opt.tag) {
+                        renderData[opt.tag] = opt.checked ? getLabelText(opt) : "";
+                    }
+                });
+
+                // Map the parent key (e.g., {daily} -> "✓, Weekly")
+                renderData[baseKey] = options
+                    .filter(o => o.checked)
+                    .map(o => getLabelText(o))
+                    .join(', ');
+            }
+            else if (p.type === 'image' && val) {
                 if (typeof val === 'string' && val.startsWith('http')) {
                     imagePromises.push(fetchImageAsBase64(val).then(b64 => {
                         renderData[baseKey] = b64;
@@ -2261,8 +2421,7 @@ export default function TemplateGenerationDialog({
                                                             </Badge>
                                                         )}
                                                     </div>
-
-                                                    <div className="space-y-2 pl-2">
+                                                                                                        <div className="space-y-2 pl-2">
                                                         {(Array.isArray(formData[p.name]) ? formData[p.name] : p.boolean_conditions || []).map((option, idx) => {
                                                             const isChecked = Array.isArray(formData[p.name])
                                                                 ? formData[p.name][idx]?.checked
@@ -2272,6 +2431,36 @@ export default function TemplateGenerationDialog({
                                                                 ? formData[p.name][idx]?.hasDbLink
                                                                 : false;
 
+                                                            // Helper function to extract label text from option object
+                                                            const getOptionLabel = (opt) => {
+                                                                if (!opt) return '';
+                                                                if (typeof opt === 'string') return opt;
+                                                                
+                                                                // Try common property names
+                                                                const possibleProps = ['label', 'display', 'text', 'value', 'name', 'title'];
+                                                                for (const prop of possibleProps) {
+                                                                    if (opt[prop] && typeof opt[prop] === 'string') {
+                                                                        return opt[prop];
+                                                                    }
+                                                                }
+                                                                
+                                                                // Try nested structures
+                                                                if (opt.label && typeof opt.label === 'object') {
+                                                                    if (opt.label.label) return opt.label.label;
+                                                                    if (opt.label.display) return opt.label.display;
+                                                                }
+                                                                
+                                                                // If it's a simple object with one string property, use that
+                                                                const keys = Object.keys(opt);
+                                                                const stringProps = keys.filter(key => typeof opt[key] === 'string');
+                                                                if (stringProps.length === 1) {
+                                                                    return opt[stringProps[0]];
+                                                                }
+                                                                
+                                                                return opt.tag || 'Option';
+                                                            };
+                                                            
+                                                            const optionLabel = getOptionLabel(option);
                                                             return (
                                                                 <div key={idx} className="flex items-center gap-2 p-2 border rounded bg-white">
                                                                     <Checkbox
@@ -2304,7 +2493,7 @@ export default function TemplateGenerationDialog({
                                                                         htmlFor={`${p.name}-${idx}`}
                                                                         className={`text-xs cursor-pointer ${isDisabled ? 'text-muted-foreground' : ''}`}
                                                                     >
-                                                                        {option.label}
+                                                                        {typeof option.label === 'string' ? option.label : (option.tag || 'Option')}
                                                                         {isDisabled && (
                                                                             <Badge variant="outline" className="ml-2 text-[8px]">
                                                                                 Auto-filled
@@ -2319,8 +2508,13 @@ export default function TemplateGenerationDialog({
                                                         })}
                                                     </div>
                                                 </div>
+                                            ) : p.type === 'boolean' ? (
+                                                <div className="flex items-center h-8 px-3 bg-white border rounded-md text-sm">
+                                                    {formData[p.name] === true ?
+                                                        (p.boolean_conditions?.[0]?.label || 'Yes') :
+                                                        (formData[p.name] === false ? 'No' : formData[p.name] || '')}
+                                                </div>
                                             ) : (
-                                                /* TEXT/OTHER TYPES */
                                                 <Input
                                                     value={formData[p.name] || ''}
                                                     onChange={e => handleInputChange(p.name, e.target.value)}
