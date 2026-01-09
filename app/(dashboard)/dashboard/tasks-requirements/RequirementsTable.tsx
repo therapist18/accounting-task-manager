@@ -292,13 +292,25 @@ export function RequirementsTable({
     const fetchMetadata = async () => {
       if (!isMounted || !filteredTasks.length) return;
       try {
-        const { data: docsRes, error: docsErr } = await supabase.from('acc_portal_kyc').select('*').order('custom_order', { ascending: true, nullsLast: true });
+        const { data: docsRes, error: docsErr } = await supabase.from('acc_portal_kyc').select('*').order('display_name', { ascending: true, nullsLast: true });
         if (!isMounted) return;
         if (docsErr) throw docsErr;
         setDocuments((docsRes || []).map(doc => ({ ...doc, display_name: doc.display_name || doc.name })));
         const taskDataPromises = filteredTasks.map(async (task) => {
-          const classId = task.subclass_id || (task.class_id && (task.subdepartment?.id || task.subdepartment_id) ? `${task.subdepartment.id}_${task.class_id}` : task.class_id);
-          const { data } = await supabase.from('tm_class_requirements').select('*').eq('class_id', classId).maybeSingle();
+          // Use job_level if available, otherwise fall back to the old structure
+          const jobLevel = task.job_level || {};
+          const subdepartmentId = jobLevel.subdepartment_id || task.subdepartment_id;
+          const classId = jobLevel.subclass_id ||
+            (jobLevel.class_id && subdepartmentId ?
+              `${subdepartmentId}_${jobLevel.class_id}` :
+              jobLevel.class_id || task.class_id);
+
+          const { data } = await supabase
+            .from('tm_class_requirements')
+            .select('*')
+            .eq('class_id', classId)
+            .maybeSingle();
+
           return { taskId: task.id, classRequirements: data };
         });
         const results = await Promise.all(taskDataPromises);
@@ -365,7 +377,7 @@ export function RequirementsTable({
 
   // --- MODIFICATION: Separate "Letters" from other document types ---
   const organizedRequirements = useMemo(() => {
-    const documentsMap = new Map<string, { document: any; fields: any[]; category: 'company' | 'individual' | 'letter'; }>();
+    const documentsMap = new Map<string, { document: any; fields: any[]; category: 'company' | 'individual' | 'template' }>();
     const allTasks = filteredGroupedTasks.flatMap(g => g.tasks);
 
     allTasks.forEach(task => {
@@ -379,9 +391,11 @@ export function RequirementsTable({
 
         if (docDef && !documentsMap.has(docId)) {
           const itemWithSettings = { ...item, ...docDef, selectionId: item.id };
-          let category: 'company' | 'individual' | 'letter' = 'individual';
-          if (docDef.main_category === 'Letters' || docDef.main_category === 'Forms') {
-            category = 'letter';
+          
+          // Determine category - prioritize template status
+          let category: 'company' | 'individual' | 'template' = 'individual';
+          if (docDef.has_template === true || docDef.has_template === 'true') {
+            category = 'template';
           } else if (docDef.category === 'company-docs') {
             category = 'company';
           }
@@ -389,7 +403,7 @@ export function RequirementsTable({
           documentsMap.set(docId, {
             document: itemWithSettings,
             fields: [],
-            category: category
+            category
           });
         }
       });
@@ -399,8 +413,8 @@ export function RequirementsTable({
     return {
       documents: {
         company: allDocs.filter(i => i.category === 'company'),
-        individual: allDocs.filter(i => i.category === 'individual' && i.document.main_category !== 'Letters' && i.document.main_category !== 'Forms'),
-        letters: allDocs.filter(i => i.document.main_category === 'Letters' || i.document.main_category === 'Forms'),
+        individual: allDocs.filter(i => i.category === 'individual'),
+        templates: allDocs.filter(i => i.category === 'template'),
       }
     };
   }, [filteredGroupedTasks, taskClassRequirements, documents, parseSelectionId]);
@@ -547,23 +561,23 @@ export function RequirementsTable({
   const getCompanyName = (group) => {
     const task = group.tasks[0];
     if (!task) return null;
-    
+
     // If this is a company applicant, return its name
     if (task.applicant_details?.type === 'company') {
       return task.applicant_details.name;
     }
-    
+
     // For individual applicants, find the company in participants_details
     if (Array.isArray(task.participants_details)) {
       const company = task.participants_details.find(p => p.type === 'company');
       if (company) return company.name;
     }
-    
+
     // Fallback to company data if available
     if (task.company_id && companyData[task.company_id]) {
       return companyData[task.company_id].company_name;
     }
-    
+
     return null;
   };
 
@@ -577,10 +591,10 @@ export function RequirementsTable({
             {searchedGroupedTasks.map((group) => {
               const companyName = getCompanyName(group);
               return (
-                <Button 
-                  key={group.applicantName} 
-                  variant={selectedApplicant === group.applicantName ? "secondary" : "ghost"} 
-                  className="w-full justify-start h-auto py-2" 
+                <Button
+                  key={group.applicantName}
+                  variant={selectedApplicant === group.applicantName ? "secondary" : "ghost"}
+                  className="w-full justify-start h-auto py-2"
                   onClick={() => handleSelectApplicant(group.applicantName)}
                 >
                   <div className="flex flex-col items-start w-full">
@@ -599,32 +613,32 @@ export function RequirementsTable({
             })}
             {loading && <div className="p-4 text-center"><Loader2 className="h-4 w-4 animate-spin inline" /></div>}
             {!loading && searchedGroupedTasks.length === 0 && <p className="p-4 text-sm text-center text-muted-foreground">No applicants found.</p>}
-        </div>
+          </div>
         </ScrollArea>
       </div>
       <div className="flex-1 flex flex-col border rounded-md bg-background shadow-sm">
-      <div className="overflow-auto flex-1">
-        <RequirementsTableCombined
-          loading={documentsLoading || loading}
-          error={error}
-          filteredGroupedTasks={filteredGroupedTasks}
-          organizedRequirements={organizedRequirements}
-          classRequirements={currentClassRequirements}
-          expandedDocuments={expandedDocuments}
-          toggleDocumentExpansion={toggleDocumentExpansion}
-          renderDocumentStatus={renderDocumentStatus}
-          getDocumentDataForPreview={getDocumentDataForPreview}
-          renderClientFieldData={renderClientFieldData}
-          renderReferencesData={renderReferencesData}
-          hasReferencesColumn={hasReferencesColumn}
-          individualNames={individualNames}
-          companyData={companyData}
-          getCurrentRequirements={getCurrentRequirements}
-          fuzzyMatch={fuzzyMatch}
-          kycDocuments={new Map()}
-        />
+        <div className="overflow-auto flex-1">
+          <RequirementsTableCombined
+            loading={documentsLoading || loading}
+            error={error}
+            filteredGroupedTasks={filteredGroupedTasks}
+            organizedRequirements={organizedRequirements}
+            classRequirements={currentClassRequirements}
+            expandedDocuments={expandedDocuments}
+            toggleDocumentExpansion={toggleDocumentExpansion}
+            renderDocumentStatus={renderDocumentStatus}
+            getDocumentDataForPreview={getDocumentDataForPreview}
+            renderClientFieldData={renderClientFieldData}
+            renderReferencesData={renderReferencesData}
+            hasReferencesColumn={hasReferencesColumn}
+            individualNames={individualNames}
+            companyData={companyData}
+            getCurrentRequirements={getCurrentRequirements}
+            fuzzyMatch={fuzzyMatch}
+            kycDocuments={new Map()}
+          />
         </div>
-      </div>   
+      </div>
       {previewDocument && previewDocument.documents.length > 0 && (
         <ExtractionPreview
           open={documentPreviewOpen}

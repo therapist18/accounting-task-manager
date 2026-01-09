@@ -127,24 +127,35 @@ const TableHeaderCell = React.memo(({ item, header, getCellContent }) => {
     if (item.type === 'principal') {
       return getCellContent(item.task, header.id);
     }
-    // Dependant logic
+    // Dependant logic - handle both old and new data structures
+    const dependant = item.dependant;
     switch (header.id) {
       case 'applicant_name':
         return (
           <div className="flex flex-col">
-            <span>{item.dependant.full_name || 'N/A'}</span>
-            <span className="text-xs text-gray-500">{item.dependant.relationship || 'Dependant'}</span>
+            <span>{dependant?.full_name || dependant?.name || 'N/A'}</span>
+            <span className="text-xs text-gray-500">
+              {dependant?.relationship || 'Dependant'}
+            </span>
           </div>
         );
       case 'nationality':
-        return item.dependant.nationality || 'N/A';
+        return dependant?.nationality || 'N/A';
       case 'age':
-        return item.dependant.age?.toString() || 'N/A';
+        if (dependant?.date_of_birth) {
+          const age = calculateAge(new Date(dependant.date_of_birth));
+          return isNaN(age) ? 'N/A' : age.toString();
+        }
+        return dependant?.age?.toString() || 'N/A';
       case 'case_status':
         return (
           <div className="flex flex-col">
-            <span className="text-sm">{item.dependant.relationship || 'Dependant'}</span>
-            <span className="text-xs text-gray-500">{item.dependant.nationality || ''}</span>
+            <span className="text-sm">
+              {dependant?.relationship || 'Dependant'}
+            </span>
+            <span className="text-xs text-gray-500">
+              {dependant?.nationality || ''}
+            </span>
           </div>
         );
       default:
@@ -321,7 +332,8 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
 
   // State
   const [currentPage, setCurrentPage] = useState(1);
-  const [columnsPerPage, setColumnsPerPage] = useState(initialColumnsPerPage);
+  // Set default columns per page to show all tasks initially
+  const [columnsPerPage, setColumnsPerPage] = useState(tasks.length || initialColumnsPerPage);
   const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
   const [selectedRequirement, setSelectedRequirement] = useState<any>(null);
   const [taskToDelete, setTaskToDelete] = useState<any>(null);
@@ -330,12 +342,53 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   // Memoized derived data
   const processedDocuments = useMemo(() => processDocumentsForTasks(tasks, allDocuments), [tasks, allDocuments]);
 
+  // Update columns per page when tasks change
+  useEffect(() => {
+    if (tasks.length > 0 && tasks.length !== columnsPerPage) {
+      setColumnsPerPage(tasks.length);
+      setCurrentPage(1);
+    }
+  }, [tasks.length]);
+
   const headerStructure = useMemo(() => {
+    if (!Array.isArray(tasks)) return [];
+    
     return tasks.flatMap(task => {
-      const principal = { type: 'principal', task, key: `principal-${task.id}` };
-      const deps = taskDependants.get(task.id.toString()) || [];
-      if (expandedDependants.has(task.id.toString()) && deps.length > 0) {
-        const dependants = deps.map((dep, index) => ({ type: 'dependant', task, dependant: dep, index, key: `dep-${task.id}-${dep.id || index}` }));
+      if (!task) return [];
+      
+      // Ensure task has an ID
+      const taskId = task.id || Math.random().toString(36).substr(2, 9);
+      
+      // Handle the task data structure from the API
+      const taskWithDetails = {
+        ...task,
+        // Map the nested department and subdepartment to the expected format
+        department: task.department || { id: task.department_id, name: '' },
+        subdepartment: task.subdepartment || { id: task.subdepartment_id, name: '' },
+        officer: task.officer || { id: task.officer_id, name: '' },
+        task_manager: task.task_manager || { id: task.task_manager_id, name: '' },
+        // Ensure we have a valid ID
+        id: taskId,
+        // Ensure we have a valid status
+        status: task.status || 'pending'
+      };
+
+      const principal = { 
+        type: 'principal', 
+        task: taskWithDetails, 
+        key: `principal-${taskId}` 
+      };
+      
+      // Handle dependents if they exist in the task data
+      const deps = taskDependants.get(taskId.toString()) || [];
+      if (expandedDependants.has(taskId.toString()) && deps.length > 0) {
+        const dependants = deps.map((dep, index) => ({ 
+          type: 'dependant', 
+          task: taskWithDetails, 
+          dependant: dep, 
+          index, 
+          key: `dep-${taskId}-${dep.id || index}` 
+        }));
         return [principal, ...dependants];
       }
       return [principal];
@@ -395,6 +448,21 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
     setColumnsPerPage(parseInt(value, 10));
     setCurrentPage(1);
   }, []);
+
+  // Debug logging for tasks
+  useEffect(() => {
+    if (DEBUG) {
+      console.groupCollapsed('[EnhancedTable] Tasks data structure');
+      console.log('Tasks array:', tasks);
+      console.log('Tasks count:', tasks?.length || 0);
+      if (tasks?.length > 0) {
+        console.log('First task sample:', JSON.parse(JSON.stringify(tasks[0])));
+      }
+      console.log('Header structure:', headerStructure);
+      console.log('Paginated header structure:', paginatedHeaderStructure);
+      console.groupEnd();
+    }
+  }, [tasks, headerStructure, paginatedHeaderStructure]);
 
   // Render logic
   if (!tasks.length && !loading) {

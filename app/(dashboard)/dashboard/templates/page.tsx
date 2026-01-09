@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { PlusCircle, FileText, Loader2, Settings, ChevronRight, Trash2 } from "lucide-react"
+import { PlusCircle, FileText, Loader2, Settings, ChevronRight, Trash2, Building2, Check, ChevronsUpDown, X, ChevronDown } from "lucide-react"
 import { toast } from "@/components/ui/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -20,6 +20,28 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
+import { cn } from "@/lib/utils"
 
 import { DepartmentSidebar } from "../departments/main-shared-components/department-sidebar"
 import { fetchDepartments } from "../departments/departments/database"
@@ -27,24 +49,22 @@ import DocumentTemplateManager from "./document-template-manager"
 
 // --- Main Page Component ---
 export default function LettersPage() {
-  // --- State for Sidebar Navigation ---
   const [departments, setDepartments] = useState<any[]>([]);
   const [selectedDepartment, setSelectedDepartment] = useState<string>('');
   const [selectedSubdepartment, setSelectedSubdepartment] = useState<string>('');
   const [selectedClass, setSelectedClass] = useState<string>('');
   const [selectedSubclass, setSelectedSubclass] = useState<string>('');
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
-
-  // --- State for Page Content ---
   const [letterTypes, setLetterTypes] = useState<any[]>([]);
-  const [selectedLetter, setSelectedLetter] = useState<any | null>(null);
+ const [selectedLetter, setSelectedLetter] = useState<any | null>(null);
+  const [selectedBank, setSelectedBank] = useState<any | null>(null); // NEW STATE
   const [isLoading, setIsLoading] = useState(true);
-
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<any | null>(null);
   const [templateVersion, setTemplateVersion] = useState(0);
+  const [isBankDialogOpen, setIsBankDialogOpen] = useState(false);
+  const [expandedLetterIds, setExpandedLetterIds] = useState<Record<string, boolean>>({});
 
-  // --- Initial Data Fetching for Sidebar ---
   useEffect(() => {
     const performInitialLoad = async () => {
       setIsLoading(true);
@@ -55,7 +75,6 @@ export default function LettersPage() {
     performInitialLoad();
   }, []);
 
-  // Legacy string ID for fetching requirements (assuming requirements table still uses string ID)
   const constructedClassId = useMemo(() => {
     if (!selectedClass && !selectedSubclass) return null;
     return selectedSubclass ?
@@ -63,58 +82,33 @@ export default function LettersPage() {
       `${selectedSubdepartment}_${selectedClass}`;
   }, [selectedSubdepartment, selectedClass, selectedSubclass]);
 
-  // --- MODIFICATION: Construct the job_level JSON object ---
   const jobLevelObject = useMemo(() => {
-    // Helper to ensure we store numbers if the IDs are numeric strings
     const parseId = (id: string) => {
       if (!id) return null;
       const num = Number(id);
       return isNaN(num) ? id : num;
     };
-
     const deptId = parseId(selectedDepartment);
     const subDeptId = parseId(selectedSubdepartment);
     const classId = parseId(selectedClass);
     const subclassId = parseId(selectedSubclass);
 
-    if (subclassId) {
-      return {
-        level: 4,
-        department_id: deptId,
-        subdepartment_id: subDeptId,
-        class_id: classId,
-        subclass_id: subclassId
-      };
-    }
-
-    if (classId) {
-      return {
-        level: 3,
-        department_id: deptId,
-        subdepartment_id: subDeptId,
-        class_id: classId,
-        subclass_id: null
-      };
-    }
-
-    // Handle Dept/Subdept levels if needed, though UI seems to block at Class level
+    if (subclassId) return { level: 4, department_id: deptId, subdepartment_id: subDeptId, class_id: classId, subclass_id: subclassId };
+    if (classId) return { level: 3, department_id: deptId, subdepartment_id: subDeptId, class_id: classId, subclass_id: null };
     return null;
   }, [selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
 
 
-  // --- Fetch Template Types based on Sidebar Selection ---
   useEffect(() => {
     const fetchLetterTypesForClass = async () => {
-      // We still use the constructedClassId for requirements as that table likely uses the string format
       if (!constructedClassId) {
         setLetterTypes([]);
         setSelectedLetter(null);
+        setSelectedBank(null);
         return;
       }
 
       setIsLoading(true);
-      setSelectedLetter(null);
-
       try {
         const { data: requirementsData, error: requirementsError } = await supabase
           .from('tm_class_requirements')
@@ -135,57 +129,69 @@ export default function LettersPage() {
           return;
         }
 
-        const documentIds = requirementsData.documents_and_fields.map(df => df.id.split('_')[0]);
+        const documentIds = requirementsData.documents_and_fields.map(df => df.id);
 
-        if (documentIds.length === 0) {
-          setLetterTypes([]);
-          return;
-        }
-
-        const { data: documentsData, error: documentsError } = await supabase
+        // First try with the main_category filter
+        let { data: documentsData, error: documentsError } = await supabase
           .from('acc_portal_kyc')
           .select('*')
           .in('id', documentIds)
           .or('main_category.eq.Letters,main_category.eq.Forms');
 
+        // If no documents found, try without the main_category filter
+        if (!documentsData || documentsData.length === 0) {
+          const { data: allDocs } = await supabase
+            .from('acc_portal_kyc')
+            .select('*')
+            .in('id', documentIds);
+
+          if (allDocs && allDocs.length > 0) {
+            documentsData = allDocs;
+          }
+        }
+
         if (documentsError) throw documentsError;
         setLetterTypes(documentsData || []);
       } catch (error) {
-        console.error("Error fetching letter types for class:", error);
+        console.error("Error fetching letter types:", error);
         setLetterTypes([]);
-        toast({ title: "Error", description: "Could not load associated letter types.", variant: "destructive" });
       } finally {
         setIsLoading(false);
       }
     };
-
     fetchLetterTypesForClass();
   }, [constructedClassId]);
 
+const handleLetterClick = (letter: any) => {
+    const hasBanks = letter.banks_applicable && letter.banks_applicable.length > 0;
+    
+    if (hasBanks) {
+      // If it has banks, just toggle expansion
+      setExpandedLetterIds(prev => ({
+        ...prev,
+        [letter.id]: !prev[letter.id]
+      }));
+    } else {
+      // If no banks, this is the final selectable item
+      setSelectedLetter(letter);
+      setSelectedBank(null);
+    }
+  };
 
-  // --- Event Handlers for Sidebar ---
+  const handleBankClick = (letter: any, bank: any) => {
+    setSelectedLetter(letter);
+    setSelectedBank(bank);
+  };
+
   const handleDeptClick = (deptId: string) => { setSelectedDepartment(deptId); setSelectedSubdepartment(''); setSelectedClass(''); setSelectedSubclass(''); };
   const handleSubdeptClick = (deptId: string, subdeptId: string) => { setSelectedDepartment(deptId); setSelectedSubdepartment(subdeptId); setSelectedClass(''); setSelectedSubclass(''); };
   const handleClassClick = (deptId: string, subdeptId: string, classId: string) => { setSelectedDepartment(deptId); setSelectedSubdepartment(subdeptId); setSelectedClass(classId); setSelectedSubclass(''); };
   const handleSubclassClick = (deptId: string, subdeptId: string, classId: string, subclassId: string) => { setSelectedDepartment(deptId); setSelectedSubdepartment(subdeptId); setSelectedClass(classId); setSelectedSubclass(subclassId); };
 
-  // --- Event Handlers for Content & Dialog ---
   const handleTemplateUpdate = () => setTemplateVersion(v => v + 1);
-
-  const handleCreateNewTemplate = () => {
-    setEditingTemplate(null);
-    setTemplateDialogOpen(true);
-  };
-
-  const handleEditTemplate = (template: any) => {
-    setEditingTemplate(template);
-    setTemplateDialogOpen(true);
-  };
-
-  const closeTemplateDialog = () => {
-    setTemplateDialogOpen(false);
-    setEditingTemplate(null);
-  };
+  const handleCreateNewTemplate = () => { setEditingTemplate(null); setTemplateDialogOpen(true); };
+  const handleEditTemplate = (template: any) => { setEditingTemplate(template); setTemplateDialogOpen(true); };
+  const closeTemplateDialog = () => { setTemplateDialogOpen(false); setEditingTemplate(null); };
 
   const breadcrumb = useMemo(() => {
     const d = departments.find(d => String(d.id) === selectedDepartment);
@@ -195,6 +201,13 @@ export default function LettersPage() {
     return [d, sd, c, sc].filter(Boolean).map(item => item.name).join(' > ');
   }, [departments, selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
 
+  const toggleLetterExpansion = (e: React.MouseEvent, letterId: string) => {
+    e.stopPropagation(); // Prevent selecting the letter when just toggling the chevron
+    setExpandedLetterIds(prev => ({
+      ...prev,
+      [letterId]: !prev[letterId]
+    }));
+  };
 
   return (
     <div className="flex h-[calc(100vh-theme(spacing.16))] bg-slate-50/50">
@@ -222,26 +235,101 @@ export default function LettersPage() {
           <div className="flex justify-center items-center h-2/3"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>
         ) : !selectedClass && !selectedSubclass ? (
           <Card className="mt-8">
-            <CardHeader><CardTitle>Select a Class</CardTitle><CardDescription>Choose a class or subclass from the sidebar to view its associated letter types.</CardDescription></CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Select a Class</CardTitle>
+                <CardDescription>Choose a class from the sidebar.</CardDescription>
+              </div>
+              {String(selectedDepartment) === "14" && (
+                <Button variant="outline" className="gap-2" onClick={() => setIsBankDialogOpen(true)}>
+                  <Building2 className="h-4 w-4" /> Add Bank Compatibility
+                </Button>
+              )}
+            </CardHeader>
             <CardContent className="text-center py-12"><FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" /></CardContent>
           </Card>
         ) : (
           <div className="grid grid-cols-12 gap-6 h-[calc(100%-80px)]">
             <Card className="col-span-4 h-full flex flex-col">
-              <CardHeader><CardTitle>Template Types</CardTitle><CardDescription>Templates required for this class.</CardDescription></CardHeader>
-              <CardContent className="flex-1 overflow-hidden p-2">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                <div>
+                  <CardTitle>Template Types</CardTitle>
+                  <CardDescription>Required templates.</CardDescription>
+                </div>
+                {String(selectedDepartment) === "14" && (
+                  <Button variant="outline" size="sm" className="h-8 gap-1" onClick={() => setIsBankDialogOpen(true)}>
+                    <Building2 className="h-4 w-4" /> Add Bank
+                  </Button>
+                )}
+              </CardHeader>
+              
+            <CardContent className="flex-1 overflow-hidden p-2">
                 <ScrollArea className="h-full">
                   {isLoading ? (
                     <div className="flex justify-center items-center h-full"><Loader2 className="h-6 w-6 animate-spin" /></div>
                   ) : letterTypes.length > 0 ? (
-                    letterTypes.map(letter => (
-                      <Button key={letter.id} variant={selectedLetter?.id === letter.id ? 'secondary' : 'ghost'} className="w-full justify-between h-auto py-2 px-3 mb-1" onClick={() => setSelectedLetter(letter)}>
-                        <span className="text-left font-medium">{letter.display_name}</span>
-                        <ChevronRight className="h-4 w-4" />
-                      </Button>
-                    ))
+                    <div className="space-y-1">
+                      {letterTypes.map(letter => {
+                        const hasBanks = letter.banks_applicable && letter.banks_applicable.length > 0;
+                        const isExpanded = expandedLetterIds[letter.id];
+                        // Active if selected and NO bank is involved
+                        const isDocActive = selectedLetter?.id === letter.id && !selectedBank;
+
+                        return (
+                          <div key={letter.id} className="flex flex-col">
+                            <div 
+                              className={cn(
+                                "flex items-center w-full rounded-md transition-colors hover:bg-accent group",
+                                isDocActive ? "bg-secondary text-secondary-foreground" : "transparent"
+                              )}
+                            >
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className={cn("h-8 w-8 shrink-0", !hasBanks && "opacity-0 pointer-events-none")}
+                                onClick={(e) => hasBanks && toggleLetterExpansion(e, letter.id)}
+                              >
+                                {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                              </Button>
+
+                              <button
+                                className="flex-1 py-2 pr-3 text-left text-sm font-medium outline-none"
+                                onClick={() => handleLetterClick(letter)}
+                              >
+                                {letter.display_name}
+                              </button>
+                            </div>
+
+                            {/* Expanded Bank List */}
+                            {isExpanded && hasBanks && (
+                              <div className="ml-4 mt-1 mb-2 space-y-1 border-l-2 border-muted pl-4">
+                                {letter.banks_applicable.map(bank => {
+                                  const isBankActive = selectedBank?.bank_id === bank.bank_id;
+                                  return (
+                                    <button
+                                      key={bank.bank_id}
+                                      onClick={() => handleBankClick(letter, bank)}
+                                      className={cn(
+                                        "flex items-center gap-2 w-full text-left px-2 py-1.5 rounded-sm text-xs transition-colors",
+                                        isBankActive 
+                                          ? "bg-primary/10 text-primary font-semibold" 
+                                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                                      )}
+                                    >
+                                      <Building2 className="h-3.5 w-3.5" />
+                                      <span>{bank.bank_name}</span>
+                                      {isBankActive && <Check className="ml-auto h-3 w-3" />}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   ) : (
-                    <div className="text-center py-10 text-sm text-muted-foreground">No template types found for the selected class.</div>
+                    <div className="text-center py-10 text-sm text-muted-foreground">No template types found.</div>
                   )}
                 </ScrollArea>
               </CardContent>
@@ -249,20 +337,21 @@ export default function LettersPage() {
 
             <div className="col-span-8 h-full">
               {selectedLetter ? (
-                <TemplateDisplayArea
-                  key={`${selectedLetter.id}-${templateVersion}`}
+                 <TemplateDisplayArea
+                  key={`${selectedLetter.id}-${selectedBank?.bank_id || 'none'}-${templateVersion}`}
                   selectedLetter={selectedLetter}
-                  // --- MODIFICATION: Pass the job_level object for fetching ---
+                  selectedBank={selectedBank} 
                   jobLevel={jobLevelObject}
                   onCreateNew={() => handleCreateNewTemplate()}
                   onEdit={handleEditTemplate}
                   templateVersion={templateVersion}
                 />
               ) : (
-                <Card className="h-full flex items-center justify-center">
+                <Card className="h-full flex items-center justify-center text-muted-foreground">
                   <div className="text-center">
-                    <h3 className="text-lg font-medium">Select a Template Type</h3>
-                    <p className="text-sm text-muted-foreground mt-1">Choose a template type from the left panel to see its templates.</p>
+                    <FileText className="h-10 w-10 mx-auto mb-2 opacity-20" />
+                    <h3 className="text-lg font-medium">Select a Document or Bank</h3>
+                    <p className="text-sm">Choose an item from the sidebar to view templates.</p>
                   </div>
                 </Card>
               )}
@@ -270,23 +359,187 @@ export default function LettersPage() {
           </div>
         )}
       </main>
-
       {selectedLetter && (
         <DocumentTemplateManager
           document={selectedLetter}
           isOpen={templateDialogOpen}
           onClose={closeTemplateDialog}
           onTemplateUpdate={handleTemplateUpdate}
-          // --- MODIFICATION: Pass the job_level object ---
           jobLevel={jobLevelObject}
+          selectedBank={selectedBank} 
           initialTemplates={editingTemplate ? [editingTemplate] : []}
         />
       )}
+
+      <BankAssociationDialog
+        isOpen={isBankDialogOpen}
+        onClose={() => setIsBankDialogOpen(false)}
+        letterTypes={letterTypes}
+      />
     </div>
   );
 }
 
-// ... TemplateCard component remains the same ...
+/**
+ * UPDATED COMPONENT: BankAssociationDialog
+ * Stores data in acc_portal_kyc.banks_applicable JSON column
+ */
+function BankAssociationDialog({ isOpen, onClose, letterTypes }) {
+  const [banks, setBanks] = useState<any[]>([]);
+  const [mappings, setMappings] = useState<Record<string, any[]>>({});
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) fetchData();
+  }, [isOpen, letterTypes]);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const { data: banksData } = await supabase.from('banks').select('id, bank_name').order('bank_name');
+      setBanks(banksData || []);
+
+      const mappingObj: Record<string, any[]> = {};
+      letterTypes.forEach(doc => {
+        mappingObj[doc.id] = Array.isArray(doc.banks_applicable) ? doc.banks_applicable : [];
+      });
+      setMappings(mappingObj);
+    } catch (error) {
+      console.error("Error fetching data:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSelect = (docId: string, bank: any) => {
+    setMappings(prev => {
+      const current = prev[docId] || [];
+      const isSelected = current.some(b => b.bank_id === bank.id);
+
+      const updated = isSelected
+        ? current.filter(b => b.bank_id !== bank.id)
+        : [...current, { bank_id: bank.id, bank_name: bank.bank_name }];
+
+      return { ...prev, [docId]: updated };
+    });
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const updatePromises = Object.entries(mappings).map(([docId, selectedBanks]) => {
+        return supabase
+          .from('acc_portal_kyc')
+          .update({ banks_applicable: selectedBanks })
+          .eq('id', docId)
+          .select('*')
+          .single();
+      });
+
+      const results = await Promise.all(updatePromises);
+      const updatedDocuments = results.map(result => result.data).filter(Boolean);
+
+      // Update the local state with the updated documents
+      setLetterTypes(prev =>
+        prev.map(doc => {
+          const updatedDoc = updatedDocuments.find(d => d.id === doc.id);
+          return updatedDoc || doc;
+        })
+      );
+
+      toast({ title: "Success", description: "Bank applicability updated." });
+      onClose();
+    } catch (error) {
+      console.error(error);
+      toast({ title: "Error", description: "Failed to save data.", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle>Bank Compatibility Settings</DialogTitle>
+          <DialogDescription>Select applicable banks for each document type.</DialogDescription>
+        </DialogHeader>
+
+        <div className="flex-1 overflow-hidden py-4">
+          {loading ? (
+            <div className="flex items-center justify-center h-40"><Loader2 className="animate-spin" /></div>
+          ) : (
+            <ScrollArea className="h-full pr-4">
+              <div className="space-y-4">
+                {letterTypes.map(doc => (
+                  <div key={doc.id} className="flex flex-col gap-2 p-3 border rounded-md">
+                    <label className="text-sm font-semibold flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-muted-foreground" /> {doc.display_name}
+                    </label>
+
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" role="combobox" className="justify-between w-full h-auto min-h-10 text-left font-normal">
+                          <div className="flex flex-wrap gap-1">
+                            {mappings[doc.id]?.length > 0 ? (
+                              mappings[doc.id].map(b => (
+                                <Badge key={b.bank_id} variant="secondary" className="mr-1">
+                                  {b.bank_name}
+                                </Badge>
+                              ))
+                            ) : (
+                              <span className="text-muted-foreground">Select banks...</span>
+                            )}
+                          </div>
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[400px] p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder="Search bank..." />
+                          <CommandList>
+                            <CommandEmpty>No bank found.</CommandEmpty>
+                            <CommandGroup>
+                              {banks.map((bank) => (
+                                <CommandItem
+                                  key={bank.id}
+                                  onSelect={() => handleSelect(doc.id, bank)}
+                                >
+                                  <div className={cn(
+                                    "mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary",
+                                    mappings[doc.id]?.some(b => b.bank_id === bank.id)
+                                      ? "bg-primary text-primary-foreground"
+                                      : "opacity-50 [&_svg]:invisible"
+                                  )}>
+                                    <Check className={cn("h-4 w-4")} />
+                                  </div>
+                                  {bank.bank_name}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleSave} disabled={saving}>
+            {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Save Compatibility
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 function TemplateCard({ template, onEdit, onDelete }) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -375,64 +628,63 @@ function TemplateCard({ template, onEdit, onDelete }) {
   );
 }
 
-function TemplateDisplayArea({ selectedLetter, onCreateNew, onEdit, templateVersion, jobLevel }) {
+function TemplateDisplayArea({ selectedLetter, selectedBank, onCreateNew, onEdit, templateVersion, jobLevel }) {
   const [allTemplates, setAllTemplates] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // 1. Fetch ALL templates for this document (Ignore job_level filtering here)
-  useEffect(() => {
-    const fetchTemplates = async () => {
-      if (!selectedLetter) return;
-      setIsLoading(true);
-      try {
-        // Query strictly by document_id to avoid JSON syntax errors
-        const { data, error } = await supabase
-          .from('acc_portal_templates')
-          .select('*')
-          .eq('document_id', selectedLetter.id)
-          .order('file_name', { ascending: true });
+// Inside TemplateDisplayArea component in LettersPage.tsx
 
-        if (error) throw error;
-        setAllTemplates(data || []);
-      } catch (error) {
-        console.error(`Error fetching templates:`, error);
-        toast({
-          title: "Error Loading Templates",
-          description: "Could not fetch templates.",
-          variant: "destructive"
-        });
-      } finally {
-        setIsLoading(false);
+useEffect(() => {
+  const fetchTemplates = async () => {
+    if (!selectedLetter) return;
+    setIsLoading(true);
+    try {
+      let query = supabase
+        .from('acc_portal_templates')
+        .select('*')
+        .eq('document_id', selectedLetter.id);
+
+      if (selectedBank) {
+        // We use .filter with 'cs' (contains) and manually stringify the JSON.
+        // This ensures Supabase sends a JSON string "[...]" instead of an Array string "{...}"
+        const jsonFilter = JSON.stringify([{ bank_id: selectedBank.bank_id }]);
+        query = query.filter('banks_associated', 'cs', jsonFilter);
+      } else {
+        // Fetch generic templates (where column is null or an empty JSON array)
+        // Note: For JSONB, .eq.'[]' is the correct way to check for an empty array
+        query = query.or('banks_associated.is.null,banks_associated.eq.[]');
       }
-    };
-    fetchTemplates();
-  }, [selectedLetter, templateVersion]); // Removed jobLevel dependency here
 
-  // 2. Filter Client-Side (Robust against Array vs Object storage)
+      const { data, error } = await query.order('file_name', { ascending: true });
+
+      if (error) throw error;
+      setAllTemplates(data || []);
+    } catch (error) {
+      console.error(`Error fetching templates:`, error);
+      toast({ title: "Error", description: "Could not fetch templates.", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  fetchTemplates();
+}, [selectedLetter, selectedBank, templateVersion]);
+
   const filteredTemplates = useMemo(() => {
     if (!jobLevel) return allTemplates;
 
     return allTemplates.filter(t => {
       let tJobs = t.job_level;
-
-      // Handle cases where it might be a JSON string (due to DB column type)
       if (typeof tJobs === 'string') {
         try { tJobs = JSON.parse(tJobs); } catch { return false; }
       }
-
-      // Ensure we are comparing against an Array
       if (!Array.isArray(tJobs)) {
-        // If stored as a single object, wrap it
         tJobs = tJobs ? [tJobs] : [];
       }
-
-      // Check if ANY job_level in the template's array matches the selected jobLevel
       return tJobs.some((job: any) =>
         job.level === jobLevel.level &&
         job.department_id === jobLevel.department_id &&
         job.subdepartment_id === jobLevel.subdepartment_id &&
         job.class_id === jobLevel.class_id &&
-        // Handle potential nulls in subclass_id comparison
         (job.subclass_id === jobLevel.subclass_id || (!job.subclass_id && !jobLevel.subclass_id))
       );
     });
@@ -466,11 +718,23 @@ function TemplateDisplayArea({ selectedLetter, onCreateNew, onEdit, templateVers
   }, [filteredTemplates]);
 
   return (
-    <Card className="h-full flex flex-col">
+     <Card className="h-full flex flex-col">
       <CardHeader className="flex-row items-center justify-between">
         <div>
-          <CardTitle>{selectedLetter.display_name}</CardTitle>
-          <CardDescription>Available templates for this template type.</CardDescription>
+          <CardTitle className="flex items-center gap-2">
+            {selectedLetter.display_name}
+            {selectedBank && (
+              <>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                <span className="text-primary">{selectedBank.bank_name}</span>
+              </>
+            )}
+          </CardTitle>
+          <CardDescription>
+            {selectedBank 
+              ? `Templates specific to ${selectedBank.bank_name}` 
+              : "Generic templates for this document type."}
+          </CardDescription>
         </div>
         <Button onClick={onCreateNew}>
           <PlusCircle className="mr-2 h-4 w-4" /> Create New

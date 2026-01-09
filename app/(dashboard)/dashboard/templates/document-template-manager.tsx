@@ -64,6 +64,7 @@ interface DocumentTemplateManagerProps {
     subclass_id?: number | null;
   } | null;
   className?: string; // Add className to props
+  selectedBank?: { bank_id: string; bank_name: string } | null; 
 }
 
 const PLACEHOLDER_TYPES = [
@@ -266,6 +267,7 @@ export default function DocumentTemplateManager({
   initialTemplates = [],
   onTemplateUpdate,
   jobLevel = null,
+  selectedBank = null,
   className = ''
 }: DocumentTemplateManagerProps) {
   const containerClassName = `document-template-manager ${sanitizeClassName(className)}`.trim();
@@ -1328,8 +1330,7 @@ export default function DocumentTemplateManager({
           placeholders: template.placeholders || [],
           updated_at: new Date().toISOString(),
           created_by: user?.id,
-          // Replace class_id with job_level. Using an array to support multiple contexts if needed,
-          // matching the pattern of the legacy class_id array.
+          banks_associated: selectedBank ? [selectedBank] : [] ,
           job_level: jobLevel ? [jobLevel] : [],
           entity_types: template.entity_types || [],
         };

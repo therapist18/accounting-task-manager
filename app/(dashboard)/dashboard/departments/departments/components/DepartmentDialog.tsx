@@ -27,19 +27,20 @@ const SPECIFICATION_OPTIONS = [
     { id: "Employees", label: "Employees" },
 ];
 
-const MultiSelectSpec = ({ value = [], onChange }: { value: string[], onChange: (val: string[]) => void }) => {
+const MultiSelectSpec = ({ value, onChange }: { value?: string[] | null, onChange: (val: string[]) => void }) => {
+    const safeValue = Array.isArray(value) ? value : [];
     const [open, setOpen] = useState(false);
 
     const toggleOption = (id: string) => {
-        const newValue = value.includes(id) 
-            ? value.filter(v => v !== id) 
-            : [...value, id];
+        const newValue = safeValue.includes(id) 
+            ? safeValue.filter(v => v !== id) 
+            : [...safeValue, id];
         onChange(newValue);
     };
 
     const removeOption = (e: React.MouseEvent, id: string) => {
         e.stopPropagation();
-        onChange(value.filter(v => v !== id));
+        onChange(safeValue.filter(v => v !== id));
     };
 
     return (
@@ -54,10 +55,10 @@ const MultiSelectSpec = ({ value = [], onChange }: { value: string[], onChange: 
                         className="w-full justify-between min-h-[40px] h-auto bg-white/50 hover:bg-white"
                     >
                         <div className="flex flex-wrap gap-1 items-center overflow-hidden">
-                            {value.length > 0 ? (
-                                value.map((val) => (
+                            {safeValue.length > 0 ? (
+                                safeValue.map((val, index) => (
                                     <Badge 
-                                        key={val} 
+                                        key={`${val}-${index}`} 
                                         variant="secondary" 
                                         className="mr-1 bg-blue-50 text-blue-700 border-blue-200"
                                     >
@@ -90,7 +91,7 @@ const MultiSelectSpec = ({ value = [], onChange }: { value: string[], onChange: 
                                     >
                                         <div className={cn(
                                             "mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary",
-                                            value.includes(opt.id)
+                                            safeValue.includes(opt.id)
                                                 ? "bg-primary text-primary-foreground"
                                                 : "opacity-50 [&_svg]:invisible"
                                         )}>
@@ -101,7 +102,7 @@ const MultiSelectSpec = ({ value = [], onChange }: { value: string[], onChange: 
                                 ))}
                             </CommandGroup>
                         </CommandList>
-                        {value.length > 0 && (
+                        {safeValue.length > 0 && (
                             <div className="border-t p-1">
                                 <Button 
                                     variant="ghost" 

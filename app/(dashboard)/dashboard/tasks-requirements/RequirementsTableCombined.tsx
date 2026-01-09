@@ -305,14 +305,50 @@ useEffect(() => {
   fetchMasterFields();
 }, []);
 
-const fetchDocumentTemplates = async (documentId: string) => {
+const fetchDocumentTemplates = async (documentId: string, task: any) => {
   try {
-    const { data: templates, error } = await supabase
+    console.log('=== fetchDocumentTemplates Debug ===');
+    console.log('Task participants details:', JSON.stringify(task.participants_details, null, 2));
+    
+    // Get bank ID from task's participants_details
+    const bankParticipant = task.participants_details?.find((p: any) => p.type === 'bank');
+    const bankId = bankParticipant?.id;
+    
+    console.log('Found bank participant:', bankParticipant);
+    console.log('Using bankId:', bankId);
+
+    let query = supabase
       .from('acc_portal_templates')
       .select('*')
       .eq('document_id', documentId)
       .order('file_name', { ascending: true });
-    if (error) throw error;
+
+    // If bank ID is found, filter templates by bank_id
+   // If bank ID is found, filter templates by bank_id
+if (bankId) {
+  console.log(`Filtering templates for bank ID: ${bankId}`);
+  // Use raw SQL filter for JSONB array containment
+  query = query.filter('banks_associated', 'cs', `[{"bank_id":${bankId},"bank_name":"${bankParticipant.name}"}]`);
+} else {
+  console.log('No bank ID found, fetching all templates for document');
+}
+
+    console.log('Executing query with params:', {
+      document_id: documentId,
+      banks_associated: bankId ? `cs.[{"bank_id":"${bankId}"}]` : 'not filtered'
+    });
+
+    const { data: templates, error } = await query;
+    
+    if (error) {
+      console.error('Error fetching templates:', error);
+      throw error;
+    }
+    
+    console.log(`Found ${templates?.length || 0} templates`);
+    console.log('Templates sample:', templates?.slice(0, 2)); // Log first 2 templates to avoid cluttering
+    console.log('=== End of Debug ===');
+    
     return templates || [];
   } catch (error) {
     console.error('Error fetching document templates:', error);
@@ -364,7 +400,7 @@ const entityIdMap = {
 
 console.log("✅ Step 1: Entity ID Map created", entityIdMap);
 
-    const templates = await fetchDocumentTemplates(docItem.document.id);
+    const templates = await fetchDocumentTemplates(docItem.document.id, task);
     console.log(`✅ Step 2: Found ${templates.length} available templates.`);
     if (!templates || templates.length === 0) {
       console.log('❌ No templates found, showing toast...');
@@ -923,7 +959,7 @@ const renderDocumentSection = (documents: any[], sectionName: string) => {
                     >
                       {renderDocumentStatus(col.task, docItem.document, col.type, col.id)}
                     </div>
-                  ) : (sectionName === 'letters' || docItem.document?.category === 'letters') ? (
+                  ) : (sectionName === 'templates' || sectionName === 'letters' || docItem.document?.category === 'letters') ? (
                     <Button
                       variant="ghost"
                       size="sm"
@@ -1179,14 +1215,14 @@ return (
                 </TableRow>
                 {expandedSections.individual && renderDocumentSection(organizedRequirements.documents.individual, 'individual')}
 
-                <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('letters')}>
+                <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('templates')}>
                   <TableCell colSpan={totalColumns} className="py-2 px-4 font-bold text-slate-700 border-t-2 border-white uppercase text-xs tracking-wider">
                     <div className="flex items-center gap-2">
-                      {expandedSections.letters ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />} Letters & Forms
+                      {expandedSections.templates ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />} Templates
                     </div>
                   </TableCell>
                 </TableRow>
-                {expandedSections.letters && renderDocumentSection(organizedRequirements.documents.letters, 'letters')}
+                {expandedSections.templates && renderDocumentSection(organizedRequirements.documents.templates, 'templates')}
               </>
             )}
           </TableBody>

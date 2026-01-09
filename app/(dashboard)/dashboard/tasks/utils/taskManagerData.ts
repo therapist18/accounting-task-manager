@@ -117,6 +117,7 @@ const transformKycFields = (fields: any[]): any[] => {
   /**
    * Fetch tasks with related data
    */
+// Update the fetchTasks function
 export const fetchTasks = async (departmentId?: string, subdepartmentId?: string): Promise<Task[]> => {
   try {
     let query = supabase
@@ -132,11 +133,13 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
       .order('created_at', { ascending: false });
 
     if (departmentId) {
-      query = query.eq('department_id', departmentId);
+      // Filter using job_level->>department_id
+      query = query.eq('job_level->>department_id', departmentId);
     }
 
     if (subdepartmentId) {
-      query = query.eq('subdepartment_id', subdepartmentId);
+      // Filter using job_level->>subdepartment_id
+      query = query.eq('job_level->>subdepartment_id', subdepartmentId);
     }
 
     const { data, error } = await query;
@@ -145,24 +148,29 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
 
     // Process the data to ensure consistent structure
     const processedTasks = (data || []).map(task => {
+      const jobLevel = task.job_level || {};
       const processedTask: Task = {
         ...task,
+        // Map job_level properties to top-level for backward compatibility
+        department_id: jobLevel.department_id || task.department_id,
+        subdepartment_id: jobLevel.subdepartment_id || task.subdepartment_id,
+        class_id: jobLevel.class_id || task.class_id,
+        subclass_id: jobLevel.subclass_id || task.subclass_id,
         // Ensure job_level has the correct structure
-        job_level: task.job_level ? {
-          level: task.job_level.level || 0,
-          class_id: task.job_level.class_id || '',
-          subclass_id: task.job_level.subclass_id || null,
-          department_id: task.job_level.department_id || task.department_id,
-          subdepartment_id: task.job_level.subdepartment_id || task.subdepartment_id
-        } : undefined,
-        // Ensure officer data is properly structured
+        job_level: {
+          level: jobLevel.level || 0,
+          class_id: jobLevel.class_id || '',
+          subclass_id: jobLevel.subclass_id || null,
+          department_id: jobLevel.department_id || task.department_id,
+          subdepartment_id: jobLevel.subdepartment_id || task.subdepartment_id
+        },
+        // Rest of the processing remains the same
         officer: task.officer || (task.officer_id ? {
           id: task.officer_id,
           name: task.officer_name || '',
           email: '',
           phone: ''
         } : undefined),
-        // Ensure task_manager data is properly structured
         task_manager: task.task_manager || (task.task_manager_id ? {
           id: task.task_manager_id,
           name: task.task_manager_name || '',

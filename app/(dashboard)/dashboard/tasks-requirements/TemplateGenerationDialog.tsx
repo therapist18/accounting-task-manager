@@ -60,23 +60,23 @@ const formatDate = (date, formatStr) => {
 const base64Parser = async (dataURL) => {
     try {
         if (!dataURL) return null;
-        
+
         // If it's already a base64 data URL, process it
         if (typeof dataURL === 'string' && dataURL.startsWith('data:')) {
             const matches = dataURL.match(/^data:(image\/[^;]+);base64,(.*)$/);
             if (!matches) return null;
-            
+
             const mimeType = matches[1];
             const base64 = matches[2];
             const binaryStr = atob(base64);
             const len = binaryStr.length;
             const bytes = new Uint8Array(len);
-            for (let i = 0; i < len; i++) { 
-                bytes[i] = binaryStr.charCodeAt(i); 
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryStr.charCodeAt(i);
             }
             return bytes.buffer;
         }
-        
+
         // If it's a URL, fetch and convert to base64
         if (typeof dataURL === 'string' && (dataURL.startsWith('http') || dataURL.startsWith('blob:'))) {
             const response = await fetch(dataURL);
@@ -89,7 +89,7 @@ const base64Parser = async (dataURL) => {
                 reader.readAsArrayBuffer(blob);
             });
         }
-        
+
         return null;
     } catch (error) {
         console.error('Error in base64Parser:', error);
@@ -161,29 +161,12 @@ const parseJsonValue = (data, path) => {
 
 const normalizeString = (str) => !str ? '' : str.toLowerCase().replace(/[_\s-]/g, '');
 
-const findPrimaryDirector = (sourceDataCache) => {
-    const potentialPaths = ['directors_details', 'director_details', 'directors'];
-
-    for (const key of Object.keys(sourceDataCache)) {
-        const tableData = sourceDataCache[key];
-        if (!tableData) continue;
-
-        const records = Array.isArray(tableData) ? tableData : Object.values(tableData);
-
-        for (const record of records) {
-            if (record.is_primary === true || record.is_primary === 'true') {
-                return record;
-            }
-
-            for (const path of potentialPaths) {
-                if (record[path] && Array.isArray(record[path])) {
-                    const primary = record[path].find(d => d.is_primary === true || d.is_primary === 'true');
-                    if (primary) return primary;
-                }
-            }
-        }
-    }
-    return null;
+const findPrimaryDirector = (relationshipData) => {
+    if (!relationshipData?.directors?.length) return null;
+    const directors = Array.isArray(relationshipData.directors)
+        ? relationshipData.directors
+        : [relationshipData.directors];
+    return directors.find(d => d.is_primary) || directors[0];
 };
 
 const resolveConditionalValue = (conditions, targetEntity, combinedCache, masterFields) => {
@@ -241,8 +224,8 @@ const resolveArrayData = (blockPlaceholder, allPlaceholders, combinedCache, mast
         masterFieldIds: blockPlaceholder.master_field_ids || []
     });
 
-    const entityType = Array.isArray(blockPlaceholder.entity_type) 
-        ? blockPlaceholder.entity_type[0] 
+    const entityType = Array.isArray(blockPlaceholder.entity_type)
+        ? blockPlaceholder.entity_type[0]
         : (blockPlaceholder.entity_type || 'director');
     const blockName = blockPlaceholder.name;
     const isPrimaryOnly = blockPlaceholder.director_type === 'primary';
@@ -261,11 +244,18 @@ const resolveArrayData = (blockPlaceholder, allPlaceholders, combinedCache, mast
         && p.id !== blockPlaceholder.id
         && !p.is_block_start
     );
+    
+    // Log field types for debugging
     console.log(`👶 Child Fields (${childFields.length}):`, childFields.map(f => ({
         name: f.name,
-        type: f.type,
+        type: f.type || 'text', // Default to 'text' if type is not specified
+        isArray: f.is_array || false,
+        entityType: f.entity_type,
         master_field_ids: f.master_field_ids || []
     })));
+    
+    // Log the block's type information
+    console.log(`📌 Block '${blockName}' has entityType: '${entityType}', type: '${blockPlaceholder.type || 'block'}'`);
 
     // --- Handle Horizontal/Digit-splitting blocks ---
     const isDigitSplitting = isHorizontal || (
@@ -301,15 +291,15 @@ const resolveArrayData = (blockPlaceholder, allPlaceholders, combinedCache, mast
                         continue;
                     }
 
-                    const record = Object.values(tableData).find(r => 
+                    const record = Object.values(tableData).find(r =>
                         String(r[source.linking_variable || 'id']) === String(targetEntity.id)
                     );
 
                     if (record) {
-                        let value = source.path 
-                            ? parseJsonValue(record, source.path) 
+                        let value = source.path
+                            ? parseJsonValue(record, source.path)
                             : record[mf.field_key];
-                        
+
                         console.log('📊 Found Source Data:', {
                             table: source.table,
                             path: source.path,
@@ -332,18 +322,25 @@ const resolveArrayData = (blockPlaceholder, allPlaceholders, combinedCache, mast
         }
     }
 
-    // --- Handle regular array blocks ---
-    if (blockName === 'directors' || blockName === 'contacts') {
-        sourceArray = (relationshipData?.directors || [])
-            .filter(d => !isPrimaryOnly || d.is_primary === true || d.is_primary === 'true');
-        console.log(`👥 ${sourceArray.length} ${isPrimaryOnly ? 'Primary ' : ''}Directors Found`);
-    } 
+    // --- Handle Director/Dependant Blocks ---
+    if (entityType === 'director' || entityType === 'dependant') {
+        // Only use the entityType to determine the data source
+        sourceArray = relationshipData[`${entityType}s`] || [];
+        console.log(`🔍 Using ${entityType}s from relationship data:`, sourceArray);
+
+        if (isPrimaryOnly && sourceArray.length > 0) {
+            const primary = sourceArray.find(d => d.is_primary) || sourceArray[0];
+            sourceArray = primary ? [primary] : [];
+        }
+
+        console.log(`👥 Found ${sourceArray.length} ${entityType}(s)`, sourceArray);
+    }
     else if (['dependant', 'dependent'].includes(entityType?.toLowerCase()) && relationshipData?.dependants) {
         if (blockPlaceholder.dependant_relationship) {
             const targets = Array.isArray(blockPlaceholder.dependant_relationship)
                 ? blockPlaceholder.dependant_relationship.map(r => r.toLowerCase())
                 : [blockPlaceholder.dependant_relationship.toLowerCase()];
-            sourceArray = relationshipData.dependants.filter(d => 
+            sourceArray = relationshipData.dependants.filter(d =>
                 targets.includes(d.relationship?.toLowerCase())
             );
             console.log(`👨‍👩‍👧‍👦 Filtered ${sourceArray.length} Dependants by Relationship:`, targets);
@@ -365,98 +362,103 @@ const resolveArrayData = (blockPlaceholder, allPlaceholders, combinedCache, mast
     }
 
     console.log(`🔄 Processing ${sourceArray.length} items for block: ${blockName}`);
-    
+
     // Map each entity to row data
     const result = sourceArray.map((item, index) => {
         console.group(`📝 Item ${index + 1}/${sourceArray.length}: ${item.name || item.full_name || `ID: ${item.id}`}`);
+        console.log(`🔤 Item type: ${typeof item}`, item);
         const rowData = {};
-        
+
         childFields.forEach(field => {
             console.group(`🔍 Field: ${field.name}`);
             let val = '';
-            
+
             if (field.type === 'conditional') {
                 console.log('🔄 Resolving conditional field with conditions:', field.conditions);
                 const res = resolveConditionalValue(field.conditions, item, combinedCache, masterFields);
                 val = res ? res.value : '';
                 console.log(`✅ Resolved value:`, { value: val, source: res?.source || 'No match' });
-            } 
+            }
             else if (field.name.toLowerCase().includes('name')) {
                 val = item.full_name || item.name || '';
                 console.log(`👤 Resolved name field:`, { value: val, source: 'Direct from item' });
-            } 
+            }
             else if (field.master_field_ids?.length > 0) {
                 console.log('🔎 Checking master field references:', field.master_field_ids);
-                
-         for (const mId of field.master_field_ids) {
-    const mf = masterFields.get(parseInt(mId));
-    console.log(`  - Master Field ${mId}:`, {
-        label: mf?.label,
-        field_key: mf?.field_key,
-        sources: mf?.sources?.map(s => `${s.table}${s.path ? ` (${s.path})` : ''}`) || []
-    });
 
-    if (!mf?.sources) continue;
+                for (const mId of field.master_field_ids) {
+                    const mf = masterFields.get(parseInt(mId));
+                    console.log(`  - Master Field ${mId}:`, {
+                        label: mf?.label,
+                        field_key: mf?.field_key,
+                        sources: mf?.sources?.map(s => `${s.table}${s.path ? ` (${s.path})` : ''}`) || []
+                    });
 
-    for (const source of mf.sources) {
-        const table = combinedCache[source.table];
-        if (!table) {
-            console.log(`  ℹ️ No data in cache for table: ${source.table}`);
-            continue;
-        }
+                    if (!mf?.sources) continue;
 
-        const linkingVar = source.linking_variable || 'id';
-        const record = Object.values(table).find(r => {
-            const matchesLinkingVar = String(r[linkingVar] || r.id) === String(item.id);
-            
-            // If there's a document_id in the source, check that too
-            if (source.document_id) {
-                const docId = Array.isArray(source.document_id) ? source.document_id[0] : source.document_id;
-                return matchesLinkingVar && String(r.document_id || r.id) === String(docId);
-            }
-            
-            return matchesLinkingVar;
-        });
+                    for (const source of mf.sources) {
+                        const table = combinedCache[source.table];
+                        if (!table) {
+                            console.log(`  ℹ️ No data in cache for table: ${source.table}`);
+                            continue;
+                        }
 
-        if (record) {
-            let rawVal;
-            
-            // For image/document fields, check file_path
-            if (field.type === 'image' && record.file_path) {
-                rawVal = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${record.file_path}`;
-                console.log(`  📸 Found image file_path:`, { 
-                    file_path: record.file_path,
-                    fullUrl: rawVal
-                });
-            } else {
-                // Standard field lookup - try multiple fallbacks
-                rawVal = source.path 
-                    ? parseJsonValue(record, source.path) 
-                    : (record[mf.field_key] || record[field.name]);
-            }
-            
-            if (rawVal) {
-                val = rawVal;
-                console.log(`  ✅ Found value in ${source.table}:`, { 
-                    value: typeof val === 'string' && val.length > 100 ? `${val.substring(0, 50)}...` : val,
-                    path: source.path || 'N/A',
-                    fieldKey: mf.field_key,
-                    linkingVar,
-                    recordId: record.id || 'unknown'
-                });
-                break;
-            }
-        }
-    }
-    if (val) break;
-}
-                
+                        const linkingVar = source.linking_variable || 'id';
+                        const record = Object.values(table).find(r => {
+                            const matchesLinkingVar = String(r[linkingVar] || r.id) === String(item.id);
+
+                            // If there's a document_id in the source, check that too
+                            if (source.document_id) {
+                                const docId = Array.isArray(source.document_id) ? source.document_id[0] : source.document_id;
+                                return matchesLinkingVar && String(r.document_id || r.id) === String(docId);
+                            }
+
+                            return matchesLinkingVar;
+                        });
+
+                        if (record) {
+                            let rawVal;
+
+                            // For image/document fields, check file_path
+                            if (field.type === 'image' && record.file_path) {
+                                rawVal = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${record.file_path}`;
+                                console.log(`  📸 Found image file_path:`, {
+                                    file_path: record.file_path,
+                                    fullUrl: rawVal
+                                });
+                            } else {
+                                // Standard field lookup - try multiple fallbacks
+                                rawVal = source.path
+                                    ? parseJsonValue(record, source.path)
+                                    : (record[mf.field_key] || record[field.name]);
+                            }
+
+                            if (rawVal) {
+                                val = rawVal;
+                                console.log(`  ✅ Found value in ${source.table}:`, {
+                                    value: typeof val === 'string' && val.length > 100 ? `${val.substring(0, 50)}...` : val,
+                                    path: source.path || 'N/A',
+                                    fieldKey: mf.field_key,
+                                    linkingVar,
+                                    recordId: record.id || 'unknown'
+                                });
+                                break;
+                            }
+                        }
+                    }
+                    if (val) break;
+                }
+
                 if (!val) {
                     console.log('  ⚠️ No value found in any master field source');
                 }
             }
-            
+
             rowData[field.name] = val || '';
+            console.log(`   💾 Setting field '${field.name}' (type: ${field.type || 'text'}) to:`, 
+                field.type === 'image' ? '[Image Data]' : 
+                typeof val === 'string' && val.length > 50 ? val.substring(0, 50) + '...' : val
+            );
             console.groupEnd(); // Field group
             return val;
         });
@@ -470,9 +472,9 @@ const resolveArrayData = (blockPlaceholder, allPlaceholders, combinedCache, mast
         sampleItem: result[0] || 'No items'
     });
     console.groupEnd(); // Block group
-    
+
     return result;
-};  
+};
 
 const ImagePlaceholderControls = ({ styles, onStyleChange }) => {
     const sizeMap = { small: '25%', medium: '50%', large: '75%', 'full-width': '100%' };
@@ -766,9 +768,9 @@ export default function TemplateGenerationDialog({
     const getPlaceholderValue = useCallback((placeholder) => {
         const placeholderId = placeholder.id || 'unknown';
         const placeholderName = placeholder.name || 'unnamed';
-        
+
         console.group(`🔍 [${placeholderId}] Processing placeholder: ${placeholderName}`);
-        
+
         // Log detailed placeholder metadata
         const placeholderDetails = {
             id: placeholderId,
@@ -785,13 +787,13 @@ export default function TemplateGenerationDialog({
             created_at: placeholder.created_at || 'unknown',
             updated_at: placeholder.updated_at || 'never'
         };
-        
+
         console.log('📋 Placeholder Metadata:', JSON.stringify(placeholderDetails, null, 2));
-        
+
         // Log source data cache info
         console.log('💾 Source Data Cache Keys:', Object.keys(sourceDataCache || {}));
         console.log('✨ Additional Cache Keys:', Object.keys(additionalCache || {}));
-        
+
         // Log master fields info if available
         if (placeholder.master_field_ids?.length > 0) {
             console.log('🔑 Master Field References:', placeholder.master_field_ids.map(id => {
@@ -849,85 +851,85 @@ export default function TemplateGenerationDialog({
                 relationship: placeholder.dependant_relationship,
                 sourceLabel
             });
-       // Replace the director resolution section with this updated version
-} else if (pEntityType === 'director') {
-    console.log('🔍 Looking up director details in data sources...');
-    
-    // Try to find director in master fields first
-    if (ids.length > 0 && masterFields) {
-        for (const id of ids) {
-            const mf = masterFields.get(parseInt(id, 10));
-            if (mf?.sources) {
-                console.log(`🔹 Checking master field ${mf.id} (${mf.name}):`, {
-                    sources: mf.sources,
-                    placeholderName: placeholder.name
-                });
-                
-                for (const source of mf.sources) {
-                    const tableData = combinedCache[source.table];
-                    if (!tableData) {
-                        console.log(`   - No data in cache for table: ${source.table}`);
-                        continue;
-                    }
+            // Replace the director resolution section with this updated version
+        } else if (pEntityType === 'director') {
+            console.log('🔍 Looking up director details in data sources...');
 
-                    const records = Object.values(tableData);
-                    console.log(`   - Found ${records.length} records in ${source.table}`);
+            // Try to find director in master fields first
+            if (ids.length > 0 && masterFields) {
+                for (const id of ids) {
+                    const mf = masterFields.get(parseInt(id, 10));
+                    if (mf?.sources) {
+                        console.log(`🔹 Checking master field ${mf.id} (${mf.name}):`, {
+                            sources: mf.sources,
+                            placeholderName: placeholder.name
+                        });
 
-                    // Try to find the most relevant record
-                    let record = null;
-                    
-                    // If we have a specific director ID, use it
-                    if (relationshipData?.directors?.[0]?.id) {
-                        const directorId = String(relationshipData.directors[0].id);
-                        const linkingVar = source.linking_variable || 'id';
-                        record = records.find(r => 
-                            String(r[linkingVar] || r.id || r.individual_id || r.director_id) === directorId
-                        );
-                    }
-                    
-                    // If no specific ID or no match, try to find by name or other criteria
-                    if (!record && placeholder.name) {
-                        const nameField = source.path?.includes('first_name') ? 'first_name' : 
-                                        source.path?.includes('last_name') ? 'last_name' : 
+                        for (const source of mf.sources) {
+                            const tableData = combinedCache[source.table];
+                            if (!tableData) {
+                                console.log(`   - No data in cache for table: ${source.table}`);
+                                continue;
+                            }
+
+                            const records = Object.values(tableData);
+                            console.log(`   - Found ${records.length} records in ${source.table}`);
+
+                            // Try to find the most relevant record
+                            let record = null;
+
+                            // If we have a specific director ID, use it
+                            if (relationshipData?.directors?.[0]?.id) {
+                                const directorId = String(relationshipData.directors[0].id);
+                                const linkingVar = source.linking_variable || 'id';
+                                record = records.find(r =>
+                                    String(r[linkingVar] || r.id || r.individual_id || r.director_id) === directorId
+                                );
+                            }
+
+                            // If no specific ID or no match, try to find by name or other criteria
+                            if (!record && placeholder.name) {
+                                const nameField = source.path?.includes('first_name') ? 'first_name' :
+                                    source.path?.includes('last_name') ? 'last_name' :
                                         'name';
-                        
-                        record = records.find(r => {
-                            const recordName = String(r[source.path] || r[nameField] || '');
-                            return recordName && placeholder.name.toLowerCase().includes(recordName.toLowerCase());
-                        });
-                    }
 
-                    if (record) {
-                        const value = source.path ? parseJsonValue(record, source.path) : record[placeholder.name];
-                        console.log(`   ✅ Found value in ${source.table}:`, {
-                            recordId: record.id,
-                            sourcePath: source.path,
-                            value
-                        });
-                        
-                        if (value) {
-                            sourceLabel = `Data Source: ${source.table}${source.path ? '.' + source.path : ''}`;
-                            return { 
-                                value, 
-                                source: sourceLabel,
-                                rawRecord: record // Include raw record for debugging
-                            };
+                                record = records.find(r => {
+                                    const recordName = String(r[source.path] || r[nameField] || '');
+                                    return recordName && placeholder.name.toLowerCase().includes(recordName.toLowerCase());
+                                });
+                            }
+
+                            if (record) {
+                                const value = source.path ? parseJsonValue(record, source.path) : record[placeholder.name];
+                                console.log(`   ✅ Found value in ${source.table}:`, {
+                                    recordId: record.id,
+                                    sourcePath: source.path,
+                                    value
+                                });
+
+                                if (value) {
+                                    sourceLabel = `Data Source: ${source.table}${source.path ? '.' + source.path : ''}`;
+                                    return {
+                                        value,
+                                        source: sourceLabel,
+                                        rawRecord: record // Include raw record for debugging
+                                    };
+                                }
+                            } else {
+                                console.log(`   ❌ No matching record found in ${source.table}`);
+                            }
                         }
-                    } else {
-                        console.log(`   ❌ No matching record found in ${source.table}`);
                     }
                 }
             }
-        }
-    }
-    
-    // Fallback to relationship data if no match found in data sources
-    if (relationshipData?.directors?.length) {
-        console.log('ℹ️ Falling back to relationship data for director');
-        targetEntity = relationshipData.directors[0];
-        sourceLabel = "Director (Fallback)";
-    }
-} else if (pEntityType === 'company') {
+
+            // Fallback to relationship data if no match found in data sources
+            if (relationshipData?.directors?.length) {
+                console.log('ℹ️ Falling back to relationship data for director');
+                targetEntity = relationshipData.directors[0];
+                sourceLabel = "Director (Fallback)";
+            }
+        } else if (pEntityType === 'company') {
             targetEntity = relationshipData.company;
             sourceLabel = "Company";
         }
@@ -1124,7 +1126,7 @@ export default function TemplateGenerationDialog({
                 ...Object.keys(additionalCache || {})
             ])]
         });
-        
+
         // Log potential matches for debugging
         if (placeholder.master_field_ids?.length > 0) {
             const potentialValues = [];
@@ -1148,12 +1150,12 @@ export default function TemplateGenerationDialog({
                     });
                 }
             });
-            
+
             if (potentialValues.length > 0) {
                 console.log('🔍 Potential data sources found (but no direct match):', potentialValues);
             }
         }
-        
+
         console.groupEnd();
         return { value: '', source: 'Not Found' };
     }, [masterFields, entityIdMap, sourceDataCache, additionalCache, relationshipData]);
@@ -1411,23 +1413,23 @@ export default function TemplateGenerationDialog({
 
                     return `<div style="display:flex;align-items:center;margin:5px 0;">${cells}</div>`;
                 }
-             return rows.map(row => {
-    let rowHtml = innerTemplate;
-    block.children.forEach(child => {
-        let value = row?.[child.name] ?? '';
-        const childRegex = new RegExp(`\\{+\\s*${child.name}\\s*\\}+`, 'g');
+                return rows.map(row => {
+                    let rowHtml = innerTemplate;
+                    block.children.forEach(child => {
+                        let value = row?.[child.name] ?? '';
+                        const childRegex = new RegExp(`\\{+\\s*${child.name}\\s*\\}+`, 'g');
 
-        // ADD THIS CHECK:
-        if (child.type === 'image' && value && typeof value === 'string' && value.startsWith('http')) {
-            const style = styles[child.name] || {};
-            const imgWidth = style.imageWidth ? `${style.imageWidth}px` : "120px"; // Default size for table cells
-            value = `<img src="${value}" style="width:${imgWidth}; height:auto;" />`;
-        }
+                        // ADD THIS CHECK:
+                        if (child.type === 'image' && value && typeof value === 'string' && value.startsWith('http')) {
+                            const style = styles[child.name] || {};
+                            const imgWidth = style.imageWidth ? `${style.imageWidth}px` : "120px"; // Default size for table cells
+                            value = `<img src="${value}" style="width:${imgWidth}; height:auto;" />`;
+                        }
 
-        rowHtml = rowHtml.replace(childRegex, value);
-    });
-    return rowHtml;
-}).join('');
+                        rowHtml = rowHtml.replace(childRegex, value);
+                    });
+                    return rowHtml;
+                }).join('');
             });
         });
 
@@ -1551,170 +1553,170 @@ export default function TemplateGenerationDialog({
         return content;
     }, [selectedTemplate, groupedPlaceholders]);
 
-  const prepareRenderData = useCallback(async (data) => {
-    const renderData = {};
-    const imagePromises = [];
+    const prepareRenderData = useCallback(async (data) => {
+        const renderData = {};
+        const imagePromises = [];
 
-    // 1. Process Array Blocks and nested images
-    for (const blockName of Object.keys(groupedPlaceholders.blocks)) {
-        const block = groupedPlaceholders.blocks[blockName];
-        const rows = JSON.parse(JSON.stringify(data[blockName] || [])); // Deep clone to avoid mutating state
+        // 1. Process Array Blocks and nested images
+        for (const blockName of Object.keys(groupedPlaceholders.blocks)) {
+            const block = groupedPlaceholders.blocks[blockName];
+            const rows = JSON.parse(JSON.stringify(data[blockName] || [])); // Deep clone to avoid mutating state
 
-        for (const row of rows) {
-            for (const child of block.children) {
-                // If child is an image, convert its URL to Base64 for Docxtemplater
-                if (child.type === 'image' && row[child.name] && String(row[child.name]).startsWith('http')) {
-                    const promise = fetchImageAsBase64(row[child.name]).then(b64 => {
-                        row[child.name] = b64;
-                    });
-                    imagePromises.push(promise);
-                }
-            }
-        }
-        renderData[blockName] = rows;
-    }
-
-    if (!selectedTemplate) return renderData;
-
-    // 2. Process Top Level Placeholders
-    (selectedTemplate.placeholders || []).forEach(p => {
-        const val = data[p.name];
-        const baseKey = p.name.replace(/[%#{}]/g, '').trim();
-
-        // Skip children (handled above)
-        if (p.parent_name || p.is_block_start) return;
-
-        if (p.is_digit_split) {
-            const strVal = String(val || '');
-            const count = p.digit_count || 8;
-            for (let i = 1; i <= count; i++) {
-                renderData[`${baseKey.toLowerCase()}_${i}`] = strVal[i - 1] || "";
-                renderData[`${baseKey.toUpperCase()}_${i}`] = strVal[i - 1] || "";
-            }
-            renderData[baseKey] = strVal;
-        } else if (p.type === 'image' && val) {
-            if (typeof val === 'string' && val.startsWith('http')) {
-                imagePromises.push(fetchImageAsBase64(val).then(b64 => { 
-                    renderData[baseKey] = b64; 
-                }));
-            } else {
-                renderData[baseKey] = val;
-            }
-        } else {
-            renderData[baseKey] = val || "";
-        }
-    });
-
-    await Promise.all(imagePromises);
-    return renderData;
-}, [groupedPlaceholders, selectedTemplate]);
-
-  const updateWordPreview = useCallback(async (data, styles) => {
-    if (!docxTemplateBuffer.current) return;
-
-    try {
-        setIsPreviewLoading(true);
-        const zip = new PizZip(docxTemplateBuffer.current);
-        const renderData = await prepareRenderData(data);
-        
-        // Process all images first
-        const processedData = { ...renderData };
-        const imagePromises = Object.entries(renderData)
-            .filter(([_, value]) => value && typeof value === 'string' && 
-                   (value.startsWith('http') || value.startsWith('data:image')))
-            .map(async ([key, value]) => {
-                try {
-                    const buffer = await base64Parser(value);
-                    if (buffer) {
-                        processedData[key] = `data:image/png;base64,${Buffer.from(buffer).toString('base64')}`;
+            for (const row of rows) {
+                for (const child of block.children) {
+                    // If child is an image, convert its URL to Base64 for Docxtemplater
+                    if (child.type === 'image' && row[child.name] && String(row[child.name]).startsWith('http')) {
+                        const promise = fetchImageAsBase64(row[child.name]).then(b64 => {
+                            row[child.name] = b64;
+                        });
+                        imagePromises.push(promise);
                     }
-                } catch (err) {
-                    console.warn(`⚠️ Failed to process image for ${key}:`, err);
                 }
-            });
+            }
+            renderData[blockName] = rows;
+        }
+
+        if (!selectedTemplate) return renderData;
+
+        // 2. Process Top Level Placeholders
+        (selectedTemplate.placeholders || []).forEach(p => {
+            const val = data[p.name];
+            const baseKey = p.name.replace(/[%#{}]/g, '').trim();
+
+            // Skip children (handled above)
+            if (p.parent_name || p.is_block_start) return;
+
+            if (p.is_digit_split) {
+                const strVal = String(val || '');
+                const count = p.digit_count || 8;
+                for (let i = 1; i <= count; i++) {
+                    renderData[`${baseKey.toLowerCase()}_${i}`] = strVal[i - 1] || "";
+                    renderData[`${baseKey.toUpperCase()}_${i}`] = strVal[i - 1] || "";
+                }
+                renderData[baseKey] = strVal;
+            } else if (p.type === 'image' && val) {
+                if (typeof val === 'string' && val.startsWith('http')) {
+                    imagePromises.push(fetchImageAsBase64(val).then(b64 => {
+                        renderData[baseKey] = b64;
+                    }));
+                } else {
+                    renderData[baseKey] = val;
+                }
+            } else {
+                renderData[baseKey] = val || "";
+            }
+        });
 
         await Promise.all(imagePromises);
+        return renderData;
+    }, [groupedPlaceholders, selectedTemplate]);
 
-        const imageModule = new ImageModule({
-            centered: false,
-            getImage: (tag) => {
-                if (!tag) return null;
-                try {
-                    if (tag.startsWith('data:image')) {
-                        const base64Data = tag.split('base64,')[1];
-                        const binaryStr = atob(base64Data);
-                        const len = binaryStr.length;
-                        const bytes = new Uint8Array(len);
-                        for (let i = 0; i < len; i++) {
-                            bytes[i] = binaryStr.charCodeAt(i);
+    const updateWordPreview = useCallback(async (data, styles) => {
+        if (!docxTemplateBuffer.current) return;
+
+        try {
+            setIsPreviewLoading(true);
+            const zip = new PizZip(docxTemplateBuffer.current);
+            const renderData = await prepareRenderData(data);
+
+            // Process all images first
+            const processedData = { ...renderData };
+            const imagePromises = Object.entries(renderData)
+                .filter(([_, value]) => value && typeof value === 'string' &&
+                    (value.startsWith('http') || value.startsWith('data:image')))
+                .map(async ([key, value]) => {
+                    try {
+                        const buffer = await base64Parser(value);
+                        if (buffer) {
+                            processedData[key] = `data:image/png;base64,${Buffer.from(buffer).toString('base64')}`;
                         }
-                        return bytes.buffer;
+                    } catch (err) {
+                        console.warn(`⚠️ Failed to process image for ${key}:`, err);
                     }
-                    return null;
-                } catch (error) {
-                    console.error('Error processing image:', error);
-                    return null;
+                });
+
+            await Promise.all(imagePromises);
+
+            const imageModule = new ImageModule({
+                centered: false,
+                getImage: (tag) => {
+                    if (!tag) return null;
+                    try {
+                        if (tag.startsWith('data:image')) {
+                            const base64Data = tag.split('base64,')[1];
+                            const binaryStr = atob(base64Data);
+                            const len = binaryStr.length;
+                            const bytes = new Uint8Array(len);
+                            for (let i = 0; i < len; i++) {
+                                bytes[i] = binaryStr.charCodeAt(i);
+                            }
+                            return bytes.buffer;
+                        }
+                        return null;
+                    } catch (error) {
+                        console.error('Error processing image:', error);
+                        return null;
+                    }
+                },
+                getSize: (img, tag, name) => {
+                    const s = styles[name];
+                    return s ? [s.imageWidth || 300, s.imageHeight || 200] : [300, 200];
+                },
+            });
+
+            const doc = new Docxtemplater();
+            doc.loadZip(zip);
+            doc.attachModule(imageModule);
+            doc.setOptions({
+                paragraphLoop: true,
+                linebreaks: true,
+                nullGetter: () => ""
+            });
+
+            // Set the data and render
+            doc.setData(processedData);
+            doc.render();
+
+            // Generate the document
+            const out = doc.getZip().generate({ type: "arraybuffer" });
+
+            // Convert to HTML for preview
+            const result = await mammoth.convertToHtml(
+                { arrayBuffer: out },
+                {
+                    styleMap: [
+                        "p => p:fresh",
+                        "table => table.border-collapse.table-auto.w-full.my-4",
+                        "td => td.border.p-2",
+                        "th => th.border.bg-muted.p-2.font-bold"
+                    ],
+                    convertImage: mammoth.images.imgElement(function (image) {
+                        return image.read("base64").then(function (imageBuffer) {
+                            return {
+                                src: "data:" + (image.contentType || 'image/png') + ";base64," + imageBuffer
+                            };
+                        }).catch(err => {
+                            console.warn('Failed to convert image in preview:', err);
+                            return { src: '' }; // Return empty source on error
+                        });
+                    })
                 }
-            },
-            getSize: (img, tag, name) => {
-                const s = styles[name];
-                return s ? [s.imageWidth || 300, s.imageHeight || 200] : [300, 200];
-            },
-        });
+            );
 
-        const doc = new Docxtemplater();
-        doc.loadZip(zip);
-        doc.attachModule(imageModule);
-        doc.setOptions({
-            paragraphLoop: true,
-            linebreaks: true,
-            nullGetter: () => ""
-        });
+            // Update the preview content
+            setPreviewContent(result.value);
 
-        // Set the data and render
-        doc.setData(processedData);
-        doc.render();
-
-        // Generate the document
-        const out = doc.getZip().generate({ type: "arraybuffer" });
-        
-        // Convert to HTML for preview
-        const result = await mammoth.convertToHtml(
-            { arrayBuffer: out },
-            {
-                styleMap: [
-                    "p => p:fresh",
-                    "table => table.border-collapse.table-auto.w-full.my-4",
-                    "td => td.border.p-2",
-                    "th => th.border.bg-muted.p-2.font-bold"
-                ],
-                convertImage: mammoth.images.imgElement(function (image) {
-                    return image.read("base64").then(function (imageBuffer) {
-                        return {
-                            src: "data:" + (image.contentType || 'image/png') + ";base64," + imageBuffer
-                        };
-                    }).catch(err => {
-                        console.warn('Failed to convert image in preview:', err);
-                        return { src: '' }; // Return empty source on error
-                    });
-                })
-            }
-        );
-
-        // Update the preview content
-        setPreviewContent(result.value);
-        
-    } catch (err) {
-        console.error("❌ [updateWordPreview] Error:", err);
-        toast({ 
-            title: "Preview Error", 
-            description: err.message || 'Failed to generate preview', 
-            variant: "destructive" 
-        });
-    } finally {
-        setIsPreviewLoading(false);
-    }
-}, [selectedTemplate, toast, prepareRenderData]);
+        } catch (err) {
+            console.error("❌ [updateWordPreview] Error:", err);
+            toast({
+                title: "Preview Error",
+                description: err.message || 'Failed to generate preview',
+                variant: "destructive"
+            });
+        } finally {
+            setIsPreviewLoading(false);
+        }
+    }, [selectedTemplate, toast, prepareRenderData]);
 
     const handleInputChange = (name, val) => {
         setFormData(prev => ({ ...prev, [name]: val }));
@@ -1997,7 +1999,7 @@ export default function TemplateGenerationDialog({
 
             console.log('[generateAndDownload] Initializing document generation...');
             const zip = new PizZip(docxTemplateBuffer.current);
-            
+
             const imageModule = new ImageModule({
                 centered: false,
                 getImage: (tag) => {
@@ -2035,16 +2037,16 @@ export default function TemplateGenerationDialog({
                 type: "blob",
                 mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             });
-            console.log('[generateAndDownload] Blob generated:', blob.size > 0 ? `${Math.round(blob.size/1024)}KB` : 'empty');
+            console.log('[generateAndDownload] Blob generated:', blob.size > 0 ? `${Math.round(blob.size / 1024)}KB` : 'empty');
 
             if (type === 'word') {
                 console.log('[generateAndDownload] Initiating Word document download...');
                 try {
                     saveAs(blob, `${fileName}.docx`);
                     console.log('[generateAndDownload] Word download initiated');
-                    toast({ 
-                        title: "Success", 
-                        description: `Document downloaded as ${fileName}.docx` 
+                    toast({
+                        title: "Success",
+                        description: `Document downloaded as ${fileName}.docx`
                     });
                 } catch (saveError) {
                     console.error('[generateAndDownload] Error saving Word document:', saveError);
@@ -2055,27 +2057,27 @@ export default function TemplateGenerationDialog({
                 try {
                     const html2pdf = (await import('html2pdf.js')).default;
                     console.log('[generateAndDownload] html2pdf loaded');
-                    
+
                     const element = document.createElement('div');
                     element.innerHTML = previewContent;
                     element.className = EDITOR_PREVIEW_STYLES + ' p-10 bg-white';
                     element.style.width = '800px';
-                    
+
                     console.log('[generateAndDownload] Starting PDF generation...');
                     await html2pdf()
                         .set({
                             margin: 10,
                             filename: `${fileName}.pdf`,
-                            html2canvas: { 
-                                scale: 2, 
+                            html2canvas: {
+                                scale: 2,
                                 useCORS: true,
                                 logging: true,
                                 onclone: (clonedDoc) => {
                                     console.log('[html2canvas] Document cloned for rendering');
                                 }
                             },
-                            jsPDF: { 
-                                unit: 'mm', 
+                            jsPDF: {
+                                unit: 'mm',
                                 format: 'a4',
                                 orientation: 'portrait'
                             }
@@ -2091,10 +2093,10 @@ export default function TemplateGenerationDialog({
         } catch (e) {
             const errorMessage = e instanceof Error ? e.message : String(e);
             console.error('[generateAndDownload] Unhandled error:', e);
-            toast({ 
-                title: "Error", 
-                description: errorMessage, 
-                variant: "destructive" 
+            toast({
+                title: "Error",
+                description: errorMessage,
+                variant: "destructive"
             });
         } finally {
             console.log('[generateAndDownload] Cleaning up...');
