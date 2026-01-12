@@ -1027,9 +1027,22 @@ const PlaceholderInput = ({
 export default function TemplateGenerationDialog({
     isOpen, onClose, template, availableTemplates = [], documentName, masterFields,
     entityIdMap, sourceDataCache, extractedData = {}, personData = {}, companyData = {},
-    relationshipData = { directors: [] },
+    relationshipData = { directors: [], dependants: [], company: {}, principal: null, understudy: null },
 }) {
     const { toast } = useToast();
+    
+    // Debug: Log the relationshipData structure
+    useEffect(() => {
+        if (isOpen && relationshipData) {
+            console.log('🔗 TemplateGenerationDialog received relationshipData:', {
+                company: relationshipData.company,
+                directors: relationshipData.directors,
+                dependants: relationshipData.dependants,
+                principal: relationshipData.principal,
+                understudy: relationshipData.understudy
+            });
+        }
+    }, [isOpen, relationshipData]);
 
     const [formData, setFormData] = useState(() => ({
         ...extractedData,
@@ -1211,20 +1224,27 @@ export default function TemplateGenerationDialog({
             }
         } else if (['dependant', 'dependent', 'spouse', 'child', 'father', 'mother', 'son', 'daughter'].includes(normalizedEntityType)) {
             sourceArray = relationshipData.dependants || [];
+            console.log(`🔍 Found ${sourceArray.length} total dependants:`, sourceArray);
             
             // Filter by relationship if specified in block config
-            if (blockPlaceholder.dependant_relationship?.[0]) {
-                const targetRel = blockPlaceholder.dependant_relationship[0].toLowerCase();
+            if (blockPlaceholder.dependant_relationship?.length > 0) {
+                const targetRels = blockPlaceholder.dependant_relationship.map(rel => rel.toLowerCase());
+                console.log(`🎯 Filtering by block config relationships: "${targetRels.join(', ')}"`);
+                
                 sourceArray = sourceArray.filter(d => 
-                    d.relationship?.toLowerCase() === targetRel
+                    targetRels.includes(d.relationship?.toLowerCase())
                 );
+                console.log(`📊 After filtering by "${targetRels.join(', ')}": ${sourceArray.length} items`);
             }
-            // Or filter by entity type name itself (e.g., "spouse", "child")
+            // Or filter by entity type name itself (e.g., "spouse", "child") - only if no specific relationships configured
             else if (['spouse', 'child', 'father', 'mother', 'son', 'daughter'].includes(normalizedEntityType)) {
+                console.log(`🎯 Filtering by entity type: "${normalizedEntityType}"`);
+                
+                // Use the entity type directly as relationship filter
                 sourceArray = sourceArray.filter(d =>
-                    d.relationship?.toLowerCase() === normalizedEntityType ||
-                    (normalizedEntityType === 'child' && ['son', 'daughter'].includes(d.relationship?.toLowerCase()))
+                    d.relationship?.toLowerCase() === normalizedEntityType
                 );
+                console.log(`📊 After filtering by entity type "${normalizedEntityType}": ${sourceArray.length} items`);
             }
         }
 
@@ -1250,7 +1270,12 @@ export default function TemplateGenerationDialog({
                     sourceArray
                 );
                 
-                rowData[field.name] = extractDisplayValue(processed.value);
+                // For boolean fields, preserve the structure (array of options)
+                if (field.type === 'boolean') {
+                    rowData[field.name] = processed.value;
+                } else {
+                    rowData[field.name] = extractDisplayValue(processed.value);
+                }
                 
                 if (processed.source) {
                     rowData[`__${field.name}_source`] = processed.source;
@@ -1414,7 +1439,7 @@ export default function TemplateGenerationDialog({
                         </Label>
                         <div className="flex flex-wrap gap-1">
                             {rows.map((row, idx) => {
-                                const rowValue = row && typeof row === 'object' ? Object.values(row)[0] : row;
+                                const rowValue = row && typeof row === 'object' ? extractDisplayValue(Object.values(row)[0]) : extractDisplayValue(row);
                                 return (
                                     <input
                                         key={idx}
