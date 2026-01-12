@@ -211,44 +211,58 @@ const getOrdinalWord = (index: number): string => {
 };
 
 // --- UNIFIED PLACEHOLDER PROCESSORS ---
-
-/**
- * Get target entity based on placeholder configuration
- */
-const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourceArray = null) => {
-    // If this is part of an array, use the item from the source array
+const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourceArray = null, entityIdMap = null, combinedCache = null, extractedData = null, companyData = null) => {
+    // Priority 1: If we are inside an array loop (Block), use the current item
     if (sourceArray && arrayIndex !== null && sourceArray[arrayIndex]) {
         return sourceArray[arrayIndex];
     }
 
-    // Otherwise, determine entity from placeholder config
+    // Determine requested type
     let entityType = 'company';
     if (Array.isArray(placeholder.entity_type)) {
         entityType = placeholder.entity_type[0];
     } else if (placeholder.entity_type) {
         entityType = placeholder.entity_type;
     }
+    const normType = entityType?.toLowerCase()?.trim();
 
-    const isPrimaryDirectorReq = placeholder.director_type === 'primary';
-    const isDependantType = entityType && ['dependant', 'dependent', 'spouse', 'child'].includes(entityType.toLowerCase()?.trim());
+    // Priority 2: Use specific ID from entityIdMap if the types match
+    if (entityIdMap) {
+        // If placeholder wants a director and we have a specific director ID for this column
+        if (normType === 'director' && entityIdMap.director) {
+            const dirId = entityIdMap.director;
+            return relationshipData?.directors?.find(d => String(d.id) === String(dirId)) || 
+                   combinedCache?.['registry_individuals']?.[dirId];
+        }
 
-    if (isDependantType && relationshipData?.dependants) {
+        // If placeholder wants a principal
+        if (normType === 'principal' && entityIdMap.principal) {
+            return relationshipData?.principal;
+        }
+
+        // If placeholder wants a company
+        if (normType === 'company' && entityIdMap.company) {
+            return relationshipData?.company || companyData || extractedData;
+        }
+    }
+
+    // Priority 3: Fallback to Relationship Data logic (original logic)
+    if (['dependant', 'dependent', 'spouse', 'child'].includes(normType)) {
         if (placeholder.dependant_relationship?.[0]) {
             const targetRel = placeholder.dependant_relationship[0].toLowerCase();
-            return relationshipData.dependants.find(d =>
-                d.relationship?.toLowerCase() === targetRel
-            );
+            return relationshipData?.dependants?.find(d => d.relationship?.toLowerCase() === targetRel);
         }
-        return relationshipData.dependants[0];
-    } else if (entityType === 'director') {
-        if (isPrimaryDirectorReq) {
-            return relationshipData?.directors?.find(d => d.is_primary) ||
-                relationshipData?.directors?.[0];
-        } else {
-            return relationshipData?.directors?.[0];
-        }
-    } else if (entityType === 'company') {
-        return relationshipData.company;
+        return relationshipData?.dependants?.[0];
+    }
+
+    if (normType === 'director') {
+        return placeholder.director_type === 'primary' 
+            ? relationshipData?.directors?.find(d => d.is_primary) 
+            : relationshipData?.directors?.[0];
+    }
+
+    if (normType === 'company') {
+        return relationshipData?.company || companyData || extractedData;
     }
 
     return null;
@@ -511,8 +525,13 @@ const processTextField = (placeholder, targetEntity, combinedCache, masterFields
 /**
  * MAIN UNIFIED PROCESSOR - handles all placeholder types
  */
-const processPlaceholderValue = (placeholder, relationshipData, combinedCache, masterFields, arrayIndex = null, sourceArray = null) => {
+const processPlaceholderValue = (placeholder, relationshipData, combinedCache, masterFields, entityIdMap = null, extractedData, companyData, arrayIndex = null, sourceArray = null) => {
     console.group(`🔍 Processing: ${placeholder.name} (${placeholder.type || 'text'})`);
+    
+    // Log entity_type for debugging
+    if (placeholder.entity_type) {
+        console.log(`🏷️ entity_type: ${placeholder.entity_type}`);
+    }
 
     // CHECK FOR CURRENT DATE FIRST (before getting target entity)
     if (placeholder.master_field_ids?.length) {
@@ -525,10 +544,12 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
     }
 
     // Get target entity
-    const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray);
+    const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData);
 
     if (!targetEntity) {
         console.warn('⚠️ No target entity found');
+        console.log('🔍 Debug - relationshipData.company:', relationshipData.company);
+        console.log('🔍 Debug - placeholder.entity_type:', placeholder.entity_type);
         console.groupEnd();
         return { value: '', source: null };
     }
@@ -1044,6 +1065,41 @@ export default function TemplateGenerationDialog({
         }
     }, [isOpen, relationshipData]);
 
+    // Debug: Log applicant_details.type from all data sources
+    useEffect(() => {
+        if (isOpen) {
+            console.log('📋 Applicant Details Type Logging:');
+            console.log('extractedData:', extractedData);
+            console.log('personData:', personData);
+            console.log('companyData:', companyData);
+            
+            // Log applicant_details.type if it exists in any data source
+            if (extractedData?.applicant_details?.type) {
+                console.log('🏢 applicant_details.type from extractedData:', extractedData.applicant_details.type);
+            }
+            if (personData?.applicant_details?.type) {
+                console.log('👤 applicant_details.type from personData:', personData.applicant_details.type);
+            }
+            if (companyData?.applicant_details?.type) {
+                console.log('🏢 applicant_details.type from companyData:', companyData.applicant_details.type);
+            }
+            if (relationshipData?.company?.type) {
+                console.log('🏢 company.type from relationshipData:', relationshipData.company.type);
+            }
+            
+            // Log the type field directly from each data source
+            if (extractedData?.type) {
+                console.log('🏢 extractedData.type:', extractedData.type);
+            }
+            if (personData?.type) {
+                console.log('👤 personData.type:', personData.type);
+            }
+            if (companyData?.type) {
+                console.log('🏢 companyData.type:', companyData.type);
+            }
+        }
+    }, [isOpen, extractedData, personData, companyData, relationshipData]);
+
     const [formData, setFormData] = useState(() => ({
         ...extractedData,
         ...personData,
@@ -1155,7 +1211,7 @@ export default function TemplateGenerationDialog({
         return { value: '', source: null };
     }, [extractedData, personData, companyData]);
 
-    const resolveArrayData = useCallback((blockPlaceholder, allPlaceholders, combinedCache, masterFields, entityIdMap, relationshipData) => {
+    const resolveArrayData = useCallback((blockPlaceholder, allPlaceholders, combinedCache, masterFields, entityIdMap, relationshipData, extractedData, companyData) => {
         console.group(`🔄 Processing Array Block: ${blockPlaceholder.name || 'unnamed-block'}`);
 
         const entityType = Array.isArray(blockPlaceholder.entity_type)
@@ -1260,16 +1316,18 @@ export default function TemplateGenerationDialog({
             console.group(`📝 Item ${index + 1}/${sourceArray.length}`);
             const rowData = {};
 
-            childFields.forEach(field => {
-                const processed = processPlaceholderValue(
-                    field, 
-                    relationshipData, 
-                    combinedCache, 
-                    masterFields, 
-                    index, 
-                    sourceArray
-                );
-                
+       childFields.forEach(field => {
+    const processed = processPlaceholderValue(
+        field, 
+        relationshipData, 
+        combinedCache, 
+        masterFields, 
+        entityIdMap,   // Argument 5: entityIdMap
+        extractedData, // Argument 6: extractedData
+        companyData,   // Argument 7: companyData
+        index,         // Argument 8: arrayIndex (Critical Fix)
+        sourceArray    // Argument 9: sourceArray (Critical Fix)
+    );
                 // For boolean fields, preserve the structure (array of options)
                 if (field.type === 'boolean') {
                     rowData[field.name] = processed.value;
@@ -1289,7 +1347,7 @@ export default function TemplateGenerationDialog({
 
         console.groupEnd();
         return result;
-    }, []);
+    }, [extractedData, personData, companyData]);
 
     useEffect(() => {
         if (isOpen && selectedTemplate && Object.keys(sourceDataCache).length > 0) {
@@ -1332,7 +1390,9 @@ export default function TemplateGenerationDialog({
                     combinedCache,
                     masterFields,
                     entityIdMap,
-                    relationshipData
+                    relationshipData,
+                    extractedData,
+                    companyData
                 );
                 initData[blockName] = resolvedRows;
                 if (resolvedRows.length > 0) {

@@ -67,7 +67,7 @@ type SourceCardState = JobFieldSource & {
   fields: TableColumn[]
   loadingFields: boolean
   document_id?: string[] | null
-  linking_variable?: "id" | "director_id" | "kyc_document_id" | null
+  linking_variable?: "id" | "director_id" | "kyc_document_id" | "company_id" | null
 }
 
 function MultiSelectDocumentTypes({
@@ -523,6 +523,7 @@ export function LinkSourcesDialog({ open, onOpenChange, field, onSuccess }: Link
                         { value: "id", label: "ID" },
                         { value: "director_id", label: "Director ID" },
                         { value: "kyc_document_id", label: "KYC Document ID" },
+                        { value: "company_id", label: "Company ID" },
                       ]}
                       placeholder="Select a linking variable..."
                     />
