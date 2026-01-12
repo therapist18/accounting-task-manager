@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Loader2, PlusCircle, Trash2, FileText, Pencil, Save, RefreshCw, ChevronDown, Check, ChevronsUpDown, Link2, X, Search, View, Download, UserCog, Users, User, Code } from "lucide-react";
+import { Loader2, PlusCircle, Trash2, FileText, Pencil, Save, RefreshCw, ChevronDown, Check, ChevronsUpDown, Link2, X, Search, View, Download, UserCog, Users, User, Code, Hash } from "lucide-react";
 import { DocxLivePreview } from "@/components/DocxLivePreview";
 import { DocumentTemplate as BaseDocumentTemplate } from "./types";
 import { TableHeader, Table, TableBody, TableCell, TableHead, TableRow } from "@/components/ui/table";
@@ -64,13 +64,14 @@ interface DocumentTemplateManagerProps {
     subclass_id?: number | null;
   } | null;
   className?: string; // Add className to props
-  selectedBank?: { bank_id: string; bank_name: string } | null; 
+  selectedBank?: { bank_id: string; bank_name: string } | null;
 }
 
 const PLACEHOLDER_TYPES = [
   { value: 'text', label: 'Text' },
   { value: 'date', label: 'Date' },
   { value: 'number', label: 'Number' },
+  { value: 'ordinal', label: 'Ordinal (1st, 2nd, 3rd...)' },
   { value: 'select', label: 'Dropdown' },
   { value: 'array', label: 'Array/List' },
   { value: 'conditional', label: 'Conditional' },
@@ -117,7 +118,7 @@ type Placeholder = {
   id: string;
   name: string;
   description?: string;
-  type: 'text' | 'number' | 'date' | 'select' | 'array' | 'conditional' | 'image' | 'boolean';
+  type: 'text' | 'number' | 'date' | 'select' | 'array' | 'conditional' | 'image' | 'boolean' | 'ordinal'; // Added 'ordinal'
   array_direction?: 'horizontal' | 'vertical';
   boolean_conditions?: BooleanCondition[];
   boolean_type?: 'single' | 'multiple'; // single = radio, multiple = checkboxes
@@ -130,6 +131,7 @@ type Placeholder = {
   director_type?: 'all' | 'primary'; // For director fields
   dependant_relationship?: string[]; // For dependant fields
   conditions?: ConditionalCondition[]; // For conditional fields
+  ordinal_format?: 'number' | 'word';
 };
 
 const getCleanText = (str: string) => str.replace(/<[^>]+>/g, '');
@@ -864,13 +866,13 @@ export default function DocumentTemplateManager({
             isBlock && "bg-blue-50/40 hover:bg-blue-50/60"
           )}
         >
-            <TableCell className="border-r">
-    <div className="flex items-center gap-2 font-mono text-sm">
-      <FileText className="h-3.5 w-3.5" />
-      <span>{p.is_digit_split ? `${p.name}_[1-${p.digit_count}]` : `{${p.name}}`}</span>
-      {p.is_digit_split && <Badge className="bg-orange-500">DIGIT SPLIT</Badge>}
-    </div>
-  </TableCell>
+          <TableCell className="border-r">
+            <div className="flex items-center gap-2 font-mono text-sm">
+              <FileText className="h-3.5 w-3.5" />
+              <span>{p.is_digit_split ? `${p.name}_[1-${p.digit_count}]` : `{${p.name}}`}</span>
+              {p.is_digit_split && <Badge className="bg-orange-500">DIGIT SPLIT</Badge>}
+            </div>
+          </TableCell>
           <TableCell className="border-r">
             <div className={cn(
               "flex items-center gap-2 font-mono text-sm",
@@ -1330,7 +1332,7 @@ export default function DocumentTemplateManager({
           placeholders: template.placeholders || [],
           updated_at: new Date().toISOString(),
           created_by: user?.id,
-          banks_associated: selectedBank ? [selectedBank] : [] ,
+          banks_associated: selectedBank ? [selectedBank] : [],
           job_level: jobLevel ? [jobLevel] : [],
           entity_types: template.entity_types || [],
         };
@@ -2238,7 +2240,6 @@ export default function DocumentTemplateManager({
               </div>
             )}
 
-            {/* Array Direction Selection */}
             {newPlaceholder.type === 'array' && (
               <div className="space-y-3 p-4 rounded-lg bg-orange-50 border border-orange-200 shadow-sm">
                 <div className="space-y-1">
@@ -2277,6 +2278,48 @@ export default function DocumentTemplateManager({
               </div>
             )}
 
+            {newPlaceholder.type === 'ordinal' && (
+              <div className="space-y-3 p-4 rounded-lg bg-purple-50 border border-purple-200 shadow-sm">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Hash className="h-5 w-5 text-purple-600" />
+                    <h4 className="font-medium text-purple-800">Ordinal Format</h4>
+                  </div>
+                  <p className="text-xs text-purple-700 pl-7">
+                    Choose how ordinal numbers should be displayed in the array.
+                  </p>
+                </div>
+                <Select
+                  value={newPlaceholder.ordinal_format || 'number'}
+                  onValueChange={(v: 'number' | 'word') =>
+                    setNewPlaceholder({ ...newPlaceholder, ordinal_format: v })
+                  }
+                >
+                  <SelectTrigger className="bg-white border-purple-200">
+                    <SelectValue placeholder="Select format" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="number">
+                      <div className="flex flex-col">
+                        <span className="font-medium">Numbers (1st, 2nd, 3rd...)</span>
+                        <span className="text-[10px] text-muted-foreground">Uses numeric ordinals</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="word">
+                      <div className="flex flex-col">
+                        <span className="font-medium">Words (First, Second, Third...)</span>
+                        <span className="text-[10px] text-muted-foreground">Uses written ordinals</span>
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <div className="p-2 bg-white rounded border border-purple-200">
+                  <code className="text-xs text-purple-700">
+                    Preview: {newPlaceholder.ordinal_format === 'word' ? 'First, Second, Third...' : '1st, 2nd, 3rd...'}
+                  </code>
+                </div>
+              </div>
+            )}
             {/* Debug logging */}
             <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
               Debug: entity_type = {JSON.stringify(newPlaceholder.entity_type)}
