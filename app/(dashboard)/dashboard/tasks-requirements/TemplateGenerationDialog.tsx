@@ -41,6 +41,33 @@ const EDITOR_PREVIEW_STYLES = `
 `.replace(/\s+/g, ' ').trim();
 
 // --- HELPER FUNCTIONS ---
+const isDate = (str) => {
+    if (!str || typeof str !== 'string') return false;
+    
+    const datePatterns = [
+        /^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/,
+        /^\d{4}[\/\-]\d{2}[\/\-]\d{2}$/,
+        /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/,
+    ];
+    
+    return datePatterns.some(pattern => pattern.test(str.trim()));
+};
+
+const processDigitSplit = (value, digitCount = 8) => {
+    if (!value) return [];
+    
+    const strValue = String(value);
+    const chars = isDate(strValue) 
+        ? strValue.replace(/\D/g, '').split('')
+        : strValue.split('');
+    
+    const result = [];
+    for (let i = 1; i <= digitCount; i++) {
+        result.push(chars[i - 1] || '');
+    }
+    return result;
+};
+
 const formatDate = (date, formatStr) => {
     if (!date) return '';
     const d = new Date(date);
@@ -61,7 +88,6 @@ const base64Parser = async (dataURL) => {
     try {
         if (!dataURL) return null;
 
-        // If it's already a base64 data URL, process it
         if (typeof dataURL === 'string' && dataURL.startsWith('data:')) {
             const matches = dataURL.match(/^data:(image\/[^;]+);base64,(.*)$/);
             if (!matches) return null;
@@ -77,7 +103,6 @@ const base64Parser = async (dataURL) => {
             return bytes.buffer;
         }
 
-        // If it's a URL, fetch and convert to base64
         if (typeof dataURL === 'string' && (dataURL.startsWith('http') || dataURL.startsWith('blob:'))) {
             const response = await fetch(dataURL);
             if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
@@ -144,14 +169,10 @@ const parseJsonValue = (data, path) => {
                     currentValue = foundKey ? currentValue[foundKey] : undefined;
                 }
             } else if (i < parts.length - 1) {
-                console.log('❌ No value found for placeholder, returning empty string');
-                console.groupEnd();
                 return '';
             }
         }
 
-        console.log(`✅ Found value in JSON path: ${path}`, currentValue);
-        console.groupEnd();
         return currentValue !== undefined && currentValue !== null ? String(currentValue) : '';
     } catch (error) {
         console.error(`[parseJsonValue] Error:`, error);
@@ -169,19 +190,116 @@ const findPrimaryDirector = (relationshipData) => {
     return directors.find(d => d.is_primary) || directors[0];
 };
 
-const resolveConditionalValue = (conditions, targetEntity, combinedCache, masterFields) => {
-    if (!conditions || !targetEntity) return null;
+const getOrdinalNumber = (index: number): string => {
+    const num = index + 1;
+
+    if (num % 100 >= 11 && num % 100 <= 13) {
+        return `${num}th`;
+    }
+
+    switch (num % 10) {
+        case 1: return `${num}st`;
+        case 2: return `${num}nd`;
+        case 3: return `${num}rd`;
+        default: return `${num}th`;
+    }
+};
+
+const getOrdinalWord = (index: number): string => {
+    const words = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth'];
+    return words[index] || getOrdinalNumber(index);
+};
+
+// --- UNIFIED PLACEHOLDER PROCESSORS ---
+
+/**
+ * Get target entity based on placeholder configuration
+ */
+const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourceArray = null) => {
+    // If this is part of an array, use the item from the source array
+    if (sourceArray && arrayIndex !== null && sourceArray[arrayIndex]) {
+        return sourceArray[arrayIndex];
+    }
+
+    // Otherwise, determine entity from placeholder config
+    let entityType = 'company';
+    if (Array.isArray(placeholder.entity_type)) {
+        entityType = placeholder.entity_type[0];
+    } else if (placeholder.entity_type) {
+        entityType = placeholder.entity_type;
+    }
+
+    const isPrimaryDirectorReq = placeholder.director_type === 'primary';
+    const isDependantType = entityType && ['dependant', 'dependent', 'spouse', 'child'].includes(entityType.toLowerCase()?.trim());
+
+    if (isDependantType && relationshipData?.dependants) {
+        if (placeholder.dependant_relationship?.[0]) {
+            const targetRel = placeholder.dependant_relationship[0].toLowerCase();
+            return relationshipData.dependants.find(d =>
+                d.relationship?.toLowerCase() === targetRel
+            );
+        }
+        return relationshipData.dependants[0];
+    } else if (entityType === 'director') {
+        if (isPrimaryDirectorReq) {
+            return relationshipData?.directors?.find(d => d.is_primary) ||
+                relationshipData?.directors?.[0];
+        } else {
+            return relationshipData?.directors?.[0];
+        }
+    } else if (entityType === 'company') {
+        return relationshipData.company;
+    }
+
+    return null;
+};
+
+/**
+ * Process ordinal fields
+ */
+const processOrdinalField = (placeholder, arrayIndex) => {
+    const ordinalFormat = placeholder.ordinal_format || 'number';
+    return {
+        value: ordinalFormat === 'word' ? getOrdinalWord(arrayIndex) : getOrdinalNumber(arrayIndex),
+        source: 'Ordinal Generator'
+    };
+};
+
+/**
+ * Process current date fields
+ */
+const processCurrentDateField = (placeholder, masterFields) => {
+    if (!placeholder.master_field_ids?.length || !masterFields) {
+        return { value: '', source: null };
+    }
+
+    for (const id of placeholder.master_field_ids) {
+        const mf = masterFields.get(parseInt(id, 10));
+        if (mf?.date_config?.useCurrentDate) {
+            return {
+                value: formatDate(new Date(), mf.date_config.format || 'DD/MM/YYYY'),
+                source: 'System Date'
+            };
+        }
+    }
+
+    return { value: '', source: null };
+};
+
+/**
+ * Process conditional fields
+ */
+const processConditionalField = (placeholder, targetEntity, combinedCache, masterFields) => {
+    if (!placeholder.conditions || !targetEntity) {
+        return { value: '', source: null };
+    }
+
     const targetId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id);
 
-    for (const condition of conditions) {
+    for (const condition of placeholder.conditions) {
         const tag = condition.tag;
 
-        // 1. Check direct field on entity
-        if (targetEntity[tag]) return { value: `${condition.label || ''}${targetEntity[tag]}`, source: 'Direct' };
-        const matchingKey = Object.keys(targetEntity).find(k => k.toLowerCase() === tag.toLowerCase());
-        if (matchingKey && targetEntity[matchingKey]) return { value: `${condition.label || ''}${targetEntity[matchingKey]}`, source: 'Direct (Case-Insensitive)' };
-
-        // 2. Check Master Field sources in Cache
+        // ONLY use Master Field Cache Lookup - no direct access
         if (condition.master_field_id && masterFields) {
             const mf = masterFields.get(parseInt(condition.master_field_id, 10));
             if (mf?.sources) {
@@ -191,28 +309,311 @@ const resolveConditionalValue = (conditions, targetEntity, combinedCache, master
 
                     let records = Object.values(tableData);
 
-                    // Filter by document_id if provided
                     if (source.document_id) {
-                        const requiredIds = Array.isArray(source.document_id) ? source.document_id : [source.document_id];
-                        records = records.filter(r => requiredIds.includes(r.document_id || r.kyc_document_id));
+                        const requiredIds = Array.isArray(source.document_id)
+                            ? source.document_id
+                            : [source.document_id];
+                        records = records.filter(r =>
+                            requiredIds.includes(r.document_id || r.kyc_document_id)
+                        );
                     }
 
                     const linkingVar = source.linking_variable || 'id';
+
                     const record = records.find(rec => {
                         const recId = String(rec[linkingVar] || rec.id || rec.individual_id || rec.director_id);
                         return recId === targetId || recId.startsWith(targetId + ' ');
                     });
 
                     if (record) {
-                        const rawVal = source.path ? parseJsonValue(record, source.path) : record[tag];
-                        if (rawVal) return { value: `${condition.label || ''}${rawVal}`, source: `Fresh DB: ${mf.label || source.table}` };
+                        const rawVal = source.path
+                            ? parseJsonValue(record, source.path)
+                            : record[tag];
+                        if (rawVal) {
+                            return {
+                                value: `${condition.label || ''}${rawVal}`,
+                                source: `DB: ${mf.label || source.table}`
+                            };
+                        }
                     }
                 }
             }
         }
     }
-    return null;
+
+    return { value: '', source: null };
 };
+
+/**
+ * Process boolean fields
+ */
+const processBooleanField = (placeholder, targetEntity, combinedCache, masterFields) => {
+    if (!placeholder.boolean_conditions) {
+        return { value: [], source: null };
+    }
+
+    const targetId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id);
+
+    const results = placeholder.boolean_conditions.map(condition => {
+        let isChecked = false;
+
+        if (condition.master_field_id) {
+            const mf = masterFields.get(parseInt(condition.master_field_id, 10));
+            if (mf?.sources) {
+                for (const source of mf.sources) {
+                    const tableData = combinedCache[source.table];
+                    if (!tableData) continue;
+
+                    const record = Object.values(tableData).find(r =>
+                        String(r[source.linking_variable || 'id']) === targetId
+                    );
+
+                    if (record) {
+                        const fieldValue = source.path
+                            ? parseJsonValue(record, source.path)
+                            : record[condition.comparison?.field || condition.tag];
+
+                        if (condition.comparison) {
+                            const { operator, value } = condition.comparison;
+                            const strValue = String(fieldValue).toLowerCase();
+                            const compareValue = String(value).toLowerCase();
+
+                            switch (operator) {
+                                case 'equals':
+                                    isChecked = strValue === compareValue;
+                                    break;
+                                case 'not_equals':
+                                    isChecked = strValue !== compareValue;
+                                    break;
+                                case 'contains':
+                                    isChecked = strValue.includes(compareValue);
+                                    break;
+                            }
+                        } else {
+                            isChecked = Boolean(fieldValue);
+                        }
+
+                        if (isChecked) break;
+                    }
+                }
+            }
+        }
+
+        return {
+            tag: condition.tag,
+            label: condition.label,
+            checked: isChecked,
+            hasDbLink: Boolean(condition.master_field_id)
+        };
+    });
+
+    return {
+        value: results,
+        source: results.some(r => r.hasDbLink) ? 'Boolean (DB)' : 'Boolean (User Input)'
+    };
+};
+
+/**
+ * Process image fields
+ */
+const processImageField = (placeholder, targetEntity, combinedCache, masterFields) => {
+    if (!placeholder.master_field_ids?.length) {
+        return { value: '', source: null };
+    }
+
+    const searchId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id);
+
+    for (const id of placeholder.master_field_ids) {
+        const mf = masterFields.get(parseInt(id, 10));
+        if (!mf?.sources) continue;
+
+        for (const source of mf.sources) {
+            const tableData = combinedCache[source.table];
+            if (!tableData) continue;
+
+            const linkingVar = source.linking_variable || 'id';
+            const reqDocIds = Array.isArray(source.document_id)
+                ? source.document_id
+                : [source.document_id];
+
+            const match = Object.values(tableData).find(d =>
+                reqDocIds.includes(d.document_id || d.kyc_document_id) &&
+                String(d[linkingVar] || d.id) === searchId
+            );
+
+            if (match?.file_path) {
+                return {
+                    value: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${match.file_path}`,
+                    source: 'Image Cache'
+                };
+            }
+        }
+    }
+
+    return { value: '', source: null };
+};
+
+/**
+ * Process text fields using master field sources - handles MULTIPLE master fields
+ */
+const processTextField = (placeholder, targetEntity, combinedCache, masterFields) => {
+    if (!placeholder.master_field_ids?.length) {
+        return { value: '', source: null };
+    }
+
+    const searchId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id);
+    const allValues = [];
+    const allSources = [];
+
+    // Iterate through ALL master field IDs
+    for (const id of placeholder.master_field_ids) {
+        const mf = masterFields.get(parseInt(id, 10));
+        if (!mf?.sources) continue;
+
+        for (const source of mf.sources) {
+            const tableData = combinedCache[source.table];
+            if (!tableData) continue;
+
+            const linkingVar = source.linking_variable || 'id';
+
+            const record = Object.values(tableData).find(r =>
+                String(r[linkingVar] || r.id) === searchId
+            );
+
+            if (record) {
+                const val = source.path
+                    ? parseJsonValue(record, source.path)
+                    : (record[mf.field_key] || record[placeholder.name]);
+
+                if (val) {
+                    allValues.push(val);
+                    allSources.push(`DB: ${source.table}`);
+                }
+            }
+        }
+    }
+
+    // If we found values, combine them
+    if (allValues.length > 0) {
+        // For names and similar fields, join with space
+        const combinedValue = allValues.join(' ');
+        const combinedSource = allSources[0]; // Use first source for display
+        
+        return {
+            value: combinedValue,
+            source: combinedSource
+        };
+    }
+
+    return { value: '', source: null };
+};
+
+/**
+ * MAIN UNIFIED PROCESSOR - handles all placeholder types
+ */
+const processPlaceholderValue = (placeholder, relationshipData, combinedCache, masterFields, arrayIndex = null, sourceArray = null) => {
+    console.group(`🔍 Processing: ${placeholder.name} (${placeholder.type || 'text'})`);
+
+    // CHECK FOR CURRENT DATE FIRST (before getting target entity)
+    if (placeholder.master_field_ids?.length) {
+        const dateResult = processCurrentDateField(placeholder, masterFields);
+        if (dateResult.value) {
+            console.log('✅ Current date field detected');
+            console.groupEnd();
+            return dateResult;
+        }
+    }
+
+    // Get target entity
+    const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray);
+
+    if (!targetEntity) {
+        console.warn('⚠️ No target entity found');
+        console.groupEnd();
+        return { value: '', source: null };
+    }
+
+    console.log('Target Entity:', targetEntity?.name || targetEntity?.full_name || targetEntity?.id);
+
+    let result = { value: '', source: null };
+
+    // Route to appropriate processor based on field type
+    switch (placeholder.type) {
+        case 'ordinal':
+            if (arrayIndex !== null) {
+                result = processOrdinalField(placeholder, arrayIndex);
+            }
+            break;
+
+        case 'conditional':
+            result = processConditionalField(placeholder, targetEntity, combinedCache, masterFields);
+            break;
+
+        case 'boolean':
+            result = processBooleanField(placeholder, targetEntity, combinedCache, masterFields);
+            break;
+
+        case 'image':
+            result = processImageField(placeholder, targetEntity, combinedCache, masterFields);
+            break;
+
+        default:
+            // For all other text fields, use master field sources
+            result = processTextField(placeholder, targetEntity, combinedCache, masterFields);
+    }
+
+    console.log('Result:', result);
+    console.groupEnd();
+
+    return result;
+};
+
+/**
+ * Extract display value from processed result
+ */
+const extractDisplayValue = (value) => {
+    if (value === null || value === undefined) {
+        return '';
+    }
+
+    if (Array.isArray(value)) {
+        return value
+            .filter(opt => opt && opt.checked)
+            .map(opt => {
+                if (!opt) return '';
+                if (typeof opt === 'string') return opt;
+
+                const possibleProps = ['label', 'display', 'text', 'value', 'name', 'title'];
+                for (const prop of possibleProps) {
+                    if (opt[prop] && typeof opt[prop] === 'string') {
+                        return opt[prop];
+                    }
+                }
+
+                if (opt.label && typeof opt.label === 'object') {
+                    if (opt.label.label) return opt.label.label;
+                    if (opt.label.display) return opt.label.display;
+                }
+
+                return opt.tag || '';
+            })
+            .filter(Boolean)
+            .join(', ');
+    }
+
+    if (typeof value === 'object') {
+        if (value.value !== undefined) {
+            return String(value.value);
+        }
+
+        console.warn('Unexpected object value:', value);
+        return '';
+    }
+
+    return String(value);
+};
+
+// --- UI COMPONENTS ---
 
 const ImagePlaceholderControls = ({ styles, onStyleChange }) => {
     const sizeMap = { small: '25%', medium: '50%', large: '75%', 'full-width': '100%' };
@@ -269,7 +670,6 @@ const ImagePlaceholderControls = ({ styles, onStyleChange }) => {
     );
 };
 
-// --- Update Profile Dialog Component ---
 const UpdateProfileDialog = ({ open, onOpenChange, changedFields, onSave, isSaving }) => {
     if (!changedFields || changedFields.length === 0) return null;
 
@@ -402,26 +802,226 @@ const UpdateProfileDialog = ({ open, onOpenChange, changedFields, onSave, isSavi
     );
 };
 
-const getOrdinalNumber = (index: number): string => {
-  const num = index + 1; // Convert 0-based index to 1-based
+/**
+ * Unified placeholder input renderer
+ */
+const PlaceholderInput = ({ 
+    placeholder, 
+    value, 
+    onChange, 
+    onFileChange,
+    imageStyles,
+    onImageStyleChange,
+    autoPopulated,
+    isArrayItem = false,
+    arrayIndex = null,
+    blockName = null
+}) => {
+    const fieldKey = isArrayItem ? `${blockName}_${arrayIndex}_${placeholder.name}` : placeholder.name;
+    
+    if (placeholder.is_digit_split) {
+        const val = String(value || '');
+        const chars = processDigitSplit(val, placeholder.digit_count || 8);
+        
+        return (
+            <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                    <Label className="text-[10px] font-bold text-slate-400 uppercase">
+                        {placeholder.name.replace(/_/g, ' ')}
+                    </Label>
+                    {autoPopulated && (
+                        <Badge variant="secondary" className="text-[9px]">
+                            {autoPopulated}
+                        </Badge>
+                    )}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                    {Array.from({ length: placeholder.digit_count || 8 }).map((_, idx) => {
+                        const displayVal = chars[idx] || '';
+                        return (
+                            <input
+                                key={idx}
+                                maxLength={1}
+                                value={displayVal}
+                                onChange={(e) => {
+                                    const char = e.target.value.slice(-1);
+                                    let currentStr = val.padEnd(placeholder.digit_count, ' ');
+                                    const newStr = currentStr.substring(0, idx) + char + currentStr.substring(idx + 1);
+                                    onChange(newStr.trimEnd());
+                                }}
+                                className="w-7 h-8 text-center border rounded font-mono font-bold text-sm focus:border-blue-400 outline-none bg-white"
+                            />
+                        );
+                    })}
+                </div>
+            </div>
+        );
+    }
 
-  // Special cases for 11th, 12th, 13th
-  if (num % 100 >= 11 && num % 100 <= 13) {
-    return `${num}th`;
-  }
+    if (placeholder.type === 'image') {
+        const imageStyleKey = isArrayItem ? `${blockName}_${arrayIndex}_${placeholder.name}` : placeholder.name;
+        const styles = imageStyles[imageStyleKey] || {};
+        
+        return (
+            <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                    <Label className="text-[10px] font-bold text-slate-400 uppercase">
+                        {placeholder.name.replace(/_/g, ' ')}
+                    </Label>
+                    {autoPopulated && (
+                        <Badge variant="secondary" className="text-[9px]">
+                            {autoPopulated}
+                        </Badge>
+                    )}
+                </div>
+                {value ? (
+                    <div className="relative group rounded-md overflow-hidden border bg-white aspect-video flex items-center justify-center">
+                        <img
+                            src={value}
+                            alt={placeholder.name}
+                            className="max-h-full object-contain"
+                            style={{
+                                textAlign: styles.textAlign || 'center',
+                                maxWidth: styles.maxWidth || '100%'
+                            }}
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                            <Button
+                                size="sm"
+                                variant="secondary"
+                                className="h-7 text-[10px]"
+                                onClick={() => document.getElementById(`file-${fieldKey}`).click()}
+                            >
+                                Replace
+                            </Button>
+                            <Button
+                                size="sm"
+                                variant="destructive"
+                                className="h-7 text-[10px]"
+                                onClick={() => onChange('')}
+                            >
+                                Remove
+                            </Button>
+                        </div>
+                    </div>
+                ) : (
+                    <Button
+                        variant="outline"
+                        className="w-full h-20 border-dashed border-2 flex flex-col gap-1"
+                        onClick={() => document.getElementById(`file-${fieldKey}`).click()}
+                    >
+                        <ImageIcon className="h-4 w-4 text-slate-400" />
+                        <span className="text-[10px] text-slate-500">Upload {placeholder.name}</span>
+                    </Button>
+                )}
+                <input
+                    id={`file-${fieldKey}`}
+                    type="file"
+                    className="hidden"
+                    accept="image/*"
+                    onChange={onFileChange}
+                />
+                <ImagePlaceholderControls
+                    styles={styles}
+                    onStyleChange={(key, val) => onImageStyleChange(imageStyleKey, key, val)}
+                />
+            </div>
+        );
+    }
 
-  // Regular cases
-  switch (num % 10) {
-    case 1: return `${num}st`;
-    case 2: return `${num}nd`;
-    case 3: return `${num}rd`;
-    default: return `${num}th`;
-  }
-};
+    if (placeholder.type === 'boolean') {
+        const options = Array.isArray(value) ? value : (placeholder.boolean_conditions || []);
+        
+        return (
+            <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                    <Label className="text-[10px] font-bold text-slate-400 uppercase">
+                        {placeholder.name.replace(/_/g, ' ')}
+                    </Label>
+                    {autoPopulated && (
+                        <Badge variant="secondary" className="text-[9px]">
+                            {autoPopulated}
+                        </Badge>
+                    )}
+                </div>
+                <div className="space-y-2 bg-slate-50 p-2 rounded border">
+                    {options.map((option, idx) => {
+                        const isChecked = option?.checked || false;
+                        const isDisabled = option?.hasDbLink || false;
+                        
+                        const getOptionLabel = (opt) => {
+                            if (!opt) return '';
+                            if (typeof opt === 'string') return opt;
+                            if (opt.label && typeof opt.label === 'string') return opt.label;
+                            if (opt.label && typeof opt.label === 'object' && opt.label.label) return opt.label.label;
+                            return opt.tag || 'Option';
+                        };
+                        
+                        return (
+                            <div key={idx} className="flex items-center gap-2 p-2 border rounded bg-white">
+                                <Checkbox
+                                    id={`${fieldKey}-${idx}`}
+                                    checked={isChecked}
+                                    disabled={isDisabled}
+                                    onCheckedChange={(checked) => {
+                                        const newOptions = [...options];
+                                        
+                                        if (placeholder.boolean_type === 'single') {
+                                            newOptions.forEach((opt, i) => {
+                                                if (!opt.hasDbLink) {
+                                                    opt.checked = i === idx ? checked : false;
+                                                }
+                                            });
+                                        } else {
+                                            if (!newOptions[idx].hasDbLink) {
+                                                newOptions[idx].checked = checked;
+                                            }
+                                        }
+                                        
+                                        onChange(newOptions);
+                                    }}
+                                />
+                                <Label
+                                    htmlFor={`${fieldKey}-${idx}`}
+                                    className={`text-xs cursor-pointer flex-1 ${isDisabled ? 'text-muted-foreground' : ''}`}
+                                >
+                                    {getOptionLabel(option)}
+                                </Label>
+                                {isDisabled && (
+                                    <Badge variant="outline" className="text-[8px] bg-blue-50 text-blue-700">
+                                        Auto-filled
+                                    </Badge>
+                                )}
+                                {isChecked && !isDisabled && (
+                                    <CheckCircle2 className="h-3 w-3 text-green-500" />
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        );
+    }
 
-const getOrdinalWord = (index: number): string => {
-  const words = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth'];
-  return words[index] || getOrdinalNumber(index);
+    return (
+        <div className="space-y-2">
+            <div className="flex items-center justify-between">
+                <Label className="text-[10px] font-bold text-slate-400 uppercase">
+                    {placeholder.name.replace(/_/g, ' ')}
+                </Label>
+                {autoPopulated && (
+                    <Badge variant="secondary" className="text-[9px]">
+                        {autoPopulated}
+                    </Badge>
+                )}
+            </div>
+            <Input
+                value={value || ''}
+                onChange={(e) => onChange(e.target.value)}
+                className="bg-white h-8 text-xs"
+            />
+        </div>
+    );
 };
 
 export default function TemplateGenerationDialog({
@@ -431,7 +1031,6 @@ export default function TemplateGenerationDialog({
 }) {
     const { toast } = useToast();
 
-    // Initialize form data with relationship data
     const [formData, setFormData] = useState(() => ({
         ...extractedData,
         ...personData,
@@ -512,8 +1111,15 @@ export default function TemplateGenerationDialog({
                     });
                     return { ...prev, [table]: cache };
                 });
-            } catch (err) { console.error(`Fetch Error ${table}:`, err); }
-            finally { setFetchingTables(prev => { const n = new Set(prev); n.delete(table); return n; }); }
+            } catch (err) { 
+                console.error(`Fetch Error ${table}:`, err); 
+            } finally { 
+                setFetchingTables(prev => { 
+                    const n = new Set(prev); 
+                    n.delete(table); 
+                    return n; 
+                }); 
+            }
         }
     }, [isOpen, selectedTemplate, masterFields, entityIdMap, relationshipData]);
 
@@ -524,210 +1130,19 @@ export default function TemplateGenerationDialog({
         }
     }, [isOpen, selectedTemplate?.id]);
 
-    const processConditionalField = (placeholder, targetEntity, combinedCache, masterFields) => {
-        if (!placeholder.conditions || !targetEntity) return { value: '', source: null };
-
-        for (const condition of placeholder.conditions) {
-            const tag = condition.tag;
-
-            // 1. Check direct field on entity
-            if (targetEntity[tag]) {
-                return {
-                    value: `${condition.label || ''}${targetEntity[tag]}`,
-                    source: 'Direct'
-                };
-            }
-
-            // 2. Case-insensitive direct access
-            const matchingKey = Object.keys(targetEntity).find(k =>
-                k.toLowerCase() === tag.toLowerCase()
-            );
-            if (matchingKey && targetEntity[matchingKey]) {
-                return {
-                    value: `${condition.label || ''}${targetEntity[matchingKey]}`,
-                    source: 'Direct (Case-Insensitive)'
-                };
-            }
-
-            // 3. Master Field Cache Lookup
-            if (condition.master_field_id && masterFields) {
-                const mf = masterFields.get(parseInt(condition.master_field_id, 10));
-                if (mf?.sources) {
-                    for (const source of mf.sources) {
-                        const tableData = combinedCache[source.table];
-                        if (!tableData) continue;
-
-                        let records = Object.values(tableData);
-
-                        // Filter by document_id if provided
-                        if (source.document_id) {
-                            const requiredIds = Array.isArray(source.document_id)
-                                ? source.document_id
-                                : [source.document_id];
-                            records = records.filter(r =>
-                                requiredIds.includes(r.document_id || r.kyc_document_id)
-                            );
-                        }
-
-                        const linkingVar = source.linking_variable || 'id';
-                        const targetId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id);
-
-                        const record = records.find(rec => {
-                            const recId = String(rec[linkingVar] || rec.id || rec.individual_id || rec.director_id);
-                            return recId === targetId || recId.startsWith(targetId + ' ');
-                        });
-
-                        if (record) {
-                            const rawVal = source.path
-                                ? parseJsonValue(record, source.path)
-                                : record[tag];
-                            if (rawVal) {
-                                return {
-                                    value: `${condition.label || ''}${rawVal}`,
-                                    source: `DB: ${mf.label || source.table}`
-                                };
-                            }
-                        }
-                    }
-                }
+    const smartFieldMatch = useCallback((placeholderName) => {
+        const normalized = normalizeString(placeholderName);
+        const sources = [{ data: extractedData }, { data: personData }, { data: companyData }];
+        for (const { data } of sources) {
+            if (!data) continue;
+            for (const key of Object.keys(data)) {
+                if (normalizeString(key) === normalized) return { value: data[key], source: 'Smart Match' };
             }
         }
-
         return { value: '', source: null };
-    };
+    }, [extractedData, personData, companyData]);
 
-    const processTextField = (placeholder, targetEntity, combinedCache, masterFields) => {
-        if (!placeholder.master_field_ids?.length) {
-            return { value: '', source: null };
-        }
-
-        for (const id of placeholder.master_field_ids) {
-            const mf = masterFields.get(parseInt(id, 10));
-            if (!mf?.sources) continue;
-
-            for (const source of mf.sources) {
-                const tableData = combinedCache[source.table];
-                if (!tableData) continue;
-
-                const linkingVar = source.linking_variable || 'id';
-                const searchId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id);
-
-                const record = Object.values(tableData).find(r =>
-                    String(r[linkingVar] || r.id) === searchId
-                );
-
-                if (record) {
-                    // Use source.path first, then field_key, then placeholder name
-                    const val = source.path
-                        ? parseJsonValue(record, source.path)
-                        : (record[mf.field_key] || record[placeholder.name]);
-
-                    if (val) {
-                        return {
-                            value: val,
-                            source: `DB: ${source.table}`
-                        };
-                    }
-                }
-            }
-        }
-
-        return { value: '', source: null };
-    };
-
- const processFieldValue = (placeholder, targetEntity, combinedCache, masterFields, arrayIndex = 0) => {
-    console.group(`🔍 Processing field: ${placeholder.name}`);
-    console.log('Type:', placeholder.type);
-    console.log('Entity:', targetEntity?.name || targetEntity?.full_name || 'Unknown');
-    console.log('Array Index:', arrayIndex);
-
-    let result = { value: '', source: null };
-
-    // Route to appropriate processor based on field type
-    switch (placeholder.type) {
-        case 'ordinal':
-            // Return ordinal number based on array index
-            const ordinalFormat = placeholder.ordinal_format || 'number'; // 'number' (1st, 2nd) or 'word' (First, Second)
-            result = {
-                value: ordinalFormat === 'word' ? getOrdinalWord(arrayIndex) : getOrdinalNumber(arrayIndex),
-                source: 'Ordinal Generator'
-            };
-            break;
-
-        case 'conditional':
-            result = processConditionalField(placeholder, targetEntity, combinedCache, masterFields);
-            break;
-
-        case 'boolean':
-            result = processBooleanField(placeholder, targetEntity, combinedCache, masterFields);
-            break;
-
-        case 'image':
-            result = processImageField(placeholder, targetEntity, combinedCache, masterFields);
-            break;
-
-        default:
-            // For all other text fields, use master field sources
-            result = processTextField(placeholder, targetEntity, combinedCache, masterFields);
-    }
-
-    console.log('Result:', result);
-    console.groupEnd();
-
-    return result;
-};
-
-    const extractDisplayValue = (value) => {
-        // Handle null/undefined
-        if (value === null || value === undefined) {
-            return '';
-        }
-
-        // Handle arrays (boolean fields)
-        if (Array.isArray(value)) {
-            return value
-                .filter(opt => opt && opt.checked)
-                .map(opt => {
-                    if (!opt) return '';
-                    if (typeof opt === 'string') return opt;
-
-                    // Try common property names
-                    const possibleProps = ['label', 'display', 'text', 'value', 'name', 'title'];
-                    for (const prop of possibleProps) {
-                        if (opt[prop] && typeof opt[prop] === 'string') {
-                            return opt[prop];
-                        }
-                    }
-
-                    // Try nested structures
-                    if (opt.label && typeof opt.label === 'object') {
-                        if (opt.label.label) return opt.label.label;
-                        if (opt.label.display) return opt.label.display;
-                    }
-
-                    return opt.tag || '';
-                })
-                .filter(Boolean)
-                .join(', ');
-        }
-
-        // Handle objects (like conditional field results)
-        if (typeof value === 'object') {
-            // If it's a result object with a value property, extract it
-            if (value.value !== undefined) {
-                return String(value.value);
-            }
-
-            // Otherwise it's likely an error - return empty
-            console.warn('Unexpected object value:', value);
-            return '';
-        }
-
-        // Handle primitives
-        return String(value);
-    };
-
-    const resolveArrayData = (blockPlaceholder, allPlaceholders, combinedCache, masterFields, entityIdMap, relationshipData) => {
+    const resolveArrayData = useCallback((blockPlaceholder, allPlaceholders, combinedCache, masterFields, entityIdMap, relationshipData) => {
         console.group(`🔄 Processing Array Block: ${blockPlaceholder.name || 'unnamed-block'}`);
 
         const entityType = Array.isArray(blockPlaceholder.entity_type)
@@ -739,14 +1154,12 @@ export default function TemplateGenerationDialog({
 
         let sourceArray = [];
 
-        // Identify child fields
         const childFields = allPlaceholders.filter(p =>
             (p.parent_name === blockName || (p.description && p.description.toLowerCase().includes(blockName.toLowerCase())))
             && p.id !== blockPlaceholder.id
             && !p.is_block_start
         );
 
-        // Handle Horizontal/Digit-splitting blocks
         const isDigitSplitting = isHorizontal || (
             childFields.length === 1 &&
             childFields[0].master_field_ids?.[0] === blockPlaceholder.master_field_ids?.[0]
@@ -787,213 +1200,71 @@ export default function TemplateGenerationDialog({
             }
         }
 
-        // Get source array based on entity type
-        if (entityType === 'director' || entityType === 'dependant') {
-            sourceArray = relationshipData[`${entityType}s`] || [];
+        // HANDLE DIFFERENT ENTITY TYPES FOR ARRAYS
+        const normalizedEntityType = entityType.toLowerCase().trim();
+        
+        if (normalizedEntityType === 'director') {
+            sourceArray = relationshipData.directors || [];
             if (isPrimaryOnly && sourceArray.length > 0) {
                 const primary = sourceArray.find(d => d.is_primary) || sourceArray[0];
                 sourceArray = primary ? [primary] : [];
             }
+        } else if (['dependant', 'dependent', 'spouse', 'child', 'father', 'mother', 'son', 'daughter'].includes(normalizedEntityType)) {
+            sourceArray = relationshipData.dependants || [];
+            
+            // Filter by relationship if specified in block config
+            if (blockPlaceholder.dependant_relationship?.[0]) {
+                const targetRel = blockPlaceholder.dependant_relationship[0].toLowerCase();
+                sourceArray = sourceArray.filter(d => 
+                    d.relationship?.toLowerCase() === targetRel
+                );
+            }
+            // Or filter by entity type name itself (e.g., "spouse", "child")
+            else if (['spouse', 'child', 'father', 'mother', 'son', 'daughter'].includes(normalizedEntityType)) {
+                sourceArray = sourceArray.filter(d =>
+                    d.relationship?.toLowerCase() === normalizedEntityType ||
+                    (normalizedEntityType === 'child' && ['son', 'daughter'].includes(d.relationship?.toLowerCase()))
+                );
+            }
         }
 
         if (sourceArray.length === 0) {
-            console.warn(`⚠️ No source array found for block: ${blockName}`);
+            console.warn(`⚠️ No source array found for block: ${blockName} (entity type: ${entityType})`);
             console.groupEnd();
             return [];
         }
 
+        console.log(`✅ Found ${sourceArray.length} items for ${blockName}`);
+
         const result = sourceArray.map((item, index) => {
-        console.group(`📝 Item ${index + 1}/${sourceArray.length}`);
-        const rowData = {};
+            console.group(`📝 Item ${index + 1}/${sourceArray.length}`);
+            const rowData = {};
 
-        childFields.forEach(field => {
-            // **PASS ARRAY INDEX** for ordinal processing
-            const processed = processFieldValue(field, item, combinedCache, masterFields, index);
-            
-            // **USE UNIFIED EXTRACTOR** - consistent value extraction
-            rowData[field.name] = extractDisplayValue(processed.value);
-        });
-
-        console.log(`📊 Final row data:`, rowData);
-        console.groupEnd();
-        return rowData;
-    });
-
-    console.groupEnd();
-    return result;
-};
-
-    const processBooleanField = (placeholder, targetEntity, combinedCache, masterFields) => {
-        if (!placeholder.boolean_conditions) {
-            return { value: [], source: null };
-        }
-
-        const results = placeholder.boolean_conditions.map(condition => {
-            let isChecked = false;
-
-            // Scenario 1: DB-driven (has master_field_id)
-            if (condition.master_field_id) {
-                const mf = masterFields.get(parseInt(condition.master_field_id, 10));
-                if (mf?.sources) {
-                    for (const source of mf.sources) {
-                        const tableData = combinedCache[source.table];
-                        if (!tableData) continue;
-
-                        const targetId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id);
-                        const record = Object.values(tableData).find(r =>
-                            String(r[source.linking_variable || 'id']) === targetId
-                        );
-
-                        if (record) {
-                            const fieldValue = source.path
-                                ? parseJsonValue(record, source.path)
-                                : record[condition.comparison?.field || condition.tag];
-
-                            // Evaluate comparison
-                            if (condition.comparison) {
-                                const { operator, value } = condition.comparison;
-                                const strValue = String(fieldValue).toLowerCase();
-                                const compareValue = String(value).toLowerCase();
-
-                                switch (operator) {
-                                    case 'equals':
-                                        isChecked = strValue === compareValue;
-                                        break;
-                                    case 'not_equals':
-                                        isChecked = strValue !== compareValue;
-                                        break;
-                                    case 'contains':
-                                        isChecked = strValue.includes(compareValue);
-                                        break;
-                                }
-                            } else {
-                                isChecked = Boolean(fieldValue);
-                            }
-
-                            if (isChecked) break;
-                        }
-                    }
-                }
-            }
-            // Scenario 2: User input - will be set manually in form
-
-            return {
-                tag: condition.tag,
-                label: condition.label,
-                checked: isChecked,
-                hasDbLink: Boolean(condition.master_field_id)
-            };
-        });
-
-        return {
-            value: results,
-            source: results.some(r => r.hasDbLink) ? 'Boolean (DB)' : 'Boolean (User Input)'
-        };
-    };
-
-    const processImageField = (placeholder, targetEntity, combinedCache, masterFields) => {
-        if (!placeholder.master_field_ids?.length) {
-            return { value: '', source: null };
-        }
-
-        for (const id of placeholder.master_field_ids) {
-            const mf = masterFields.get(parseInt(id, 10));
-            if (!mf?.sources) continue;
-
-            for (const source of mf.sources) {
-                const tableData = combinedCache[source.table];
-                if (!tableData) continue;
-
-                const linkingVar = source.linking_variable || 'id';
-                const searchId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id);
-                const reqDocIds = Array.isArray(source.document_id)
-                    ? source.document_id
-                    : [source.document_id];
-
-                const match = Object.values(tableData).find(d =>
-                    reqDocIds.includes(d.document_id || d.kyc_document_id) &&
-                    String(d[linkingVar] || d.id) === searchId
+            childFields.forEach(field => {
+                const processed = processPlaceholderValue(
+                    field, 
+                    relationshipData, 
+                    combinedCache, 
+                    masterFields, 
+                    index, 
+                    sourceArray
                 );
-
-                if (match?.file_path) {
-                    return {
-                        value: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${match.file_path}`,
-                        source: 'Image Cache'
-                    };
+                
+                rowData[field.name] = extractDisplayValue(processed.value);
+                
+                if (processed.source) {
+                    rowData[`__${field.name}_source`] = processed.source;
                 }
-            }
-        }
+            });
 
-        return { value: '', source: null };
-    };
-
-    const getPlaceholderValue = useCallback((placeholder) => {
-        console.group(`🔍 [${placeholder.id}] Processing placeholder: ${placeholder.name}`);
-        const combinedCache = { ...sourceDataCache, ...additionalCache };
-        const isPrimaryDirectorReq = placeholder.director_type === 'primary';
-        let pEntityType = 'company';
-        if (Array.isArray(placeholder.entity_type)) {
-            pEntityType = placeholder.entity_type[0];
-        } else if (placeholder.entity_type) {
-            pEntityType = placeholder.entity_type;
-        }
-        let targetEntity = null;
-        const isDependantType = pEntityType && ['dependant', 'dependent'].includes(pEntityType.toLowerCase()?.trim());
-
-        if (isDependantType && relationshipData?.dependants) {
-            if (placeholder.dependant_relationship?.[0]) {
-                const targetRel = placeholder.dependant_relationship[0].toLowerCase();
-                targetEntity = relationshipData.dependants.find(d =>
-                    d.relationship?.toLowerCase() === targetRel
-                );
-            }
-        } else if (pEntityType === 'director') {
-            if (isPrimaryDirectorReq) {
-                targetEntity = relationshipData?.directors?.find(d => d.is_primary) ||
-                    relationshipData?.directors?.[0];
-            } else {
-                targetEntity = relationshipData?.directors?.[0];
-            }
-        } else if (pEntityType === 'company') {
-            targetEntity = relationshipData.company;
-        }
-
-        if (placeholder.master_field_ids?.length > 0 && masterFields) {
-            for (const id of placeholder.master_field_ids) {
-                const mf = masterFields.get(parseInt(id, 10));
-                if (mf?.date_config?.useCurrentDate) {
-                    console.groupEnd();
-                    return {
-                        value: formatDate(new Date(), mf.date_config.format || 'DD/MM/YYYY'),
-                        source: 'System Date'
-                    };
-                }
-            }
-        }
-
-        if (!targetEntity) {
+            console.log(`📊 Final row data:`, rowData);
             console.groupEnd();
-            return { value: '', source: null };
-        }
-
-        // **USE UNIFIED PROCESSOR** - same logic for all field types
-        const result = processFieldValue(placeholder, targetEntity, combinedCache, masterFields);
+            return rowData;
+        });
 
         console.groupEnd();
         return result;
-    }, [masterFields, entityIdMap, sourceDataCache, additionalCache, relationshipData]);
-
-    const smartFieldMatch = useCallback((placeholderName) => {
-        const normalized = normalizeString(placeholderName);
-        const sources = [{ data: extractedData }, { data: personData }, { data: companyData }];
-        for (const { data } of sources) {
-            if (!data) continue;
-            for (const key of Object.keys(data)) {
-                if (normalizeString(key) === normalized) return { value: data[key], source: 'Smart Match' };
-            }
-        }
-        return { value: '', source: null };
-    }, [extractedData, personData, companyData]);
+    }, []);
 
     useEffect(() => {
         if (isOpen && selectedTemplate && Object.keys(sourceDataCache).length > 0) {
@@ -1002,28 +1273,30 @@ export default function TemplateGenerationDialog({
             const combinedCache = { ...sourceDataCache, ...additionalCache };
 
             groupedPlaceholders.topLevel.forEach(p => {
-                let match = getPlaceholderValue(p);
+                const match = processPlaceholderValue(
+                    p,
+                    relationshipData,
+                    combinedCache,
+                    masterFields
+                );
 
-                // Special handling for boolean types
                 if (p.type === 'boolean') {
-                    if (match.value && Array.isArray(match.value)) {
-                        // Already in correct format from getPlaceholderValue
-                        initData[p.name] = match.value;
-                    } else if (p.boolean_conditions) {
-                        // Initialize with unchecked options for user input
-                        initData[p.name] = p.boolean_conditions.map(cond => ({
-                            tag: cond.tag,
-                            label: cond.label,
-                            checked: false,
-                            hasDbLink: false
-                        }));
-                    }
+                    initData[p.name] = match.value;
                 } else {
-                    if (!match.value) match = smartFieldMatch(p.name);
-                    initData[p.name] = match.value || '';
+                    initData[p.name] = extractDisplayValue(match.value);
                 }
 
-                if (match.value) autoMap.set(p.name, match.source);
+                if (match.source) {
+                    autoMap.set(p.name, match.source);
+                }
+
+                if (!initData[p.name] && p.type !== 'boolean') {
+                    const smartMatch = smartFieldMatch(p.name);
+                    if (smartMatch.value) {
+                        initData[p.name] = smartMatch.value;
+                        autoMap.set(p.name, smartMatch.source);
+                    }
+                }
             });
 
             Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
@@ -1037,7 +1310,9 @@ export default function TemplateGenerationDialog({
                     relationshipData
                 );
                 initData[blockName] = resolvedRows;
-                if (resolvedRows.length > 0) autoMap.set(blockName, `Auto-populated`);
+                if (resolvedRows.length > 0) {
+                    autoMap.set(blockName, `Auto-populated (${resolvedRows.length} items)`);
+                }
             });
 
             setFormData(initData);
@@ -1045,11 +1320,56 @@ export default function TemplateGenerationDialog({
             setAutoPopulatedFields(autoMap);
 
             setTimeout(() => {
-                if (docxTemplateBuffer.current) updateWordPreview(initData, imageStyles);
-                else setPreviewContent(populateHtmlContent(initData, selectedTemplate.placeholders || [], imageStyles));
+                if (docxTemplateBuffer.current) {
+                    updateWordPreview(initData, imageStyles);
+                } else {
+                    setPreviewContent(populateHtmlContent(initData, selectedTemplate.placeholders || [], imageStyles));
+                }
             }, 100);
         }
     }, [isOpen, selectedTemplate?.id, groupedPlaceholders, sourceDataCache, additionalCache]);
+
+    const handleInputChange = (name, val) => {
+        setFormData(prev => {
+            const newState = { ...prev, [name]: val };
+            
+            if (docxTemplateBuffer.current) {
+                updateWordPreview(newState, imageStyles);
+            } else {
+                setPreviewContent(populateHtmlContent(newState, selectedTemplate?.placeholders || [], imageStyles));
+            }
+            
+            return newState;
+        });
+        
+        if (!manuallyEditedFields.has(name)) {
+            setManuallyEditedFields(prev => new Set(prev).add(name));
+        }
+    };
+
+    const handleFileChange = (name, e) => {
+        const file = e.target.files[0];
+        if (file) {
+            setUploadedFiles(prev => ({ ...prev, [name]: file }));
+            const reader = new FileReader();
+            reader.onloadend = () => handleInputChange(name, reader.result);
+            reader.readAsDataURL(file);
+        }
+    };
+
+    const handleImageStyleChange = (name, key, value) => {
+        setImageStyles(prev => {
+            const newStyles = { ...prev, [name]: { ...(prev[name] || {}), [key]: value } };
+            
+            if (docxTemplateBuffer.current) {
+                updateWordPreview(formData, newStyles);
+            } else {
+                setPreviewContent(populateHtmlContent(formData, selectedTemplate?.placeholders || [], newStyles));
+            }
+            
+            return newStyles;
+        });
+    };
 
     const handleArrayInputChange = (blockName, index, fieldName, value) => {
         setFormData(prev => {
@@ -1067,8 +1387,10 @@ export default function TemplateGenerationDialog({
 
             return newState;
         });
+        
         setManuallyEditedFields(prev => new Set(prev).add(`${blockName}[${index}].${fieldName}`));
     };
+
     const renderArrayInputs = (blockName, blockData) => {
         const rows = Array.isArray(formData[blockName]) ? formData[blockName] : [];
         const isHorizontal = blockData?.config?.array_direction === 'horizontal';
@@ -1086,7 +1408,6 @@ export default function TemplateGenerationDialog({
                 {rows.length === 0 ? (
                     <div className="text-xs text-muted-foreground italic p-3 text-center">No data found.</div>
                 ) : isHorizontal ? (
-                    /* HORIZONTAL UI - Character Boxes */
                     <div className="p-3 bg-white border rounded shadow-sm">
                         <Label className="text-[9px] font-bold text-slate-400 uppercase block mb-2">
                             {blockData.children[0]?.name.replace(/_/g, ' ')}
@@ -1112,7 +1433,6 @@ export default function TemplateGenerationDialog({
                         <p className="text-[8px] text-muted-foreground mt-2 italic">Data is split across horizontal boxes</p>
                     </div>
                 ) : (
-                    /* **NORMAL RENDERING FOR REGULAR BLOCKS** */
                     rows.map((row, idx) => (
                         <div key={idx} className="p-3 bg-white border rounded shadow-sm relative group mb-2">
                             <Button
@@ -1129,92 +1449,30 @@ export default function TemplateGenerationDialog({
 
                             <div className="space-y-3">
                                 {blockData.children.map(child => {
-                                    const fieldValue = row[child.name] || '';
+                                    const fieldValue = row[child.name];
+                                    const autoSource = row[`__${child.name}_source`];
 
                                     return (
                                         <div key={child.id}>
-                                            <Label className="text-[9px] font-bold text-slate-400 uppercase">
-                                                {child.name.replace(/_/g, ' ')}
-                                            </Label>
-                                            {child.type === 'boolean' ? (
-                                                <div className="space-y-1 mt-1 bg-slate-50 p-2 rounded border">
-                                                    {(Array.isArray(row[child.name]) ? row[child.name] : child.boolean_conditions || []).map((option, optIdx) => {
-                                                        // Extract checked state properly
-                                                        const isChecked = option?.checked || false;
-                                                        const isDisabled = option?.hasDbLink || false;
-
-                                                        // Helper to get display label
-                                                        const getDisplayLabel = (opt) => {
-                                                            if (!opt) return '';
-                                                            if (typeof opt === 'string') return opt;
-                                                            if (opt.label && typeof opt.label === 'string') return opt.label;
-                                                            if (opt.label && typeof opt.label === 'object' && opt.label.label) return opt.label.label;
-                                                            return opt.tag || 'Option';
-                                                        };
-
-                                                        return (
-                                                            <div key={optIdx} className="flex items-center gap-2 p-2 border rounded bg-white">
-                                                                <Checkbox
-                                                                    checked={isChecked}
-                                                                    disabled={isDisabled}
-                                                                    onCheckedChange={(checked) => {
-                                                                        const currentOptions = [...(Array.isArray(row[child.name]) ? row[child.name] : child.boolean_conditions)];
-                                                                        if (child.boolean_type === 'single') {
-                                                                            currentOptions.forEach((o, i) => {
-                                                                                if (!o.hasDbLink) o.checked = i === optIdx ? checked : false;
-                                                                            });
-                                                                        } else {
-                                                                            if (!currentOptions[optIdx].hasDbLink) {
-                                                                                currentOptions[optIdx].checked = checked;
-                                                                            }
-                                                                        }
-                                                                        handleArrayInputChange(blockName, idx, child.name, currentOptions);
-                                                                    }}
-                                                                />
-                                                                <span className="text-[10px]">
-                                                                    {getDisplayLabel(option)}
-                                                                </span>
-                                                                {isDisabled && (
-                                                                    <Badge variant="outline" className="ml-auto text-[8px] bg-blue-50 text-blue-700">
-                                                                        Auto-filled
-                                                                    </Badge>
-                                                                )}
-                                                                {isChecked && !isDisabled && (
-                                                                    <CheckCircle2 className="h-3 w-3 text-green-500 ml-auto" />
-                                                                )}
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            ) : child.type === 'image' ? (
-                                                <div className="space-y-2">
-                                                    {fieldValue ? (
-                                                        <div className="relative group rounded overflow-hidden border aspect-video flex items-center justify-center bg-gray-50">
-                                                            <img src={fieldValue} alt={child.name} className="max-h-full object-contain" />
-                                                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                                                <Button
-                                                                    size="sm"
-                                                                    variant="destructive"
-                                                                    className="h-6 text-[10px]"
-                                                                    onClick={() => handleArrayInputChange(blockName, idx, child.name, '')}
-                                                                >
-                                                                    Remove
-                                                                </Button>
-                                                            </div>
-                                                        </div>
-                                                    ) : (
-                                                        <div className="h-20 border-2 border-dashed rounded flex items-center justify-center text-xs text-gray-400">
-                                                            No image
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            ) : (
-                                                <Input
-                                                    value={fieldValue}
-                                                    onChange={(e) => handleArrayInputChange(blockName, idx, child.name, e.target.value)}
-                                                    className="h-7 text-xs border-slate-100 focus:border-blue-200"
-                                                />
-                                            )}
+                                            <PlaceholderInput
+                                                placeholder={child}
+                                                value={fieldValue}
+                                                onChange={(val) => handleArrayInputChange(blockName, idx, child.name, val)}
+                                                onFileChange={(e) => {
+                                                    const file = e.target.files[0];
+                                                    if (file) {
+                                                        const reader = new FileReader();
+                                                        reader.onloadend = () => handleArrayInputChange(blockName, idx, child.name, reader.result);
+                                                        reader.readAsDataURL(file);
+                                                    }
+                                                }}
+                                                imageStyles={imageStyles}
+                                                onImageStyleChange={handleImageStyleChange}
+                                                autoPopulated={autoSource}
+                                                isArrayItem={true}
+                                                arrayIndex={idx}
+                                                blockName={blockName}
+                                            />
                                         </div>
                                     );
                                 })}
@@ -1225,29 +1483,6 @@ export default function TemplateGenerationDialog({
             </div>
         );
     };
-    function createCell(value) {
-        const displayValue = value !== undefined && value !== null ? value : '&nbsp;';
-        console.log('Creating cell with value:', { value, displayValue });
-        return `<span style="
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 30px;
-    height: 30px;
-    border: 1px solid #000;
-    text-align: center;
-    line-height: 1;
-    font-family: monospace;
-    font-weight: bold;
-    background: #fff;
-    padding: 0 8px;
-  ">${displayValue}</span>`;
-    }
-    // Debug function to log with timestamp and style
-    const debugLog = (...args) => {
-        const timestamp = new Date().toISOString();
-        console.log(`[${timestamp}] [TEMPLATE_DEBUG]`, ...args);
-    };
 
     const populateHtmlContent = useCallback((data, placeholders, styles) => {
         if (!selectedTemplate?.content) {
@@ -1257,7 +1492,6 @@ export default function TemplateGenerationDialog({
 
         let content = selectedTemplate.content;
 
-        // Process array blocks
         Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
             const block = groupedPlaceholders.blocks[blockName];
             const blockConfig = block.config || {};
@@ -1272,7 +1506,6 @@ export default function TemplateGenerationDialog({
                 if (isHorizontal) {
                     const childName = block.children[0]?.name || 'd';
                     const cells = rows.map(row => {
-                        // Use unified extractor
                         const value = extractDisplayValue(row[childName]);
                         return `<span style="display:inline-block;width:25px;height:30px;border:1px solid #000;text-align:center;line-height:30px;font-weight:bold;margin-right:2px;background:#fff;color:#000;">${value || '&nbsp;'}</span>`;
                     }).join('');
@@ -1280,37 +1513,49 @@ export default function TemplateGenerationDialog({
                     return `<div style="display:flex;align-items:center;margin:5px 0;">${cells}</div>`;
                 }
 
-                return rows.map(row => {
+                return rows.map((row, rowIndex) => {
                     let rowHtml = innerTemplate;
+                    
                     block.children.forEach(child => {
                         const rawValue = row?.[child.name];
-                        // Use unified extractor
                         let value = extractDisplayValue(rawValue);
 
                         const childRegex = new RegExp(`\\{+\\s*${child.name}\\s*\\}+`, 'g');
 
-                        // Handle images
                         if (child.type === 'image' && value && value.startsWith('http')) {
-                            const style = styles[child.name] || {};
+                            const styleKey = `${blockName}_${rowIndex}_${child.name}`;
+                            const style = styles[styleKey] || styles[child.name] || {};
                             const imgWidth = style.imageWidth ? `${style.imageWidth}px` : "120px";
-                            value = `<img src="${value}" style="width:${imgWidth}; height:auto;" />`;
+                            const textAlign = style.textAlign || 'center';
+                            value = `<div style="text-align:${textAlign};"><img src="${value}" style="width:${imgWidth}; height:auto;" /></div>`;
+                        }
+                        else if (child.is_digit_split) {
+                            const chars = processDigitSplit(value, child.digit_count || 8);
+                            const count = child.digit_count || 8;
+                            for (let i = 1; i <= count; i++) {
+                                const seqRegex = new RegExp(`\\{+\\s*${child.name}_${i}\\s*\\}+`, 'gi');
+                                const charVal = chars[i - 1] || '&nbsp;';
+                                rowHtml = rowHtml.replace(seqRegex, charVal);
+                            }
+                            const baseRegex = new RegExp(`\\{+\\s*${child.name}\\s*\\}+`, 'gi');
+                            rowHtml = rowHtml.replace(baseRegex, value || '');
+                            return;
                         }
 
                         rowHtml = rowHtml.replace(childRegex, value || '');
                     });
+                    
                     return rowHtml;
                 }).join('');
             });
         });
 
-        // Process top-level placeholders
         groupedPlaceholders.topLevel.forEach(placeholder => {
             const rawValue = data[placeholder.name];
             const cleanName = placeholder.name.replace(/[{}]/g, '').trim();
 
-            // Handle digit split
             if (placeholder.is_digit_split) {
-                const chars = String(rawValue || '').split('');
+                const chars = processDigitSplit(rawValue, placeholder.digit_count || 8);
                 const count = placeholder.digit_count || 8;
                 for (let i = 1; i <= count; i++) {
                     const seqRegex = new RegExp(`\\{+\\s*${cleanName}_${i}\\s*\\}+`, 'gi');
@@ -1318,11 +1563,10 @@ export default function TemplateGenerationDialog({
                     content = content.replace(seqRegex, charVal);
                 }
                 const baseRegex = new RegExp(`\\{+\\s*${cleanName}\\s*\\}+`, 'gi');
-                content = content.replace(baseRegex, rawValue || '');
+                content = content.replace(baseRegex, extractDisplayValue(rawValue) || '');
                 return;
             }
 
-            // Use unified extractor for all other types
             let value = extractDisplayValue(rawValue);
             const regex = new RegExp(`\\{+\\s*${cleanName}\\s*\\}+`, 'gi');
 
@@ -1340,7 +1584,6 @@ export default function TemplateGenerationDialog({
                     </div>`
                     );
                 } else if (placeholder.type === 'boolean') {
-                    // For boolean, handle individual option tags
                     const options = Array.isArray(rawValue) ? rawValue : [];
 
                     options.forEach(option => {
@@ -1358,7 +1601,6 @@ export default function TemplateGenerationDialog({
                         }
                     });
 
-                    // Replace parent tag with summary
                     content = content.replace(regex, value);
                 } else {
                     const formattedValue = /<[a-z][\s\S]*>/i.test(String(value))
@@ -1384,14 +1626,12 @@ export default function TemplateGenerationDialog({
         const renderData = {};
         const imagePromises = [];
 
-        // 1. Process Array Blocks
         for (const blockName of Object.keys(groupedPlaceholders.blocks)) {
             const block = groupedPlaceholders.blocks[blockName];
             const rows = JSON.parse(JSON.stringify(data[blockName] || []));
 
             for (const row of rows) {
                 for (const child of block.children) {
-                    // Use unified extractor
                     const displayValue = extractDisplayValue(row[child.name]);
                     row[child.name] = displayValue;
 
@@ -1408,7 +1648,6 @@ export default function TemplateGenerationDialog({
 
         if (!selectedTemplate) return renderData;
 
-        // 2. Process Top Level Placeholders
         (selectedTemplate.placeholders || []).forEach(p => {
             const val = data[p.name];
             const baseKey = p.name.replace(/[%#{}]/g, '').trim();
@@ -1417,24 +1656,23 @@ export default function TemplateGenerationDialog({
 
             if (p.is_digit_split) {
                 const strVal = extractDisplayValue(val);
+                const chars = processDigitSplit(strVal, p.digit_count || 8);
                 const count = p.digit_count || 8;
                 for (let i = 1; i <= count; i++) {
-                    renderData[`${baseKey.toLowerCase()}_${i}`] = strVal[i - 1] || "";
-                    renderData[`${baseKey.toUpperCase()}_${i}`] = strVal[i - 1] || "";
+                    renderData[`${baseKey.toLowerCase()}_${i}`] = chars[i - 1] || "";
+                    renderData[`${baseKey.toUpperCase()}_${i}`] = chars[i - 1] || "";
                 }
                 renderData[baseKey] = strVal;
             }
             else if (p.type === 'boolean') {
                 const options = Array.isArray(val) ? val : [];
 
-                // Map individual option tags
                 options.forEach(opt => {
                     if (opt && opt.tag) {
                         renderData[opt.tag] = opt.checked ? extractDisplayValue([opt].filter(o => o.checked)) : "";
                     }
                 });
 
-                // Map the parent key
                 renderData[baseKey] = extractDisplayValue(val);
             }
             else if (p.type === 'image') {
@@ -1463,7 +1701,6 @@ export default function TemplateGenerationDialog({
             const zip = new PizZip(docxTemplateBuffer.current);
             const renderData = await prepareRenderData(data);
 
-            // Process all images first
             const processedData = { ...renderData };
             const imagePromises = Object.entries(renderData)
                 .filter(([_, value]) => value && typeof value === 'string' &&
@@ -1517,14 +1754,11 @@ export default function TemplateGenerationDialog({
                 nullGetter: () => ""
             });
 
-            // Set the data and render
             doc.setData(processedData);
             doc.render();
 
-            // Generate the document
             const out = doc.getZip().generate({ type: "arraybuffer" });
 
-            // Convert to HTML for preview
             const result = await mammoth.convertToHtml(
                 { arrayBuffer: out },
                 {
@@ -1541,13 +1775,12 @@ export default function TemplateGenerationDialog({
                             };
                         }).catch(err => {
                             console.warn('Failed to convert image in preview:', err);
-                            return { src: '' }; // Return empty source on error
+                            return { src: '' };
                         });
                     })
                 }
             );
 
-            // Update the preview content
             setPreviewContent(result.value);
 
         } catch (err) {
@@ -1561,27 +1794,6 @@ export default function TemplateGenerationDialog({
             setIsPreviewLoading(false);
         }
     }, [selectedTemplate, toast, prepareRenderData]);
-
-    const handleInputChange = (name, val) => {
-        setFormData(prev => ({ ...prev, [name]: val }));
-        if (!manuallyEditedFields.has(name)) {
-            setManuallyEditedFields(prev => new Set(prev).add(name));
-        }
-    };
-
-    const handleFileChange = (name, e) => {
-        const file = e.target.files[0];
-        if (file) {
-            setUploadedFiles(prev => ({ ...prev, [name]: file }));
-            const reader = new FileReader();
-            reader.onloadend = () => handleInputChange(name, reader.result);
-            reader.readAsDataURL(file);
-        }
-    };
-
-    const handleImageStyleChange = (name, key, value) => {
-        setImageStyles(prev => ({ ...prev, [name]: { ...(prev[name] || {}), [key]: value } }));
-    };
 
     useEffect(() => {
         if (!isOpen) return;
@@ -1613,7 +1825,7 @@ export default function TemplateGenerationDialog({
         };
 
         updatePreview();
-    }, [isOpen, selectedTemplate?.id, formData, imageStyles]);
+    }, [isOpen, selectedTemplate?.id]);
 
     const changedFields = useMemo(() => {
         const changes = [];
@@ -1622,17 +1834,14 @@ export default function TemplateGenerationDialog({
             const original = originalFormData[placeholder.name];
             const current = formData[placeholder.name];
 
-            // Handle boolean fields differently
             if (placeholder.type === 'boolean') {
                 if (Array.isArray(original) && Array.isArray(current)) {
-                    // Check if any checkbox state changed
                     const hasChanged = current.some((opt, idx) => {
                         const origOpt = original[idx];
                         return origOpt?.checked !== opt?.checked;
                     });
 
                     if (hasChanged) {
-                        // For boolean, store the entire options array
                         let targetInfo = null;
 
                         if (placeholder.master_field_ids?.length > 0) {
@@ -1668,7 +1877,6 @@ export default function TemplateGenerationDialog({
                     }
                 }
             } else {
-                // Original logic for non-boolean fields
                 const originalStr = String(original || '');
                 const currentStr = String(current || '');
 
@@ -1678,7 +1886,6 @@ export default function TemplateGenerationDialog({
                     if (placeholder.master_field_ids?.length > 0) {
                         const masterField = masterFields.get(parseInt(placeholder.master_field_ids[0]));
                         if (masterField?.sources?.[0]) {
-                            // Find the source matching the entity type
                             const source = masterField.sources.find(s =>
                                 s.source_type === (placeholder.entity_type || 'company')
                             ) || masterField.sources[0];
@@ -1725,11 +1932,9 @@ export default function TemplateGenerationDialog({
                 const { table, path, linkingVariable, entityId } = change.targetInfo;
 
                 if (path) {
-                    // For JSONB fields
                     const pathParts = path.replace(/'/g, '').split(/->>|->/);
                     const updatePayload = {};
 
-                    // Build nested structure for JSONB update
                     let current = updatePayload;
                     for (let i = 0; i < pathParts.length - 1; i++) {
                         const part = pathParts[i].trim();
@@ -1748,7 +1953,6 @@ export default function TemplateGenerationDialog({
                 }
             }
 
-            // Execute updates
             const results = [];
             for (const update of updates) {
                 const { error, data } = await supabase
@@ -1828,7 +2032,6 @@ export default function TemplateGenerationDialog({
 
         try {
             const fileName = `${documentName.replace(/[^\w\s-]/g, '_')}_${formatDate(new Date(), 'YYYYMMDD')}`;
-            console.log(`[generateAndDownload] Generated file name: ${fileName}`);
 
             if (!docxTemplateBuffer.current) {
                 const errorMsg = 'No template buffer available for document generation';
@@ -1837,28 +2040,31 @@ export default function TemplateGenerationDialog({
                 return;
             }
 
-            console.log('[generateAndDownload] Preparing render data...');
             const renderData = await prepareRenderData(formData);
-            console.log('[generateAndDownload] Render data prepared:', Object.keys(renderData).length > 0);
-
-            console.log('[generateAndDownload] Initializing document generation...');
             const zip = new PizZip(docxTemplateBuffer.current);
 
             const imageModule = new ImageModule({
                 centered: false,
-                getImage: (tag) => {
-                    console.log(`[generateAndDownload] Processing image tag: ${tag ? 'tag exists' : 'empty tag'}`);
-                    return base64Parser(tag);
-                },
+                getImage: (tag) => base64Parser(tag),
                 getSize: (img, tag, name) => {
-                    const s = imageStyles[name];
-                    const size = s ? [s.imageWidth || 300, s.imageHeight || 200] : [300, 200];
-                    console.log(`[generateAndDownload] Image size for ${name || 'unnamed'}:`, size);
-                    return size;
+                    const styleKeys = [name, name?.split('_').slice(2).join('_')];
+                    let s = null;
+                    
+                    for (const key of styleKeys) {
+                        if (key && imageStyles[key]) {
+                            s = imageStyles[key];
+                            break;
+                        }
+                    }
+                    
+                    if (!s) {
+                        s = imageStyles[name] || {};
+                    }
+                    
+                    return s ? [s.imageWidth || 300, s.imageHeight || 200] : [300, 200];
                 }
             });
 
-            console.log('[generateAndDownload] Creating Docxtemplater instance...');
             const doc = new Docxtemplater(zip, {
                 modules: [imageModule],
                 linebreaks: true,
@@ -1866,84 +2072,54 @@ export default function TemplateGenerationDialog({
                 nullGetter: () => ""
             });
 
-            console.log('[generateAndDownload] Setting and rendering document data...');
             doc.setData(renderData);
-            try {
-                doc.render();
-                console.log('[generateAndDownload] Document rendered successfully');
-            } catch (renderError) {
-                console.error('[generateAndDownload] Error rendering document:', renderError);
-                throw new Error(`Failed to render document: ${renderError.message}`);
-            }
+            doc.render();
 
-            console.log(`[generateAndDownload] Generating ${type.toUpperCase()} blob...`);
             const blob = doc.getZip().generate({
                 type: "blob",
                 mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             });
-            console.log('[generateAndDownload] Blob generated:', blob.size > 0 ? `${Math.round(blob.size / 1024)}KB` : 'empty');
 
             if (type === 'word') {
-                console.log('[generateAndDownload] Initiating Word document download...');
-                try {
-                    saveAs(blob, `${fileName}.docx`);
-                    console.log('[generateAndDownload] Word download initiated');
-                    toast({
-                        title: "Success",
-                        description: `Document downloaded as ${fileName}.docx`
-                    });
-                } catch (saveError) {
-                    console.error('[generateAndDownload] Error saving Word document:', saveError);
-                    throw new Error(`Failed to save Word document: ${saveError.message}`);
-                }
+                saveAs(blob, `${fileName}.docx`);
+                toast({
+                    title: "Success",
+                    description: `Document downloaded as ${fileName}.docx`
+                });
             } else {
-                console.log('[generateAndDownload] Preparing PDF generation...');
-                try {
-                    const html2pdf = (await import('html2pdf.js')).default;
-                    console.log('[generateAndDownload] html2pdf loaded');
+                const html2pdf = (await import('html2pdf.js')).default;
+                const element = document.createElement('div');
+                element.innerHTML = previewContent;
+                element.className = EDITOR_PREVIEW_STYLES + ' p-10 bg-white';
+                element.style.width = '800px';
 
-                    const element = document.createElement('div');
-                    element.innerHTML = previewContent;
-                    element.className = EDITOR_PREVIEW_STYLES + ' p-10 bg-white';
-                    element.style.width = '800px';
-
-                    console.log('[generateAndDownload] Starting PDF generation...');
-                    await html2pdf()
-                        .set({
-                            margin: 10,
-                            filename: `${fileName}.pdf`,
-                            html2canvas: {
-                                scale: 2,
-                                useCORS: true,
-                                logging: true,
-                                onclone: (clonedDoc) => {
-                                    console.log('[html2canvas] Document cloned for rendering');
-                                }
-                            },
-                            jsPDF: {
-                                unit: 'mm',
-                                format: 'a4',
-                                orientation: 'portrait'
-                            }
-                        })
-                        .from(element)
-                        .save();
-                    console.log('[generateAndDownload] PDF generated and download initiated');
-                } catch (pdfError) {
-                    console.error('[generateAndDownload] Error generating PDF:', pdfError);
-                    throw new Error(`Failed to generate PDF: ${pdfError.message}`);
-                }
+                await html2pdf()
+                    .set({
+                        margin: 10,
+                        filename: `${fileName}.pdf`,
+                        html2canvas: {
+                            scale: 2,
+                            useCORS: true,
+                            logging: false
+                        },
+                        jsPDF: {
+                            unit: 'mm',
+                            format: 'a4',
+                            orientation: 'portrait'
+                        }
+                    })
+                    .from(element)
+                    .save();
             }
         } catch (e) {
             const errorMessage = e instanceof Error ? e.message : String(e);
-            console.error('[generateAndDownload] Unhandled error:', e);
+            console.error('[generateAndDownload] Error:', e);
             toast({
                 title: "Error",
                 description: errorMessage,
                 variant: "destructive"
             });
         } finally {
-            console.log('[generateAndDownload] Cleaning up...');
             setIsGenerating(false);
         }
     };
@@ -2009,202 +2185,17 @@ export default function TemplateGenerationDialog({
                                         General Fields
                                     </Label>
                                     {groupedPlaceholders.topLevel.map(p => (
-                                        <div key={p.id} className="space-y-2 p-3 border rounded-lg bg-slate-50/50">
-                                            <div className="flex justify-between items-center">
-                                                <Label className="font-semibold uppercase text-[11px]">
-                                                    {p.name.replace(/_/g, ' ')}
-                                                </Label>
-                                                {autoPopulatedFields.has(p.name) && (
-                                                    <Badge variant="secondary" className="text-[9px] bg-blue-50 text-blue-600">
-                                                        {autoPopulatedFields.get(p.name)}
-                                                    </Badge>
-                                                )}
-                                            </div>
-
-                                            {p.is_digit_split ? (
-                                                /* DIGIT SPLIT INPUT BOXES */
-                                                <div className="flex flex-wrap gap-1 mt-1">
-                                                    {Array.from({ length: p.digit_count || 8 }).map((_, idx) => {
-                                                        const val = String(formData[p.name] || '');
-                                                        return (
-                                                            <input
-                                                                key={idx}
-                                                                maxLength={1}
-                                                                value={val[idx] || ''}
-                                                                onChange={(e) => {
-                                                                    const char = e.target.value.slice(-1);
-                                                                    let currentStr = val.padEnd(p.digit_count, ' ');
-                                                                    const newStr = currentStr.substring(0, idx) + char + currentStr.substring(idx + 1);
-                                                                    handleInputChange(p.name, newStr.trimEnd());
-                                                                }}
-                                                                className="w-7 h-8 text-center border rounded font-mono font-bold text-sm focus:border-blue-400 outline-none bg-white"
-                                                            />
-                                                        );
-                                                    })}
-                                                </div>
-                                            ) : p.type === 'image' ? (
-                                                <div className="space-y-3">
-                                                    {formData[p.name] ? (
-                                                        <div className="relative group rounded-md overflow-hidden border bg-white aspect-video flex items-center justify-center">
-                                                            <img
-                                                                src={formData[p.name]}
-                                                                alt={p.name}
-                                                                className="max-h-full object-contain"
-                                                            />
-                                                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                                                                <Button
-                                                                    size="sm"
-                                                                    variant="secondary"
-                                                                    className="h-7 text-[10px]"
-                                                                    onClick={() => document.getElementById(`file-${p.id}`).click()}
-                                                                >
-                                                                    Replace
-                                                                </Button>
-                                                                <Button
-                                                                    size="sm"
-                                                                    variant="destructive"
-                                                                    className="h-7 text-[10px]"
-                                                                    onClick={() => handleInputChange(p.name, '')}
-                                                                >
-                                                                    Remove
-                                                                </Button>
-                                                            </div>
-                                                        </div>
-                                                    ) : (
-                                                        <Button
-                                                            variant="outline"
-                                                            className="w-full h-20 border-dashed border-2 flex flex-col gap-1"
-                                                            onClick={() => document.getElementById(`file-${p.id}`).click()}
-                                                        >
-                                                            <ImageIcon className="h-4 w-4 text-slate-400" />
-                                                            <span className="text-[10px] text-slate-500">Upload {p.name}</span>
-                                                        </Button>
-                                                    )}
-                                                    <input
-                                                        id={`file-${p.id}`}
-                                                        type="file"
-                                                        className="hidden"
-                                                        accept="image/*"
-                                                        onChange={(e) => handleFileChange(p.name, e)}
-                                                    />
-
-                                                    <ImagePlaceholderControls
-                                                        styles={imageStyles[p.name] || {}}
-                                                        onStyleChange={(key, val) => handleImageStyleChange(p.name, key, val)}
-                                                    />
-                                                </div>
-                                            ) : p.type === 'boolean' ? (
-                                                <div className="space-y-3">
-                                                    <div className="flex items-center gap-2">
-                                                        <Label className="font-semibold uppercase text-[11px]">
-                                                            {p.name.replace(/_/g, ' ')}
-                                                        </Label>
-                                                        {autoPopulatedFields.has(p.name) && (
-                                                            <Badge variant="secondary" className="text-[9px] bg-green-50 text-green-600">
-                                                                Auto
-                                                            </Badge>
-                                                        )}
-                                                    </div>
-                                                    <div className="space-y-2 pl-2">
-                                                        {(Array.isArray(formData[p.name]) ? formData[p.name] : p.boolean_conditions || []).map((option, idx) => {
-                                                            const isChecked = Array.isArray(formData[p.name])
-                                                                ? formData[p.name][idx]?.checked
-                                                                : false;
-
-                                                            const isDisabled = Array.isArray(formData[p.name])
-                                                                ? formData[p.name][idx]?.hasDbLink
-                                                                : false;
-
-                                                            // Helper function to extract label text from option object
-                                                            const getOptionLabel = (opt) => {
-                                                                if (!opt) return '';
-                                                                if (typeof opt === 'string') return opt;
-
-                                                                // Try common property names
-                                                                const possibleProps = ['label', 'display', 'text', 'value', 'name', 'title'];
-                                                                for (const prop of possibleProps) {
-                                                                    if (opt[prop] && typeof opt[prop] === 'string') {
-                                                                        return opt[prop];
-                                                                    }
-                                                                }
-
-                                                                // Try nested structures
-                                                                if (opt.label && typeof opt.label === 'object') {
-                                                                    if (opt.label.label) return opt.label.label;
-                                                                    if (opt.label.display) return opt.label.display;
-                                                                }
-
-                                                                // If it's a simple object with one string property, use that
-                                                                const keys = Object.keys(opt);
-                                                                const stringProps = keys.filter(key => typeof opt[key] === 'string');
-                                                                if (stringProps.length === 1) {
-                                                                    return opt[stringProps[0]];
-                                                                }
-
-                                                                return opt.tag || 'Option';
-                                                            };
-
-                                                            const optionLabel = getOptionLabel(option);
-                                                            return (
-                                                                <div key={idx} className="flex items-center gap-2 p-2 border rounded bg-white">
-                                                                    <Checkbox
-                                                                        id={`${p.name}-${idx}`}
-                                                                        checked={isChecked}
-                                                                        disabled={isDisabled}
-                                                                        onCheckedChange={(checked) => {
-                                                                            setFormData(prev => {
-                                                                                const options = [...(Array.isArray(prev[p.name]) ? prev[p.name] : p.boolean_conditions || [])];
-
-                                                                                if (p.boolean_type === 'single') {
-                                                                                    // Radio behavior - uncheck others
-                                                                                    options.forEach((opt, i) => {
-                                                                                        if (!opt.hasDbLink) {
-                                                                                            opt.checked = i === idx ? checked : false;
-                                                                                        }
-                                                                                    });
-                                                                                } else {
-                                                                                    // Checkbox behavior
-                                                                                    if (!options[idx].hasDbLink) {
-                                                                                        options[idx].checked = checked;
-                                                                                    }
-                                                                                }
-
-                                                                                return { ...prev, [p.name]: options };
-                                                                            });
-                                                                        }}
-                                                                    />
-                                                                    <Label
-                                                                        htmlFor={`${p.name}-${idx}`}
-                                                                        className={`text-xs cursor-pointer ${isDisabled ? 'text-muted-foreground' : ''}`}
-                                                                    >
-                                                                        {typeof option.label === 'string' ? option.label : (option.tag || 'Option')}
-                                                                        {isDisabled && (
-                                                                            <Badge variant="outline" className="ml-2 text-[8px]">
-                                                                                Auto-filled
-                                                                            </Badge>
-                                                                        )}
-                                                                    </Label>
-                                                                    {isChecked && (
-                                                                        <CheckCircle2 className="h-3 w-3 text-green-500 ml-auto" />
-                                                                    )}
-                                                                </div>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </div>
-                                            ) : p.type === 'boolean' ? (
-                                                <div className="flex items-center h-8 px-3 bg-white border rounded-md text-sm">
-                                                    {formData[p.name] === true ?
-                                                        (p.boolean_conditions?.[0]?.label || 'Yes') :
-                                                        (formData[p.name] === false ? 'No' : formData[p.name] || '')}
-                                                </div>
-                                            ) : (
-                                                <Input
-                                                    value={formData[p.name] || ''}
-                                                    onChange={e => handleInputChange(p.name, e.target.value)}
-                                                    className="bg-white h-8 text-xs"
-                                                />
-                                            )}
+                                        <div key={p.id} className="p-3 border rounded-lg bg-slate-50/50">
+                                            <PlaceholderInput
+                                                placeholder={p}
+                                                value={formData[p.name]}
+                                                onChange={(val) => handleInputChange(p.name, val)}
+                                                onFileChange={(e) => handleFileChange(p.name, e)}
+                                                imageStyles={imageStyles}
+                                                onImageStyleChange={handleImageStyleChange}
+                                                autoPopulated={autoPopulatedFields.get(p.name)}
+                                                isArrayItem={false}
+                                            />
                                         </div>
                                     ))}
                                 </div>
@@ -2244,71 +2235,70 @@ export default function TemplateGenerationDialog({
                                 </div>
                                 <div className="p-4">
                                     {docPreviewUrl ? (
-                                        <iframe
-                                            src={docPreviewUrl}
-                                            className="w-full h-[calc(100vh-200px)] border-0 rounded shadow"
-                                            title="Original"
-                                            onError={() => setDocPreviewUrl(null)}
-                                        />
-                                    ) : (
-                                        <div className="h-[calc(100vh-200px)] flex items-center justify-center">
-                                            <FileText className="h-12 w-12 text-slate-300" />
-                                        </div>
-                                    )}
-                                </div>
+                                    <iframe
+                                        src={docPreviewUrl}
+                                        className="w-full h-[calc(100vh-200px)] border-0 rounded shadow"
+                                        title="Original"
+                                        onError={() => setDocPreviewUrl(null)}
+                                    />
+                                ) : (
+                                    <div className="h-[calc(100vh-200px)] flex items-center justify-center">
+                                        <FileText className="h-12 w-12 text-slate-300" />
+                                    </div>
+                                )}
                             </div>
-                        ) : (
-                            <div className="col-span-4 bg-slate-50 p-8">
-                                <div className="bg-white rounded border p-6">
-                                    <FileText className="h-8 w-8 text-blue-500 mb-3" />
-                                    <h3 className="font-semibold mb-2">HTML Template</h3>
-                                    <p className="text-xs text-slate-600">Preview shows generated output</p>
-                                </div>
+                        </div>
+                    ) : (
+                        <div className="col-span-4 bg-slate-50 p-8">
+                            <div className="bg-white rounded border p-6">
+                                <FileText className="h-8 w-8 text-blue-500 mb-3" />
+                                <h3 className="font-semibold mb-2">HTML Template</h3>
+                                <p className="text-xs text-slate-600">Preview shows generated output</p>
                             </div>
-                        )}
+                        </div>
+                    )}
+                </div>
+
+                <DialogFooter className="border-t px-6 py-3 bg-white flex justify-between flex-shrink-0">
+                    <div className="text-[10px] flex items-center gap-1.5">
+                        <CheckCircle2 className="h-3 w-3 text-green-500" />
+                        {isWordTemplate ? 'Word + Images' : 'HTML'}
                     </div>
+                    <div className='flex gap-2'>
+                        <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button size="sm" disabled={isGenerating} className="bg-blue-600">
+                                    {isGenerating ? (
+                                        <Loader2 className="animate-spin mr-2 h-4 w-4" />
+                                    ) : (
+                                        <Download className="mr-2 h-4 w-4" />
+                                    )}
+                                    Download
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => generateAndDownload('word')}>
+                                    <FileText className="h-4 w-4 mr-2 text-blue-600" />
+                                    Word
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => generateAndDownload('pdf')}>
+                                    <FileText className="h-4 w-4 mr-2 text-red-600" />
+                                    PDF
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    </div>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
 
-                    <DialogFooter className="border-t px-6 py-3 bg-white flex justify-between flex-shrink-0">
-                        <div className="text-[10px] flex items-center gap-1.5">
-                            <CheckCircle2 className="h-3 w-3 text-green-500" />
-                            {isWordTemplate ? 'Word + Images' : 'HTML'}
-                        </div>
-                        <div className='flex gap-2'>
-                            <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <Button size="sm" disabled={isGenerating} className="bg-blue-600">
-                                        {isGenerating ? (
-                                            <Loader2 className="animate-spin mr-2 h-4 w-4" />
-                                        ) : (
-                                            <Download className="mr-2 h-4 w-4" />
-                                        )}
-                                        Download
-                                    </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                    <DropdownMenuItem onClick={() => generateAndDownload('word')}>
-                                        <FileText className="h-4 w-4 mr-2 text-blue-600" />
-                                        Word
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => generateAndDownload('pdf')}>
-                                        <FileText className="h-4 w-4 mr-2 text-red-600" />
-                                        PDF
-                                    </DropdownMenuItem>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
-                        </div>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-
-            <UpdateProfileDialog
-                open={showUpdateDialog}
-                onOpenChange={setShowUpdateDialog}
-                changedFields={changedFields}
-                onSave={handleUpdateProfile}
-                isSaving={isSavingProfile}
-            />
-        </>
-    );
-}
+        <UpdateProfileDialog
+            open={showUpdateDialog}
+            onOpenChange={setShowUpdateDialog}
+            changedFields={changedFields}
+            onSave={handleUpdateProfile}
+            isSaving={isSavingProfile}
+        />
+    </>
+);}
