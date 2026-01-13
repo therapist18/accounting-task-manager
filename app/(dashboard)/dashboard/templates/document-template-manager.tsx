@@ -131,7 +131,8 @@ type Placeholder = {
   director_type?: 'all' | 'primary'; // For director fields
   dependant_relationship?: string[]; // For dependant fields
   conditions?: ConditionalCondition[]; // For conditional fields
-  ordinal_format?: 'number' | 'word';
+  ordinal_format?: 'number' | 'word' | 'custom';
+  custom_ordinal_format?: string;
 };
 
 const getCleanText = (str: string) => str.replace(/<[^>]+>/g, '');
@@ -512,7 +513,7 @@ export default function DocumentTemplateManager({
     return currentTemplate.placeholders.filter(p =>
       p.name.toLowerCase().includes(searchLower) ||
       p.type.toLowerCase().includes(searchLower) ||
-      p.entity_type.toLowerCase().includes(searchLower) ||
+      (Array.isArray(p.entity_type) ? p.entity_type : [p.entity_type]).some(et => et?.toLowerCase().includes(searchLower)) ||
       (p.master_field_ids || []).some(id =>
         masterFieldMap.get(id)?.toLowerCase().includes(searchLower)
       )
@@ -2291,7 +2292,7 @@ export default function DocumentTemplateManager({
                 </div>
                 <Select
                   value={newPlaceholder.ordinal_format || 'number'}
-                  onValueChange={(v: 'number' | 'word') =>
+                  onValueChange={(v: 'number' | 'word' | 'custom') =>
                     setNewPlaceholder({ ...newPlaceholder, ordinal_format: v })
                   }
                 >
@@ -2311,13 +2312,39 @@ export default function DocumentTemplateManager({
                         <span className="text-[10px] text-muted-foreground">Uses written ordinals</span>
                       </div>
                     </SelectItem>
+                    <SelectItem value="custom">
+                      <div className="flex flex-col">
+                        <span className="font-medium">Custom Format</span>
+                        <span className="text-[10px] text-muted-foreground">Define your own format (e.g., 1., 2., 3.)</span>
+                      </div>
+                    </SelectItem>
                   </SelectContent>
                 </Select>
                 <div className="p-2 bg-white rounded border border-purple-200">
                   <code className="text-xs text-purple-700">
-                    Preview: {newPlaceholder.ordinal_format === 'word' ? 'First, Second, Third...' : '1st, 2nd, 3rd...'}
+                    Preview: {newPlaceholder.ordinal_format === 'word' ? 'First, Second, Third...' : 
+                             newPlaceholder.ordinal_format === 'custom' ? 
+                             (newPlaceholder.custom_ordinal_format ? `1${newPlaceholder.custom_ordinal_format}, 2${newPlaceholder.custom_ordinal_format}, 3${newPlaceholder.custom_ordinal_format}...` : '1., 2., 3....') : 
+                             '1st, 2nd, 3rd...'}
                   </code>
                 </div>
+                {newPlaceholder.ordinal_format === 'custom' && (
+                  <div className="space-y-2">
+                    <Label htmlFor="custom-format" className="text-sm font-medium text-purple-800">
+                      Custom Format Pattern
+                    </Label>
+                    <Input
+                      id="custom-format"
+                      placeholder="Enter format (e.g., '.', ')', '. ')"
+                      value={newPlaceholder.custom_ordinal_format || ''}
+                      onChange={(e) => setNewPlaceholder({ ...newPlaceholder, custom_ordinal_format: e.target.value })}
+                      className="bg-white border-purple-200"
+                    />
+                    <p className="text-xs text-purple-700">
+                      Enter the suffix to add after each number. Examples: "." for "1., 2., 3.", ")" for "1), 2), 3)", ". " for "1. , 2. , 3. "
+                    </p>
+                  </div>
+                )}
               </div>
             )}
             {/* Debug logging */}

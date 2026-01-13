@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/components/ui/use-toast";
 import {
     AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp,
-    Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save
+    Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles
 } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Progress } from "@/components/ui/progress";
@@ -273,10 +273,26 @@ const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourc
  */
 const processOrdinalField = (placeholder, arrayIndex) => {
     const ordinalFormat = placeholder.ordinal_format || 'number';
-    return {
-        value: ordinalFormat === 'word' ? getOrdinalWord(arrayIndex) : getOrdinalNumber(arrayIndex),
-        source: 'Ordinal Generator'
-    };
+    
+    if (ordinalFormat === 'word') {
+        return {
+            value: getOrdinalWord(arrayIndex),
+            source: 'Ordinal Generator'
+        };
+    } else if (ordinalFormat === 'custom') {
+        const customFormat = placeholder.custom_ordinal_format || '.';
+        const num = arrayIndex + 1;
+        return {
+            value: `${num}${customFormat}`,
+            source: 'Custom Ordinal Generator'
+        };
+    } else {
+        // Default to number format
+        return {
+            value: getOrdinalNumber(arrayIndex),
+            source: 'Ordinal Generator'
+        };
+    }
 };
 
 /**
@@ -1783,7 +1799,16 @@ export default function TemplateGenerationDialog({
 
         try {
             setIsPreviewLoading(true);
-            const zip = new PizZip(docxTemplateBuffer.current);
+            
+            // Ensure we have the template buffer, await if it's a promise
+            let templateBuffer = docxTemplateBuffer.current;
+            if (templateBuffer && typeof templateBuffer.then === 'function') {
+                templateBuffer = await templateBuffer;
+            }
+            
+            if (!templateBuffer) return;
+            
+            const zip = new PizZip(templateBuffer);
             const renderData = await prepareRenderData(data);
 
             const processedData = { ...renderData };
@@ -2082,6 +2107,109 @@ export default function TemplateGenerationDialog({
         }
     };
 
+    const generateSampleData = useCallback(() => {
+        const sampleData = { ...formData };
+        
+        // Generate sample data for top-level fields
+        groupedPlaceholders.topLevel.forEach(placeholder => {
+            if (!sampleData[placeholder.name] || String(sampleData[placeholder.name]).trim() === '') {
+                switch (placeholder.type) {
+                    case 'text':
+                        sampleData[placeholder.name] = placeholder.name.includes('email') 
+                            ? 'john.doe@example.com'
+                            : placeholder.name.includes('phone') 
+                            ? '+1 234 567 8900'
+                            : placeholder.name.includes('name')
+                            ? 'John Doe'
+                            : placeholder.name.includes('address')
+                            ? '123 Main St, City, State 12345'
+                            : `Sample ${placeholder.name}`;
+                        break;
+                    case 'number':
+                        sampleData[placeholder.name] = Math.floor(Math.random() * 1000) + 1;
+                        break;
+                    case 'date':
+                        const date = new Date();
+                        date.setFullYear(date.getFullYear() - Math.floor(Math.random() * 10));
+                        sampleData[placeholder.name] = formatDate(date, 'MM/DD/YYYY');
+                        break;
+                    case 'boolean':
+                        sampleData[placeholder.name] = placeholder.boolean_type === 'multiple' 
+                            ? [{ checked: true, label: 'Option 1' }, { checked: false, label: 'Option 2' }]
+                            : [{ checked: true, label: placeholder.options?.[0] || 'Yes' }];
+                        break;
+                    case 'select':
+                        sampleData[placeholder.name] = placeholder.options?.[0] || 'Option 1';
+                        break;
+                    case 'image':
+                        sampleData[placeholder.name] = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+                        break;
+                    case 'ordinal':
+                        sampleData[placeholder.name] = '1st';
+                        break;
+                    default:
+                        sampleData[placeholder.name] = `Sample ${placeholder.name}`;
+                }
+            }
+        });
+
+        // Generate sample data for block fields
+        Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
+            const block = groupedPlaceholders.blocks[blockName];
+            const existingRows = Array.isArray(sampleData[blockName]) ? sampleData[blockName] : [];
+            
+            // Add sample rows if block is empty
+            if (existingRows.length === 0) {
+                const sampleRows = [];
+                for (let i = 0; i < 2; i++) { // Add 2 sample rows
+                    const row = {};
+                    block.children.forEach(child => {
+                        switch (child.type) {
+                            case 'text':
+                                row[child.name] = child.name.includes('email') 
+                                    ? `user${i + 1}@example.com`
+                                    : child.name.includes('phone') 
+                                    ? `+1 234 567 89${i}0`
+                                    : child.name.includes('name')
+                                    ? `User ${i + 1}`
+                                    : `Sample ${child.name} ${i + 1}`;
+                                break;
+                            case 'number':
+                                row[child.name] = Math.floor(Math.random() * 100) + 1;
+                                break;
+                            case 'date':
+                                const date = new Date();
+                                date.setFullYear(date.getFullYear() - Math.floor(Math.random() * 5));
+                                row[child.name] = formatDate(date, 'MM/DD/YYYY');
+                                break;
+                            case 'boolean':
+                                row[child.name] = child.boolean_type === 'multiple' 
+                                    ? [{ checked: i === 0, label: 'Option 1' }, { checked: i === 1, label: 'Option 2' }]
+                                    : [{ checked: i === 0, label: child.options?.[0] || 'Yes' }];
+                                break;
+                            case 'select':
+                                row[child.name] = child.options?.[i % (child.options?.length || 1)] || 'Option 1';
+                                break;
+                            case 'ordinal':
+                                row[child.name] = getOrdinalNumber(i);
+                                break;
+                            default:
+                                row[child.name] = `Sample ${child.name} ${i + 1}`;
+                        }
+                    });
+                    sampleRows.push(row);
+                }
+                sampleData[blockName] = sampleRows;
+            }
+        });
+
+        setFormData(sampleData);
+        toast({
+            title: "AI Auto-Fill Complete",
+            description: "Sample data has been populated for all empty fields",
+        });
+    }, [formData, groupedPlaceholders]);
+
     const completionStats = useMemo(() => {
         let totalFields = groupedPlaceholders.topLevel.length;
         let filledFields = groupedPlaceholders.topLevel.filter(p =>
@@ -2118,19 +2246,75 @@ export default function TemplateGenerationDialog({
         try {
             const fileName = `${documentName.replace(/[^\w\s-]/g, '_')}_${formatDate(new Date(), 'YYYYMMDD')}`;
 
-            if (!docxTemplateBuffer.current) {
+            // Ensure we have the template buffer, await if it's a promise
+            let templateBuffer = docxTemplateBuffer.current;
+            if (templateBuffer && typeof templateBuffer.then === 'function') {
+                templateBuffer = await templateBuffer;
+            }
+
+            if (!templateBuffer) {
                 const errorMsg = 'No template buffer available for document generation';
                 console.error('[generateAndDownload] Error:', errorMsg);
                 toast({ title: "Error", description: errorMsg, variant: "destructive" });
                 return;
             }
 
+            // Debug: Check what we're passing to PizZip
+            console.log('[generateAndDownload] templateBuffer type:', typeof templateBuffer);
+            console.log('[generateAndDownload] templateBuffer is ArrayBuffer:', templateBuffer instanceof ArrayBuffer);
+            console.log('[generateAndDownload] templateBuffer length:', templateBuffer?.byteLength);
+
             const renderData = await prepareRenderData(formData);
-            const zip = new PizZip(docxTemplateBuffer.current);
+            
+            // Pre-process all images to convert them to buffers synchronously
+            const processedRenderData = JSON.parse(JSON.stringify(renderData));
+            const imageCache = new Map();
+            
+            const processImagesRecursively = (obj, path = '') => {
+                for (const [key, value] of Object.entries(obj)) {
+                    if (value && typeof value === 'string' && (value.startsWith('http') || value.startsWith('data:image'))) {
+                        if (!imageCache.has(value)) {
+                            // Convert image to buffer synchronously (this should already be done by prepareRenderData)
+                            imageCache.set(value, value);
+                        }
+                    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+                        processImagesRecursively(value, `${path}.${key}`);
+                    } else if (Array.isArray(value)) {
+                        value.forEach((item, index) => {
+                            if (item && typeof item === 'object') {
+                                processImagesRecursively(item, `${path}.${key}[${index}]`);
+                            }
+                        });
+                    }
+                }
+            };
+            processImagesRecursively(processedRenderData);
+
+            const zip = new PizZip(templateBuffer);
 
             const imageModule = new ImageModule({
                 centered: false,
-                getImage: (tag) => base64Parser(tag),
+                getImage: (tag) => {
+                    if (!tag) return null;
+                    try {
+                        if (tag.startsWith('data:image')) {
+                            const base64Data = tag.split('base64,')[1];
+                            if (!base64Data) return null;
+                            
+                            const binaryStr = atob(base64Data);
+                            const len = binaryStr.length;
+                            const bytes = new Uint8Array(len);
+                            for (let i = 0; i < len; i++) {
+                                bytes[i] = binaryStr.charCodeAt(i);
+                            }
+                            return bytes.buffer;
+                        }
+                        return null;
+                    } catch (error) {
+                        console.error('Error processing image:', error);
+                        return null;
+                    }
+                },
                 getSize: (img, tag, name) => {
                     const styleKeys = [name, name?.split('_').slice(2).join('_')];
                     let s = null;
@@ -2236,6 +2420,15 @@ export default function TemplateGenerationDialog({
                                         Update Profile ({changedFields.length})
                                     </Button>
                                 )}
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={generateSampleData}
+                                    className="border-purple-200 text-purple-700 hover:bg-purple-50"
+                                >
+                                    <Sparkles className="h-4 w-4 mr-2" />
+                                    AI Auto-Fill
+                                </Button>
                                 {availableTemplates.length > 1 && (
                                     <Select value={selectedTemplate?.id} onValueChange={(v) => setSelectedTemplate(availableTemplates.find(t => t.id === v))}>
                                         <SelectTrigger className="w-64 h-9">

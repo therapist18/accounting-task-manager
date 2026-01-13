@@ -161,8 +161,9 @@ const SubClassComponent = memo(({ subClass, onUpdate, onRemove, path, index }) =
     const [isExpanded, setIsExpanded] = useState(true);
 
     const handleReqAdd = () => {
-        const newReq = { id: Date.now().toString(), name: '', description: '', isRequired: true, order: subClass.requirements.length + 1, isVisible: true };
-        onUpdate([...path, 'requirements'], [...subClass.requirements, newReq]);
+        const currentRequirements = subClass.requirements || [];
+        const newReq = { id: Date.now().toString(), name: '', description: '', isRequired: true, order: currentRequirements.length + 1, isVisible: true };
+        onUpdate([...path, 'requirements'], [...currentRequirements, newReq]);
     };
 
     return (
@@ -193,11 +194,11 @@ const SubClassComponent = memo(({ subClass, onUpdate, onRemove, path, index }) =
 
                     <div className="ml-8 space-y-3 border-t pt-4">
                         <div className="flex justify-between items-center">
-                            <Label className="font-semibold text-gray-700">Requirements ({subClass.requirements.length})</Label>
+                            <Label className="font-semibold text-gray-700">Requirements ({(subClass.requirements || []).length})</Label>
                             <Button variant="outline" size="sm" onClick={handleReqAdd}><Plus className="h-3 w-3 mr-1" /> Add Req</Button>
                         </div>
-                        {subClass.requirements.map((req, i) => (
-                            <RequirementComponent key={req.id} requirement={req} onUpdate={onUpdate} onRemove={() => onUpdate([...path, 'requirements'], subClass.requirements.filter((_, idx) => idx !== i))} path={[...path, 'requirements', i.toString()]} index={`${index}.${i + 1}`} />
+                        {(subClass.requirements || []).map((req, i) => (
+                            <RequirementComponent key={req.id} requirement={req} onUpdate={onUpdate} onRemove={() => onUpdate([...path, 'requirements'], (subClass.requirements || []).filter((_, idx) => idx !== i))} path={[...path, 'requirements', i.toString()]} index={`${index}.${i + 1}`} />
                         ))}
                     </div>
                 </CardContent>
