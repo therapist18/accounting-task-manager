@@ -296,37 +296,37 @@ export function RequirementsTable({
         if (!isMounted) return;
         if (docsErr) throw docsErr;
         setDocuments((docsRes || []).map(doc => ({ ...doc, display_name: doc.display_name || doc.name })));
-     // RequirementsTable.tsx - Update within the fetchMetadata function
-const taskDataPromises = filteredTasks.map(async (task) => {
-  const jobLevel = task.job_level || {};
-  
-  // Construct a query that targets the job_level JSON structure
-  let query = supabase
-    .from('tm_class_requirements')
-    .select('*');
+        
+        // Fetch class requirements for each task
+        const taskDataPromises = filteredTasks.map(async (task) => {
+          const jobLevel = task.job_level || {};
+          
+          // Construct a query that targets the job_level JSON structure
+          let query = supabase
+            .from('tm_class_requirements')
+            .select('*');
 
-  // Filter based on the hierarchical IDs stored in the task's job_level
-  if (jobLevel.department_id) {
-    query = query.eq('job_level->>department_id', jobLevel.department_id.toString());
-  }
-  if (jobLevel.subdepartment_id) {
-    query = query.eq('job_level->>subdepartment_id', jobLevel.subdepartment_id.toString());
-  }
-  
-  // Use 'null' string for comparison if the ID is missing, or skip if that's your schema logic
-  // Typically, class_id and subclass_id might be null for higher level requirements
-  query = query.eq('job_level->>class_id', jobLevel.class_id ? jobLevel.class_id.toString() : 'null');
-  
-  if (jobLevel.subclass_id) {
-    query = query.eq('job_level->>subclass_id', jobLevel.subclass_id.toString());
-  } else {
-    query = query.eq('job_level->>subclass_id', 'null');
-  }
+          // Filter based on the hierarchical IDs stored in the task's job_level
+          if (jobLevel.department_id) {
+            query = query.eq('job_level->>department_id', jobLevel.department_id.toString());
+          }
+          if (jobLevel.subdepartment_id) {
+            query = query.eq('job_level->>subdepartment_id', jobLevel.subdepartment_id.toString());
+          }
+          
+          // Use .is() for null values in JSONB
+          query = query.eq('job_level->>class_id', jobLevel.class_id ? jobLevel.class_id.toString() : 'null');
+          
+          if (jobLevel.subclass_id) {
+            query = query.eq('job_level->>subclass_id', jobLevel.subclass_id.toString());
+          } else {
+            query = query.is('job_level->>subclass_id', null);
+          }
 
-  const { data } = await query.maybeSingle();
+          const { data } = await query.maybeSingle();
 
-  return { taskId: task.id, classRequirements: data };
-});
+          return { taskId: task.id, classRequirements: data };
+        });
         const results = await Promise.all(taskDataPromises);
         const requirementsMap = results.reduce((acc, res) => {
           if (res.classRequirements) acc[res.taskId] = res.classRequirements;

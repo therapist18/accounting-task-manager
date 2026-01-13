@@ -460,10 +460,77 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
               }
             }
           });
+
+        if (placeholder.type === 'document_checklist' && placeholder.linked_document_ids) {
+  // Get data source configuration with defaults
+  const dataSource = placeholder.checklist_data_source || {
+    table: 'acc_portal_kyc_uploads',
+    linking_variable: 'company_id',
+    document_id_field: 'kyc_document_id'
+  };
+  
+  const tableName = dataSource.table;
+  
+  console.log('[Query Builder] Document checklist detected:', {
+    placeholder: placeholder.name,
+    dataSource,
+    linkedDocs: placeholder.linked_document_ids
+  });
+  
+  // Initialize table queries if not exists
+  if (!queriesToRun.has(tableName)) {
+    queriesToRun.set(tableName, { docIds: new Set(), links: new Map() });
+  }
+  
+  const tableQueries = queriesToRun.get(tableName);
+  
+  // Add document IDs
+  placeholder.linked_document_ids.forEach(docId => {
+    tableQueries.docIds.add(docId);
+  });
+  
+  // Determine entity type and ID
+  const entityType = Array.isArray(placeholder.entity_type) 
+    ? placeholder.entity_type[0] 
+    : placeholder.entity_type || 'company';
+  
+  const entityId = entityIdMap[entityType] || entityIdMap.company;
+  
+  if (entityId) {
+    // Use the configured linking variable
+    const linkVar = dataSource.linking_variable;
+    
+    if (!tableQueries.links.has(linkVar)) {
+      tableQueries.links.set(linkVar, new Set());
+    }
+    
+    // Handle both single IDs and arrays
+    if (Array.isArray(entityId)) {
+      entityId.forEach(id => {
+        const idValue = id && typeof id === 'object' 
+          ? (id.id || id.director_id || id.individual_id || id.company_id) 
+          : id;
+        if (idValue) tableQueries.links.get(linkVar).add(idValue);
+      });
+    } else {
+      const idValue = entityId && typeof entityId === 'object' 
+        ? (entityId.id || entityId.director_id || entityId.individual_id || entityId.company_id) 
+        : entityId;
+      if (idValue) tableQueries.links.get(linkVar).add(idValue);
+    }
+    
+    console.log('[Query Builder] Added queries:', {
+      table: tableName,
+      linkVar,
+      docIds: [...tableQueries.docIds],
+      entityIds: [...tableQueries.links.get(linkVar)]
+    });
+  }
+}
         });
       });
 
-      console.log("✅ Step 3: Analyzed templates. Required data sources:",
+     console.log("✅ Step 3: Analyzed templates. Required data sources:",
         Object.fromEntries(Array.from(queriesToRun.entries()).map(([table, { docIds, links }]) =>
           [table, { docIds: [...docIds], links: Object.fromEntries(Array.from(links.entries()).map(([lv, ids]) => [lv, [...ids]])) }]
         ))
@@ -472,49 +539,68 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       console.log("⏳ Step 4: Fetching data from Supabase...");
       const sourceDataCache: Record<string, Record<number, any>> = { 'tm_tasks': { [task.id]: task } };
 
-      for (const [table, { docIds, links }] of queriesToRun.entries()) {
+       for (const [table, { docIds, links }] of queriesToRun.entries()) {
         const records = new Map();
         console.log(`  - Querying table '${table}'...`);
-        // In RequirementsTableCombined.tsx, around line 180-210
-        if (table === 'acc_portal_kyc_uploads') {
-          // Get company ID from entityIdMap
-          const companyId = entityIdMap.company;
+        
+     // CORRECTED CODE
+// Handle dynamic document tables (acc_portal_kyc_uploads, acc_portal_directors_documents, etc.)
+if (table === 'acc_portal_kyc_uploads' || table === 'acc_portal_directors_documents') {
+  // Filter valid UUIDs
+  const validDocIds = [...docIds].filter(id =>
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+  );
 
-          // Filter out non-UUID values from docIds
-          const validKycDocIds = [...docIds].filter(id =>
-            typeof id === 'string' &&
-            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
-          );
+  if (validDocIds.length > 0) {
+    console.log(`[Query Execution] Fetching from ${table}:`, validDocIds);
+    
+    // ✅ FIX: Determine the correct document ID field for this table
+    const docIdField = table === 'acc_portal_kyc_uploads' ? 'kyc_document_id' : 'document_id';
+    
+    console.log(`[Query Execution] Using document ID field: ${docIdField}`);
+    
+    // ✅ FIX: Use single .in() with correct field
+    let query = supabase
+      .from(table)
+      .select('*')
+      .in(docIdField, validDocIds);
+    
+    const { data, error } = await query;
+    
+    if (error) {
+      console.error(`[Query Execution] Error fetching from ${table}:`, error);
+    } else {
+      console.log(`[Query Execution] Found ${data?.length || 0} records in ${table}`);
+      (data || []).forEach(rec => records.set(rec.id, rec));
+    }
+  }
+  
+  // Continue with linking variables...
+  for (const [linkVar, entityIdsSet] of links.entries()) {
+    const entityIds = Array.from(entityIdsSet).map(id => {
+      if (id && typeof id === 'object') {
+        return id.id || id.director_id || id.individual_id || id.company_id;
+      }
+      return id;
+    }).filter(id => id != null && id !== '');
 
-          if (validKycDocIds.length > 0) {
-            console.log(`    - by kyc_document_id and company_id:`, { kyc_document_ids: validKycDocIds, company_id: companyId });
+    if (entityIds.length > 0) {
+      console.log(`[Query Execution] Fetching from ${table} by ${linkVar}:`, entityIds);
+      
+      const { data, error } = await supabase
+        .from(table)
+        .select('*')
+        .in(linkVar, entityIds);
 
-            // First, get all matching kyc_document_ids
-            let query = supabase
-              .from(table)
-              .select('*')
-              .in('kyc_document_id', validKycDocIds);
-
-            // Then filter by company_id if available
-            if (companyId) {
-              query = query.eq('company_id', companyId);
-            }
-
-            const { data, error } = await query;
-
-            if (error) {
-              console.error(`    - ❌ ERROR fetching documents:`, error);
-              toast({
-                title: `Failed to fetch from ${table}`,
-                description: error.message,
-                variant: "destructive"
-              });
-            } else {
-              (data || []).forEach(rec => records.set(rec.id, rec));
-              console.log(`    - Found ${data?.length || 0} matching documents`);
-            }
-          }
-        }
+      if (error) {
+        console.error(`[Query Execution] Error fetching by ${linkVar}:`, error);
+      } else {
+        console.log(`[Query Execution] Found ${data?.length || 0} additional records`);
+        (data || []).forEach(rec => records.set(rec.id, rec));
+      }
+    }
+  }
+}
         else {
           if (docIds.size > 0) {
             console.log(`    - by document_id:`, [...docIds]);

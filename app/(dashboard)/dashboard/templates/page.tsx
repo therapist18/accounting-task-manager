@@ -111,11 +111,11 @@ export default function LettersPage() {
         .eq('job_level->>subdepartment_id', jobLevelObject.subdepartment_id.toString())
         .eq('job_level->>class_id', jobLevelObject.class_id.toString());
 
-      // Handle subclass (check for 'null' string if the property is missing in the JSON object)
+      // Handle subclass (use .is() for null values in JSONB)
       if (jobLevelObject.subclass_id) {
         query = query.eq('job_level->>subclass_id', jobLevelObject.subclass_id.toString());
       } else {
-        query = query.eq('job_level->>subclass_id', 'null');
+        query = query.is('job_level->>subclass_id', null);
       }
 
       const { data: requirementsData, error: requirementsError } = await query.maybeSingle();

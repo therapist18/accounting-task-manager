@@ -210,6 +210,100 @@ const getOrdinalWord = (index: number): string => {
     return words[index] || getOrdinalNumber(index);
 };
 
+const checkDocumentStatus = (
+  documentId: string,
+  entityId: string,
+  entityType: string,
+  sourceDataCache: Record<string, Record<number, any>>,
+  dataSourceConfig?: {
+    table: string;
+    linking_variable: string;
+    document_id_field: string;
+  }
+): boolean => {
+  // Use provided config or fallback to defaults
+  const config = dataSourceConfig || {
+    table: 'acc_portal_kyc_uploads',
+    linking_variable: entityType === 'company' ? 'company_id' : 'individual_id',
+    document_id_field: 'kyc_document_id'
+  };
+  
+  console.log('[checkDocumentStatus] Config:', config);
+  console.log('[checkDocumentStatus] Looking for document:', documentId, 'entity:', entityId);
+  
+  // Get uploads from the specified table
+  const uploads = sourceDataCache[config.table] || {};
+  
+  // Check if the document exists for this entity
+  const documentFound = Object.values(uploads).some(upload => {
+    // Must match the document ID using the specified field
+    const uploadDocId = upload[config.document_id_field];
+    if (uploadDocId !== documentId) return false;
+    
+    // Must have a file uploaded
+    if (!upload.file_path) return false;
+    
+    // Match based on the specified linking variable
+    return String(upload[config.linking_variable]) === String(entityId);
+  });
+  
+  console.log('[checkDocumentStatus] Result:', documentFound);
+  return documentFound;
+};
+
+const generateDocumentChecklist = (
+  placeholder: any,
+  entityId: string,
+  entityType: string,
+  sourceDataCache: Record<string, Record<number, any>>,
+  availableDocuments: Array<{ id: string; display_name: string; name: string }>
+): string => {
+  const linkedDocs = placeholder.linked_document_ids || [];
+  const format = placeholder.checklist_display_format || 'checkboxes';
+  const dataSourceConfig = placeholder.checklist_data_source;
+  
+  console.log('[generateDocumentChecklist] Placeholder config:', {
+    linkedDocs,
+    format,
+    dataSourceConfig,
+    entityId,
+    entityType
+  });
+  
+  if (linkedDocs.length === 0) {
+    return 'No documents configured for this checklist.';
+  }
+  
+  const checklist = linkedDocs.map(docId => {
+    const doc = availableDocuments.find(d => d.id === docId);
+    const isFound = checkDocumentStatus(
+      docId,
+      entityId,
+      entityType,
+      sourceDataCache,
+      dataSourceConfig // Pass the custom config
+    );
+    
+    const docName = doc?.display_name || doc?.name || 'Unknown Document';
+    const symbol = isFound ? '☑' : '☐';
+    
+    switch (format) {
+      case 'bullets':
+        return `• ${docName}${isFound ? ' ✓' : ''}`;
+      case 'table':
+        return `| ${symbol} | ${docName} | ${isFound ? 'Submitted' : 'Pending'} |`;
+      default: // checkboxes
+        return `${symbol}`;
+    }
+  });
+  
+  if (format === 'table') {
+    return `| Status | Document | Notes |\n|--------|----------|-------|\n${checklist.join('\n')}`;
+  }
+  
+  return checklist.join('\n');
+};
+
 // --- UNIFIED PLACEHOLDER PROCESSORS ---
 const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourceArray = null, entityIdMap = null, combinedCache = null, extractedData = null, companyData = null) => {
     // Priority 1: If we are inside an array loop (Block), use the current item
@@ -576,6 +670,29 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
 
     // Route to appropriate processor based on field type
     switch (placeholder.type) {
+        case 'document_checklist': {
+            // Get available documents from a prop or fetch them
+            // For now, we'll use an empty array - this should be passed as a prop
+            const availableDocuments = window.__availableDocuments || [];
+            
+            const entityId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id);
+            const entityType = Array.isArray(placeholder.entity_type) 
+                ? placeholder.entity_type[0] 
+                : placeholder.entity_type || 'company';
+            
+            result = {
+                value: generateDocumentChecklist(
+                    placeholder,
+                    entityId,
+                    entityType,
+                    combinedCache,
+                    availableDocuments
+                ),
+                source: 'Document Checklist'
+            };
+            break;
+        }
+        
         case 'ordinal':
             if (arrayIndex !== null) {
                 result = processOrdinalField(placeholder, arrayIndex);
@@ -856,6 +973,37 @@ const PlaceholderInput = ({
 }) => {
     const fieldKey = isArrayItem ? `${blockName}_${arrayIndex}_${placeholder.name}` : placeholder.name;
     
+      if (placeholder.type === 'document_checklist') {
+        return (
+            <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                    <Label className="text-[10px] font-bold text-slate-400 uppercase">
+                        {placeholder.name.replace(/_/g, ' ')}
+                    </Label>
+                    {autoPopulated && (
+                        <Badge variant="secondary" className="text-[9px]">
+                            {autoPopulated}
+                        </Badge>
+                    )}
+                </div>
+                <div className="p-3 bg-slate-50 rounded border space-y-1.5">
+                    {value ? (
+                        <div className="text-xs whitespace-pre-line font-mono">
+                            {value}
+                        </div>
+                    ) : (
+                        <div className="text-xs text-muted-foreground italic">
+                            No checklist data available
+                        </div>
+                    )}
+                </div>
+                <p className="text-[8px] text-muted-foreground italic">
+                    ☑ = Document found, ☐ = Document missing
+                </p>
+            </div>
+        );
+    }
+
     if (placeholder.is_digit_split) {
         const val = String(value || '');
         const chars = processDigitSplit(val, placeholder.digit_count || 8);
@@ -1138,6 +1286,7 @@ export default function TemplateGenerationDialog({
     const [isSavingProfile, setIsSavingProfile] = useState(false);
     const [additionalCache, setAdditionalCache] = useState({});
     const [fetchingTables, setFetchingTables] = useState(new Set());
+ const [availableDocuments, setAvailableDocuments] = useState<Array<{ id: string; display_name: string; name: string }>>([]);
 
     const docxTemplateBuffer = useRef(null);
     const isWordTemplate = selectedTemplate?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -1214,6 +1363,35 @@ export default function TemplateGenerationDialog({
             setTimeout(fetchMissingDataSources, 50);
         }
     }, [isOpen, selectedTemplate?.id]);
+
+    useEffect(() => {
+        const fetchAvailableDocuments = async () => {
+            if (!isOpen) return;
+            
+            try {
+                const { data, error } = await supabase
+                    .from('acc_portal_kyc')
+                    .select('id, name, display_name, category')
+                    .order('display_name');
+                
+                if (error) throw error;
+                
+                setAvailableDocuments(data || []);
+                
+                // Make available globally for the processor functions
+                window.__availableDocuments = data || [];
+            } catch (error) {
+                console.error('Error fetching available documents:', error);
+            }
+        };
+
+        fetchAvailableDocuments();
+        
+        return () => {
+            // Cleanup
+            window.__availableDocuments = undefined;
+        };
+    }, [isOpen]);
 
     const smartFieldMatch = useCallback((placeholderName) => {
         const normalized = normalizeString(placeholderName);
@@ -1672,7 +1850,46 @@ export default function TemplateGenerationDialog({
             const regex = new RegExp(`\\{+\\s*${cleanName}\\s*\\}+`, 'gi');
 
             if (value) {
-                if (placeholder.type === 'image' && value.startsWith('http')) {
+               
+                if (placeholder.type === 'document_checklist') {
+                    // Format the checklist for HTML display
+                    const lines = String(value).split('\n');
+                    const formattedLines = lines.map(line => {
+                        // Style checked items in green, unchecked in gray
+                        if (line.startsWith('☑')) {
+                            return `<div style="color: #16a34a; padding: 2px 0;">✓ ${line.substring(1).trim()}</div>`;
+                        } else if (line.startsWith('☐')) {
+                            return `<div style="color: #9ca3af; padding: 2px 0;">☐ ${line.substring(1).trim()}</div>`;
+                        } else if (line.startsWith('•')) {
+                            return `<div style="padding: 2px 0;">${line}</div>`;
+                        } else if (line.startsWith('|')) {
+                            // Table row - will be handled by table formatting
+                            return line;
+                        }
+                        return line;
+                    });
+                    // Check if it's a table format
+                    if (lines.some(line => line.startsWith('|'))) {
+                        // Convert markdown table to HTML
+                        const tableHtml = `
+                            <table style="width: 100%; border-collapse: collapse; margin: 10px 0;">
+                                ${formattedLines.map(line => {
+                                    if (!line.startsWith('|')) return '';
+                                    const cells = line.split('|').filter(Boolean);
+                                    const isHeader = line.includes('Status') && line.includes('Document');
+                                    const tag = isHeader ? 'th' : 'td';
+                                    return `<tr>
+                                        ${cells.map(cell => `<${tag} style="border: 1px solid #e5e7eb; padding: 8px; text-align: left;">${cell.trim()}</${tag}>`).join('')}
+                                    </tr>`;
+                                }).join('')}
+                            </table>
+                        `;
+                        content = content.replace(regex, tableHtml);
+                    } else {
+                        content = content.replace(regex, `<div style="padding: 5px 0;">${formattedLines.join('')}</div>`);
+                    }
+                }
+                else if (placeholder.type === 'image' && value.startsWith('http')) {
                     const style = styles[placeholder.name] || {};
                     const imgWidth = style.imageWidth
                         ? `${style.imageWidth}px`

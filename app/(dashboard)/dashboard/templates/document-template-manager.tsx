@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Loader2, PlusCircle, Trash2, FileText, Pencil, Save, RefreshCw, ChevronDown, Check, ChevronsUpDown, Link2, X, Search, View, Download, UserCog, Users, User, Code, Hash } from "lucide-react";
+import { Loader2, PlusCircle, Trash2, FileText, Pencil, Save, RefreshCw, ChevronDown, Check, ChevronsUpDown, Link2, X, Search, View, Download, UserCog, Users, User, Code, Hash, Database } from "lucide-react";
 import { DocxLivePreview } from "@/components/DocxLivePreview";
 import { DocumentTemplate as BaseDocumentTemplate } from "./types";
 import { TableHeader, Table, TableBody, TableCell, TableHead, TableRow } from "@/components/ui/table";
@@ -77,6 +77,7 @@ const PLACEHOLDER_TYPES = [
   { value: 'conditional', label: 'Conditional' },
   { value: 'boolean', label: 'Boolean/Checkbox' },
   { value: 'image', label: 'Image' },
+  { value: 'document_checklist', label: 'Document Checklist' }, // NEW
 ];
 
 const ENTITY_TYPES: { value: EntityType; label: string }[] = [
@@ -118,21 +119,30 @@ type Placeholder = {
   id: string;
   name: string;
   description?: string;
-  type: 'text' | 'number' | 'date' | 'select' | 'array' | 'conditional' | 'image' | 'boolean' | 'ordinal'; // Added 'ordinal'
+  type: 'text' | 'number' | 'date' | 'select' | 'array' | 'conditional' | 'image' | 'boolean' | 'ordinal' | 'document_checklist';
   array_direction?: 'horizontal' | 'vertical';
   boolean_conditions?: BooleanCondition[];
-  boolean_type?: 'single' | 'multiple'; // single = radio, multiple = checkboxes
+  boolean_type?: 'single' | 'multiple';
   required: boolean;
   options?: string[];
-  entity_type: EntityType[]; // Always an array now
+  entity_type: EntityType[];
   master_field_ids?: number[];
-  parent_name?: string; // If this field is inside a {#block}
-  is_block_start?: boolean; // If this is the {#block} tag itself
-  director_type?: 'all' | 'primary'; // For director fields
-  dependant_relationship?: string[]; // For dependant fields
-  conditions?: ConditionalCondition[]; // For conditional fields
+  parent_name?: string;
+  is_block_start?: boolean;
+  director_type?: 'all' | 'primary';
+  dependant_relationship?: string[];
+  conditions?: ConditionalCondition[];
   ordinal_format?: 'number' | 'word' | 'custom';
   custom_ordinal_format?: string;
+  // NEW: Document checklist fields
+  linked_document_ids?: string[];
+  checklist_display_format?: 'bullets' | 'checkboxes' | 'table';
+  // NEW: Data source configuration
+  checklist_data_source?: {
+    table: 'acc_portal_kyc_uploads' | 'acc_portal_directors_documents';
+    linking_variable: string; // e.g., 'company_id', 'director_id', 'individual_id'
+    document_id_field: string; // e.g., 'kyc_document_id', 'document_id'
+  };
 };
 
 const getCleanText = (str: string) => str.replace(/<[^>]+>/g, '');
@@ -292,15 +302,20 @@ export default function DocumentTemplateManager({
   const [isProcessing, setIsProcessing] = useState(false);
   const [isPlaceholderFormOpen, setIsPlaceholderFormOpen] = useState(false);
   const [isEditingPlaceholder, setIsEditingPlaceholder] = useState<number | null>(null);
-  const [newPlaceholder, setNewPlaceholder] = useState<Placeholder>({
-    id: '',
-    name: '',
-    description: '',
-    type: 'text',
-    required: false,
-    entity_type: [],
-    array_direction: 'vertical'
-  });
+const [newPlaceholder, setNewPlaceholder] = useState<Placeholder>({
+  id: '',
+  name: '',
+  description: '',
+  type: 'text',
+  required: false,
+  entity_type: [],
+  array_direction: 'vertical',
+  checklist_data_source: {
+    table: 'acc_portal_kyc_uploads',
+    linking_variable: 'company_id',
+    document_id_field: 'kyc_document_id'
+  }
+});
   const [directorType, setDirectorType] = useState<'all' | 'primary'>('all');
   const [dependantRelationship, setDependantRelationship] = useState<string[]>([]);
   const [templateFiles, setTemplateFiles] = useState<Map<string, File>>(new Map());
@@ -313,6 +328,7 @@ export default function DocumentTemplateManager({
   const [docPreviewUrl, setDocPreviewUrl] = useState<string | null>(null);
   const [availableFields, setAvailableFields] = useState<string[]>([]);
   const [showLinkPrompt, setShowLinkPrompt] = useState(false);
+  const [availableDocuments, setAvailableDocuments] = useState<Array<{ id: string; display_name: string; name: string }>>([]);
 
   // Extract scalar fields from conditional template
   const extractScalarFields = (templateContent: string): string[] => {
@@ -442,6 +458,31 @@ export default function DocumentTemplateManager({
 
     loadDocumentPreview();
   }, [currentTemplate?.file_path]);
+
+  useEffect(() => {
+    const fetchDocuments = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('acc_portal_kyc')
+          .select('id, name, display_name, category')
+          .order('display_name');
+
+        if (error) throw error;
+        setAvailableDocuments(data || []);
+      } catch (error) {
+        console.error('Error fetching documents:', error);
+        toast({
+          title: 'Could not load documents',
+          description: error.message,
+          variant: 'destructive'
+        });
+      }
+    };
+
+    if (isOpen) {
+      fetchDocuments();
+    }
+  }, [isOpen]);
 
   const togglePanel = (panel: 'left' | 'middle' | 'right') => {
     const currentlyVisibleCount = Object.values(panelsVisible).filter(Boolean).length;
@@ -922,31 +963,47 @@ export default function DocumentTemplateManager({
           </TableCell>
 
           <TableCell className="border-r">
-            {p.type === 'boolean' && p.boolean_conditions?.length > 0 ? (
-              <div className="flex flex-wrap gap-1">
-                {p.boolean_conditions.slice(0, 3).map((cond, idx) => (
-                  <Badge key={idx} variant="outline" className="text-[9px] bg-purple-50 text-purple-700">
-                    {cond.label}
-                  </Badge>
-                ))}
-                {p.boolean_conditions.length > 3 && (
-                  <Badge variant="outline" className="text-[9px]">
-                    +{p.boolean_conditions.length - 3}
-                  </Badge>
-                )}
-              </div>
-            ) : p.master_field_ids?.length > 0 ? (
-              <div className="flex flex-wrap gap-1">
-                {p.master_field_ids.map(id => (
-                  <Badge key={id} variant="outline" className="text-[9px] bg-white">
-                    {masterFieldMap.get(id) || id}
-                  </Badge>
-                ))}
-              </div>
-            ) : (
-              <span className="text-[10px] text-muted-foreground italic">Not Linked</span>
-            )}
-          </TableCell>
+           {p.type === 'document_checklist' && p.linked_document_ids?.length > 0 ? (
+    <div className="flex flex-wrap gap-1">
+      {p.linked_document_ids.slice(0, 3).map(docId => {
+        const doc = availableDocuments.find(d => d.id === docId);
+        return (
+          <Badge key={docId} variant="outline" className="text-[9px] bg-purple-50 text-purple-700">
+            {doc?.display_name || doc?.name || 'Doc'}
+          </Badge>
+        );
+      })}
+      {p.linked_document_ids.length > 3 && (
+        <Badge variant="outline" className="text-[9px]">
+          +{p.linked_document_ids.length - 3}
+        </Badge>
+      )}
+    </div>
+  ) : p.type === 'boolean' && p.boolean_conditions?.length > 0 ? (
+    <div className="flex flex-wrap gap-1">
+      {p.boolean_conditions.slice(0, 3).map((cond, idx) => (
+        <Badge key={idx} variant="outline" className="text-[9px] bg-purple-50 text-purple-700">
+          {cond.label}
+        </Badge>
+      ))}
+      {p.boolean_conditions.length > 3 && (
+        <Badge variant="outline" className="text-[9px]">
+          +{p.boolean_conditions.length - 3}
+        </Badge>
+      )}
+    </div>
+  ) : p.master_field_ids?.length > 0 ? (
+    <div className="flex flex-wrap gap-1">
+      {p.master_field_ids.map(id => (
+        <Badge key={id} variant="outline" className="text-[9px] bg-white">
+          {masterFieldMap.get(id) || id}
+        </Badge>
+      ))}
+    </div>
+  ) : (
+    <span className="text-[10px] text-muted-foreground italic">Not Linked</span>
+  )}
+</TableCell>
 
           <TableCell className="text-right">
             <div className="flex justify-end gap-1">
@@ -1168,27 +1225,35 @@ export default function DocumentTemplateManager({
 
   const handleEditorBlur = () => { if (currentTemplate?.isDirty) handleRescanPlaceholders(); };
 
-  const savePlaceholder = () => {
-    if (!newPlaceholder.name.trim()) return;
+const savePlaceholder = () => {
+  if (!newPlaceholder.name.trim()) return;
 
-    const processedOptions = newPlaceholder.type === 'conditional'
-      ? (newPlaceholder.conditions || []).map(c => `{#${c.tag}}${c.label}{${c.tag}}{/${c.tag}}`)
-      : newPlaceholder.options;
+  const processedOptions = newPlaceholder.type === 'conditional'
+    ? (newPlaceholder.conditions || []).map(c => `{#${c.tag}}${c.label}{${c.tag}}{/${c.tag}}`)
+    : newPlaceholder.options;
 
-    const placeholderToSave = {
-      ...newPlaceholder,
-      options: processedOptions,
-      entity_type: Array.isArray(newPlaceholder.entity_type)
-        ? newPlaceholder.entity_type
-        : newPlaceholder.entity_type ? [newPlaceholder.entity_type] : [],
-      ...(newPlaceholder.entity_type?.includes('director') && { director_type: directorType }),
-      ...(newPlaceholder.entity_type?.includes('dependent') && { dependant_relationship: dependantRelationship }),
-      // Add boolean fields
-      ...(newPlaceholder.type === 'boolean' && {
-        boolean_conditions: newPlaceholder.boolean_conditions || [],
-        boolean_type: newPlaceholder.boolean_type || 'single'
-      })
-    };
+  const placeholderToSave = {
+    ...newPlaceholder,
+    options: processedOptions,
+    entity_type: Array.isArray(newPlaceholder.entity_type)
+      ? newPlaceholder.entity_type
+      : newPlaceholder.entity_type ? [newPlaceholder.entity_type] : [],
+    ...(newPlaceholder.entity_type?.includes('director') && { director_type: directorType }),
+    ...(newPlaceholder.entity_type?.includes('dependent') && { dependant_relationship: dependantRelationship }),
+    ...(newPlaceholder.type === 'boolean' && {
+      boolean_conditions: newPlaceholder.boolean_conditions || [],
+      boolean_type: newPlaceholder.boolean_type || 'single'
+    }),
+   ...(newPlaceholder.type === 'document_checklist' && {
+  linked_document_ids: newPlaceholder.linked_document_ids || [],
+  checklist_display_format: newPlaceholder.checklist_display_format || 'checkboxes',
+  checklist_data_source: newPlaceholder.checklist_data_source || {
+    table: 'acc_portal_kyc_uploads',
+    linking_variable: 'company_id',
+    document_id_field: 'kyc_document_id'
+  }
+})
+  };
 
     if (isEditingPlaceholder !== null) {
       const updatedTemplates = [...templates];
@@ -1935,8 +2000,8 @@ export default function DocumentTemplateManager({
                 <Label>Options (one per line)</Label>
                 <Textarea
                   placeholder="Option 1
-  Option 2
-  Option 3"
+    Option 2
+    Option 3"
                   value={newPlaceholder.options?.join('\n') || ''}
                   onChange={(e) =>
                     setNewPlaceholder({
@@ -2322,10 +2387,10 @@ export default function DocumentTemplateManager({
                 </Select>
                 <div className="p-2 bg-white rounded border border-purple-200">
                   <code className="text-xs text-purple-700">
-                    Preview: {newPlaceholder.ordinal_format === 'word' ? 'First, Second, Third...' : 
-                             newPlaceholder.ordinal_format === 'custom' ? 
-                             (newPlaceholder.custom_ordinal_format ? `1${newPlaceholder.custom_ordinal_format}, 2${newPlaceholder.custom_ordinal_format}, 3${newPlaceholder.custom_ordinal_format}...` : '1., 2., 3....') : 
-                             '1st, 2nd, 3rd...'}
+                    Preview: {newPlaceholder.ordinal_format === 'word' ? 'First, Second, Third...' :
+                      newPlaceholder.ordinal_format === 'custom' ?
+                        (newPlaceholder.custom_ordinal_format ? `1${newPlaceholder.custom_ordinal_format}, 2${newPlaceholder.custom_ordinal_format}, 3${newPlaceholder.custom_ordinal_format}...` : '1., 2., 3....') :
+                        '1st, 2nd, 3rd...'}
                   </code>
                 </div>
                 {newPlaceholder.ordinal_format === 'custom' && (
@@ -2347,6 +2412,236 @@ export default function DocumentTemplateManager({
                 )}
               </div>
             )}
+
+            {newPlaceholder.type === 'document_checklist' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b pb-2">
+                  <div className="space-y-0.5">
+                    <Label className="text-base">Document Checklist</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Select documents to track. Documents will be auto-checked when found.
+                    </p>
+                  </div>
+                  <Select
+                    value={newPlaceholder.checklist_display_format || 'checkboxes'}
+                    onValueChange={(v: 'bullets' | 'checkboxes' | 'table') =>
+                      setNewPlaceholder(prev => ({
+                        ...prev,
+                        checklist_display_format: v
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="w-40">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="checkboxes">☑ Checkboxes</SelectItem>
+                      <SelectItem value="bullets">• Bullets</SelectItem>
+                      <SelectItem value="table">📋 Table</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Linked Documents</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        className="w-full justify-between"
+                      >
+                        {(newPlaceholder.linked_document_ids?.length || 0) > 0
+                          ? `${newPlaceholder.linked_document_ids.length} document(s) selected`
+                          : 'Select documents...'}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Search documents..." />
+                        <CommandList>
+                          <CommandEmpty>No documents found.</CommandEmpty>
+                          <CommandGroup className="max-h-[300px] overflow-y-auto">
+                            {availableDocuments.map((doc) => {
+                              const isSelected = newPlaceholder.linked_document_ids?.includes(doc.id);
+                              return (
+                                <CommandItem
+                                  key={doc.id}
+                                  onSelect={() => {
+                                    setNewPlaceholder(prev => ({
+                                      ...prev,
+                                      linked_document_ids: isSelected
+                                        ? (prev.linked_document_ids || []).filter(id => id !== doc.id)
+                                        : [...(prev.linked_document_ids || []), doc.id]
+                                    }));
+                                  }}
+                                  className="cursor-pointer"
+                                >
+                                  <div className="flex items-center">
+                                    <div className={`mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary ${isSelected ? 'bg-primary text-primary-foreground' : 'opacity-50'
+                                      }`}>
+                                      {isSelected && <Check className="h-3 w-3" />}
+                                    </div>
+                                    <div>
+                                      <div className="font-medium">{doc.display_name || doc.name}</div>
+                                      <div className="text-xs text-muted-foreground capitalize">{doc.category}</div>
+                                    </div>
+                                  </div>
+                                </CommandItem>
+                              );
+                            })}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+
+                  {(newPlaceholder.linked_document_ids?.length || 0) > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {newPlaceholder.linked_document_ids.map(docId => {
+                        const doc = availableDocuments.find(d => d.id === docId);
+                        return (
+                          <Badge
+                            key={docId}
+                            variant="secondary"
+                            className="flex items-center gap-1.5 pr-1.5"
+                          >
+                            <FileText className="h-3 w-3" />
+                            <span className="max-w-[200px] truncate">
+                              {doc?.display_name || doc?.name || docId}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setNewPlaceholder(prev => ({
+                                  ...prev,
+                                  linked_document_ids: (prev.linked_document_ids || []).filter(id => id !== docId)
+                                }));
+                              }}
+                              className="ml-1 rounded-full p-0.5 hover:bg-muted"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </Badge>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                 <div className="space-y-3 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+      <div className="flex items-center gap-2">
+        <Database className="h-5 w-5 text-purple-600" />
+        <h4 className="font-semibold text-purple-900">Data Source Configuration</h4>
+      </div>
+      <p className="text-xs text-purple-700">
+        Specify where to fetch document upload records from
+      </p>
+      
+      <div className="grid grid-cols-3 gap-3">
+        {/* Table Selection */}
+        <div className="space-y-2">
+          <Label className="text-xs font-bold text-purple-800">Table</Label>
+          <Select
+            value={newPlaceholder.checklist_data_source?.table || 'acc_portal_kyc_uploads'}
+            onValueChange={(v: 'acc_portal_kyc_uploads' | 'acc_portal_directors_documents') =>
+              setNewPlaceholder(prev => ({
+                ...prev,
+                checklist_data_source: {
+                  table: v,
+                  linking_variable: prev.checklist_data_source?.linking_variable || 'company_id',
+                  document_id_field: prev.checklist_data_source?.document_id_field || 'kyc_document_id'
+                }
+              }))
+            }
+          >
+            <SelectTrigger className="bg-white border-purple-200">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="acc_portal_kyc_uploads">
+                <div className="flex flex-col">
+                  <span className="font-medium">KYC Uploads</span>
+                  <span className="text-xs text-muted-foreground">acc_portal_kyc_uploads</span>
+                </div>
+              </SelectItem>
+              <SelectItem value="acc_portal_directors_documents">
+                <div className="flex flex-col">
+                  <span className="font-medium">Directors Documents</span>
+                  <span className="text-xs text-muted-foreground">acc_portal_directors_documents</span>
+                </div>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Linking Variable */}
+        <div className="space-y-2">
+          <Label className="text-xs font-bold text-purple-800">Linking Variable</Label>
+          <Input
+            placeholder="company_id"
+            value={newPlaceholder.checklist_data_source?.linking_variable || ''}
+            onChange={(e) =>
+              setNewPlaceholder(prev => ({
+                ...prev,
+                checklist_data_source: {
+                  table: prev.checklist_data_source?.table || 'acc_portal_kyc_uploads',
+                  linking_variable: e.target.value,
+                  document_id_field: prev.checklist_data_source?.document_id_field || 'kyc_document_id'
+                }
+              }))
+            }
+            className="bg-white border-purple-200 text-xs"
+          />
+          <p className="text-[10px] text-purple-600">
+            e.g., company_id, director_id, individual_id
+          </p>
+        </div>
+
+        {/* Document ID Field */}
+        <div className="space-y-2">
+          <Label className="text-xs font-bold text-purple-800">Document ID Field</Label>
+          <Input
+            placeholder="kyc_document_id"
+            value={newPlaceholder.checklist_data_source?.document_id_field || ''}
+            onChange={(e) =>
+              setNewPlaceholder(prev => ({
+                ...prev,
+                checklist_data_source: {
+                  table: prev.checklist_data_source?.table || 'acc_portal_kyc_uploads',
+                  linking_variable: prev.checklist_data_source?.linking_variable || 'company_id',
+                  document_id_field: e.target.value
+                }
+              }))
+            }
+            className="bg-white border-purple-200 text-xs"
+          />
+          <p className="text-[10px] text-purple-600">
+            e.g., kyc_document_id, document_id
+          </p>
+        </div>
+      </div>
+
+      {/* Preview of Configuration */}
+      <div className="p-2 bg-white rounded border border-purple-200">
+        <code className="text-[10px] text-purple-800">
+          SELECT * FROM {newPlaceholder.checklist_data_source?.table || 'acc_portal_kyc_uploads'}<br/>
+          WHERE {newPlaceholder.checklist_data_source?.linking_variable || 'company_id'} = entity_id<br/>
+          AND {newPlaceholder.checklist_data_source?.document_id_field || 'kyc_document_id'} IN (selected_docs)
+        </code>
+      </div>
+    </div>
+
+                <div className="p-3 bg-blue-50 rounded border border-blue-200">
+                  <p className="text-xs text-blue-800">
+                    <strong>How it works:</strong> When generating the document, the system will check if these documents exist for the selected entity. Found documents will be marked as checked (☑), missing documents as unchecked (☐).
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Debug logging */}
             <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
               Debug: entity_type = {JSON.stringify(newPlaceholder.entity_type)}
