@@ -75,13 +75,6 @@ export default function LettersPage() {
     performInitialLoad();
   }, []);
 
-  const constructedClassId = useMemo(() => {
-    if (!selectedClass && !selectedSubclass) return null;
-    return selectedSubclass ?
-      `${selectedSubdepartment}_${selectedClass}_${selectedSubclass}` :
-      `${selectedSubdepartment}_${selectedClass}`;
-  }, [selectedSubdepartment, selectedClass, selectedSubclass]);
-
   const jobLevelObject = useMemo(() => {
     const parseId = (id: string) => {
       if (!id) return null;
@@ -98,69 +91,64 @@ export default function LettersPage() {
     return null;
   }, [selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
 
-
   useEffect(() => {
-    const fetchLetterTypesForClass = async () => {
-      if (!constructedClassId) {
+  const fetchLetterTypesForClass = async () => {
+    // 1. Ensure we have enough data to identify the hierarchy
+    if (!jobLevelObject || !selectedClass) {
+      setLetterTypes([]);
+      setSelectedLetter(null);
+      setSelectedBank(null);
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      // 2. Fetch requirements using the job_level JSONB column filters
+      let query = supabase
+        .from('tm_class_requirements')
+        .select('documents_and_fields')
+        .eq('job_level->>department_id', jobLevelObject.department_id.toString())
+        .eq('job_level->>subdepartment_id', jobLevelObject.subdepartment_id.toString())
+        .eq('job_level->>class_id', jobLevelObject.class_id.toString());
+
+      // Handle subclass (check for 'null' string if the property is missing in the JSON object)
+      if (jobLevelObject.subclass_id) {
+        query = query.eq('job_level->>subclass_id', jobLevelObject.subclass_id.toString());
+      } else {
+        query = query.eq('job_level->>subclass_id', 'null');
+      }
+
+      const { data: requirementsData, error: requirementsError } = await query.maybeSingle();
+
+      if (requirementsError) throw requirementsError;
+
+      if (!requirementsData?.documents_and_fields || requirementsData.documents_and_fields.length === 0) {
         setLetterTypes([]);
-        setSelectedLetter(null);
-        setSelectedBank(null);
         return;
       }
 
-      setIsLoading(true);
-      try {
-        const { data: requirementsData, error: requirementsError } = await supabase
-          .from('tm_class_requirements')
-          .select('documents_and_fields')
-          .eq('class_id', constructedClassId)
-          .single();
+      // 3. Extract IDs and fetch the actual KYC document definitions
+      const documentIds = requirementsData.documents_and_fields.map(df => df.id);
 
-        if (requirementsError) {
-          if (requirementsError.code === 'PGRST116') {
-            setLetterTypes([]);
-            return;
-          }
-          throw requirementsError;
-        }
+      let { data: documentsData, error: documentsError } = await supabase
+        .from('acc_portal_kyc')
+        .select('*')
+        .in('id', documentIds)
 
-        if (!requirementsData?.documents_and_fields || requirementsData.documents_and_fields.length === 0) {
-          setLetterTypes([]);
-          return;
-        }
-
-        const documentIds = requirementsData.documents_and_fields.map(df => df.id);
-
-        // First try with the main_category filter
-        let { data: documentsData, error: documentsError } = await supabase
-          .from('acc_portal_kyc')
-          .select('*')
-          .in('id', documentIds)
-          .or('main_category.eq.Letters,main_category.eq.Forms');
-
-        // If no documents found, try without the main_category filter
-        if (!documentsData || documentsData.length === 0) {
-          const { data: allDocs } = await supabase
-            .from('acc_portal_kyc')
-            .select('*')
-            .in('id', documentIds);
-
-          if (allDocs && allDocs.length > 0) {
-            documentsData = allDocs;
-          }
-        }
-
-        if (documentsError) throw documentsError;
-        setLetterTypes(documentsData || []);
-      } catch (error) {
-        console.error("Error fetching letter types:", error);
-        setLetterTypes([]);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchLetterTypesForClass();
-  }, [constructedClassId]);
+      if (documentsError) throw documentsError;
+      
+      setLetterTypes(documentsData || []);
+    } catch (error) {
+      console.error("Error fetching letter types:", error);
+      setLetterTypes([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  // Dependency change: depend on jobLevelObject instead of constructedClassId
+  fetchLetterTypesForClass();
+}, [jobLevelObject, selectedClass]);
 
 const handleLetterClick = (letter: any) => {
     const hasBanks = letter.banks_applicable && letter.banks_applicable.length > 0;
@@ -269,7 +257,7 @@ const handleLetterClick = (letter: any) => {
                     <div className="flex justify-center items-center h-full"><Loader2 className="h-6 w-6 animate-spin" /></div>
                   ) : letterTypes.length > 0 ? (
                     <div className="space-y-1">
-                      {letterTypes.map(letter => {
+                      {letterTypes.filter(letter => letter.has_template === "true").map(letter => {
                         const hasBanks = letter.banks_applicable && letter.banks_applicable.length > 0;
                         const isExpanded = expandedLetterIds[letter.id];
                         // Active if selected and NO bank is involved

@@ -481,19 +481,146 @@ export function EnquiryDialog({
         setLoading(true)
 
         try {
-            // Prepare Payload
+            // Build participants array
+            const participants_details = [];
+
+            // Add primary individual as participant
+            participants_details.push({
+                id: selectedIndividual.id,
+                name: selectedIndividual.full_name,
+                role: [applicantType === 'dependant' ? 'dependant' : 'principal'],
+                type: "individual",
+                is_primary: true
+            });
+
+            // Add principal member if dependant
+            if (applicantType === 'dependant' && formData.principal_member_id) {
+                const principal = availablePrincipals.find(p => p.id.toString() === formData.principal_member_id);
+                if (principal) {
+                    participants_details.push({
+                        id: principal.id,
+                        name: principal.full_name,
+                        role: ['principal'],
+                        type: "individual",
+                        is_primary: false
+                    });
+                }
+            }
+
+            // Add company if selected
+            if (selectedCompany) {
+                participants_details.push({
+                    id: selectedCompany,
+                    name: `Company ${selectedCompany}`,
+                    role: ['company'],
+                    type: "company",
+                    is_primary: false
+                });
+            }
+
+            // Add understudy if selected
+            if (selectedUnderstudy) {
+                const understudy = users.find(u => u.id.toString() === selectedUnderstudy);
+                if (understudy) {
+                    participants_details.push({
+                        id: understudy.id,
+                        name: understudy.name,
+                        role: ['understudy'],
+                        type: "individual",
+                        is_primary: false
+                    });
+                }
+            }
+
+            // Add assigned staff as participants
+            if (formData.officer_id && formData.officer_id !== 'none') {
+                const officer = officers.find(o => o.id.toString() === formData.officer_id);
+                if (officer) {
+                    participants_details.push({
+                        id: officer.id,
+                        name: officer.name,
+                        role: ["officer"],
+                        type: "individual",
+                        is_primary: false
+                    });
+                }
+            }
+
+            if (formData.task_manager_id && formData.task_manager_id !== 'none') {
+                const manager = users.find(u => u.id.toString() === formData.task_manager_id);
+                if (manager) {
+                    participants_details.push({
+                        id: manager.id,
+                        name: manager.name,
+                        role: ["task_manager"],
+                        type: "individual",
+                        is_primary: false
+                    });
+                }
+            }
+
+            if (formData.task_assistant_id && formData.task_assistant_id !== 'none') {
+                const assistant = users.find(u => u.id.toString() === formData.task_assistant_id);
+                if (assistant) {
+                    participants_details.push({
+                        id: assistant.id,
+                        name: assistant.name,
+                        role: ["task_assistant"],
+                        type: "individual",
+                        is_primary: false
+                    });
+                }
+            }
+
+            // Add dependants if included
+            if (includeDependants) {
+                availableDependants
+                    .filter(d => selectedDependants.includes(d.id.toString()))
+                    .forEach(d => {
+                        participants_details.push({
+                            id: d.id,
+                            name: d.full_name,
+                            role: ['dependant'],
+                            type: "individual",
+                            is_primary: false
+                        });
+                    });
+            }
+
+            // Add references if included
+            if (includeReferences) {
+                availableReferences
+                    .filter(r => selectedReferences.includes(r.id.toString()))
+                    .forEach(r => {
+                        participants_details.push({
+                            id: r.id,
+                            name: r.full_name,
+                            role: ['reference'],
+                            type: "individual",
+                            is_primary: false
+                        });
+                    });
+            }
+
+            // Prepare Payload with required structure
             const payload = {
-                job_description: formData.job_description,
                 status: 'enquiry',
-                renewal_status: taskType,
-                department_id: formData.department_id,
-                subdepartment_id: formData.subdepartment_id || null,
-                class_id: formData.class_id || null,
-                subclass_id: formData.subclass_id || null,
-                individual_id: selectedIndividual.id,
-                applicant_type: applicantType,
-                applicant_name: selectedIndividual.full_name,
-                date_initiated: formData.enquiry_date,
+                date_initiated: new Date(formData.enquiry_date).toISOString(),
+                created_by: null,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                account_used: null,
+                batch: null,
+                applied_by: "11", // This might need to be dynamic
+                stages: {
+                    '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa': {
+                        date: format(new Date(formData.enquiry_date), 'dd/MM/yyyy'),
+                        status: "completed",
+                        completedAt: new Date(formData.enquiry_date).toISOString()
+                    }
+                },
+                job_description: formData.job_description,
+                source_document_id: null,
                 job_level: {
                     level: formData.subclass_id ? 4 :
                         formData.class_id ? 3 :
@@ -504,32 +631,12 @@ export function EnquiryDialog({
                     department_id: formData.department_id ? parseInt(formData.department_id) : null,
                     subdepartment_id: formData.subdepartment_id ? parseInt(formData.subdepartment_id) : null
                 },
-                // Relations
-                principal_member: applicantType === 'dependant' ? formData.principal_member_id : selectedIndividual.id,
-                company_id: selectedCompany || null,
-                understudy: selectedUnderstudy || null,
-
-                // Staff
-                officer_id: formData.officer_id === 'none' || !formData.officer_id ? null : formData.officer_id,
-                task_manager_id: formData.task_manager_id === 'none' || !formData.task_manager_id ? null : formData.task_manager_id,
-                task_assistant_id: formData.task_assistant_id === 'none' || !formData.task_assistant_id ? null : formData.task_assistant_id,
-
-                // JSONB fields
-                dependant_member: includeDependants ? availableDependants
-                    .filter(d => selectedDependants.includes(d.id.toString()))
-                    .map(d => ({ id: d.id, name: d.full_name, relationship: d.relationship_type })) : [],
-
-                references: includeReferences ? availableReferences
-                    .filter(r => selectedReferences.includes(r.id.toString()))
-                    .map(r => ({ id: r.id, name: r.full_name, relationship: 'Reference' })) : [],
-
-                stages: {
-                    '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa': {
-                        date: format(new Date(), 'dd/MM/yyyy'),
-                        status: 'completed',
-                        completedAt: new Date().toISOString()
-                    }
-                }
+                applicant_details: {
+                    id: selectedIndividual.id,
+                    name: selectedIndividual.full_name,
+                    type: "individual"
+                },
+                participants_details: participants_details
             }
 
             const { data, error } = await supabase.from('tm_tasks').insert([payload]).select().single()

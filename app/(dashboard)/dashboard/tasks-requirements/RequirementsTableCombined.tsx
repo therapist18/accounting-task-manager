@@ -89,8 +89,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   const [isPreparingTemplate, setIsPreparingTemplate] = useState(false);
   const [masterFields, setMasterFields] = useState<Map<number, any>>(new Map());
   const hasFetchedMasterFields = useRef(false);
-
-  const classDocsAndFields = useMemo(() => classRequirements?.[0]?.documents_and_fields || [], [classRequirements]);
+  // RequirementsTableCombined.tsx - Around line 105
+  const classDocsAndFields = useMemo(() => { return classRequirements?.[0]?.documents_and_fields || []; }, [classRequirements]);
 
   // Helper to check if a specific document is required for a specific column type
   const checkApplicability = (colType: string, docConfig: any) => {
@@ -386,14 +386,14 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       );
 
       const entityIdMap = {
-      company: companyId,
-      directors: companyRelationships?.directors?.map(d => d.id) || [],
-      // FIX: If we are in a director column, set THIS specific ID as the target director
-      director: colType === 'director' ? colId : companyRelationships?.directors?.[0]?.id,
-      principal: colType === 'principal' ? colId : companyRelationships?.principal?.id,
-      dependants: companyRelationships?.dependants || [],
-      understudy: companyRelationships?.understudy?.id
-    }
+        company: companyId,
+        directors: companyRelationships?.directors?.map(d => d.id) || [],
+        // FIX: If we are in a director column, set THIS specific ID as the target director
+        director: colType === 'director' ? colId : companyRelationships?.directors?.[0]?.id,
+        principal: colType === 'principal' ? colId : companyRelationships?.principal?.id,
+        dependants: companyRelationships?.dependants || [],
+        understudy: companyRelationships?.understudy?.id
+      }
       console.log("✅ Step 1: Entity ID Map created", entityIdMap);
 
       const templates = await fetchDocumentTemplates(docItem.document.id, task);

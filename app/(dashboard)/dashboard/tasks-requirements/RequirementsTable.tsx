@@ -296,23 +296,37 @@ export function RequirementsTable({
         if (!isMounted) return;
         if (docsErr) throw docsErr;
         setDocuments((docsRes || []).map(doc => ({ ...doc, display_name: doc.display_name || doc.name })));
-        const taskDataPromises = filteredTasks.map(async (task) => {
-          // Use job_level if available, otherwise fall back to the old structure
-          const jobLevel = task.job_level || {};
-          const subdepartmentId = jobLevel.subdepartment_id || task.subdepartment_id;
-          const classId = jobLevel.subclass_id ||
-            (jobLevel.class_id && subdepartmentId ?
-              `${subdepartmentId}_${jobLevel.class_id}` :
-              jobLevel.class_id || task.class_id);
+     // RequirementsTable.tsx - Update within the fetchMetadata function
+const taskDataPromises = filteredTasks.map(async (task) => {
+  const jobLevel = task.job_level || {};
+  
+  // Construct a query that targets the job_level JSON structure
+  let query = supabase
+    .from('tm_class_requirements')
+    .select('*');
 
-          const { data } = await supabase
-            .from('tm_class_requirements')
-            .select('*')
-            .eq('class_id', classId)
-            .maybeSingle();
+  // Filter based on the hierarchical IDs stored in the task's job_level
+  if (jobLevel.department_id) {
+    query = query.eq('job_level->>department_id', jobLevel.department_id.toString());
+  }
+  if (jobLevel.subdepartment_id) {
+    query = query.eq('job_level->>subdepartment_id', jobLevel.subdepartment_id.toString());
+  }
+  
+  // Use 'null' string for comparison if the ID is missing, or skip if that's your schema logic
+  // Typically, class_id and subclass_id might be null for higher level requirements
+  query = query.eq('job_level->>class_id', jobLevel.class_id ? jobLevel.class_id.toString() : 'null');
+  
+  if (jobLevel.subclass_id) {
+    query = query.eq('job_level->>subclass_id', jobLevel.subclass_id.toString());
+  } else {
+    query = query.eq('job_level->>subclass_id', 'null');
+  }
 
-          return { taskId: task.id, classRequirements: data };
-        });
+  const { data } = await query.maybeSingle();
+
+  return { taskId: task.id, classRequirements: data };
+});
         const results = await Promise.all(taskDataPromises);
         const requirementsMap = results.reduce((acc, res) => {
           if (res.classRequirements) acc[res.taskId] = res.classRequirements;

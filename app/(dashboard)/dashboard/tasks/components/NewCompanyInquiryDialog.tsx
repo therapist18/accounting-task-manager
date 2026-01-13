@@ -269,54 +269,100 @@ export function NewCompanyInquiryDialog({
 
         setLoading(true);
         try {
-            const directorsDetails = Array.from(selectedOfficialIds).map(officialId => {
+            // Build participants array
+            const participants_details = [];
+
+            // Add company officials as participants
+            Array.from(selectedOfficialIds).forEach(officialId => {
                 const official = officials.find(o => o.id === officialId);
-                return {
-                    id: official?.id,
-                    full_name: official?.full_name,
-                    role: official?.primary_role,
-                    roles: official?.roles,
-                    is_primary: officialId === primaryDirectorId
-                };
+                if (official) {
+                    participants_details.push({
+                        id: official.id,
+                        name: official.full_name,
+                        role: official.roles.map(r => r.toLowerCase()),
+                        type: "individual",
+                        is_primary: officialId === primaryDirectorId
+                    });
+                }
             });
 
+            // Add assigned staff as participants
+            if (formData.officer_id && formData.officer_id !== 'none') {
+                const officer = localOfficers.find(o => o.id.toString() === formData.officer_id);
+                if (officer) {
+                    participants_details.push({
+                        id: officer.id,
+                        name: officer.name,
+                        role: ["officer"],
+                        type: "individual",
+                        is_primary: false
+                    });
+                }
+            }
+
+            if (formData.task_manager_id && formData.task_manager_id !== 'none') {
+                const manager = localUsers.find(u => u.id.toString() === formData.task_manager_id);
+                if (manager) {
+                    participants_details.push({
+                        id: manager.id,
+                        name: manager.name,
+                        role: ["task_manager"],
+                        type: "individual",
+                        is_primary: false
+                    });
+                }
+            }
+
+            if (formData.task_assistant_id && formData.task_assistant_id !== 'none') {
+                const assistant = localUsers.find(u => u.id.toString() === formData.task_assistant_id);
+                if (assistant) {
+                    participants_details.push({
+                        id: assistant.id,
+                        name: assistant.name,
+                        role: ["task_assistant"],
+                        type: "individual",
+                        is_primary: false
+                    });
+                }
+            }
+
             const taskPayload = {
+                status: 'enquiry',
+                date_initiated: new Date(formData.enquiry_date).toISOString(),
+                created_by: null,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                account_used: null,
+                batch: null,
+                applied_by: "11", // This might need to be dynamic
+                stages: {
+                    "1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa": {
+                        date: format(new Date(formData.enquiry_date), 'dd/MM/yyyy'),
+                        status: "completed",
+                        completedAt: new Date(formData.enquiry_date).toISOString()
+                    }
+                },
                 job_description: formData.job_description,
-                renewal_status: taskType,
-                            department_id: parseInt(formData.department_id) || null,
-                subdepartment_id: parseInt(formData.subdepartment_id) || null,
-                class_id: parseInt(formData.class_id) || null,
-                subclass_id: parseInt(formData.subclass_id) || null,
-                applicant_type: 'company',
-                date_initiated: new Date(formData.enquiry_date),
-                applicant_name: selectedCompany.company_name,
-                company_id: selectedCompany.id,
-                officer_id: formData.officer_id && formData.officer_id !== 'none' ? parseInt(formData.officer_id) : null,
-                task_manager_id: formData.task_manager_id && formData.task_manager_id !== 'none' ? parseInt(formData.task_manager_id) : null,
-                task_assistant_id: formData.task_assistant_id && formData.task_assistant_id !== 'none' ? parseInt(formData.task_assistant_id) : null,
-                directors_details: directorsDetails,
+                source_document_id: null,
                 job_level: {
                     level: formData.subclass_id ? 4 : formData.class_id ? 3 : formData.subdepartment_id ? 2 : 1,
                     department_id: parseInt(formData.department_id) || null,
                     subdepartment_id: parseInt(formData.subdepartment_id) || null,
                     class_id: parseInt(formData.class_id) || null,
                     subclass_id: parseInt(formData.subclass_id) || null
-                }
+                },
+                applicant_details: {
+                    id: selectedCompany.id,
+                    name: selectedCompany.company_name,
+                    type: "company"
+                },
+                participants_details: participants_details
             };
 
             let result;
             if (isEditMode) {
                 result = await supabase.from('tm_tasks').update(taskPayload).eq('id', initialData.id).select();
             } else {
-                const enquiryStageId = '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa';
-                taskPayload.status = 'enquiry';
-                taskPayload.stages = {
-                    [enquiryStageId]: {
-                        date: format(new Date(), 'dd/MM/yyyy'),
-                        status: 'completed',
-                        completedAt: new Date().toISOString(),
-                    },
-                };
                 result = await supabase.from('tm_tasks').insert([taskPayload]).select();
             }
 
@@ -498,7 +544,7 @@ export function NewCompanyInquiryDialog({
                                             <Select value={taskType} onValueChange={(v: any) => setTaskType(v)}>
                                                 <SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="new" className="text-xs">New Service</SelectItem>
+                                                    <SelectItem value="new" className="text-xs">New</SelectItem>
                                                     <SelectItem value="renewal" className="text-xs">Renewal/Compliance</SelectItem>
                                                 </SelectContent>
                                             </Select>
@@ -550,7 +596,7 @@ export function NewCompanyInquiryDialog({
                                     </div>
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="space-y-1.5">
-                                            <Label className="text-xs">Service Class</Label>
+                                            <Label className="text-xs">Class</Label>
                                             <Select value={formData.class_id} onValueChange={(v) => {
                                                 setFormData(prev => ({ ...prev, class_id: v, subclass_id: '' }));
                                             }}>

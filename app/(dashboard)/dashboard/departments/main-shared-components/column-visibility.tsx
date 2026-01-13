@@ -6,8 +6,9 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Separator } from "@/components/ui/separator"
-import { Eye, EyeOff, Settings } from "lucide-react"
+import { Eye, EyeOff, Settings, Search } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Input } from "@/components/ui/input"
 
 export interface ColumnVisibilityOption {
   id: string
@@ -21,8 +22,6 @@ export interface ColumnVisibilityOption {
 interface ColumnVisibilityControlProps {
   columns: ColumnVisibilityOption[]
   onVisibilityChange: (columnId: string, visible: boolean) => void
-  onShowAll?: () => void
-  onHideAll?: () => void
   onResetToDefault?: () => void
   trigger?: React.ReactNode
   title?: string
@@ -32,14 +31,13 @@ interface ColumnVisibilityControlProps {
 export const ColumnVisibilityControl: React.FC<ColumnVisibilityControlProps> = React.memo(({
   columns,
   onVisibilityChange,
-  onShowAll,
-  onHideAll,
   onResetToDefault,
   trigger,
   title = "Column Visibility",
   description = "Toggle column visibility"
 }) => {
   const [isOpen, setIsOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
 
   // Group columns by their group property - memoized to prevent recalculation
   const groupedColumns = useMemo(() => {
@@ -53,8 +51,35 @@ export const ColumnVisibilityControl: React.FC<ColumnVisibilityControlProps> = R
     }, {} as Record<string, ColumnVisibilityOption[]>)
   }, [columns])
 
+  // Filter columns based on search query
+  const filteredGroupedColumns = useMemo(() => {
+    if (!searchQuery.trim()) return groupedColumns
+    
+    const filtered: Record<string, ColumnVisibilityOption[]> = {}
+    Object.entries(groupedColumns).forEach(([groupName, groupColumns]) => {
+      const filteredColumns = groupColumns.filter(column =>
+        column.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        groupName.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+      if (filteredColumns.length > 0) {
+        filtered[groupName] = filteredColumns
+      }
+    })
+    return filtered
+  }, [groupedColumns, searchQuery])
+
   const visibleCount = useMemo(() => columns.filter(col => col.visible).length, [columns])
   const totalCount = columns.length
+  const allSelected = visibleCount === totalCount && totalCount > 0
+
+  // Toggle all functionality
+  const handleToggleAll = () => {
+    columns.forEach((column: ColumnVisibilityOption) => {
+      if (!column.disabled) {
+        onVisibilityChange(column.id, !allSelected)
+      }
+    })
+  }
 
   const defaultTrigger = useMemo(() => (
     <Button variant="outline" size="sm" className="flex items-center gap-2">
@@ -79,32 +104,24 @@ export const ColumnVisibilityControl: React.FC<ColumnVisibilityControlProps> = R
 
           {/* Action buttons */}
           <div className="flex gap-2">
-            {onShowAll && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  onShowAll()
-                }}
-                className="flex-1"
-              >
-                <Eye className="h-3 w-3 mr-1" />
-                Show All
-              </Button>
-            )}
-            {onHideAll && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  onHideAll()
-                }}
-                className="flex-1"
-              >
-                <EyeOff className="h-3 w-3 mr-1" />
-                Hide All
-              </Button>
-            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleToggleAll}
+              className="flex-1"
+            >
+              {allSelected ? (
+                <>
+                  <EyeOff className="h-3 w-3 mr-1" />
+                  Deselect All
+                </>
+              ) : (
+                <>
+                  <Eye className="h-3 w-3 mr-1" />
+                  Select All
+                </>
+              )}
+            </Button>
             {onResetToDefault && (
               <Button
                 variant="outline"
@@ -121,12 +138,25 @@ export const ColumnVisibilityControl: React.FC<ColumnVisibilityControlProps> = R
 
           <Separator />
 
+          {/* Search bar */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search columns..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+
+          <Separator />
+
           {/* Column list */}
           <ScrollArea className="h-64">
             <div className="space-y-4">
-              {Object.entries(groupedColumns).map(([groupName, groupColumns]) => (
+              {Object.entries(filteredGroupedColumns).map(([groupName, groupColumns]) => (
                 <div key={groupName} className="space-y-2">
-                  {Object.keys(groupedColumns).length > 1 && (
+                  {Object.keys(filteredGroupedColumns).length > 1 && (
                     <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       {groupName}
                     </div>

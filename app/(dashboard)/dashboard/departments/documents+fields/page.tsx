@@ -10,7 +10,6 @@ import { Plus, Minus, Expand, Minimize2, Info, FileText, Users, Search, X } from
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
-import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
 import { getTableFields, getGroupedFields } from "./components/formFields"
 import ColumnVisibilityControl, { ColumnVisibilityOption } from "@/app/(dashboard)/dashboard/departments/main-shared-components/column-visibility"
@@ -24,6 +23,7 @@ import {
   shouldShowUnderstudy as shouldShowUnderstudyUtil,
   shouldShowReferences as shouldShowReferencesUtil,
 } from "./components/utils"
+import { supabase } from "@/lib/supabase/client"
 import { Input } from "@/components/ui/input"
 
 const MemoizedCheckbox = memo(OptimizedCheckbox)
@@ -64,7 +64,7 @@ export default function DocumentsFields() {
       const [depts, docs, requirements] = await Promise.all([
         supabase.from('tm_departments').select(`*, tm_subdepartments (*, classes)`).order('order', { ascending: true }),
         supabase.from('acc_portal_kyc').select('*').order('main_category_number', { ascending: true }),
-        supabase.from('tm_class_requirements').select('documents_and_fields, client_fields, class_id')
+        supabase.from('tm_class_requirements').select('documents_and_fields, client_fields, job_level')
       ]);
 
       if (depts.error || docs.error || requirements.error) throw new Error("Fetch failed");
@@ -72,7 +72,14 @@ export default function DocumentsFields() {
       const transformedDepts = (depts.data || []).map(dept => ({
         ...dept,
         subdepartments: (dept.tm_subdepartments || []).sort((a, b) => (a.order || 0) - (b.order || 0))
-          .map(sd => ({ ...sd, classes: sd.classes || [], hasClasses: !!sd.classes?.length }))
+          .map(sd => ({ 
+            ...sd, 
+            classes: (sd.classes || []).map(cls => ({
+              ...cls,
+              subclasses: cls.subClasses || cls.subclasses || [] // Handle both subClasses and subclasses
+            })), 
+            hasClasses: !!(sd.classes && sd.classes.length > 0)
+          }))
       }));
 
       const processedDocs = (docs.data || []).map(doc => ({
@@ -84,12 +91,21 @@ export default function DocumentsFields() {
       const docAllocations = {};
       const fieldAllocations = {};
       requirements.data?.forEach(req => {
-        if (!req.class_id) return;
+        if (!req.job_level) return;
+        
+        // Generate class identifier from job_level
+        const classId = [
+          req.job_level.department_id,
+          req.job_level.subdepartment_id,
+          req.job_level.class_id,
+          req.job_level.subclass_id
+        ].filter(id => id !== null && id !== undefined).join('_');
+        
         (req.documents_and_fields || []).forEach(doc => {
-          docAllocations[`${doc.id}_${req.class_id}`] = doc;
-          (doc.fields || []).forEach(f => docAllocations[`${doc.id}-${f.id}_${req.class_id}`] = f);
+          docAllocations[`${doc.id}_${classId}`] = doc;
+          (doc.fields || []).forEach(f => docAllocations[`${doc.id}-${f.id}_${classId}`] = f);
         });
-        (req.client_fields || []).forEach(f => fieldAllocations[`${f.id}_${req.class_id}`] = f);
+        (req.client_fields || []).forEach(f => fieldAllocations[`${f.id}_${classId}`] = f);
       });
 
       const cols = [];
@@ -149,7 +165,10 @@ export default function DocumentsFields() {
     if (!currentDepartment?.subdepartments) return [];
     return currentDepartment.subdepartments.map(sd => ({
       ...sd,
-      classes: sd.classes?.map(cls => ({ ...cls, subclasses: cls.subclasses || [] }))
+      classes: sd.classes?.map(cls => ({ 
+        ...cls, 
+        subclasses: cls.subClasses || cls.subclasses || [] // Handle both subClasses and subclasses
+      }))
     }));
   }, [currentDepartment]);
 
@@ -301,13 +320,13 @@ export default function DocumentsFields() {
     setHasUnsavedChanges(false)
   }, [])
 
-  const handleSaveAllChanges = useCallback(async () => {
+const handleSaveAllChanges = useCallback(async () => {
     if (!hasUnsavedChanges) return;
     setIsSaving(true);
     try {
       const changesByClassId = {};
 
-      // 1. Group all pending changes by their classId.
+      // 1. Group all pending changes by their classId string.
       const groupChanges = (changeType) => {
         const source = pendingChanges[changeType];
         Object.entries(source).forEach(([allocationKey, changeData]) => {
@@ -315,34 +334,58 @@ export default function DocumentsFields() {
           if (firstUnderscoreIndex === -1) return;
 
           const entityId = allocationKey.substring(0, firstUnderscoreIndex);
-          const classId = allocationKey.substring(firstUnderscoreIndex + 1);
+          const classHierarchy = allocationKey.substring(firstUnderscoreIndex + 1);
 
-          if (!changesByClassId[classId]) {
-            changesByClassId[classId] = { documents: {}, clientFields: {} };
+          if (!changesByClassId[classHierarchy]) {
+            changesByClassId[classHierarchy] = { documents: {}, clientFields: {} };
           }
 
-          changesByClassId[classId][changeType][entityId] = changeData;
+          changesByClassId[classHierarchy][changeType][entityId] = changeData;
         });
       };
 
       groupChanges('documents');
       groupChanges('clientFields');
 
-      // 2. For each classId, fetch existing data, merge changes, and upsert.
-      const savePromises = Object.entries(changesByClassId).map(async ([classId, classChanges]) => {
-        const { data: existingData, error: fetchError } = await supabase
+      // 2. Iterate through each unique hierarchy path
+      const savePromises = Object.entries(changesByClassId).map(async ([classHierarchy, classChanges]) => {
+        // Parse the hierarchy string: "sdId" or "sdId_clsId" or "sdId_clsId_scId"
+        const parts = classHierarchy.split('_');
+        const sdId = parts[0] ? parseInt(parts[0]) : null;
+        const clsId = parts[1] ? parseInt(parts[1]) : null;
+        const scId = parts[2] ? parseInt(parts[2]) : null;
+        const deptId = parseInt(activeTab); // The current active Department tab
+
+        // Determine the level based on specificity
+        let currentLevel = 1; // Default: Department
+        if (scId) currentLevel = 4;
+        else if (clsId) currentLevel = 3;
+        else if (sdId) currentLevel = 2;
+
+        const jobLevel = {
+          level: currentLevel,
+          department_id: deptId,
+          subdepartment_id: sdId,
+          class_id: clsId,
+          subclass_id: scId
+        };
+
+        // 3. Fetch existing data for this specific job_level
+        const { data: existingRecord, error: fetchError } = await supabase
           .from('tm_class_requirements')
-          .select('documents_and_fields, client_fields')
-          .eq('class_id', classId)
+          .select('id, documents_and_fields, client_fields')
+          .eq('job_level->>department_id', jobLevel.department_id.toString())
+          .eq('job_level->>subdepartment_id', jobLevel.subdepartment_id ? jobLevel.subdepartment_id.toString() : 'null')
+          .eq('job_level->>class_id', jobLevel.class_id ? jobLevel.class_id.toString() : 'null')
+          .eq('job_level->>subclass_id', jobLevel.subclass_id ? jobLevel.subclass_id.toString() : 'null')
           .maybeSingle();
 
-        if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
+        if (fetchError) throw fetchError;
 
-        // 3. Build the nested document structure
-        const documentsMap = new Map((existingData?.documents_and_fields || []).map(doc => [doc.id, doc]));
+        // 4. Merge Document Changes
+        const documentsMap = new Map((existingRecord?.documents_and_fields || []).map(doc => [doc.id, doc]));
 
         Object.entries(classChanges.documents).forEach(([entityId, changeProps]) => {
-          // A document ID is a 36-char UUID. Anything longer is a field ID.
           const isField = entityId.length > 37 && entityId[36] === '-';
           let docId, fieldId;
 
@@ -356,40 +399,49 @@ export default function DocumentsFields() {
 
           const docData = documentsMap.get(docId) || { id: docId, fields: [] };
 
-          if (fieldId) { // It's a field change
+          if (fieldId) {
             const fieldIndex = docData.fields.findIndex(f => f.id === fieldId);
             const fieldChanges = { id: fieldId, updated_at: new Date().toISOString(), ...changeProps };
-
             if (fieldIndex > -1) {
               docData.fields[fieldIndex] = { ...docData.fields[fieldIndex], ...fieldChanges };
             } else {
               docData.fields.push(fieldChanges);
             }
-          } else { // It's a document change
+          } else {
             const docChanges = { updated_at: new Date().toISOString(), ...changeProps };
             documentsMap.set(docId, { ...docData, ...docChanges });
           }
         });
 
-        // 4. Merge client field changes (they remain flat)
-        const clientFieldsMap = new Map((existingData?.client_fields || []).map(field => [field.id, field]));
+        // 5. Merge Client Field Changes
+        const clientFieldsMap = new Map((existingRecord?.client_fields || []).map(field => [field.id, field]));
         Object.entries(classChanges.clientFields).forEach(([entityId, changeProps]) => {
           const fieldChanges = { id: entityId, updated_at: new Date().toISOString(), ...changeProps };
           clientFieldsMap.set(entityId, { ...clientFieldsMap.get(entityId), ...fieldChanges });
         });
 
+        // 6. Final Payload
         const finalPayload = {
-          class_id: classId,
           documents_and_fields: Array.from(documentsMap.values()),
           client_fields: Array.from(clientFieldsMap.values()),
+          job_level: jobLevel,
           updated_at: new Date().toISOString(),
         };
 
-        const { error: upsertError } = await supabase
-          .from('tm_class_requirements')
-          .upsert(finalPayload, { onConflict: 'class_id' });
+        // 7. Upsert (Update if exists, else Insert)
+        let result;
+        if (existingRecord?.id) {
+          result = await supabase
+            .from('tm_class_requirements')
+            .update(finalPayload)
+            .eq('id', existingRecord.id);
+        } else {
+          result = await supabase
+            .from('tm_class_requirements')
+            .insert([finalPayload]);
+        }
 
-        if (upsertError) throw upsertError;
+        if (result.error) throw result.error;
       });
 
       await Promise.all(savePromises);
@@ -400,8 +452,7 @@ export default function DocumentsFields() {
 
       toast({
         title: "Success",
-        description: `Changes saved successfully.`,
-        variant: "default",
+        description: `All hierarchical levels updated successfully.`,
       });
 
     } catch (error) {
@@ -414,7 +465,7 @@ export default function DocumentsFields() {
     } finally {
       setIsSaving(false);
     }
-  }, [pendingChanges, hasUnsavedChanges, refreshData]);
+  }, [pendingChanges, hasUnsavedChanges, refreshData, activeTab]);
 
   if (loading) return <div className="p-12 text-center animate-pulse">Loading Document Map...</div>;
 
