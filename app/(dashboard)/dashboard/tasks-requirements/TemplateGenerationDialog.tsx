@@ -2612,6 +2612,116 @@ export default function TemplateGenerationDialog({
         };
     }, [formData, groupedPlaceholders]);
 
+  const saveAsDraft = async () => {
+    console.log('[saveAsDraft] Starting draft save');
+    setIsGenerating(true);
+
+    try {
+        const fileName = `${documentName.replace(/[^\w\s-]/g, '_')}_draft_${formatDate(new Date(), 'YYYYMMDD')}`;
+        
+        // 1. Determine applicant type
+        let applicantType = 'company'; 
+        if (personData?.applicant_details?.type) {
+            applicantType = personData.applicant_details.type;
+        } else if (companyData?.applicant_details?.type) {
+            applicantType = companyData.applicant_details.type;
+        } else if (extractedData?.type) {
+            applicantType = extractedData.type;
+        }
+
+        const isCompany = applicantType.toLowerCase() === 'company';
+        const targetTable = isCompany ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents';
+
+        console.log('[saveAsDraft] Applicant type:', applicantType);
+        console.log('[saveAsDraft] Target table:', targetTable);
+
+        // 2. Generate the document content
+        const renderData = await prepareRenderData(formData);
+        let templateBuffer = docxTemplateBuffer.current;
+        if (templateBuffer && typeof templateBuffer.then === 'function') {
+            templateBuffer = await templateBuffer;
+        }
+
+        if (!templateBuffer) {
+            throw new Error('No template buffer available for draft save');
+        }
+
+        const zip = new PizZip(templateBuffer);
+        const doc = new Docxtemplater(zip, {
+            linebreaks: true,
+            paragraphLoop: true,
+            nullGetter: () => ""
+        });
+
+        doc.setData(renderData);
+        doc.render();
+
+        const blob = doc.getZip().generate({
+            type: "blob",
+            mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        });
+
+        // 3. Convert to base64
+        const draftBase64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+
+        // 4. Prepare Table-Specific Payload
+        // We get the KYC Document ID from the template metadata
+        const kycDocId = template?.document_id; 
+
+        const insertPayload = {
+            file_path: `drafts/${fileName}.docx`,
+            file_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            file_content: draftBase64,
+            created_at: new Date().toISOString(),
+            status: 'draft'
+        };
+
+        if (isCompany) {
+            // For acc_portal_kyc_uploads
+            insertPayload.company_id = entityIdMap?.company || relationshipData?.company?.id;
+            insertPayload.kyc_document_id = kycDocId; // Use kyc_document_id field
+        } else {
+            // For acc_portal_directors_documents
+            // Use director_id instead of individual_id
+            insertPayload.director_id = entityIdMap?.principal || entityIdMap?.director || relationshipData?.principal?.id;
+            insertPayload.document_id = kycDocId; // Use document_id field
+            // Ensure company_id is NOT included here
+        }
+
+        console.log('[saveAsDraft] Submitting to:', targetTable, insertPayload);
+
+        // 5. Save to database
+        const { data, error } = await supabase
+            .from(targetTable)
+            .insert(insertPayload)
+            .select();
+
+        if (error) throw error;
+
+        console.log('[saveAsDraft] Draft saved successfully:', data);
+        toast({
+            title: "Success",
+            description: `Draft saved to ${targetTable}`,
+        });
+
+    } catch (e) {
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        console.error('[saveAsDraft] Error:', e);
+        toast({
+            title: "Error",
+            description: errorMessage,
+            variant: "destructive"
+        });
+    } finally {
+        setIsGenerating(false);
+    }
+};
+
     const generateAndDownload = async (type) => {
         console.log(`[generateAndDownload] Starting ${type.toUpperCase()} document generation`);
         setIsGenerating(true);
@@ -2916,13 +3026,20 @@ export default function TemplateGenerationDialog({
                             </div>
                         )}
                     </div>
-
                     <DialogFooter className="border-t px-6 py-3 bg-white flex justify-between flex-shrink-0">
                         <div className="text-[10px] flex items-center gap-1.5">
                             <CheckCircle2 className="h-3 w-3 text-green-500" />
                             {isWordTemplate ? 'Word + Images' : 'HTML'}
                         </div>
                         <div className='flex gap-2'>
+                            <Button variant="outline" size="sm" onClick={saveAsDraft} disabled={isGenerating}>
+                                {isGenerating ? (
+                                    <Loader2 className="animate-spin mr-2 h-4 w-4" />
+                                ) : (
+                                    <Save className="mr-2 h-4 w-4" />
+                                )}
+                                Save as Draft
+                            </Button>
                             <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>

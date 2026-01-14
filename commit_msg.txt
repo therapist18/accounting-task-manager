@@ -1,0 +1,1 @@
+﻿Update TemplateGenerationDialog and EditableStageCell components

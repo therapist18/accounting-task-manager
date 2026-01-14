@@ -22,6 +22,7 @@ import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { formatDuration, getTimeStatus, isDocumentApplicable, parseDate } from "../overall-view/tableUtils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { calculateStageDate } from "../utils/dateUtils"
+import { AutomationMappingDialog } from "./AutomationMappingDialog"
 
 interface EditableStageCellProps {
   stage: any
@@ -110,6 +111,15 @@ export default function EditableStageCell({
   const [documentFields, setDocumentFields] = useState<any[]>([]);
   const [isLoadingFields, setIsLoadingFields] = useState(false);
 
+  // Log automation dialog state changes
+  useEffect(() => {
+    console.log('🤖 [EditableStageCell] Automation dialog state changed:', {
+      automationDialogOpen,
+      stageId: stage?.id,
+      stageName: stage?.name,
+      taskId: task?.id
+    });
+  }, [automationDialogOpen, stage?.id, stage?.name, task?.id]);
 
   const handlePreviewDataChange = useCallback((docId: string, fieldName: string, value: any) => {
     setPreviewDocuments(prev =>
@@ -620,8 +630,20 @@ export default function EditableStageCell({
 
   const handleTriggerAutomation = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
+    console.log('🤖 [EditableStageCell] Automation button clicked!', {
+      stageId: stage?.id,
+      stageName: stage?.name,
+      taskId: task?.id,
+      taskName: task?.name,
+      hasAutomation: !!(stage?.automation?.automationId || stage?.automation?.id || stage?.web_automation?.automationId),
+      automationId: stage?.automation?.automationId || stage?.automation?.id,
+      isAutomationRunning,
+      automationDialogOpen
+    });
+    
     setAutomationDialogOpen(true);
-  }, []);
+    console.log('🤖 [EditableStageCell] Automation dialog should now be open');
+  }, [stage, task, isAutomationRunning, automationDialogOpen]);
 
   const fetchKycDocumentData = useCallback(async (kycId: string) => {
     try {
@@ -1238,6 +1260,22 @@ export default function EditableStageCell({
   return (
     <>
       <SkipStageDialog />
+      <AutomationMappingDialog
+        isOpen={automationDialogOpen}
+        onClose={() => {
+          console.log('🤖 [EditableStageCell] Automation dialog closing');
+          setAutomationDialogOpen(false);
+        }}
+        classId={task?.class_id || ''}
+        requirementId={stage?.id || ''}
+        taskId={task?.id}
+        automationId={stage?.automation?.automationId || stage?.automation?.id}
+        task={task}
+        individualId={task?.individual_id || task?.principal_member}
+        stageDocuments={stage?.documents || []}
+        allDocuments={allDocuments}
+        stage={stage}
+      />
     </>
   );
 }
