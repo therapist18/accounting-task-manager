@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Loader2, PlusCircle, Trash2, FileText, Pencil, Save, RefreshCw, ChevronDown, Check, ChevronsUpDown, Link2, X, Search, View, Download, UserCog, Users, User, Code, Hash, Database } from "lucide-react";
+import { Loader2, PlusCircle, Trash2, FileText, Pencil, Save, RefreshCw, ChevronDown, Check, ChevronsUpDown, Link2, X, Search, View, Download, UserCog, Users, User, Code, Hash, Database, Sparkles } from "lucide-react";
 import { DocxLivePreview } from "@/components/DocxLivePreview";
 import { DocumentTemplate as BaseDocumentTemplate } from "./types";
 import { TableHeader, Table, TableBody, TableCell, TableHead, TableRow } from "@/components/ui/table";
@@ -143,6 +143,8 @@ type Placeholder = {
     linking_variable: string; // e.g., 'company_id', 'director_id', 'individual_id'
     document_id_field: string; // e.g., 'kyc_document_id', 'document_id'
   };
+  is_ai_generated?: boolean;
+  ai_prompt?: string;
 };
 
 const getCleanText = (str: string) => str.replace(/<[^>]+>/g, '');
@@ -302,20 +304,20 @@ export default function DocumentTemplateManager({
   const [isProcessing, setIsProcessing] = useState(false);
   const [isPlaceholderFormOpen, setIsPlaceholderFormOpen] = useState(false);
   const [isEditingPlaceholder, setIsEditingPlaceholder] = useState<number | null>(null);
-const [newPlaceholder, setNewPlaceholder] = useState<Placeholder>({
-  id: '',
-  name: '',
-  description: '',
-  type: 'text',
-  required: false,
-  entity_type: [],
-  array_direction: 'vertical',
-  checklist_data_source: {
-    table: 'acc_portal_kyc_uploads',
-    linking_variable: 'company_id',
-    document_id_field: 'kyc_document_id'
-  }
-});
+  const [newPlaceholder, setNewPlaceholder] = useState<Placeholder>({
+    id: '',
+    name: '',
+    description: '',
+    type: 'text',
+    required: false,
+    entity_type: [],
+    array_direction: 'vertical',
+    checklist_data_source: {
+      table: 'acc_portal_kyc_uploads',
+      linking_variable: 'company_id',
+      document_id_field: 'kyc_document_id'
+    }
+  });
   const [directorType, setDirectorType] = useState<'all' | 'primary'>('all');
   const [dependantRelationship, setDependantRelationship] = useState<string[]>([]);
   const [templateFiles, setTemplateFiles] = useState<Map<string, File>>(new Map());
@@ -621,7 +623,43 @@ const [newPlaceholder, setNewPlaceholder] = useState<Placeholder>({
         const arrayBuffer = await source.content.arrayBuffer();
         const zip = new PizZip(arrayBuffer);
         // Word stores main content in document.xml
-        const xmlContent = zip.files['word/document.xml'].asText();
+        let xmlContent = zip.files['word/document.xml'].asText();
+
+        // Check for additional content files (header.xml, footer.xml)
+        let headerContent = '';
+        let footerContent = '';
+
+        console.log('[SCANNER] Available files in zip:', Object.keys(zip.files));
+        
+        // Word documents can have multiple headers/footers with numbers (header1.xml, header2.xml, etc.)
+        const headerFiles = Object.keys(zip.files).filter(file => file.startsWith('word/header') && file.endsWith('.xml'));
+        const footerFiles = Object.keys(zip.files).filter(file => file.startsWith('word/footer') && file.endsWith('.xml'));
+        
+        console.log('[SCANNER] Found header files:', headerFiles);
+        console.log('[SCANNER] Found footer files:', footerFiles);
+        
+        // Combine all header files
+        if (headerFiles.length > 0) {
+          headerContent = headerFiles.map(file => zip.files[file].asText()).join('\n');
+          console.log('[SCANNER] Header content found (first 200 chars):', headerContent.substring(0, 200));
+        }
+        
+        // Combine all footer files
+        if (footerFiles.length > 0) {
+          footerContent = footerFiles.map(file => zip.files[file].asText()).join('\n');
+          console.log('[SCANNER] Footer content found (first 200 chars):', footerContent.substring(0, 200));
+        }
+
+        // Combine all parts for complete text extraction
+        if (headerContent) {
+          xmlContent = headerContent + xmlContent;
+          console.log('[SCANNER] Added header to content');
+        }
+
+        if (footerContent) {
+          xmlContent = xmlContent + footerContent;
+          console.log('[SCANNER] Added footer to content');
+        }
 
         // 1. Strip XML tags. 
         // 2. IMPORTANT: Remove zero-width joiners/spaces that Word inserts between characters in tags
@@ -629,7 +667,9 @@ const [newPlaceholder, setNewPlaceholder] = useState<Placeholder>({
           .replace(/<[^>]+>/g, '')
           .replace(/[\u200B-\u200D\uFEFF]/g, '');
 
-        console.log("[SCANNER] Extracted Raw Text from XML (First 100 chars):", rawTextContent.substring(0, 100));
+        console.log('[SCANNER] Combined XML Content (first 200 chars):', xmlContent.substring(0, 200));
+        console.log('[SCANNER] Combined Raw Text Content (first 200 chars):', rawTextContent.substring(0, 200));
+        console.log('[SCANNER] Raw text content length:', rawTextContent.length);
       } else {
         // Clean HTML from the editor
         rawTextContent = getCleanText(source.content).replace(/[\u200B-\u200D\uFEFF]/g, '');
@@ -963,48 +1003,60 @@ const [newPlaceholder, setNewPlaceholder] = useState<Placeholder>({
           </TableCell>
 
           <TableCell className="border-r">
-           {p.type === 'document_checklist' && p.linked_document_ids?.length > 0 ? (
-    <div className="flex flex-wrap gap-1">
-      {p.linked_document_ids.slice(0, 3).map(docId => {
-        const doc = availableDocuments.find(d => d.id === docId);
-        return (
-          <Badge key={docId} variant="outline" className="text-[9px] bg-purple-50 text-purple-700">
-            {doc?.display_name || doc?.name || 'Doc'}
-          </Badge>
-        );
-      })}
-      {p.linked_document_ids.length > 3 && (
-        <Badge variant="outline" className="text-[9px]">
-          +{p.linked_document_ids.length - 3}
-        </Badge>
-      )}
-    </div>
-  ) : p.type === 'boolean' && p.boolean_conditions?.length > 0 ? (
-    <div className="flex flex-wrap gap-1">
-      {p.boolean_conditions.slice(0, 3).map((cond, idx) => (
-        <Badge key={idx} variant="outline" className="text-[9px] bg-purple-50 text-purple-700">
-          {cond.label}
-        </Badge>
-      ))}
-      {p.boolean_conditions.length > 3 && (
-        <Badge variant="outline" className="text-[9px]">
-          +{p.boolean_conditions.length - 3}
-        </Badge>
-      )}
-    </div>
-  ) : p.master_field_ids?.length > 0 ? (
-    <div className="flex flex-wrap gap-1">
-      {p.master_field_ids.map(id => (
-        <Badge key={id} variant="outline" className="text-[9px] bg-white">
-          {masterFieldMap.get(id) || id}
-        </Badge>
-      ))}
-    </div>
-  ) : (
-    <span className="text-[10px] text-muted-foreground italic">Not Linked</span>
-  )}
-</TableCell>
+            {p.type === 'document_checklist' && p.linked_document_ids?.length > 0 ? (
+              <div className="flex flex-wrap gap-1">
+                {p.linked_document_ids.slice(0, 3).map(docId => {
+                  const doc = availableDocuments.find(d => d.id === docId);
+                  return (
+                    <Badge key={docId} variant="outline" className="text-[9px] bg-purple-50 text-purple-700">
+                      {doc?.display_name || doc?.name || 'Doc'}
+                    </Badge>
+                  );
+                })}
+                {p.linked_document_ids.length > 3 && (
+                  <Badge variant="outline" className="text-[9px]">
+                    +{p.linked_document_ids.length - 3}
+                  </Badge>
+                )}
+              </div>
+            ) : p.type === 'boolean' && p.boolean_conditions?.length > 0 ? (
+              <div className="flex flex-wrap gap-1">
+                {p.boolean_conditions.slice(0, 3).map((cond, idx) => (
+                  <Badge key={idx} variant="outline" className="text-[9px] bg-purple-50 text-purple-700">
+                    {cond.label}
+                  </Badge>
+                ))}
+                {p.boolean_conditions.length > 3 && (
+                  <Badge variant="outline" className="text-[9px]">
+                    +{p.boolean_conditions.length - 3}
+                  </Badge>
+                )}
+              </div>
+            ) : p.master_field_ids?.length > 0 ? (
+              <div className="flex flex-wrap gap-1">
+                {p.master_field_ids.map(id => (
+                  <Badge key={id} variant="outline" className="text-[9px] bg-white">
+                    {masterFieldMap.get(id) || id}
+                  </Badge>
+                ))}
+              </div>
+            ) : (
+              <span className="text-[10px] text-muted-foreground italic">Not Linked</span>
+            )}
+          </TableCell>
 
+<TableCell className="border-r">
+  <div className="flex items-center gap-1">
+    <Badge variant="outline" className="capitalize text-[10px]">
+      {p.type}
+    </Badge>
+    {p.is_ai_generated && (
+      <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-[8px] h-4">
+        AI
+      </Badge>
+    )}
+  </div>
+</TableCell>
           <TableCell className="text-right">
             <div className="flex justify-end gap-1">
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => editPlaceholder(originalIndex)}>
@@ -1225,35 +1277,37 @@ const [newPlaceholder, setNewPlaceholder] = useState<Placeholder>({
 
   const handleEditorBlur = () => { if (currentTemplate?.isDirty) handleRescanPlaceholders(); };
 
-const savePlaceholder = () => {
-  if (!newPlaceholder.name.trim()) return;
+  const savePlaceholder = () => {
+    if (!newPlaceholder.name.trim()) return;
 
-  const processedOptions = newPlaceholder.type === 'conditional'
-    ? (newPlaceholder.conditions || []).map(c => `{#${c.tag}}${c.label}{${c.tag}}{/${c.tag}}`)
-    : newPlaceholder.options;
+    const processedOptions = newPlaceholder.type === 'conditional'
+      ? (newPlaceholder.conditions || []).map(c => `{#${c.tag}}${c.label}{${c.tag}}{/${c.tag}}`)
+      : newPlaceholder.options;
 
-  const placeholderToSave = {
-    ...newPlaceholder,
-    options: processedOptions,
-    entity_type: Array.isArray(newPlaceholder.entity_type)
-      ? newPlaceholder.entity_type
-      : newPlaceholder.entity_type ? [newPlaceholder.entity_type] : [],
-    ...(newPlaceholder.entity_type?.includes('director') && { director_type: directorType }),
-    ...(newPlaceholder.entity_type?.includes('dependent') && { dependant_relationship: dependantRelationship }),
-    ...(newPlaceholder.type === 'boolean' && {
-      boolean_conditions: newPlaceholder.boolean_conditions || [],
-      boolean_type: newPlaceholder.boolean_type || 'single'
-    }),
-   ...(newPlaceholder.type === 'document_checklist' && {
-  linked_document_ids: newPlaceholder.linked_document_ids || [],
-  checklist_display_format: newPlaceholder.checklist_display_format || 'checkboxes',
-  checklist_data_source: newPlaceholder.checklist_data_source || {
-    table: 'acc_portal_kyc_uploads',
-    linking_variable: 'company_id',
-    document_id_field: 'kyc_document_id'
-  }
-})
-  };
+    const placeholderToSave = {
+      ...newPlaceholder,
+      is_ai_generated: newPlaceholder.is_ai_generated || false,
+      ai_prompt: newPlaceholder.ai_prompt || '',
+      options: processedOptions,
+      entity_type: Array.isArray(newPlaceholder.entity_type)
+        ? newPlaceholder.entity_type
+        : newPlaceholder.entity_type ? [newPlaceholder.entity_type] : [],
+      ...(newPlaceholder.entity_type?.includes('director') && { director_type: directorType }),
+      ...(newPlaceholder.entity_type?.includes('dependent') && { dependant_relationship: dependantRelationship }),
+      ...(newPlaceholder.type === 'boolean' && {
+        boolean_conditions: newPlaceholder.boolean_conditions || [],
+        boolean_type: newPlaceholder.boolean_type || 'single'
+      }),
+      ...(newPlaceholder.type === 'document_checklist' && {
+        linked_document_ids: newPlaceholder.linked_document_ids || [],
+        checklist_display_format: newPlaceholder.checklist_display_format || 'checkboxes',
+        checklist_data_source: newPlaceholder.checklist_data_source || {
+          table: 'acc_portal_kyc_uploads',
+          linking_variable: 'company_id',
+          document_id_field: 'kyc_document_id'
+        }
+      })
+    };
 
     if (isEditingPlaceholder !== null) {
       const updatedTemplates = [...templates];
@@ -1305,7 +1359,9 @@ const savePlaceholder = () => {
         : placeholder.entity_type ? [placeholder.entity_type] : [],
       conditions: placeholder.conditions || [],
       boolean_conditions: placeholder.boolean_conditions || [],
-      boolean_type: placeholder.boolean_type || 'single'
+      boolean_type: placeholder.boolean_type || 'single',
+      is_ai_generated: placeholder.is_ai_generated || false, // Add this
+        ai_prompt: placeholder.ai_prompt || '',    
     });
 
     // Set director type if applicable
@@ -1490,58 +1546,24 @@ const savePlaceholder = () => {
   const handleManualRescan = async () => {
     if (!currentTemplate) return;
 
-    try {
+try {
       setIsProcessing(true);
-      let content = currentTemplate.content || '';
 
-      // If it's a file template, extract content from the file
+      // Use enhanced extractPlaceholders function that includes header/footer support
+      let extracted: Placeholder[] = [];
+
+      // If it's a file template, extract from file (includes header/footer)
       if (currentTemplate.file_name && templateFiles.has(currentTemplate.id)) {
         const file = templateFiles.get(currentTemplate.id);
         if (file) {
-          const extracted = await extractPlaceholders({ type: 'file', content: file });
-          content = extracted.join(' '); // Use extracted placeholders as content for further processing
+          extracted = await extractPlaceholders({ type: 'file', content: file });
         }
+      } else {
+        // Extract from editor content
+        extracted = await extractPlaceholders({ type: 'text', content: currentTemplate.content || '' });
       }
 
-      // Enhanced pattern matching for different placeholder formats
-      const patterns = [
-        /{{([^{}]+)}}/g,        // Handlebars-style: {{placeholder}}
-        /\[\[([^\]]+)\]\]/g,     // Double bracket: [[placeholder]]
-        /%([^%]+)%/g,            // Percent-encoded: %placeholder%
-        /{([^{}]+)}/g,           // Single curly: {placeholder}
-        /\(\(([^)]+)\)/g,        // Double parens: ((placeholder))
-        /<([^>]+)>/g,            // HTML-style: <placeholder>
-        /\[([^\]]+)\]/g,         // Single bracket: [placeholder]
-        /#([^#\s]+)#/g,          // Hash-delimited: #placeholder#
-        /\$([A-Za-z0-9_]+)/g,    // Variable-style: $placeholder
-        /@([A-Za-z0-9_]+)@/g     // Email-style: @placeholder@
-      ];
-
-      const foundPlaceholders = new Set<string>();
-
-      // Try each pattern and collect unique placeholders
-      patterns.forEach(pattern => {
-        let match;
-        while ((match = pattern.exec(content)) !== null) {
-          if (match[1]) { // If we have a captured group
-            foundPlaceholders.add(match[1].trim());
-          }
-        }
-      });
-
-      // Convert to array and filter out empty strings
-      const extracted = Array.from(foundPlaceholders).filter(Boolean);
-
-      if (extracted.length === 0) {
-        toast({
-          title: 'No Placeholders Found',
-          description: 'No placeholders were found using standard patterns. Try checking your template format.',
-          variant: 'default'
-        });
-        return;
-      }
-
-      // Update the placeholders in the template
+      // Update placeholders in template with the extracted ones
       const updatedTemplates = [...templates];
       const existingPlaceholders = updatedTemplates[currentTemplateIndex].placeholders || [];
 
@@ -1551,7 +1573,7 @@ const savePlaceholder = () => {
         masterFields
       );
 
-      updatedTemplates[currentTemplateIndex].isDirty = true;
+      updatedTemplates[currentTemplateIndex].isDirty = false;
       setTemplates(updatedTemplates);
 
       const linkedCount = updatedTemplates[currentTemplateIndex].placeholders
@@ -1559,7 +1581,7 @@ const savePlaceholder = () => {
 
       toast({
         title: 'Manual Rescan Complete',
-        description: `Found ${extracted.length} placeholders using enhanced detection. ${linkedCount} were automatically linked to master fields.`,
+        description: `Found ${extracted.length} placeholders including header/footer. ${linkedCount} were automatically linked to master fields.`,
         variant: 'default'
       });
 
@@ -2531,108 +2553,108 @@ const savePlaceholder = () => {
                   )}
                 </div>
 
-                 <div className="space-y-3 p-4 bg-purple-50 border border-purple-200 rounded-lg">
-      <div className="flex items-center gap-2">
-        <Database className="h-5 w-5 text-purple-600" />
-        <h4 className="font-semibold text-purple-900">Data Source Configuration</h4>
-      </div>
-      <p className="text-xs text-purple-700">
-        Specify where to fetch document upload records from
-      </p>
-      
-      <div className="grid grid-cols-3 gap-3">
-        {/* Table Selection */}
-        <div className="space-y-2">
-          <Label className="text-xs font-bold text-purple-800">Table</Label>
-          <Select
-            value={newPlaceholder.checklist_data_source?.table || 'acc_portal_kyc_uploads'}
-            onValueChange={(v: 'acc_portal_kyc_uploads' | 'acc_portal_directors_documents') =>
-              setNewPlaceholder(prev => ({
-                ...prev,
-                checklist_data_source: {
-                  table: v,
-                  linking_variable: prev.checklist_data_source?.linking_variable || 'company_id',
-                  document_id_field: prev.checklist_data_source?.document_id_field || 'kyc_document_id'
-                }
-              }))
-            }
-          >
-            <SelectTrigger className="bg-white border-purple-200">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="acc_portal_kyc_uploads">
-                <div className="flex flex-col">
-                  <span className="font-medium">KYC Uploads</span>
-                  <span className="text-xs text-muted-foreground">acc_portal_kyc_uploads</span>
+                <div className="space-y-3 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <Database className="h-5 w-5 text-purple-600" />
+                    <h4 className="font-semibold text-purple-900">Data Source Configuration</h4>
+                  </div>
+                  <p className="text-xs text-purple-700">
+                    Specify where to fetch document upload records from
+                  </p>
+
+                  <div className="grid grid-cols-3 gap-3">
+                    {/* Table Selection */}
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-purple-800">Table</Label>
+                      <Select
+                        value={newPlaceholder.checklist_data_source?.table || 'acc_portal_kyc_uploads'}
+                        onValueChange={(v: 'acc_portal_kyc_uploads' | 'acc_portal_directors_documents') =>
+                          setNewPlaceholder(prev => ({
+                            ...prev,
+                            checklist_data_source: {
+                              table: v,
+                              linking_variable: prev.checklist_data_source?.linking_variable || 'company_id',
+                              document_id_field: prev.checklist_data_source?.document_id_field || 'kyc_document_id'
+                            }
+                          }))
+                        }
+                      >
+                        <SelectTrigger className="bg-white border-purple-200">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="acc_portal_kyc_uploads">
+                            <div className="flex flex-col">
+                              <span className="font-medium">KYC Uploads</span>
+                              <span className="text-xs text-muted-foreground">acc_portal_kyc_uploads</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="acc_portal_directors_documents">
+                            <div className="flex flex-col">
+                              <span className="font-medium">Directors Documents</span>
+                              <span className="text-xs text-muted-foreground">acc_portal_directors_documents</span>
+                            </div>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Linking Variable */}
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-purple-800">Linking Variable</Label>
+                      <Input
+                        placeholder="company_id"
+                        value={newPlaceholder.checklist_data_source?.linking_variable || ''}
+                        onChange={(e) =>
+                          setNewPlaceholder(prev => ({
+                            ...prev,
+                            checklist_data_source: {
+                              table: prev.checklist_data_source?.table || 'acc_portal_kyc_uploads',
+                              linking_variable: e.target.value,
+                              document_id_field: prev.checklist_data_source?.document_id_field || 'kyc_document_id'
+                            }
+                          }))
+                        }
+                        className="bg-white border-purple-200 text-xs"
+                      />
+                      <p className="text-[10px] text-purple-600">
+                        e.g., company_id, director_id, individual_id
+                      </p>
+                    </div>
+
+                    {/* Document ID Field */}
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-purple-800">Document ID Field</Label>
+                      <Input
+                        placeholder="kyc_document_id"
+                        value={newPlaceholder.checklist_data_source?.document_id_field || ''}
+                        onChange={(e) =>
+                          setNewPlaceholder(prev => ({
+                            ...prev,
+                            checklist_data_source: {
+                              table: prev.checklist_data_source?.table || 'acc_portal_kyc_uploads',
+                              linking_variable: prev.checklist_data_source?.linking_variable || 'company_id',
+                              document_id_field: e.target.value
+                            }
+                          }))
+                        }
+                        className="bg-white border-purple-200 text-xs"
+                      />
+                      <p className="text-[10px] text-purple-600">
+                        e.g., kyc_document_id, document_id
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Preview of Configuration */}
+                  <div className="p-2 bg-white rounded border border-purple-200">
+                    <code className="text-[10px] text-purple-800">
+                      SELECT * FROM {newPlaceholder.checklist_data_source?.table || 'acc_portal_kyc_uploads'}<br />
+                      WHERE {newPlaceholder.checklist_data_source?.linking_variable || 'company_id'} = entity_id<br />
+                      AND {newPlaceholder.checklist_data_source?.document_id_field || 'kyc_document_id'} IN (selected_docs)
+                    </code>
+                  </div>
                 </div>
-              </SelectItem>
-              <SelectItem value="acc_portal_directors_documents">
-                <div className="flex flex-col">
-                  <span className="font-medium">Directors Documents</span>
-                  <span className="text-xs text-muted-foreground">acc_portal_directors_documents</span>
-                </div>
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Linking Variable */}
-        <div className="space-y-2">
-          <Label className="text-xs font-bold text-purple-800">Linking Variable</Label>
-          <Input
-            placeholder="company_id"
-            value={newPlaceholder.checklist_data_source?.linking_variable || ''}
-            onChange={(e) =>
-              setNewPlaceholder(prev => ({
-                ...prev,
-                checklist_data_source: {
-                  table: prev.checklist_data_source?.table || 'acc_portal_kyc_uploads',
-                  linking_variable: e.target.value,
-                  document_id_field: prev.checklist_data_source?.document_id_field || 'kyc_document_id'
-                }
-              }))
-            }
-            className="bg-white border-purple-200 text-xs"
-          />
-          <p className="text-[10px] text-purple-600">
-            e.g., company_id, director_id, individual_id
-          </p>
-        </div>
-
-        {/* Document ID Field */}
-        <div className="space-y-2">
-          <Label className="text-xs font-bold text-purple-800">Document ID Field</Label>
-          <Input
-            placeholder="kyc_document_id"
-            value={newPlaceholder.checklist_data_source?.document_id_field || ''}
-            onChange={(e) =>
-              setNewPlaceholder(prev => ({
-                ...prev,
-                checklist_data_source: {
-                  table: prev.checklist_data_source?.table || 'acc_portal_kyc_uploads',
-                  linking_variable: prev.checklist_data_source?.linking_variable || 'company_id',
-                  document_id_field: e.target.value
-                }
-              }))
-            }
-            className="bg-white border-purple-200 text-xs"
-          />
-          <p className="text-[10px] text-purple-600">
-            e.g., kyc_document_id, document_id
-          </p>
-        </div>
-      </div>
-
-      {/* Preview of Configuration */}
-      <div className="p-2 bg-white rounded border border-purple-200">
-        <code className="text-[10px] text-purple-800">
-          SELECT * FROM {newPlaceholder.checklist_data_source?.table || 'acc_portal_kyc_uploads'}<br/>
-          WHERE {newPlaceholder.checklist_data_source?.linking_variable || 'company_id'} = entity_id<br/>
-          AND {newPlaceholder.checklist_data_source?.document_id_field || 'kyc_document_id'} IN (selected_docs)
-        </code>
-      </div>
-    </div>
 
                 <div className="p-3 bg-blue-50 rounded border border-blue-200">
                   <p className="text-xs text-blue-800">
@@ -2774,7 +2796,44 @@ const savePlaceholder = () => {
               />
             </div>
             <div className="flex items-center space-x-2 pt-2"><Checkbox id="required" checked={newPlaceholder.required} onCheckedChange={(c) => setNewPlaceholder({ ...newPlaceholder, required: !!c })} /><Label htmlFor="required">Required field</Label></div>
-          </div>
+        <div className="space-y-4 border-t pt-4 mt-2">
+  <div className="flex items-center space-x-2">
+    <Checkbox 
+      id="is_ai_generated" 
+      checked={newPlaceholder.is_ai_generated} 
+      onCheckedChange={(c) => setNewPlaceholder({ ...newPlaceholder, is_ai_generated: !!c })} 
+    />
+    <Label htmlFor="is_ai_generated" className="text-purple-700 font-semibold flex items-center gap-2">
+      <Sparkles className="h-4 w-4" /> AI Refinement Enabled
+    </Label>
+  </div>
+
+  {newPlaceholder.is_ai_generated && (
+    <div className="space-y-2 p-3 bg-purple-50 border border-purple-200 rounded-md animate-in fade-in slide-in-from-top-1">
+      <Label className="text-[11px] text-purple-800 uppercase font-bold">
+        AI Refinement Prompt
+      </Label>
+      <Textarea
+        placeholder="e.g. Write a professional role description for {applicant_full_name} who is a {applicant_position} at {company_name}. Tone: Formal."
+        value={newPlaceholder.ai_prompt}
+        onChange={(e) => setNewPlaceholder({ ...newPlaceholder, ai_prompt: e.target.value })}
+        rows={4}
+        className="bg-white border-purple-200 focus-visible:ring-purple-400"
+      />
+      <div className="flex flex-col gap-1">
+        <p className="text-[10px] text-purple-600 italic">
+          <strong>Tip:</strong> Use curly braces to reference other fields as context.
+        </p>
+        <div className="flex flex-wrap gap-1 mt-1">
+          <span className="text-[9px] bg-purple-100 px-1.5 py-0.5 rounded text-purple-700 font-mono">{"{applicant_full_name}"}</span>
+          <span className="text-[9px] bg-purple-100 px-1.5 py-0.5 rounded text-purple-700 font-mono">{"{company_name}"}</span>
+          <span className="text-[9px] bg-purple-100 px-1.5 py-0.5 rounded text-purple-700 font-mono">{"{applicant_position}"}</span>
+        </div>
+      </div>
+    </div>
+  )}
+</div>
+  </div>
           <DialogFooter><Button variant="outline" onClick={() => setIsPlaceholderFormOpen(false)}>Cancel</Button><Button onClick={savePlaceholder} disabled={!newPlaceholder.name.trim()}>{isEditingPlaceholder !== null ? 'Update' : 'Add'} Placeholder</Button></DialogFooter>
         </DialogContent>
       </Dialog>

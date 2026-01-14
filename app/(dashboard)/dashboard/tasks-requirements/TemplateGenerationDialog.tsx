@@ -43,24 +43,24 @@ const EDITOR_PREVIEW_STYLES = `
 // --- HELPER FUNCTIONS ---
 const isDate = (str) => {
     if (!str || typeof str !== 'string') return false;
-    
+
     const datePatterns = [
         /^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/,
         /^\d{4}[\/\-]\d{2}[\/\-]\d{2}$/,
         /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/,
     ];
-    
+
     return datePatterns.some(pattern => pattern.test(str.trim()));
 };
 
 const processDigitSplit = (value, digitCount = 8) => {
     if (!value) return [];
-    
+
     const strValue = String(value);
-    const chars = isDate(strValue) 
+    const chars = isDate(strValue)
         ? strValue.replace(/\D/g, '').split('')
         : strValue.split('');
-    
+
     const result = [];
     for (let i = 1; i <= digitCount; i++) {
         result.push(chars[i - 1] || '');
@@ -211,107 +211,104 @@ const getOrdinalWord = (index: number): string => {
 };
 
 const checkDocumentStatus = (
-  documentId: string,
-  entityId: string,
-  entityType: string,
-  sourceDataCache: Record<string, Record<number, any>>,
-  dataSourceConfig?: {
-    table: string;
-    linking_variable: string;
-    document_id_field: string;
-  }
+    documentId: string,
+    entityId: string,
+    entityType: string,
+    sourceDataCache: Record<string, Record<number, any>>,
+    dataSourceConfig?: {
+        table: string;
+        linking_variable: string;
+        document_id_field: string;
+    }
 ): boolean => {
-  // Use provided config or fallback to defaults
-  const config = dataSourceConfig || {
-    table: 'acc_portal_kyc_uploads',
-    linking_variable: entityType === 'company' ? 'company_id' : 'individual_id',
-    document_id_field: 'kyc_document_id'
-  };
-  
-  console.log('[checkDocumentStatus] Config:', config);
-  console.log('[checkDocumentStatus] Looking for document:', documentId, 'entity:', entityId);
-  
-  // Get uploads from the specified table
-  const uploads = sourceDataCache[config.table] || {};
-  
-  // Check if the document exists for this entity
-  const documentFound = Object.values(uploads).some(upload => {
-    // Must match the document ID using the specified field
-    const uploadDocId = upload[config.document_id_field];
-    if (uploadDocId !== documentId) return false;
-    
-    // Must have a file uploaded
-    if (!upload.file_path) return false;
-    
-    // Match based on the specified linking variable
-    return String(upload[config.linking_variable]) === String(entityId);
-  });
-  
-  console.log('[checkDocumentStatus] Result:', documentFound);
-  return documentFound;
+    // Use provided config or fallback to defaults
+    const config = dataSourceConfig || {
+        table: 'acc_portal_kyc_uploads',
+        linking_variable: entityType === 'company' ? 'company_id' : 'individual_id',
+        document_id_field: 'kyc_document_id'
+    };
+
+    console.log('[checkDocumentStatus] Config:', config);
+    console.log('[checkDocumentStatus] Looking for document:', documentId, 'entity:', entityId);
+
+    // Get uploads from the specified table
+    const uploads = sourceDataCache[config.table] || {};
+
+    // Check if the document exists for this entity
+    const documentFound = Object.values(uploads).some(upload => {
+        // Must match the document ID using the specified field
+        const uploadDocId = upload[config.document_id_field];
+        if (uploadDocId !== documentId) return false;
+
+        // Must have a file uploaded
+        if (!upload.file_path) return false;
+
+        // Match based on the specified linking variable
+        return String(upload[config.linking_variable]) === String(entityId);
+    });
+
+    console.log('[checkDocumentStatus] Result:', documentFound);
+    return documentFound;
 };
 
 const generateDocumentChecklist = (
-  placeholder: any,
-  entityId: string,
-  entityType: string,
-  sourceDataCache: Record<string, Record<number, any>>,
-  availableDocuments: Array<{ id: string; display_name: string; name: string }>
+    placeholder: any,
+    entityId: string,
+    entityType: string,
+    sourceDataCache: Record<string, Record<number, any>>,
+    availableDocuments: Array<{ id: string; display_name: string; name: string }>
 ): string => {
-  const linkedDocs = placeholder.linked_document_ids || [];
-  const format = placeholder.checklist_display_format || 'checkboxes';
-  const dataSourceConfig = placeholder.checklist_data_source;
-  
-  console.log('[generateDocumentChecklist] Placeholder config:', {
-    linkedDocs,
-    format,
-    dataSourceConfig,
-    entityId,
-    entityType
-  });
-  
-  if (linkedDocs.length === 0) {
-    return 'No documents configured for this checklist.';
-  }
-  
-  const checklist = linkedDocs.map(docId => {
-    const doc = availableDocuments.find(d => d.id === docId);
-    const isFound = checkDocumentStatus(
-      docId,
-      entityId,
-      entityType,
-      sourceDataCache,
-      dataSourceConfig // Pass the custom config
-    );
-    
-    const docName = doc?.display_name || doc?.name || 'Unknown Document';
-    const symbol = isFound ? '☑' : '☐';
-    
-    switch (format) {
-      case 'bullets':
-        return `• ${docName}${isFound ? ' ✓' : ''}`;
-      case 'table':
-        return `| ${symbol} | ${docName} | ${isFound ? 'Submitted' : 'Pending'} |`;
-      default: // checkboxes
-        return `${symbol}`;
+    const linkedDocs = placeholder.linked_document_ids || [];
+    const format = placeholder.checklist_display_format || 'checkboxes';
+    const dataSourceConfig = placeholder.checklist_data_source;
+
+    console.log('[generateDocumentChecklist] Placeholder config:', {
+        linkedDocs,
+        format,
+        dataSourceConfig,
+        entityId,
+        entityType
+    });
+
+    if (linkedDocs.length === 0) {
+        return '';
     }
-  });
-  
-  if (format === 'table') {
-    return `| Status | Document | Notes |\n|--------|----------|-------|\n${checklist.join('\n')}`;
-  }
-  
-  return checklist.join('\n');
+
+    const checklist = linkedDocs.map(docId => {
+        const doc = availableDocuments.find(d => d.id === docId);
+        const isFound = checkDocumentStatus(
+            docId,
+            entityId,
+            entityType,
+            sourceDataCache,
+            dataSourceConfig // Pass the custom config
+        );
+
+        const docName = doc?.display_name || doc?.name || 'Unknown Document';
+        const symbol = isFound ? '✓' : '';
+
+        switch (format) {
+            case 'bullets':
+                return `• ${docName}${isFound ? ' ✓' : ''}`;
+            case 'table':
+                return `| ${symbol} | ${docName} | ${isFound ? 'Submitted' : 'Pending'} |`;
+            default: // checkboxes
+                return `${symbol}`;
+        }
+    });
+
+    if (format === 'table') {
+        return `| Status | Document | Notes |\n|--------|----------|-------|\n${checklist.join('\n')}`;
+    }
+
+    return checklist.join('\n');
 };
 
-// --- UNIFIED PLACEHOLDER PROCESSORS ---
 const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourceArray = null, entityIdMap = null, combinedCache = null, extractedData = null, companyData = null) => {
-    // Priority 1: If we are inside an array loop (Block), use the current item
     if (sourceArray && arrayIndex !== null && sourceArray[arrayIndex]) {
         return sourceArray[arrayIndex];
     }
 
-    // Determine requested type
     let entityType = 'company';
     if (Array.isArray(placeholder.entity_type)) {
         entityType = placeholder.entity_type[0];
@@ -320,27 +317,24 @@ const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourc
     }
     const normType = entityType?.toLowerCase()?.trim();
 
-    // Priority 2: Use specific ID from entityIdMap if the types match
+    // 1. Check entityIdMap for specific overrides
     if (entityIdMap) {
-        // If placeholder wants a director and we have a specific director ID for this column
         if (normType === 'director' && entityIdMap.director) {
             const dirId = entityIdMap.director;
-            return relationshipData?.directors?.find(d => String(d.id) === String(dirId)) || 
-                   combinedCache?.['registry_individuals']?.[dirId];
+            return relationshipData?.directors?.find(d => String(d.id) === String(dirId)) ||
+                combinedCache?.['registry_individuals']?.[dirId];
         }
-
-        // If placeholder wants a principal
         if (normType === 'principal' && entityIdMap.principal) {
-            return relationshipData?.principal;
-        }
-
-        // If placeholder wants a company
-        if (normType === 'company' && entityIdMap.company) {
-            return relationshipData?.company || companyData || extractedData;
+            return relationshipData?.principal || extractedData;
         }
     }
 
-    // Priority 3: Fallback to Relationship Data logic (original logic)
+    // 2. Fallback to Relationship Data logic
+    if (normType === 'principal') {
+        // Broaden matching for principal
+        return relationshipData?.principal || extractedData || personData;
+    }
+
     if (['dependant', 'dependent', 'spouse', 'child'].includes(normType)) {
         if (placeholder.dependant_relationship?.[0]) {
             const targetRel = placeholder.dependant_relationship[0].toLowerCase();
@@ -350,9 +344,10 @@ const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourc
     }
 
     if (normType === 'director') {
-        return placeholder.director_type === 'primary' 
-            ? relationshipData?.directors?.find(d => d.is_primary) 
+        const dir = placeholder.director_type === 'primary'
+            ? relationshipData?.directors?.find(d => d.is_primary)
             : relationshipData?.directors?.[0];
+        return dir || null;
     }
 
     if (normType === 'company') {
@@ -367,7 +362,7 @@ const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourc
  */
 const processOrdinalField = (placeholder, arrayIndex) => {
     const ordinalFormat = placeholder.ordinal_format || 'number';
-    
+
     if (ordinalFormat === 'word') {
         return {
             value: getOrdinalWord(arrayIndex),
@@ -622,7 +617,7 @@ const processTextField = (placeholder, targetEntity, combinedCache, masterFields
         // For names and similar fields, join with space
         const combinedValue = allValues.join(' ');
         const combinedSource = allSources[0]; // Use first source for display
-        
+
         return {
             value: combinedValue,
             source: combinedSource
@@ -637,7 +632,7 @@ const processTextField = (placeholder, targetEntity, combinedCache, masterFields
  */
 const processPlaceholderValue = (placeholder, relationshipData, combinedCache, masterFields, entityIdMap = null, extractedData, companyData, arrayIndex = null, sourceArray = null) => {
     console.group(`🔍 Processing: ${placeholder.name} (${placeholder.type || 'text'})`);
-    
+
     // Log entity_type for debugging
     if (placeholder.entity_type) {
         console.log(`🏷️ entity_type: ${placeholder.entity_type}`);
@@ -674,12 +669,12 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
             // Get available documents from a prop or fetch them
             // For now, we'll use an empty array - this should be passed as a prop
             const availableDocuments = window.__availableDocuments || [];
-            
+
             const entityId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id);
-            const entityType = Array.isArray(placeholder.entity_type) 
-                ? placeholder.entity_type[0] 
+            const entityType = Array.isArray(placeholder.entity_type)
+                ? placeholder.entity_type[0]
                 : placeholder.entity_type || 'company';
-            
+
             result = {
                 value: generateDocumentChecklist(
                     placeholder,
@@ -692,7 +687,7 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
             };
             break;
         }
-        
+
         case 'ordinal':
             if (arrayIndex !== null) {
                 result = processOrdinalField(placeholder, arrayIndex);
@@ -959,21 +954,23 @@ const UpdateProfileDialog = ({ open, onOpenChange, changedFields, onSave, isSavi
 /**
  * Unified placeholder input renderer
  */
-const PlaceholderInput = ({ 
-    placeholder, 
-    value, 
-    onChange, 
+const PlaceholderInput = ({
+    placeholder,
+    value,
+    onChange,
     onFileChange,
     imageStyles,
     onImageStyleChange,
     autoPopulated,
     isArrayItem = false,
     arrayIndex = null,
-    blockName = null
+    blockName = null,
+    onAIRefine, // Add this
+    isAIRefining,
 }) => {
     const fieldKey = isArrayItem ? `${blockName}_${arrayIndex}_${placeholder.name}` : placeholder.name;
-    
-      if (placeholder.type === 'document_checklist') {
+
+    if (placeholder.type === 'document_checklist') {
         return (
             <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -998,7 +995,7 @@ const PlaceholderInput = ({
                     )}
                 </div>
                 <p className="text-[8px] text-muted-foreground italic">
-                    ☑ = Document found, ☐ = Document missing
+                    ✓ = Document found
                 </p>
             </div>
         );
@@ -1007,7 +1004,7 @@ const PlaceholderInput = ({
     if (placeholder.is_digit_split) {
         const val = String(value || '');
         const chars = processDigitSplit(val, placeholder.digit_count || 8);
-        
+
         return (
             <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -1046,7 +1043,7 @@ const PlaceholderInput = ({
     if (placeholder.type === 'image') {
         const imageStyleKey = isArrayItem ? `${blockName}_${arrayIndex}_${placeholder.name}` : placeholder.name;
         const styles = imageStyles[imageStyleKey] || {};
-        
+
         return (
             <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -1116,7 +1113,7 @@ const PlaceholderInput = ({
 
     if (placeholder.type === 'boolean') {
         const options = Array.isArray(value) ? value : (placeholder.boolean_conditions || []);
-        
+
         return (
             <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -1133,7 +1130,7 @@ const PlaceholderInput = ({
                     {options.map((option, idx) => {
                         const isChecked = option?.checked || false;
                         const isDisabled = option?.hasDbLink || false;
-                        
+
                         const getOptionLabel = (opt) => {
                             if (!opt) return '';
                             if (typeof opt === 'string') return opt;
@@ -1141,7 +1138,7 @@ const PlaceholderInput = ({
                             if (opt.label && typeof opt.label === 'object' && opt.label.label) return opt.label.label;
                             return opt.tag || 'Option';
                         };
-                        
+
                         return (
                             <div key={idx} className="flex items-center gap-2 p-2 border rounded bg-white">
                                 <Checkbox
@@ -1150,7 +1147,7 @@ const PlaceholderInput = ({
                                     disabled={isDisabled}
                                     onCheckedChange={(checked) => {
                                         const newOptions = [...options];
-                                        
+
                                         if (placeholder.boolean_type === 'single') {
                                             newOptions.forEach((opt, i) => {
                                                 if (!opt.hasDbLink) {
@@ -1162,7 +1159,7 @@ const PlaceholderInput = ({
                                                 newOptions[idx].checked = checked;
                                             }
                                         }
-                                        
+
                                         onChange(newOptions);
                                     }}
                                 />
@@ -1188,17 +1185,64 @@ const PlaceholderInput = ({
         );
     }
 
+    if (placeholder.type === 'select') {
+        return (
+            <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                    <Label className="text-[10px] font-bold text-slate-400 uppercase">
+                        {placeholder.name.replace(/_/g, ' ')}
+                    </Label>
+                    {autoPopulated && (
+                        <Badge variant="secondary" className="text-[9px]">
+                            {autoPopulated}
+                        </Badge>
+                    )}
+                </div>
+                <Select value={value || ''} onValueChange={(val) => onChange(val)}>
+                    <SelectTrigger className="w-full">
+                        <SelectValue placeholder={`Select ${placeholder.name.replace(/_/g, ' ')}`} />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {placeholder.options?.map((option, idx) => (
+                            <SelectItem key={idx} value={option}>
+                                {typeof option === 'string' ? option : (option.label || option)}
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+            </div>
+        );
+    }
+
     return (
         <div className="space-y-2">
             <div className="flex items-center justify-between">
                 <Label className="text-[10px] font-bold text-slate-400 uppercase">
                     {placeholder.name.replace(/_/g, ' ')}
                 </Label>
-                {autoPopulated && (
-                    <Badge variant="secondary" className="text-[9px]">
-                        {autoPopulated}
-                    </Badge>
-                )}
+                <div className="flex items-center gap-2">
+                    {placeholder.is_ai_generated && (
+                        <Button
+                            type="button" // Important
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2 text-purple-600 hover:text-purple-700 hover:bg-purple-50"
+                            onClick={(e) => {
+                                e.preventDefault();
+                                onAIRefine(placeholder);
+                            }}
+                            disabled={isAIRefining}
+                        >
+                            {isAIRefining ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+                            <span className="text-[9px]">Refine</span>
+                        </Button>
+                    )}
+                    {autoPopulated && (
+                        <Badge variant="secondary" className="text-[9px]">
+                            {autoPopulated}
+                        </Badge>
+                    )}
+                </div>
             </div>
             <Input
                 value={value || ''}
@@ -1215,7 +1259,7 @@ export default function TemplateGenerationDialog({
     relationshipData = { directors: [], dependants: [], company: {}, principal: null, understudy: null },
 }) {
     const { toast } = useToast();
-    
+
     // Debug: Log the relationshipData structure
     useEffect(() => {
         if (isOpen && relationshipData) {
@@ -1236,7 +1280,7 @@ export default function TemplateGenerationDialog({
             console.log('extractedData:', extractedData);
             console.log('personData:', personData);
             console.log('companyData:', companyData);
-            
+
             // Log applicant_details.type if it exists in any data source
             if (extractedData?.applicant_details?.type) {
                 console.log('🏢 applicant_details.type from extractedData:', extractedData.applicant_details.type);
@@ -1250,7 +1294,7 @@ export default function TemplateGenerationDialog({
             if (relationshipData?.company?.type) {
                 console.log('🏢 company.type from relationshipData:', relationshipData.company.type);
             }
-            
+
             // Log the type field directly from each data source
             if (extractedData?.type) {
                 console.log('🏢 extractedData.type:', extractedData.type);
@@ -1271,7 +1315,7 @@ export default function TemplateGenerationDialog({
         directors: relationshipData.directors || [],
         company: relationshipData.company || {}
     }));
-
+    const [refiningFields, setRefiningFields] = useState(new Set());
     const [originalFormData, setOriginalFormData] = useState({ ...formData });
     const [isGenerating, setIsGenerating] = useState(false);
     const [isPreviewLoading, setIsPreviewLoading] = useState(false);
@@ -1286,7 +1330,7 @@ export default function TemplateGenerationDialog({
     const [isSavingProfile, setIsSavingProfile] = useState(false);
     const [additionalCache, setAdditionalCache] = useState({});
     const [fetchingTables, setFetchingTables] = useState(new Set());
- const [availableDocuments, setAvailableDocuments] = useState<Array<{ id: string; display_name: string; name: string }>>([]);
+    const [availableDocuments, setAvailableDocuments] = useState<Array<{ id: string; display_name: string; name: string }>>([]);
 
     const docxTemplateBuffer = useRef(null);
     const isWordTemplate = selectedTemplate?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -1345,14 +1389,14 @@ export default function TemplateGenerationDialog({
                     });
                     return { ...prev, [table]: cache };
                 });
-            } catch (err) { 
-                console.error(`Fetch Error ${table}:`, err); 
-            } finally { 
-                setFetchingTables(prev => { 
-                    const n = new Set(prev); 
-                    n.delete(table); 
-                    return n; 
-                }); 
+            } catch (err) {
+                console.error(`Fetch Error ${table}:`, err);
+            } finally {
+                setFetchingTables(prev => {
+                    const n = new Set(prev);
+                    n.delete(table);
+                    return n;
+                });
             }
         }
     }, [isOpen, selectedTemplate, masterFields, entityIdMap, relationshipData]);
@@ -1367,17 +1411,17 @@ export default function TemplateGenerationDialog({
     useEffect(() => {
         const fetchAvailableDocuments = async () => {
             if (!isOpen) return;
-            
+
             try {
                 const { data, error } = await supabase
                     .from('acc_portal_kyc')
                     .select('id, name, display_name, category')
                     .order('display_name');
-                
+
                 if (error) throw error;
-                
+
                 setAvailableDocuments(data || []);
-                
+
                 // Make available globally for the processor functions
                 window.__availableDocuments = data || [];
             } catch (error) {
@@ -1386,7 +1430,7 @@ export default function TemplateGenerationDialog({
         };
 
         fetchAvailableDocuments();
-        
+
         return () => {
             // Cleanup
             window.__availableDocuments = undefined;
@@ -1465,7 +1509,7 @@ export default function TemplateGenerationDialog({
 
         // HANDLE DIFFERENT ENTITY TYPES FOR ARRAYS
         const normalizedEntityType = entityType.toLowerCase().trim();
-        
+
         if (normalizedEntityType === 'director') {
             sourceArray = relationshipData.directors || [];
             if (isPrimaryOnly && sourceArray.length > 0) {
@@ -1475,13 +1519,13 @@ export default function TemplateGenerationDialog({
         } else if (['dependant', 'dependent', 'spouse', 'child', 'father', 'mother', 'son', 'daughter'].includes(normalizedEntityType)) {
             sourceArray = relationshipData.dependants || [];
             console.log(`🔍 Found ${sourceArray.length} total dependants:`, sourceArray);
-            
+
             // Filter by relationship if specified in block config
             if (blockPlaceholder.dependant_relationship?.length > 0) {
                 const targetRels = blockPlaceholder.dependant_relationship.map(rel => rel.toLowerCase());
                 console.log(`🎯 Filtering by block config relationships: "${targetRels.join(', ')}"`);
-                
-                sourceArray = sourceArray.filter(d => 
+
+                sourceArray = sourceArray.filter(d =>
                     targetRels.includes(d.relationship?.toLowerCase())
                 );
                 console.log(`📊 After filtering by "${targetRels.join(', ')}": ${sourceArray.length} items`);
@@ -1489,7 +1533,7 @@ export default function TemplateGenerationDialog({
             // Or filter by entity type name itself (e.g., "spouse", "child") - only if no specific relationships configured
             else if (['spouse', 'child', 'father', 'mother', 'son', 'daughter'].includes(normalizedEntityType)) {
                 console.log(`🎯 Filtering by entity type: "${normalizedEntityType}"`);
-                
+
                 // Use the entity type directly as relationship filter
                 sourceArray = sourceArray.filter(d =>
                     d.relationship?.toLowerCase() === normalizedEntityType
@@ -1510,25 +1554,25 @@ export default function TemplateGenerationDialog({
             console.group(`📝 Item ${index + 1}/${sourceArray.length}`);
             const rowData = {};
 
-       childFields.forEach(field => {
-    const processed = processPlaceholderValue(
-        field, 
-        relationshipData, 
-        combinedCache, 
-        masterFields, 
-        entityIdMap,   // Argument 5: entityIdMap
-        extractedData, // Argument 6: extractedData
-        companyData,   // Argument 7: companyData
-        index,         // Argument 8: arrayIndex (Critical Fix)
-        sourceArray    // Argument 9: sourceArray (Critical Fix)
-    );
+            childFields.forEach(field => {
+                const processed = processPlaceholderValue(
+                    field,
+                    relationshipData,
+                    combinedCache,
+                    masterFields,
+                    entityIdMap,   // Argument 5: entityIdMap
+                    extractedData, // Argument 6: extractedData
+                    companyData,   // Argument 7: companyData
+                    index,         // Argument 8: arrayIndex (Critical Fix)
+                    sourceArray    // Argument 9: sourceArray (Critical Fix)
+                );
                 // For boolean fields, preserve the structure (array of options)
                 if (field.type === 'boolean') {
                     rowData[field.name] = processed.value;
                 } else {
                     rowData[field.name] = extractDisplayValue(processed.value);
                 }
-                
+
                 if (processed.source) {
                     rowData[`__${field.name}_source`] = processed.source;
                 }
@@ -1545,7 +1589,8 @@ export default function TemplateGenerationDialog({
 
     useEffect(() => {
         if (isOpen && selectedTemplate && Object.keys(sourceDataCache).length > 0) {
-            const initData = {};
+            // Start with a copy of existing data to prevent blanking out fields
+            const initData = { ...formData };
             const autoMap = new Map();
             const combinedCache = { ...sourceDataCache, ...additionalCache };
 
@@ -1554,20 +1599,22 @@ export default function TemplateGenerationDialog({
                     p,
                     relationshipData,
                     combinedCache,
-                    masterFields
+                    masterFields,
+                    entityIdMap,     // Arg 5
+                    extractedData,   // Arg 6
+                    companyData      // Arg 7
                 );
 
-                if (p.type === 'boolean') {
-                    initData[p.name] = match.value;
-                } else {
-                    initData[p.name] = extractDisplayValue(match.value);
+                // Use the calculated value if found
+                let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
+
+                if (val) {
+                    initData[p.name] = val;
+                    if (match.source) autoMap.set(p.name, match.source);
                 }
 
-                if (match.source) {
-                    autoMap.set(p.name, match.source);
-                }
-
-                if (!initData[p.name] && p.type !== 'boolean') {
+                // Smart Match fallback if DB search was empty
+                if (!initData[p.name]) {
                     const smartMatch = smartFieldMatch(p.name);
                     if (smartMatch.value) {
                         initData[p.name] = smartMatch.value;
@@ -1576,6 +1623,7 @@ export default function TemplateGenerationDialog({
                 }
             });
 
+            // Process blocks...
             Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
                 const block = groupedPlaceholders.blocks[blockName];
                 const resolvedRows = resolveArrayData(
@@ -1594,10 +1642,11 @@ export default function TemplateGenerationDialog({
                 }
             });
 
-            setFormData(initData);
+            setFormData(initData); // This updates the state
             setOriginalFormData(JSON.parse(JSON.stringify(initData)));
             setAutoPopulatedFields(autoMap);
 
+            // Update preview
             setTimeout(() => {
                 if (docxTemplateBuffer.current) {
                     updateWordPreview(initData, imageStyles);
@@ -1606,21 +1655,21 @@ export default function TemplateGenerationDialog({
                 }
             }, 100);
         }
-    }, [isOpen, selectedTemplate?.id, groupedPlaceholders, sourceDataCache, additionalCache]);
+    }, [isOpen, selectedTemplate?.id, sourceDataCache, additionalCache]); // Ensure dependencies are correct
 
     const handleInputChange = (name, val) => {
         setFormData(prev => {
             const newState = { ...prev, [name]: val };
-            
+
             if (docxTemplateBuffer.current) {
                 updateWordPreview(newState, imageStyles);
             } else {
                 setPreviewContent(populateHtmlContent(newState, selectedTemplate?.placeholders || [], imageStyles));
             }
-            
+
             return newState;
         });
-        
+
         if (!manuallyEditedFields.has(name)) {
             setManuallyEditedFields(prev => new Set(prev).add(name));
         }
@@ -1639,13 +1688,13 @@ export default function TemplateGenerationDialog({
     const handleImageStyleChange = (name, key, value) => {
         setImageStyles(prev => {
             const newStyles = { ...prev, [name]: { ...(prev[name] || {}), [key]: value } };
-            
+
             if (docxTemplateBuffer.current) {
                 updateWordPreview(formData, newStyles);
             } else {
                 setPreviewContent(populateHtmlContent(formData, selectedTemplate?.placeholders || [], newStyles));
             }
-            
+
             return newStyles;
         });
     };
@@ -1666,7 +1715,7 @@ export default function TemplateGenerationDialog({
 
             return newState;
         });
-        
+
         setManuallyEditedFields(prev => new Set(prev).add(`${blockName}[${index}].${fieldName}`));
     };
 
@@ -1685,7 +1734,86 @@ export default function TemplateGenerationDialog({
                 </div>
 
                 {rows.length === 0 ? (
-                    <div className="text-xs text-muted-foreground italic p-3 text-center">No data found.</div>
+                    <div className="p-3 bg-white border rounded shadow-sm">
+                        <div className="flex items-center justify-between mb-2">
+                            <Badge className={`${isHorizontal ? 'bg-orange-600' : 'bg-blue-600'} uppercase text-[9px] tracking-tighter`}>
+                                {blockName} {isHorizontal && '(Horizontal)'}
+                            </Badge>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                    // Add a new empty row for manual input
+                                    const newRow = blockData.children.reduce((acc, child) => {
+                                        acc[child.name] = '';
+                                        return acc;
+                                    }, {});
+                                    setFormData(prev => ({ ...prev, [blockName]: [newRow] }));
+                                }}
+                                className="text-xs"
+                            >
+                                Add Row
+                            </Button>
+                        </div>
+                        {isHorizontal ? (
+                            <div className="p-3 bg-white border rounded shadow-sm">
+                                <Label className="text-[9px] font-bold text-slate-400 uppercase block mb-2">
+                                    {blockData.children[0]?.name.replace(/_/g, ' ')}
+                                </Label>
+                                <div className="flex flex-wrap gap-1">
+                                    <input
+                                        value=""
+                                        onChange={(e) => {
+                                            if (blockData?.children?.[0]?.name) {
+                                                // Create new row with the entered value
+                                                const newRow = {};
+                                                newRow[blockData.children[0].name] = e.target.value;
+                                                setFormData(prev => ({ ...prev, [blockName]: [newRow] }));
+                                            }
+                                        }}
+                                        className="w-7 h-9 text-center border rounded font-mono font-bold text-sm focus:border-orange-400 focus:ring-1 focus:ring-orange-100 outline-none"
+                                        maxLength={1}
+                                        placeholder="?"
+                                    />
+                                </div>
+                                <p className="text-[8px] text-muted-foreground mt-2 italic">Enter data manually</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-2">
+                                {blockData.children.map(child => (
+                                    <div key={child.id} className="p-3 bg-white border rounded shadow-sm">
+                                        <PlaceholderInput
+                                            placeholder={child}
+                                            value=""
+                                            onChange={(val) => {
+                                                // Create new row with the entered value
+                                                const newRow = {};
+                                                newRow[child.name] = val;
+                                                setFormData(prev => ({ ...prev, [blockName]: [newRow] }));
+                                            }}
+                                            onFileChange={(e) => {
+                                                const file = e.target.files[0];
+                                                if (file) {
+                                                    const reader = new FileReader();
+                                                    reader.onloadend = () => {
+                                                        const newRow = {};
+                                                        newRow[child.name] = reader.result;
+                                                        setFormData(prev => ({ ...prev, [blockName]: [newRow] }));
+                                                    };
+                                                    reader.readAsDataURL(file);
+                                                }
+                                            }}
+                                            imageStyles={imageStyles}
+                                            onImageStyleChange={handleImageStyleChange}
+                                            isArrayItem={true}
+                                            arrayIndex={0}
+                                            blockName={blockName}
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                 ) : isHorizontal ? (
                     <div className="p-3 bg-white border rounded shadow-sm">
                         <Label className="text-[9px] font-bold text-slate-400 uppercase block mb-2">
@@ -1794,7 +1922,7 @@ export default function TemplateGenerationDialog({
 
                 return rows.map((row, rowIndex) => {
                     let rowHtml = innerTemplate;
-                    
+
                     block.children.forEach(child => {
                         const rawValue = row?.[child.name];
                         let value = extractDisplayValue(rawValue);
@@ -1823,7 +1951,7 @@ export default function TemplateGenerationDialog({
 
                         rowHtml = rowHtml.replace(childRegex, value || '');
                     });
-                    
+
                     return rowHtml;
                 }).join('');
             });
@@ -1850,16 +1978,14 @@ export default function TemplateGenerationDialog({
             const regex = new RegExp(`\\{+\\s*${cleanName}\\s*\\}+`, 'gi');
 
             if (value) {
-               
+
                 if (placeholder.type === 'document_checklist') {
                     // Format the checklist for HTML display
                     const lines = String(value).split('\n');
                     const formattedLines = lines.map(line => {
                         // Style checked items in green, unchecked in gray
-                        if (line.startsWith('☑')) {
+                        if (line.startsWith('✓')) {
                             return `<div style="color: #16a34a; padding: 2px 0;">✓ ${line.substring(1).trim()}</div>`;
-                        } else if (line.startsWith('☐')) {
-                            return `<div style="color: #9ca3af; padding: 2px 0;">☐ ${line.substring(1).trim()}</div>`;
                         } else if (line.startsWith('•')) {
                             return `<div style="padding: 2px 0;">${line}</div>`;
                         } else if (line.startsWith('|')) {
@@ -1874,14 +2000,14 @@ export default function TemplateGenerationDialog({
                         const tableHtml = `
                             <table style="width: 100%; border-collapse: collapse; margin: 10px 0;">
                                 ${formattedLines.map(line => {
-                                    if (!line.startsWith('|')) return '';
-                                    const cells = line.split('|').filter(Boolean);
-                                    const isHeader = line.includes('Status') && line.includes('Document');
-                                    const tag = isHeader ? 'th' : 'td';
-                                    return `<tr>
+                            if (!line.startsWith('|')) return '';
+                            const cells = line.split('|').filter(Boolean);
+                            const isHeader = line.includes('Status') && line.includes('Document');
+                            const tag = isHeader ? 'th' : 'td';
+                            return `<tr>
                                         ${cells.map(cell => `<${tag} style="border: 1px solid #e5e7eb; padding: 8px; text-align: left;">${cell.trim()}</${tag}>`).join('')}
                                     </tr>`;
-                                }).join('')}
+                        }).join('')}
                             </table>
                         `;
                         content = content.replace(regex, tableHtml);
@@ -2016,15 +2142,15 @@ export default function TemplateGenerationDialog({
 
         try {
             setIsPreviewLoading(true);
-            
+
             // Ensure we have the template buffer, await if it's a promise
             let templateBuffer = docxTemplateBuffer.current;
             if (templateBuffer && typeof templateBuffer.then === 'function') {
                 templateBuffer = await templateBuffer;
             }
-            
+
             if (!templateBuffer) return;
-            
+
             const zip = new PizZip(templateBuffer);
             const renderData = await prepareRenderData(data);
 
@@ -2324,108 +2450,138 @@ export default function TemplateGenerationDialog({
         }
     };
 
-    const generateSampleData = useCallback(() => {
-        const sampleData = { ...formData };
-        
-        // Generate sample data for top-level fields
-        groupedPlaceholders.topLevel.forEach(placeholder => {
-            if (!sampleData[placeholder.name] || String(sampleData[placeholder.name]).trim() === '') {
-                switch (placeholder.type) {
-                    case 'text':
-                        sampleData[placeholder.name] = placeholder.name.includes('email') 
-                            ? 'john.doe@example.com'
-                            : placeholder.name.includes('phone') 
-                            ? '+1 234 567 8900'
-                            : placeholder.name.includes('name')
-                            ? 'John Doe'
-                            : placeholder.name.includes('address')
-                            ? '123 Main St, City, State 12345'
-                            : `Sample ${placeholder.name}`;
-                        break;
-                    case 'number':
-                        sampleData[placeholder.name] = Math.floor(Math.random() * 1000) + 1;
-                        break;
-                    case 'date':
-                        const date = new Date();
-                        date.setFullYear(date.getFullYear() - Math.floor(Math.random() * 10));
-                        sampleData[placeholder.name] = formatDate(date, 'MM/DD/YYYY');
-                        break;
-                    case 'boolean':
-                        sampleData[placeholder.name] = placeholder.boolean_type === 'multiple' 
-                            ? [{ checked: true, label: 'Option 1' }, { checked: false, label: 'Option 2' }]
-                            : [{ checked: true, label: placeholder.options?.[0] || 'Yes' }];
-                        break;
-                    case 'select':
-                        sampleData[placeholder.name] = placeholder.options?.[0] || 'Option 1';
-                        break;
-                    case 'image':
-                        sampleData[placeholder.name] = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
-                        break;
-                    case 'ordinal':
-                        sampleData[placeholder.name] = '1st';
-                        break;
-                    default:
-                        sampleData[placeholder.name] = `Sample ${placeholder.name}`;
-                }
-            }
+    const refineFieldWithAI = async (placeholder, allFormData) => {
+        console.log(' [AI Refine] Starting refinement for:', placeholder.name);
+        console.log(' [AI Refine] Prompt:', placeholder.ai_prompt);
+        console.log(' [AI Refine] Form data keys:', Object.keys(allFormData));
+
+        if (!placeholder.ai_prompt) return null;
+
+        // Replace variables like {applicant_full_name} in prompt
+        const regex = /\{([^}]+)\}/g;
+        const finalPrompt = placeholder.ai_prompt.replace(regex, (match, key) => {
+            // Lookup value in formData
+            const val = allFormData[key];
+            console.log(` [AI Refine] Replacing ${match} with:`, val);
+            // If it's a string/number return it, otherwise keep the tag
+            return (val && typeof val !== 'object') ? val : match;
         });
 
-        // Generate sample data for block fields
-        Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
-            const block = groupedPlaceholders.blocks[blockName];
-            const existingRows = Array.isArray(sampleData[blockName]) ? sampleData[blockName] : [];
-            
-            // Add sample rows if block is empty
-            if (existingRows.length === 0) {
-                const sampleRows = [];
-                for (let i = 0; i < 2; i++) { // Add 2 sample rows
-                    const row = {};
-                    block.children.forEach(child => {
-                        switch (child.type) {
-                            case 'text':
-                                row[child.name] = child.name.includes('email') 
-                                    ? `user${i + 1}@example.com`
-                                    : child.name.includes('phone') 
-                                    ? `+1 234 567 89${i}0`
-                                    : child.name.includes('name')
-                                    ? `User ${i + 1}`
-                                    : `Sample ${child.name} ${i + 1}`;
-                                break;
-                            case 'number':
-                                row[child.name] = Math.floor(Math.random() * 100) + 1;
-                                break;
-                            case 'date':
-                                const date = new Date();
-                                date.setFullYear(date.getFullYear() - Math.floor(Math.random() * 5));
-                                row[child.name] = formatDate(date, 'MM/DD/YYYY');
-                                break;
-                            case 'boolean':
-                                row[child.name] = child.boolean_type === 'multiple' 
-                                    ? [{ checked: i === 0, label: 'Option 1' }, { checked: i === 1, label: 'Option 2' }]
-                                    : [{ checked: i === 0, label: child.options?.[0] || 'Yes' }];
-                                break;
-                            case 'select':
-                                row[child.name] = child.options?.[i % (child.options?.length || 1)] || 'Option 1';
-                                break;
-                            case 'ordinal':
-                                row[child.name] = getOrdinalNumber(i);
-                                break;
-                            default:
-                                row[child.name] = `Sample ${child.name} ${i + 1}`;
-                        }
-                    });
-                    sampleRows.push(row);
-                }
-                sampleData[blockName] = sampleRows;
-            }
-        });
+        console.log(' [AI Refine] Final prompt:', finalPrompt);
 
-        setFormData(sampleData);
-        toast({
-            title: "AI Auto-Fill Complete",
-            description: "Sample data has been populated for all empty fields",
+        try {
+            console.log(' [AI Refine] Calling API...');
+            const response = await fetch('/api/ai/refine', { // Ensure this matches your route path
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    prompt: finalPrompt,
+                    fieldName: placeholder.name
+                })
+            });
+
+            console.log(' [AI Refine] Response status:', response.status);
+
+            if (!response.ok) {
+                const err = await response.json();
+                console.error(' [AI Refine] API Error:', err);
+                throw new Error(err.error || 'AI Refinement failed');
+            }
+
+            const data = await response.json();
+            console.log(' [AI Refine] API Response:', data);
+            return data.result; // This matches your Gemini route return
+        } catch (err) {
+            console.error("[AI Refinement Error]:", err);
+            toast({
+                title: "AI Error",
+                description: err.message,
+                variant: "destructive"
+            });
+            return null;
+        }
+    };
+
+    const refineAllFieldsWithAI = useCallback(async () => {
+        console.log(' [AI Refine All] Button clicked!');
+        console.log(' [AI Refine All] Selected template:', selectedTemplate);
+        console.log(' [AI Refine All] Form data:', formData);
+
+        const aiFields = selectedTemplate.placeholders?.filter(p => p.is_ai_generated && p.ai_prompt) || [];
+        console.log(' [AI Refine All] AI fields found:', aiFields.length, aiFields.map(f => f.name));
+
+        if (aiFields.length === 0) {
+            console.log(' [AI Refine All] No AI fields found!');
+            toast({
+                title: "No AI Fields",
+                description: "No fields with AI prompts found in this template",
+                variant: "destructive"
+            });
+            return;
+        }
+
+        setIsGenerating(true);
+        try {
+            const updatedData = { ...formData };
+
+            for (const field of aiFields) {
+                console.log(` [AI Refine All] Processing field: ${field.name}`);
+                const refinedValue = await refineFieldWithAI(field, updatedData);
+                if (refinedValue) {
+                    console.log(` [AI Refine All] Success for ${field.name}:`, refinedValue);
+                    updatedData[field.name] = refinedValue;
+                } else {
+                    console.log(` [AI Refine All] Failed for ${field.name}`);
+                }
+            }
+
+            setFormData(updatedData);
+            toast({
+                title: "AI Refine Complete",
+                description: `Refined ${aiFields.length} fields using AI`,
+            });
+        } catch (error) {
+            console.error('Error refining fields:', error);
+            toast({
+                title: "Error",
+                description: "Failed to refine fields with AI",
+                variant: "destructive"
+            });
+        } finally {
+            setIsGenerating(false);
+        }
+    }, [formData, selectedTemplate]);
+
+    const handleSingleFieldAIRefine = async (placeholder) => {
+        console.log(' [Single Field Refine] Button clicked for:', placeholder.name);
+        console.log(' [Single Field Refine] Placeholder:', placeholder);
+
+        setRefiningFields(prev => new Set(prev).add(placeholder.name));
+
+        const refinedValue = await refineFieldWithAI(placeholder, formData);
+
+        if (refinedValue) {
+            console.log(' [Single Field Refine] Success! Updating field with:', refinedValue);
+            handleInputChange(placeholder.name, refinedValue);
+            toast({
+                title: "AI Refined",
+                description: `Refined content for ${placeholder.name}`,
+            });
+        } else {
+            console.log(' [Single Field Refine] Failed! No refined value returned');
+            toast({
+                title: "Refinement Failed",
+                description: "Could not generate AI content. Check your API settings.",
+                variant: "destructive"
+            });
+        }
+
+        setRefiningFields(prev => {
+            const next = new Set(prev);
+            next.delete(placeholder.name);
+            return next;
         });
-    }, [formData, groupedPlaceholders]);
+    };
 
     const completionStats = useMemo(() => {
         let totalFields = groupedPlaceholders.topLevel.length;
@@ -2482,11 +2638,11 @@ export default function TemplateGenerationDialog({
             console.log('[generateAndDownload] templateBuffer length:', templateBuffer?.byteLength);
 
             const renderData = await prepareRenderData(formData);
-            
+
             // Pre-process all images to convert them to buffers synchronously
             const processedRenderData = JSON.parse(JSON.stringify(renderData));
             const imageCache = new Map();
-            
+
             const processImagesRecursively = (obj, path = '') => {
                 for (const [key, value] of Object.entries(obj)) {
                     if (value && typeof value === 'string' && (value.startsWith('http') || value.startsWith('data:image'))) {
@@ -2517,7 +2673,7 @@ export default function TemplateGenerationDialog({
                         if (tag.startsWith('data:image')) {
                             const base64Data = tag.split('base64,')[1];
                             if (!base64Data) return null;
-                            
+
                             const binaryStr = atob(base64Data);
                             const len = binaryStr.length;
                             const bytes = new Uint8Array(len);
@@ -2535,18 +2691,18 @@ export default function TemplateGenerationDialog({
                 getSize: (img, tag, name) => {
                     const styleKeys = [name, name?.split('_').slice(2).join('_')];
                     let s = null;
-                    
+
                     for (const key of styleKeys) {
                         if (key && imageStyles[key]) {
                             s = imageStyles[key];
                             break;
                         }
                     }
-                    
+
                     if (!s) {
                         s = imageStyles[name] || {};
                     }
-                    
+
                     return s ? [s.imageWidth || 300, s.imageHeight || 200] : [300, 200];
                 }
             });
@@ -2625,6 +2781,9 @@ export default function TemplateGenerationDialog({
                                     <DialogDescription className="text-sm">Auto-populate and generate</DialogDescription>
                                 </div>
                             </div>
+                            <div className="flex items-center justify-between">
+                                <Label>{documentName}</Label>
+                            </div>
                             <div className="flex items-center gap-2">
                                 {changedFields.length > 0 && (
                                     <Button
@@ -2640,11 +2799,12 @@ export default function TemplateGenerationDialog({
                                 <Button
                                     variant="outline"
                                     size="sm"
-                                    onClick={generateSampleData}
+                                    onClick={refineAllFieldsWithAI}
+                                    disabled={isGenerating}
                                     className="border-purple-200 text-purple-700 hover:bg-purple-50"
                                 >
                                     <Sparkles className="h-4 w-4 mr-2" />
-                                    AI Auto-Fill
+                                    AI Refine
                                 </Button>
                                 {availableTemplates.length > 1 && (
                                     <Select value={selectedTemplate?.id} onValueChange={(v) => setSelectedTemplate(availableTemplates.find(t => t.id === v))}>
@@ -2680,7 +2840,7 @@ export default function TemplateGenerationDialog({
                                         General Fields
                                     </Label>
                                     {groupedPlaceholders.topLevel.map(p => (
-                                        <div key={p.id} className="p-3 border rounded-lg bg-slate-50/50">
+                                        <div key={`${p.id || p.name}-${p.name}`} className="p-3 border rounded-lg bg-slate-50/50">
                                             <PlaceholderInput
                                                 placeholder={p}
                                                 value={formData[p.name]}
@@ -2690,6 +2850,9 @@ export default function TemplateGenerationDialog({
                                                 onImageStyleChange={handleImageStyleChange}
                                                 autoPopulated={autoPopulatedFields.get(p.name)}
                                                 isArrayItem={false}
+                                                // AI PROPS
+                                                onAIRefine={handleSingleFieldAIRefine}
+                                                isAIRefining={refiningFields.has(p.name)}
                                             />
                                         </div>
                                     ))}
@@ -2730,70 +2893,71 @@ export default function TemplateGenerationDialog({
                                 </div>
                                 <div className="p-4">
                                     {docPreviewUrl ? (
-                                    <iframe
-                                        src={docPreviewUrl}
-                                        className="w-full h-[calc(100vh-200px)] border-0 rounded shadow"
-                                        title="Original"
-                                        onError={() => setDocPreviewUrl(null)}
-                                    />
-                                ) : (
-                                    <div className="h-[calc(100vh-200px)] flex items-center justify-center">
-                                        <FileText className="h-12 w-12 text-slate-300" />
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="col-span-4 bg-slate-50 p-8">
-                            <div className="bg-white rounded border p-6">
-                                <FileText className="h-8 w-8 text-blue-500 mb-3" />
-                                <h3 className="font-semibold mb-2">HTML Template</h3>
-                                <p className="text-xs text-slate-600">Preview shows generated output</p>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                <DialogFooter className="border-t px-6 py-3 bg-white flex justify-between flex-shrink-0">
-                    <div className="text-[10px] flex items-center gap-1.5">
-                        <CheckCircle2 className="h-3 w-3 text-green-500" />
-                        {isWordTemplate ? 'Word + Images' : 'HTML'}
-                    </div>
-                    <div className='flex gap-2'>
-                        <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button size="sm" disabled={isGenerating} className="bg-blue-600">
-                                    {isGenerating ? (
-                                        <Loader2 className="animate-spin mr-2 h-4 w-4" />
+                                        <iframe
+                                            src={docPreviewUrl}
+                                            className="w-full h-[calc(100vh-200px)] border-0 rounded shadow"
+                                            title="Original"
+                                            onError={() => setDocPreviewUrl(null)}
+                                        />
                                     ) : (
-                                        <Download className="mr-2 h-4 w-4" />
+                                        <div className="h-[calc(100vh-200px)] flex items-center justify-center">
+                                            <FileText className="h-12 w-12 text-slate-300" />
+                                        </div>
                                     )}
-                                    Download
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => generateAndDownload('word')}>
-                                    <FileText className="h-4 w-4 mr-2 text-blue-600" />
-                                    Word
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => generateAndDownload('pdf')}>
-                                    <FileText className="h-4 w-4 mr-2 text-red-600" />
-                                    PDF
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="col-span-4 bg-slate-50 p-8">
+                                <div className="bg-white rounded border p-6">
+                                    <FileText className="h-8 w-8 text-blue-500 mb-3" />
+                                    <h3 className="font-semibold mb-2">HTML Template</h3>
+                                    <p className="text-xs text-slate-600">Preview shows generated output</p>
+                                </div>
+                            </div>
+                        )}
                     </div>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
 
-        <UpdateProfileDialog
-            open={showUpdateDialog}
-            onOpenChange={setShowUpdateDialog}
-            changedFields={changedFields}
-            onSave={handleUpdateProfile}
-            isSaving={isSavingProfile}
-        />
-    </>
-);}
+                    <DialogFooter className="border-t px-6 py-3 bg-white flex justify-between flex-shrink-0">
+                        <div className="text-[10px] flex items-center gap-1.5">
+                            <CheckCircle2 className="h-3 w-3 text-green-500" />
+                            {isWordTemplate ? 'Word + Images' : 'HTML'}
+                        </div>
+                        <div className='flex gap-2'>
+                            <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button size="sm" disabled={isGenerating} className="bg-blue-600">
+                                        {isGenerating ? (
+                                            <Loader2 className="animate-spin mr-2 h-4 w-4" />
+                                        ) : (
+                                            <Download className="mr-2 h-4 w-4" />
+                                        )}
+                                        Download
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                    <DropdownMenuItem onClick={() => generateAndDownload('word')}>
+                                        <FileText className="h-4 w-4 mr-2 text-blue-600" />
+                                        Word
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => generateAndDownload('pdf')}>
+                                        <FileText className="h-4 w-4 mr-2 text-red-600" />
+                                        PDF
+                                    </DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                        </div>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <UpdateProfileDialog
+                open={showUpdateDialog}
+                onOpenChange={setShowUpdateDialog}
+                changedFields={changedFields}
+                onSave={handleUpdateProfile}
+                isSaving={isSavingProfile}
+            />
+        </>
+    );
+}
