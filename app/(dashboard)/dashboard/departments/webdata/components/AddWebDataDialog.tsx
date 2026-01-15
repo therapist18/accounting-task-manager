@@ -15,7 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import supabase from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
-import { Check, Link2, Merge, Plus, X, FileText, Upload, User, Users, AlertTriangle } from "lucide-react"
+import { Check, Link2, Merge, Plus, X, FileText, Upload, User, Users, AlertTriangle, Zap } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 // Enhanced interfaces
@@ -31,15 +31,15 @@ interface KYCDocument {
 }
 
 interface WebDataForm {
-  name: string; 
-  description: string; 
-  isRequired: boolean; 
-  masterFieldIds: string[]; 
-  masterFields: JobField[]; 
-  order: number; 
-  variableName: string; 
-  efnsDisplayName: string; 
-  fieldType: 'text' | 'number' | 'boolean' | 'date' | 'select' | 'array' | 'object'; 
+  name: string;
+  description: string;
+  isRequired: boolean;
+  masterFieldIds: string[];
+  masterFields: JobField[];
+  order: number;
+  variableName: string;
+  efnsDisplayName: string;
+  fieldType: 'text' | 'number' | 'boolean' | 'date' | 'select' | 'array' | 'object';
   formName?: string;
   formId?: string;
   entityType?: 'principal' | 'dependant' | 'both';
@@ -66,43 +66,43 @@ interface FormDocument {
 }
 
 interface JobField {
-  id: number; 
-  field_key: string; 
-  label: string; 
-  type: 'text' | 'date' | 'number' | 'select'; 
-  is_required: boolean; 
-  sources?: Array<{ 
-    source_type: 'profile' | 'document' | 'company'; 
-    table: string; 
-    path: string; 
-    priority: number 
-  }>; 
-  options?: string[]; 
-  created_at: string; 
+  id: number;
+  field_key: string;
+  label: string;
+  type: 'text' | 'date' | 'number' | 'select';
+  is_required: boolean;
+  sources?: Array<{
+    source_type: 'profile' | 'document' | 'company';
+    table: string;
+    path: string;
+    priority: number
+  }>;
+  options?: string[];
+  created_at: string;
   updated_at: string;
 }
 
 interface WebDataGroup {
-  id: string; 
-  efnsDisplayName: string; 
-  variableName: string; 
-  fieldType: WebDataForm['fieldType']; 
+  id: string;
+  efnsDisplayName: string;
+  variableName: string;
+  fieldType: WebDataForm['fieldType'];
   entityType: 'principal' | 'dependant' | 'both';
   kycDocumentId?: string;
-  arrayItems?: WebDataForm['arrayItems']; 
+  arrayItems?: WebDataForm['arrayItems'];
   linkedMasterFields: JobField[];
 }
 
 interface AddWebDataDialogProps {
-  isOpen: boolean; 
-  onOpenChange: (open: boolean) => void; 
-  context: { 
-    type: 'subdepartment' | 'class' | 'subclass'; 
-    subdepartmentId: number; 
-    subdepartmentName: string; 
-    classId?: number; 
-    className?: string; 
-    subclassId?: number; 
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  context: {
+    type: 'subdepartment' | 'class' | 'subclass';
+    subdepartmentId: number;
+    subdepartmentName: string;
+    classId?: number;
+    className?: string;
+    subclassId?: number;
     subclassName?: string;
     availableForms?: Array<{ id: string; name: string }>;
   } | null;
@@ -155,38 +155,28 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
   const [selectedGroupIdsForMerge, setSelectedGroupIdsForMerge] = useState<Set<string>>(new Set())
   const [selectedFormId, setSelectedFormId] = useState<string>('')
 
-  // Helper function to get entity key for the current context
   const getEntityKeyForContext = useCallback(() => {
     if (!context) return null;
-    
-    switch (context.type) {
-      case 'subdepartment':
-        return `subdept-${context.subdepartmentId}-null-null`;
-      case 'class':
-        return `class-${context.subdepartmentId}-${context.classId || 'null'}-null`;
-      case 'subclass':
-        return `subclass-${context.subdepartmentId}-${context.classId || 'null'}-${context.subclassId || 'null'}`;
-      default:
-        return null;
-    }
+    return `${context.subdepartmentId}:${context.classId || 0}:${context.subclassId || 0}`;
   }, [context]);
 
-  // Get automation ID from the selected form for the current context
-  const getAutomationIdFromForm = useCallback((form: FormDocument | null): string | null => {
-    if (!form || !form.automationLinks) return null;
-    
-    const entityKey = getEntityKeyForContext();
-    if (!entityKey) return null;
-    
-    // Check if there's a specific automation link for this entity
-    const automationId = form.automationLinks[entityKey];
-    if (automationId) return automationId;
-    
-    // If no specific link found, return null (no fallback ID generation)
-    return null;
-  }, [getEntityKeyForContext]);
+const getAutomationIdFromForm = useCallback((form: FormDocument | null): string | null => {
+  if (!form || !form.targetEntities || !Array.isArray(form.targetEntities)) return null;
 
-  // Fetch KYC documents
+  const match = form.targetEntities.find(target => {
+    const jl = target.job_level;
+    if (!jl) return false;
+
+    const subMatch = Number(jl.subdepartment_id) === Number(context?.subdepartmentId);
+    const classMatch = String(jl.class_id || 'null') === String(context?.classId || 'null');
+    const subclassMatch = String(jl.subclass_id || 'null') === String(context?.subclassId || 'null');
+
+    return subMatch && classMatch && subclassMatch;
+  });
+
+  return match?.automationId || null;
+}, [context]);
+
   const fetchKycDocuments = useCallback(async () => {
     setLoadingKyc(true)
     try {
@@ -217,43 +207,45 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
     }
   }, []);
 
-  const fetchFormDocuments = useCallback(async () => {
-    setLoadingForms(true)
-    try {
-      const { data: departments, error } = await supabase.from('tm_departments').select('stages')
-      if (error) throw error
-      
-      const allDocuments: any[] = []
-      departments?.forEach(dept => {
-        if (!dept.stages || !Array.isArray(dept.stages)) return
-        dept.stages.forEach((stage: any) => { 
-          if (stage.documents && Array.isArray(stage.documents)) { 
-            allDocuments.push(...stage.documents) 
-          }
-        })
+  // Around line 170 in AddWebDataDialog.tsx
+const fetchFormDocuments = useCallback(async () => {
+  setLoadingForms(true)
+  try {
+    const { data: departments, error } = await supabase.from('tm_departments').select('stages')
+    if (error) throw error
+
+    const allDocuments: any[] = []
+    departments?.forEach(dept => {
+      if (!dept.stages || !Array.isArray(dept.stages)) return
+      dept.stages.forEach((stage: any) => {
+        if (stage.documents && Array.isArray(stage.documents)) {
+          allDocuments.push(...stage.documents)
+        }
       })
-      
-      const forms = allDocuments.filter((doc: any) => doc.docType === 'form').map((doc: any) => ({ 
-        id: doc.id, 
-        name: doc.name, 
-        docType: doc.docType, 
-        kycId: doc.kycId, 
-        isRequired: doc.isRequired || false, 
-        isSpecial: doc.isSpecial || false, 
-        documentType: doc.documentType || 'both',
-        automationLinks: doc.automationLinks || {}, // Include automation links
-        targetEntities: Array.isArray(doc.targetEntities) ? doc.targetEntities : [] 
+    })
+
+    // Filter to only forms and map metadata
+    const forms = allDocuments
+      .filter((doc: any) => doc.docType === 'form')
+      .map((doc: any) => ({
+        id: doc.id,
+        name: doc.name,
+        docType: doc.docType,
+        kycId: doc.kycId,
+        isRequired: !!doc.isRequired,
+        isSpecial: !!doc.isSpecial,
+        // Preserve the nested targetEntities array
+        targetEntities: Array.isArray(doc.targetEntities) ? doc.targetEntities : []
       }))
-      
-      const uniqueForms = Array.from(new Map(forms.map(form => [form.id, form])).values())
-      setFormDocuments(uniqueForms)
-    } catch (error) {
-      console.error('Error fetching form documents:', error)
-      toast({ title: 'Error', description: 'Failed to load form documents', variant: 'destructive' })
-    } finally {
-      setLoadingForms(false)
-    }
-  }, []);
+
+    const uniqueForms = Array.from(new Map(forms.map(form => [form.id, form])).values())
+    setFormDocuments(uniqueForms)
+  } catch (error) {
+    console.error('Error fetching forms:', error)
+  } finally {
+    setLoadingForms(false)
+  }
+}, []);
 
   const fetchMasterFields = useCallback(async () => {
     setLoadingMasterFields(true);
@@ -261,11 +253,11 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
       const { data, error } = await supabase.from('tm_job_fields').select('*').order('label');
       if (error) throw error;
       setMasterFields(data || []);
-    } catch (error) { 
-      console.error('Error fetching master fields:', error); 
-      toast({ title: 'Error', description: 'Failed to load master fields', variant: 'destructive' }) 
-    } finally { 
-      setLoadingMasterFields(false) 
+    } catch (error) {
+      console.error('Error fetching master fields:', error);
+      toast({ title: 'Error', description: 'Failed to load master fields', variant: 'destructive' })
+    } finally {
+      setLoadingMasterFields(false)
     }
   }, []);
 
@@ -274,7 +266,7 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
       fetchMasterFields();
       fetchFormDocuments();
       fetchKycDocuments();
-      
+
       // Reset state
       setSelectedTopLevelFieldIds(new Set());
       setSelectedGroupIdsForMerge(new Set());
@@ -287,62 +279,59 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
       setActiveTab('fields');
     }
   }, [isOpen, fetchMasterFields, fetchFormDocuments, fetchKycDocuments]);
-  
+
   const allLinkedMasterFieldIds = useMemo(() => new Set(webDataGroups.flatMap(g => g.linkedMasterFields.map(f => f.id))), [webDataGroups]);
   const filteredProfileFields = useMemo(() => masterFields.filter(f => f.sources?.some(s => s.source_type === 'profile' || s.source_type === 'document') && f.label?.toLowerCase().includes(profileSearch.toLowerCase())), [masterFields, profileSearch]);
   const filteredCompanyFields = useMemo(() => masterFields.filter(f => f.sources?.some(s => s.source_type === 'company') && f.label?.toLowerCase().includes(companySearch.toLowerCase())), [masterFields, companySearch]);
-  const filteredKycDocuments = useMemo(() => 
-    kycDocuments.filter(doc => 
+  const filteredKycDocuments = useMemo(() =>
+    kycDocuments.filter(doc =>
       doc.display_name?.toLowerCase().includes(kycSearch.toLowerCase())
-    ), 
+    ),
     [kycDocuments, kycSearch]
   );
   const availableForPicking = useMemo(() => masterFields.filter(f => !allLinkedMasterFieldIds.has(f.id)), [masterFields, allLinkedMasterFieldIds]);
 
-  // Filter forms based on the current context (subdepartment, class, or subclass)
-  const applicableForms = useMemo(() => {
-    if (!context) return [];
-    if (!formDocuments.length) return [];
+const applicableForms = useMemo(() => {
+  if (!context || !formDocuments.length) return [];
 
-    return formDocuments.filter(form => {
-      // If no target entities, don't show the form
-      if (!form.targetEntities || form.targetEntities.length === 0) {
-        return false;
+  return formDocuments.filter(form => {
+    // If it's not a special document, it applies to everything (Global)
+    if (!form.isSpecial) return true;
+
+    if (!form.targetEntities || form.targetEntities.length === 0) return false;
+
+    return form.targetEntities.some(target => {
+      // Access the nested job_level object
+      const jl = target.job_level;
+      if (!jl) return false;
+
+      // 1. Match Subdepartment
+      const subMatch = Number(jl.subdepartment_id) === Number(context.subdepartmentId);
+      if (!subMatch) return false;
+
+      // 2. Match Specific Level logic
+      if (context.type === 'subdepartment') {
+        return jl.level === 2;
       }
 
-      // Check if any of the form's targets match the current context
-      return form.targetEntities.some(target => {
-        if (!target.entityType) return false;
+      if (context.type === 'class') {
+        return jl.level === 3 && String(jl.class_id) === String(context.classId);
+      }
 
-        // For subdepartment context
-        if (context.type === 'subdepartment' && 
-            target.entityType === 'subdepartment' && 
-            target.subdept_id === context.subdepartmentId) {
-          return true;
-        }
+      if (context.type === 'subclass') {
+        return jl.level === 4 && 
+               String(jl.class_id) === String(context.classId) && 
+               String(jl.subclass_id) === String(context.subclassId);
+      }
 
-        // For class context
-        if (context.type === 'class' && 
-            target.entityType === 'class' && 
-            target.class_id?.toString() === context.classId?.toString()) {
-          return true;
-        }
-
-        // For subclass context
-        if (context.type === 'subclass' && 
-            target.entityType === 'subclass' && 
-            target.subclass_id === context.subclassId) {
-          return true;
-        }
-        
-        return false;
-      });
+      return false;
     });
-  }, [formDocuments, context]);
+  });
+}, [formDocuments, context]);
 
   // Get the selected form details
   const selectedForm = useMemo(() => {
-    return selectedFormId && selectedFormId !== 'none' 
+    return selectedFormId && selectedFormId !== 'none'
       ? formDocuments.find(f => f.id === selectedFormId)
       : null;
   }, [selectedFormId, formDocuments]);
@@ -362,8 +351,8 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
 
     // Check if a form is selected but no automation is configured for this context
     if (selectedForm && !automationIdForContext) {
-      toast({ 
-        title: "No Automation Configured", 
+      toast({
+        title: "No Automation Configured",
         description: `The selected form "${selectedForm.name}" does not have an automation configured for this ${context?.type}. Please configure automation links in the stage editor first.`,
         variant: "destructive"
       });
@@ -412,14 +401,13 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
         }));
 
         const newEntry = {
-          // Only use automation ID if it exists for this context
           ...(automationIdForContext && { automationId: automationIdForContext }),
           fields: webDataFields,
           documentId: selectedForm?.id || null,
-          documentName: selectedForm?.name || (kycDocsUpload.length > 0 ? 'Document Upload Requirements' : 'Custom Fields'),
+          documentName: selectedForm?.name || (kycDocsUpload.length > 0 ? 'Document Requirements' : 'Custom Fields'),
           kycDocsUpload: kycDocsUpload
         };
-        
+
         webDataArray.push(newEntry);
       }
 
@@ -436,13 +424,13 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
   }
 
   // Helper functions for UI interactions
-  const handleCheckboxChange = (fieldId: number, checked: boolean) => { 
-    setSelectedTopLevelFieldIds(prev => { 
-      const newSet = new Set(prev); 
-      if (checked) newSet.add(fieldId); 
-      else newSet.delete(fieldId); 
-      return newSet 
-    }) 
+  const handleCheckboxChange = (fieldId: number, checked: boolean) => {
+    setSelectedTopLevelFieldIds(prev => {
+      const newSet = new Set(prev);
+      if (checked) newSet.add(fieldId);
+      else newSet.delete(fieldId);
+      return newSet
+    })
   }
 
   const handleKycDocumentToggle = (docId: string, checked: boolean, entityType?: 'principal' | 'dependant' | 'both') => {
@@ -467,71 +455,71 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
     });
   }
 
-  const addSelectedFieldsAsGroups = () => { 
-    const fieldsToAdd = masterFields.filter(f => selectedTopLevelFieldIds.has(f.id)); 
-    const newGroups: WebDataGroup[] = fieldsToAdd.map(field => ({ 
-      id: crypto.randomUUID(), 
-      efnsDisplayName: field.label, 
-      variableName: field.field_key.toLowerCase().replace(/[^a-z0-9]+(.)/g, (_, chr) => chr.toUpperCase()), 
-      fieldType: 'text', 
+  const addSelectedFieldsAsGroups = () => {
+    const fieldsToAdd = masterFields.filter(f => selectedTopLevelFieldIds.has(f.id));
+    const newGroups: WebDataGroup[] = fieldsToAdd.map(field => ({
+      id: crypto.randomUUID(),
+      efnsDisplayName: field.label,
+      variableName: field.field_key.toLowerCase().replace(/[^a-z0-9]+(.)/g, (_, chr) => chr.toUpperCase()),
+      fieldType: 'text',
       entityType: 'principal',
-      linkedMasterFields: [field] 
-    })); 
-    setWebDataGroups(prev => [...prev, ...newGroups]); 
-    setSelectedTopLevelFieldIds(new Set()) 
+      linkedMasterFields: [field]
+    }));
+    setWebDataGroups(prev => [...prev, ...newGroups]);
+    setSelectedTopLevelFieldIds(new Set())
   }
 
-  const updateGroup = (groupId: string, field: keyof WebDataGroup, value: any) => { 
-    setWebDataGroups(prev => prev.map(g => { 
-      if (g.id !== groupId) return g; 
-      const updated = { ...g, [field]: value }; 
-      if (field === 'fieldType' && value === 'array' && !updated.arrayItems) updated.arrayItems = []; 
-      return updated 
-    })) 
+  const updateGroup = (groupId: string, field: keyof WebDataGroup, value: any) => {
+    setWebDataGroups(prev => prev.map(g => {
+      if (g.id !== groupId) return g;
+      const updated = { ...g, [field]: value };
+      if (field === 'fieldType' && value === 'array' && !updated.arrayItems) updated.arrayItems = [];
+      return updated
+    }))
   }
 
   const removeGroup = (groupId: string) => setWebDataGroups(prev => prev.filter(g => g.id !== groupId))
-  
+
   const linkMasterFieldToGroup = (groupId: string, field: JobField) => {
     const group = webDataGroups.find(g => g.id === groupId);
     if (group) {
       updateGroup(groupId, 'linkedMasterFields', [...group.linkedMasterFields, field]);
     }
   }
-  
+
   const unlinkMasterFieldFromGroup = (groupId: string, fieldId: number) => {
     const group = webDataGroups.find(g => g.id === groupId);
     if (group) {
       updateGroup(groupId, 'linkedMasterFields', group.linkedMasterFields.filter(f => f.id !== fieldId));
     }
   }
-  
+
   const toggleGroupSelectionForMerge = (groupId: string) => {
-    setSelectedGroupIdsForMerge(prev => { 
-      const newSet = new Set(prev); 
-      if (newSet.has(groupId)) newSet.delete(groupId); 
-      else newSet.add(groupId); 
-      return newSet 
+    setSelectedGroupIdsForMerge(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(groupId)) newSet.delete(groupId);
+      else newSet.add(groupId);
+      return newSet
     })
   }
-  
-  const handleMerge = () => { 
-    const groupsToMerge = webDataGroups.filter(g => selectedGroupIdsForMerge.has(g.id)); 
-    if (groupsToMerge.length < 2) return; 
-    
-    const firstGroup = groupsToMerge[0]; 
-    const combinedMasterFields = groupsToMerge.flatMap(g => g.linkedMasterFields); 
-    const newGroup: WebDataGroup = { 
-      id: crypto.randomUUID(), 
-      efnsDisplayName: firstGroup.efnsDisplayName, 
-      variableName: firstGroup.variableName, 
-      fieldType: firstGroup.fieldType, 
+
+  const handleMerge = () => {
+    const groupsToMerge = webDataGroups.filter(g => selectedGroupIdsForMerge.has(g.id));
+    if (groupsToMerge.length < 2) return;
+
+    const firstGroup = groupsToMerge[0];
+    const combinedMasterFields = groupsToMerge.flatMap(g => g.linkedMasterFields);
+    const newGroup: WebDataGroup = {
+      id: crypto.randomUUID(),
+      efnsDisplayName: firstGroup.efnsDisplayName,
+      variableName: firstGroup.variableName,
+      fieldType: firstGroup.fieldType,
       entityType: firstGroup.entityType,
-      linkedMasterFields: combinedMasterFields 
-    }; 
-    
-    setWebDataGroups(prev => [...prev.filter(g => !selectedGroupIdsForMerge.has(g.id)), newGroup]); 
-    setSelectedGroupIdsForMerge(new Set()) 
+      linkedMasterFields: combinedMasterFields
+    };
+
+    setWebDataGroups(prev => [...prev.filter(g => !selectedGroupIdsForMerge.has(g.id)), newGroup]);
+    setSelectedGroupIdsForMerge(new Set())
   }
 
   const addArrayItem = (groupId: string) => {
@@ -539,21 +527,21 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
     const currentItems = group?.arrayItems || [];
     updateGroup(groupId, 'arrayItems', [...currentItems, { name: '', variableName: '', type: 'text' }]);
   }
-  
-  const removeArrayItem = (groupId: string, itemIndex: number) => { 
-    const g = webDataGroups.find(g => g.id === groupId); 
-    if (!g || !g.arrayItems) return; 
-    const ni = [...g.arrayItems]; 
-    ni.splice(itemIndex, 1); 
-    updateGroup(groupId, 'arrayItems', ni) 
+
+  const removeArrayItem = (groupId: string, itemIndex: number) => {
+    const g = webDataGroups.find(g => g.id === groupId);
+    if (!g || !g.arrayItems) return;
+    const ni = [...g.arrayItems];
+    ni.splice(itemIndex, 1);
+    updateGroup(groupId, 'arrayItems', ni)
   }
-  
-  const handleArrayItemChange = (groupId: string, itemIndex: number, prop: string, value: string) => { 
-    const g = webDataGroups.find(g => g.id === groupId); 
-    if (!g || !g.arrayItems) return; 
-    const ni = [...g.arrayItems]; 
-    ni[itemIndex] = { ...ni[itemIndex], [prop]: value }; 
-    updateGroup(groupId, 'arrayItems', ni) 
+
+  const handleArrayItemChange = (groupId: string, itemIndex: number, prop: string, value: string) => {
+    const g = webDataGroups.find(g => g.id === groupId);
+    if (!g || !g.arrayItems) return;
+    const ni = [...g.arrayItems];
+    ni[itemIndex] = { ...ni[itemIndex], [prop]: value };
+    updateGroup(groupId, 'arrayItems', ni)
   }
 
   if (!context) return null
@@ -568,7 +556,7 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
             {context.className && ` → ${context.className}`}
             {context.subclassName && ` → ${context.subclassName}`}
           </DialogDescription>
-          
+
           <div className="space-y-2 pt-2">
             <Label>Select Form*</Label>
             <Select value={selectedFormId} onValueChange={setSelectedFormId} disabled={loadingForms}>
@@ -576,24 +564,29 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                 <SelectValue placeholder={loadingForms ? 'Loading forms...' : 'Select an applicable form'} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">No form</SelectItem>
+                <SelectItem value="none">No form (Manual Field Entry)</SelectItem>
                 {applicableForms.map(form => {
-                  const entityKey = getEntityKeyForContext();
-                  const hasAutomation = entityKey && form.automationLinks?.[entityKey];
-                  
+                  // Check if THIS specific form has an automation configured for THIS job level
+                  const automationId = getAutomationIdFromForm(form);
+                  const hasAutomation = !!automationId;
+
                   return (
                     <SelectItem key={form.id} value={form.id}>
-                      <div className="flex items-center justify-between w-full">
-                        <span>{form.name} {form.isRequired && '(Required)'}</span>
+                      <div className="flex items-center justify-between w-full gap-4">
+                        <div className="flex flex-col">
+                          <span className="font-medium text-sm">{form.name}</span>
+                          <span className="text-[10px] text-muted-foreground italic">
+                            {form.isSpecial ? 'Targeted Configuration' : 'Global Configuration'}
+                          </span>
+                        </div>
                         {hasAutomation ? (
-                          <Badge variant="outline" className="ml-2 text-xs text-green-600">
-                            <Check className="h-3 w-3 mr-1" />
-                            Automation
+                          <Badge variant="outline" className="ml-auto text-[10px] bg-green-50 text-green-700 border-green-200">
+                            <Zap className="h-3 w-3 mr-1 fill-green-700" />
+                            Automated
                           </Badge>
                         ) : (
-                          <Badge variant="outline" className="ml-2 text-xs text-amber-600">
-                            <AlertTriangle className="h-3 w-3 mr-1" />
-                            No Automation
+                          <Badge variant="outline" className="ml-auto text-[10px] bg-slate-50 text-slate-400">
+                            Manual
                           </Badge>
                         )}
                       </div>
@@ -602,7 +595,7 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                 })}
               </SelectContent>
             </Select>
-            
+
             {/* Show automation status for selected form */}
             {selectedForm && (
               <div className="p-3 rounded-lg border bg-gray-50">
@@ -610,29 +603,31 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                   <div>
                     <p className="text-sm font-medium">Selected: {selectedForm.name}</p>
                     <p className="text-xs text-gray-600">
-                      Entity context: {context.type} 
+                      Entity context: {context.type}
                       {context.type === 'class' && ` (ID: ${context.classId})`}
                       {context.type === 'subclass' && ` (ID: ${context.subclassId})`}
                     </p>
                   </div>
-                  
+
                   {automationIdForContext ? (
-                    <Badge variant="outline" className="text-green-600 border-green-300">
-                      <Check className="h-3 w-3 mr-1" />
-                      Automation: {automationIdForContext.slice(0, 8)}...
+                    <Badge variant="outline" className="text-green-600 border-green-300 bg-green-50">
+                      <Zap className="h-3 w-3 mr-1 fill-green-600" />
+                      Mapped to: {typeof automationIdForContext === 'object'
+                        ? automationIdForContext.automationId.slice(0, 8)
+                        : automationIdForContext.slice(0, 8)}...
                     </Badge>
                   ) : (
-                    <Badge variant="outline" className="text-amber-600 border-amber-300">
+                    <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50">
                       <AlertTriangle className="h-3 w-3 mr-1" />
-                      No Automation
+                      No Logic Configured
                     </Badge>
                   )}
                 </div>
-                
+
                 {!automationIdForContext && (
                   <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
                     <AlertTriangle className="h-3 w-3 inline mr-1" />
-                    This form doesn't have an automation configured for the current {context.type}. 
+                    This form doesn't have an automation configured for the current {context.type}.
                     Configure automation links in the stage editor to enable form submission automation.
                   </div>
                 )}
@@ -640,7 +635,7 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
             )}
           </div>
         </DialogHeader>
-        
+
         <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'fields' | 'documents')} className="flex-1 flex flex-col">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="fields" className="flex items-center space-x-2">
@@ -667,11 +662,11 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                     return (
                       <div className="space-y-3" key={type}>
                         <Label className="text-base font-medium">{type} Fields</Label>
-                        <Input 
-                          placeholder={`Search ${type.toLowerCase()} fields...`} 
-                          value={searchVal} 
-                          onChange={e => setSearch(e.target.value)} 
-                          className="h-9" 
+                        <Input
+                          placeholder={`Search ${type.toLowerCase()} fields...`}
+                          value={searchVal}
+                          onChange={e => setSearch(e.target.value)}
+                          className="h-9"
                         />
                         <div className="border rounded-md p-2 h-[200px] overflow-y-auto">
                           {loadingMasterFields ? (
@@ -689,10 +684,10 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                                       onCheckedChange={(checked) => handleCheckboxChange(field.id, checked)}
                                       disabled={isInUse}
                                     />
-                                    <label 
-                                      htmlFor={`field-sel-${field.id}`} 
+                                    <label
+                                      htmlFor={`field-sel-${field.id}`}
                                       className={cn(
-                                        "flex-1 flex items-center justify-between text-sm", 
+                                        "flex-1 flex items-center justify-between text-sm",
                                         isInUse ? "text-muted-foreground cursor-not-allowed" : "cursor-pointer"
                                       )}
                                     >
@@ -718,11 +713,11 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                   })}
                 </div>
                 <div className="flex justify-end mt-4">
-                  <Button 
-                    onClick={addSelectedFieldsAsGroups} 
+                  <Button
+                    onClick={addSelectedFieldsAsGroups}
                     disabled={selectedTopLevelFieldIds.size === 0}
                   >
-                    <Plus className="mr-2 h-4 w-4" /> 
+                    <Plus className="mr-2 h-4 w-4" />
                     Add Selected Fields ({selectedTopLevelFieldIds.size})
                   </Button>
                 </div>
@@ -745,8 +740,8 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                         <AlertDialogHeader>
                           <AlertDialogTitle>Confirm Merge</AlertDialogTitle>
                           <AlertDialogDescription>
-                            This will combine {selectedGroupIdsForMerge.size} fields into one. 
-                            The name and type of the first selected field will be used for the new merged field. 
+                            This will combine {selectedGroupIdsForMerge.size} fields into one.
+                            The name and type of the first selected field will be used for the new merged field.
                             You can edit it afterward.
                           </AlertDialogDescription>
                         </AlertDialogHeader>
@@ -778,27 +773,27 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 flex-grow">
                             <div className="space-y-1">
                               <Label htmlFor={`efnsDisplayName-${group.id}`}>EFNS Display Name</Label>
-                              <Input 
-                                id={`efnsDisplayName-${group.id}`} 
-                                value={group.efnsDisplayName} 
+                              <Input
+                                id={`efnsDisplayName-${group.id}`}
+                                value={group.efnsDisplayName}
                                 onChange={(e) => updateGroup(group.id, 'efnsDisplayName', e.target.value)}
                               />
                             </div>
                             <div className="space-y-1">
                               <Label htmlFor={`variableName-${group.id}`}>Variable Name</Label>
-                              <Input 
-                                id={`variableName-${group.id}`} 
-                                value={group.variableName} 
+                              <Input
+                                id={`variableName-${group.id}`}
+                                value={group.variableName}
                                 onChange={(e) => updateGroup(group.id, 'variableName', e.target.value)}
                               />
                             </div>
                             <div className="space-y-1">
                               <Label htmlFor={`fieldType-${group.id}`}>Field Type</Label>
-                              <Select 
-                                value={group.fieldType} 
+                              <Select
+                                value={group.fieldType}
                                 onValueChange={(value) => updateGroup(group.id, 'fieldType', value)}
                               >
-                                <SelectTrigger><SelectValue/></SelectTrigger>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="text">Text</SelectItem>
                                   <SelectItem value="number">Number</SelectItem>
@@ -812,11 +807,11 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                             </div>
                             <div className="space-y-1">
                               <Label htmlFor={`entityType-${group.id}`}>Entity Type</Label>
-                              <Select 
-                                value={group.entityType} 
+                              <Select
+                                value={group.entityType}
                                 onValueChange={(value) => updateGroup(group.id, 'entityType', value)}
                               >
-                                <SelectTrigger><SelectValue/></SelectTrigger>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="both">
                                     <div className="flex items-center space-x-2">
@@ -840,34 +835,34 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                               </Select>
                             </div>
                           </div>
-                          <Button 
-                            type="button" 
-                            variant="ghost" 
-                            size="icon" 
-                            className="h-7 w-7 ml-4" 
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 ml-4"
                             onClick={() => removeGroup(group.id)}
                           >
                             <X className="h-4 w-4" />
                           </Button>
                         </div>
-                        
+
                         <div className="space-y-2">
                           <Label className="text-xs font-semibold">Linked Master Fields</Label>
                           <div className="flex flex-wrap gap-2 items-center">
                             {group.linkedMasterFields.map(field => (
                               <Badge key={field.id} variant="secondary" className="pl-2 pr-1 py-1">
                                 {field.label}
-                                <button 
-                                  onClick={() => unlinkMasterFieldFromGroup(group.id, field.id)} 
+                                <button
+                                  onClick={() => unlinkMasterFieldFromGroup(group.id, field.id)}
                                   className="ml-1.5 rounded-full hover:bg-gray-400/20 p-0.5"
                                 >
-                                  <X className="h-3 w-3"/>
+                                  <X className="h-3 w-3" />
                                 </button>
                               </Badge>
                             ))}
-                            <MasterFieldPicker 
-                              availableFields={availableForPicking} 
-                              onSelect={(field) => linkMasterFieldToGroup(group.id, field)} 
+                            <MasterFieldPicker
+                              availableFields={availableForPicking}
+                              onSelect={(field) => linkMasterFieldToGroup(group.id, field)}
                             />
                           </div>
                         </div>
@@ -880,25 +875,25 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 flex-grow">
                                   <div className="space-y-1">
                                     <Label className="text-xs">Display Name</Label>
-                                    <Input 
-                                      value={arrayItem.name} 
+                                    <Input
+                                      value={arrayItem.name}
                                       onChange={(e) => handleArrayItemChange(group.id, itemIdx, 'name', e.target.value)}
                                     />
                                   </div>
                                   <div className="space-y-1">
                                     <Label className="text-xs">Variable Name</Label>
-                                    <Input 
-                                      value={arrayItem.variableName} 
+                                    <Input
+                                      value={arrayItem.variableName}
                                       onChange={(e) => handleArrayItemChange(group.id, itemIdx, 'variableName', e.target.value)}
                                     />
                                   </div>
                                   <div className="space-y-1">
                                     <Label className="text-xs">Type</Label>
-                                    <Select 
-                                      value={arrayItem.type} 
+                                    <Select
+                                      value={arrayItem.type}
                                       onValueChange={(v) => handleArrayItemChange(group.id, itemIdx, 'type', v)}
                                     >
-                                      <SelectTrigger><SelectValue/></SelectTrigger>
+                                      <SelectTrigger><SelectValue /></SelectTrigger>
                                       <SelectContent>
                                         <SelectItem value="text">Text</SelectItem>
                                         <SelectItem value="number">Number</SelectItem>
@@ -909,20 +904,20 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                                     </Select>
                                   </div>
                                 </div>
-                                <Button 
-                                  type="button" 
-                                  variant="ghost" 
-                                  size="icon" 
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
                                   onClick={() => removeArrayItem(group.id, itemIdx)}
                                 >
                                   <X className="h-4 w-4" />
                                 </Button>
                               </div>
                             ))}
-                            <Button 
-                              type="button" 
-                              variant="outline" 
-                              size="sm" 
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
                               onClick={() => addArrayItem(group.id)}
                             >
                               <Plus className="h-4 w-4 mr-2" />Add Item
@@ -943,11 +938,11 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                 <CardTitle>Document Upload Requirements</CardTitle>
                 <div className="space-y-2">
                   <Label>Search KYC Documents</Label>
-                  <Input 
-                    placeholder="Search document types..." 
-                    value={kycSearch} 
-                    onChange={e => setKycSearch(e.target.value)} 
-                    className="h-9" 
+                  <Input
+                    placeholder="Search document types..."
+                    value={kycSearch}
+                    onChange={e => setKycSearch(e.target.value)}
+                    className="h-9"
                   />
                 </div>
               </CardHeader>
@@ -967,8 +962,8 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                         />
                         <div className="flex-1 space-y-2">
                           <div className="flex items-center justify-between">
-                            <label 
-                              htmlFor={`kyc-${doc.id}`} 
+                            <label
+                              htmlFor={`kyc-${doc.id}`}
                               className="font-medium cursor-pointer"
                             >
                               {doc.display_name}
@@ -992,8 +987,8 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                           {selectedKycDocuments.has(doc.id) && (
                             <div className="mt-2">
                               <Label className="text-xs font-medium">Entity Type for Upload</Label>
-                              <Select 
-                                value={selectedKycDocuments.get(doc.id) || 'both'} 
+                              <Select
+                                value={selectedKycDocuments.get(doc.id) || 'both'}
                                 onValueChange={(value) => handleKycEntityTypeChange(doc.id, value as 'principal' | 'dependant' | 'both')}
                               >
                                 <SelectTrigger className="h-8 mt-1">
@@ -1045,7 +1040,7 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
               <div className="text-sm text-muted-foreground">
                 {webDataGroups.length} fields + {selectedKycDocuments.size} documents = {webDataGroups.length + selectedKycDocuments.size} total items
               </div>
-              
+
               {/* Show automation status in footer */}
               {selectedForm && (
                 <div className="flex items-center gap-2">
@@ -1063,19 +1058,19 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                 </div>
               )}
             </div>
-            
+
             <div className="flex space-x-2">
               <Button variant="outline" onClick={handleClose} disabled={isSubmitting}>
                 Cancel
               </Button>
-              <Button 
-                type="button" 
-                onClick={handleSubmit} 
+              <Button
+                type="button"
+                onClick={handleSubmit}
                 disabled={isSubmitting || (webDataGroups.length === 0 && selectedKycDocuments.size === 0)}
                 className={cn(
                   "transition-colors",
-                  selectedForm && !automationIdForContext 
-                    ? "bg-amber-600 hover:bg-amber-700" 
+                  selectedForm && !automationIdForContext
+                    ? "bg-amber-600 hover:bg-amber-700"
                     : "bg-blue-600 hover:bg-blue-700"
                 )}
               >

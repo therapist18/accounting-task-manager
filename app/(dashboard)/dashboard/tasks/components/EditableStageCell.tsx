@@ -110,6 +110,36 @@ export default function EditableStageCell({
   const inputRef = useRef<HTMLInputElement>(null);
   const [documentFields, setDocumentFields] = useState<any[]>([]);
   const [isLoadingFields, setIsLoadingFields] = useState(false);
+
+  const currentAutomationConfig = useMemo(() => {
+    const jl = task?.job_level;
+    if (!jl || !stage?.documents) return null;
+
+    // 1. Generate a stable key for the current task
+    const taskKey = `${jl.subdepartment_id}:${jl.class_id || 0}:${jl.subclass_id || 0}`;
+
+    // 2. Search documents for a target entity that matches this job level
+    for (const doc of stage.documents) {
+      if (doc.targetEntities && Array.isArray(doc.targetEntities)) {
+        const match = doc.targetEntities.find(te => {
+          // Check if this entity has an automation AND if the job levels match
+          if (!te.automationId || !te.job_level) return false;
+
+          const entityKey = `${te.job_level.subdepartment_id}:${te.job_level.class_id || 0}:${te.job_level.subclass_id || 0}`;
+          return entityKey === taskKey;
+        });
+
+        if (match) {
+          return {
+            automationId: match.automationId,
+            docName: doc.name
+          };
+        }
+      }
+    }
+    return null;
+  }, [task?.job_level, stage?.documents]);
+
   const handlePreviewDataChange = useCallback((docId: string, fieldName: string, value: any) => {
     setPreviewDocuments(prev =>
       prev.map(doc =>
@@ -185,7 +215,7 @@ export default function EditableStageCell({
   // --- CHANGED: Uses the utility function now ---
   const stageDate = useMemo(() => {
     const stageData = task?.stages?.[stage.id];
-    
+
     return calculateStageDate(
       stage,
       stageData,
@@ -794,445 +824,448 @@ export default function EditableStageCell({
 
   const renderCellContent = () => {
     if (!isStageApplicable) return <span className="text-sm text-gray-400 italic">N/A</span>;
-  if (renderMode === 'date') {
-    if (!isStageApplicable) return <span className="text-sm text-gray-400 italic">N/A</span>;
+    if (renderMode === 'date') {
+      if (!isStageApplicable) return <span className="text-sm text-gray-400 italic">N/A</span>;
 
-    const stageData = task.stages?.[stage.id];
-    const stageStatus = stageData?.status;
-    const isSkipped = stageStatus === 'skipped';
+      const stageData = task.stages?.[stage.id];
+      const stageStatus = stageData?.status;
+      const isSkipped = stageStatus === 'skipped';
 
-    // 1. SKIPPED STATUS
-    if (isSkipped) {
-      const skippedAt = stageData?.skippedAt;
-      const reason = stageData?.reason || 'No reason provided';
-      let formattedSkippedDate = 'N/A';
-      if (skippedAt) {
-        const d = parseDate(skippedAt);
-        if (d) formattedSkippedDate = format(d, 'dd/MM/yyyy HH:mm');
+      // 1. SKIPPED STATUS
+      if (isSkipped) {
+        const skippedAt = stageData?.skippedAt;
+        const reason = stageData?.reason || 'No reason provided';
+        let formattedSkippedDate = 'N/A';
+        if (skippedAt) {
+          const d = parseDate(skippedAt);
+          if (d) formattedSkippedDate = format(d, 'dd/MM/yyyy HH:mm');
+        }
+
+        // Matches ReportsPage styling for Skipped
+        return (
+          <div className="flex items-center gap-2">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-1.5 text-xs text-amber-600 font-medium cursor-help bg-transparent border-0 p-0">
+                    <AlertCircle className="h-3.5 w-3.5" /> Skipped
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent className="bg-amber-50 text-amber-900 border-amber-200">
+                  <div className="text-xs text-left space-y-1">
+                    <p><span className="font-semibold">Reason:</span> {reason}</p>
+                    <p><span className="font-semibold">Date:</span> {formattedSkippedDate}</p>
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            {/* Unskip functionality retained */}
+            <Button variant="ghost" size="sm" className="h-6 text-xs text-blue-600 hover:bg-blue-50" onClick={(e) => { e.stopPropagation(); handleUnskip(); }} disabled={isLoading}>
+              Unskip
+            </Button>
+          </div>
+        );
       }
 
-      // Matches ReportsPage styling for Skipped
-      return (
-        <div className="flex items-center gap-2">
+      // 2. COMPLETED STATUS
+      const isExplicitlyCompleted = stageStatus === 'completed';
+      const isLegacyCompleted = !stageStatus && (!!value || stageData?.documentsUploaded === true);
+      if (isExplicitlyCompleted && (!stageDate || stageDate === 'NaN/NaN/NaN') && !requiresUpload && !isEditing) {
+        return (
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="flex items-center gap-1.5 text-xs text-amber-600 font-medium cursor-help bg-transparent border-0 p-0">
-                  <AlertCircle className="h-3.5 w-3.5" /> Skipped
-                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-3 text-emerald-600 border border-dashed border-emerald-300 hover:border-emerald-400 bg-emerald-50"
+                  onClick={() => setIsEditing(true)}
+                >
+                  <CheckCircle2 className="h-3 w-3 mr-1" /> Set Date
+                </Button>
               </TooltipTrigger>
-              <TooltipContent className="bg-amber-50 text-amber-900 border-amber-200">
-                <div className="text-xs text-left space-y-1">
-                  <p><span className="font-semibold">Reason:</span> {reason}</p>
-                  <p><span className="font-semibold">Date:</span> {formattedSkippedDate}</p>
-                </div>
+              <TooltipContent className="bg-emerald-50 border-emerald-200 text-emerald-900">
+                <p className="text-xs">Stage is marked completed, but date is missing.</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
-          {/* Unskip functionality retained */}
-          <Button variant="ghost" size="sm" className="h-6 text-xs text-blue-600 hover:bg-blue-50" onClick={(e) => { e.stopPropagation(); handleUnskip(); }} disabled={isLoading}>
-            Unskip
-          </Button>
-        </div>
-      );
-    }
-
-    // 2. COMPLETED STATUS
-    const isExplicitlyCompleted = stageStatus === 'completed';
-    const isLegacyCompleted = !stageStatus && (!!value || stageData?.documentsUploaded === true);
-    if (isExplicitlyCompleted && (!stageDate || stageDate === 'NaN/NaN/NaN') && !requiresUpload && !isEditing) {
-      return (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-3 text-emerald-600 border border-dashed border-emerald-300 hover:border-emerald-400 bg-emerald-50"
-                onClick={() => setIsEditing(true)}
-              >
-                <CheckCircle2 className="h-3 w-3 mr-1" /> Set Date
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent className="bg-emerald-50 border-emerald-200 text-emerald-900">
-              <p className="text-xs">Stage is marked completed, but date is missing.</p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      );
-    }
-
-    if ((isExplicitlyCompleted || isLegacyCompleted) && stageDate && stageDate !== 'NaN/NaN/NaN' && !isEditing) {
-      const completionDate = parseDate(stageDate);
-      let isCompletedOverdue = false;
-      let completionDuration = 'N/A';
-
-      if (completionDate && effectiveStartTime && stage.estimated_time) {
-        const start = parseDate(effectiveStartTime instanceof Date ? effectiveStartTime.toISOString() : effectiveStartTime);
-        if (start) {
-          const durationMs = completionDate.getTime() - start.getTime();
-          const durationMinutes = Math.floor(durationMs / (1000 * 60));
-          isCompletedOverdue = durationMinutes > stage.estimated_time;
-          completionDuration = formatDuration(durationMinutes);
-        }
+        );
       }
 
-      const textColorClass = isCompletedOverdue ? "text-amber-600" : "text-emerald-600";
-      const icon = isCompletedOverdue ? <Clock className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />;
-      const borderColorClass = isCompletedOverdue ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-100";
+      if ((isExplicitlyCompleted || isLegacyCompleted) && stageDate && stageDate !== 'NaN/NaN/NaN' && !isEditing) {
+        const completionDate = parseDate(stageDate);
+        let isCompletedOverdue = false;
+        let completionDuration = 'N/A';
 
-      return (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div
-                className={`flex items-center gap-1.5 font-semibold text-xs ${textColorClass} cursor-pointer hover:underline select-none`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  // Keep single click for manual stages
-                  if (!requiresUpload) setIsEditing(true);
-                }}
-                // ADDED: Double click handler to force edit mode
-                onDoubleClick={(e) => {
-                  e.stopPropagation();
-                  setIsEditing(true);
-                }}
-              >
-                {icon}
-                <span>{formatDateDisplay(stageDate)}</span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md`}>
-              <div className="space-y-2 p-1">
-                <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
-                  <span className={`font-bold ${textColorClass}`}>
-                    {isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time"}
-                  </span>
-                </div>
-                <div className="text-xs space-y-1">
-                  <div className="flex justify-between gap-4">
-                    <span className="text-slate-500">Completed:</span>
-                    <span>{formatDateDisplay(stageDate)}</span>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-slate-500">Duration:</span>
-                    <span>{completionDuration}</span>
-                  </div>
-                  {isCompletedOverdue && <p className="text-amber-600 font-bold">Overdue</p>}
-                  {/* Added hint for user */}
-                  <p className="text-[10px] text-slate-400 pt-1 italic border-t border-slate-200 mt-1">Double-click to edit date</p>
-                </div>
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      );
-    }
-
-    // 3. EDIT MODE (Active input)
-    if (isEditing) {
-
-      // -- Helper Functions for value splitting --
-      const getCurrentDate = () => {
-        if (!editValue) return '';
-        try {
-          // If it's already an ISO string with T
-          if (editValue.includes('T')) return editValue.split('T')[0];
-
-          // If it's another format, try parsing
-          const parsed = parseDate(editValue);
-          return parsed ? format(parsed, 'yyyy-MM-dd') : '';
-        } catch (e) { return ''; }
-      };
-
-      const getCurrentTime = () => {
-        if (!editValue) return '00:00';
-        try {
-          if (editValue.includes('T')) {
-            const t = editValue.split('T')[1];
-            // Ensure we only get HH:mm even if seconds exist
-            return t ? t.substring(0, 5) : '00:00';
+        if (completionDate && effectiveStartTime && stage.estimated_time) {
+          const start = parseDate(effectiveStartTime instanceof Date ? effectiveStartTime.toISOString() : effectiveStartTime);
+          if (start) {
+            const durationMs = completionDate.getTime() - start.getTime();
+            const durationMinutes = Math.floor(durationMs / (1000 * 60));
+            isCompletedOverdue = durationMinutes > stage.estimated_time;
+            completionDuration = formatDuration(durationMinutes);
           }
-          const parsed = parseDate(editValue);
-          return parsed ? format(parsed, 'HH:mm') : '00:00';
-        } catch (e) { return '00:00'; }
-      };
-
-      const datePart = getCurrentDate();
-      const timePart = getCurrentTime();
-
-      const handleCompositeSave = () => {
-        const dateInput = document.getElementById(`date-part-${stage.id}`) as HTMLInputElement;
-        const timeInput = document.getElementById(`time-part-${stage.id}`) as HTMLInputElement;
-
-        const d = dateInput?.value || datePart;
-        const t = timeInput?.value || '00:00';
-
-        if (!d) {
-          toast({ title: "Error", description: "Please select a date", variant: "destructive" });
-          return;
         }
 
-        // Combine and save
-        handleSave(false, '', `${d}T${t}`);
-      };
+        const textColorClass = isCompletedOverdue ? "text-amber-600" : "text-emerald-600";
+        const icon = isCompletedOverdue ? <Clock className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />;
+        const borderColorClass = isCompletedOverdue ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-100";
 
-      const handleKeyDownComposite = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter') handleCompositeSave();
-        if (e.key === 'Escape') handleCancel();
-      };
-
-      return (
-        <div className="flex items-center gap-2">
-          {/* Composite Input Container - Looks like a single shadcn Input */}
-          <div className="flex items-center h-8 rounded-md border border-input bg-background px-2 py-1 text-sm ring-offset-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
-
-            {/* Date Part */}
-            <input
-              id={`date-part-${stage.id}`}
-              type="date"
-              defaultValue={datePart}
-              className="bg-transparent border-none p-0 h-full focus:outline-none focus:ring-0 text-sm font-medium text-slate-900 w-[110px]"
-              autoFocus
-              onKeyDown={handleKeyDownComposite}
-              onChange={(e) => {
-                // Optional: Live update state if needed, though we read from DOM on save for speed
-                const t = (document.getElementById(`time-part-${stage.id}`) as HTMLInputElement)?.value || '00:00';
-                setEditValue(`${e.target.value}T${t}`);
-              }}
-            />
-
-            {/* Visual Separator */}
-            <span className="text-slate-300 mx-1">|</span>
-
-            {/* Time Part - Defaults to 00:00 visually */}
-            <Clock3 className="h-3 w-3 text-slate-400 mr-1.5" />
-            <input
-              id={`time-part-${stage.id}`}
-              type="time"
-              defaultValue={timePart}
-              className="bg-transparent border-none p-0 h-full focus:outline-none focus:ring-0 text-sm text-slate-600 w-[70px]"
-              onKeyDown={handleKeyDownComposite}
-              onChange={(e) => {
-                const d = (document.getElementById(`date-part-${stage.id}`) as HTMLInputElement)?.value || '';
-                setEditValue(`${d}T${e.target.value}`);
-              }}
-            />
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex items-center gap-0.5">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 w-7 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
-              onClick={handleCompositeSave}
-              disabled={isLoading}
-              title="Save Date"
-            >
-              <Check className="h-4 w-4" />
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-              onClick={handleCancel}
-              disabled={isLoading}
-              title="Cancel"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      );
-    }
-
-    // 4. IN PROGRESS (Time Status)
-    if (timeStatus && !requiresUpload && !hasLinkedDocument) {
-      // ** COLOR & ICON LOGIC for IN PROGRESS (Matches ReportsPage) **
-      const textColorClass = timeStatus.isOverdue ? "text-red-600" : "text-blue-600";
-      const icon = timeStatus.isOverdue ? <AlertTriangle className="h-3.5 w-3.5" /> : <Timer className="h-3.5 w-3.5" />;
-      const borderColorClass = timeStatus.isOverdue ? "border-red-200 bg-red-50" : "border-blue-200 bg-blue-50";
-
-      return (
-        <div className="flex flex-col gap-1 min-w-[120px] items-start">
+        return (
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="flex items-center gap-2">
-                  <div className={`flex items-center gap-1.5 font-medium text-xs ${textColorClass} cursor-default`}>
-                    {icon}
-                    <span>{timeStatus.formattedElapsed} elapsed</span>
-                  </div>
-                  {/* Action Button for non-upload stages */}
-                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0 border border-dashed border-gray-300 hover:border-gray-400" onClick={() => setIsEditing(true)}>
-                    <Check className="h-3 w-3 text-green-600" />
-                  </Button>
+                <div
+                  className={`flex items-center gap-1.5 font-semibold text-xs ${textColorClass} cursor-pointer hover:underline select-none`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // Keep single click for manual stages
+                    if (!requiresUpload) setIsEditing(true);
+                  }}
+                  // ADDED: Double click handler to force edit mode
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setIsEditing(true);
+                  }}
+                >
+                  {icon}
+                  <span>{formatDateDisplay(stageDate)}</span>
                 </div>
               </TooltipTrigger>
-              <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md max-w-[250px]`}>
+              <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md`}>
                 <div className="space-y-2 p-1">
                   <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
-                    <span className={`font-bold ${textColorClass}`}>{timeStatus.isOverdue ? "In Progress (Overdue)" : "In Progress (On Track)"}</span>
+                    <span className={`font-bold ${textColorClass}`}>
+                      {isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time"}
+                    </span>
                   </div>
                   <div className="text-xs space-y-1">
-                    {stage.estimated_time > 0 && (
-                      <>
-                        <div className="flex justify-between gap-4"><span className="text-slate-500">Remaining:</span><span className={timeStatus.isOverdue ? 'font-bold text-red-600' : 'text-green-600'}>{timeStatus.isOverdue ? `Overdue by ${timeStatus.formattedOverdue}` : timeStatus.formattedRemaining}</span></div>
-                        <div className="flex justify-between gap-4"><span className="text-slate-500">Estimate:</span><span>{formatDuration(stage.estimated_time)}</span></div>
-                      </>
-                    )}
+                    <div className="flex justify-between gap-4">
+                      <span className="text-slate-500">Completed:</span>
+                      <span>{formatDateDisplay(stageDate)}</span>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-slate-500">Duration:</span>
+                      <span>{completionDuration}</span>
+                    </div>
+                    {isCompletedOverdue && <p className="text-amber-600 font-bold">Overdue</p>}
+                    {/* Added hint for user */}
+                    <p className="text-[10px] text-slate-400 pt-1 italic border-t border-slate-200 mt-1">Double-click to edit date</p>
                   </div>
                 </div>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
+        );
+      }
+
+      // 3. EDIT MODE (Active input)
+      if (isEditing) {
+
+        // -- Helper Functions for value splitting --
+        const getCurrentDate = () => {
+          if (!editValue) return '';
+          try {
+            // If it's already an ISO string with T
+            if (editValue.includes('T')) return editValue.split('T')[0];
+
+            // If it's another format, try parsing
+            const parsed = parseDate(editValue);
+            return parsed ? format(parsed, 'yyyy-MM-dd') : '';
+          } catch (e) { return ''; }
+        };
+
+        const getCurrentTime = () => {
+          if (!editValue) return '00:00';
+          try {
+            if (editValue.includes('T')) {
+              const t = editValue.split('T')[1];
+              // Ensure we only get HH:mm even if seconds exist
+              return t ? t.substring(0, 5) : '00:00';
+            }
+            const parsed = parseDate(editValue);
+            return parsed ? format(parsed, 'HH:mm') : '00:00';
+          } catch (e) { return '00:00'; }
+        };
+
+        const datePart = getCurrentDate();
+        const timePart = getCurrentTime();
+
+        const handleCompositeSave = () => {
+          const dateInput = document.getElementById(`date-part-${stage.id}`) as HTMLInputElement;
+          const timeInput = document.getElementById(`time-part-${stage.id}`) as HTMLInputElement;
+
+          const d = dateInput?.value || datePart;
+          const t = timeInput?.value || '00:00';
+
+          if (!d) {
+            toast({ title: "Error", description: "Please select a date", variant: "destructive" });
+            return;
+          }
+
+          // Combine and save
+          handleSave(false, '', `${d}T${t}`);
+        };
+
+        const handleKeyDownComposite = (e: React.KeyboardEvent) => {
+          if (e.key === 'Enter') handleCompositeSave();
+          if (e.key === 'Escape') handleCancel();
+        };
+
+        return (
+          <div className="flex items-center gap-2">
+            {/* Composite Input Container - Looks like a single shadcn Input */}
+            <div className="flex items-center h-8 rounded-md border border-input bg-background px-2 py-1 text-sm ring-offset-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
+
+              {/* Date Part */}
+              <input
+                id={`date-part-${stage.id}`}
+                type="date"
+                defaultValue={datePart}
+                className="bg-transparent border-none p-0 h-full focus:outline-none focus:ring-0 text-sm font-medium text-slate-900 w-[110px]"
+                autoFocus
+                onKeyDown={handleKeyDownComposite}
+                onChange={(e) => {
+                  // Optional: Live update state if needed, though we read from DOM on save for speed
+                  const t = (document.getElementById(`time-part-${stage.id}`) as HTMLInputElement)?.value || '00:00';
+                  setEditValue(`${e.target.value}T${t}`);
+                }}
+              />
+
+              {/* Visual Separator */}
+              <span className="text-slate-300 mx-1">|</span>
+
+              {/* Time Part - Defaults to 00:00 visually */}
+              <Clock3 className="h-3 w-3 text-slate-400 mr-1.5" />
+              <input
+                id={`time-part-${stage.id}`}
+                type="time"
+                defaultValue={timePart}
+                className="bg-transparent border-none p-0 h-full focus:outline-none focus:ring-0 text-sm text-slate-600 w-[70px]"
+                onKeyDown={handleKeyDownComposite}
+                onChange={(e) => {
+                  const d = (document.getElementById(`date-part-${stage.id}`) as HTMLInputElement)?.value || '';
+                  setEditValue(`${d}T${e.target.value}`);
+                }}
+              />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-0.5">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 w-7 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                onClick={handleCompositeSave}
+                disabled={isLoading}
+                title="Save Date"
+              >
+                <Check className="h-4 w-4" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                onClick={handleCancel}
+                disabled={isLoading}
+                title="Cancel"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        );
+      }
+
+      // 4. IN PROGRESS (Time Status)
+      if (timeStatus && !requiresUpload && !hasLinkedDocument) {
+        // ** COLOR & ICON LOGIC for IN PROGRESS (Matches ReportsPage) **
+        const textColorClass = timeStatus.isOverdue ? "text-red-600" : "text-blue-600";
+        const icon = timeStatus.isOverdue ? <AlertTriangle className="h-3.5 w-3.5" /> : <Timer className="h-3.5 w-3.5" />;
+        const borderColorClass = timeStatus.isOverdue ? "border-red-200 bg-red-50" : "border-blue-200 bg-blue-50";
+
+        return (
+          <div className="flex flex-col gap-1 min-w-[120px] items-start">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-2">
+                    <div className={`flex items-center gap-1.5 font-medium text-xs ${textColorClass} cursor-default`}>
+                      {icon}
+                      <span>{timeStatus.formattedElapsed} elapsed</span>
+                    </div>
+                    {/* Action Button for non-upload stages */}
+                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 border border-dashed border-gray-300 hover:border-gray-400" onClick={() => setIsEditing(true)}>
+                      <Check className="h-3 w-3 text-green-600" />
+                    </Button>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent className={`${borderColorClass} text-slate-900 border shadow-md max-w-[250px]`}>
+                  <div className="space-y-2 p-1">
+                    <div className="flex justify-between border-b border-black/10 pb-1 mb-1">
+                      <span className={`font-bold ${textColorClass}`}>{timeStatus.isOverdue ? "In Progress (Overdue)" : "In Progress (On Track)"}</span>
+                    </div>
+                    <div className="text-xs space-y-1">
+                      {stage.estimated_time > 0 && (
+                        <>
+                          <div className="flex justify-between gap-4"><span className="text-slate-500">Remaining:</span><span className={timeStatus.isOverdue ? 'font-bold text-red-600' : 'text-green-600'}>{timeStatus.isOverdue ? `Overdue by ${timeStatus.formattedOverdue}` : timeStatus.formattedRemaining}</span></div>
+                          <div className="flex justify-between gap-4"><span className="text-slate-500">Estimate:</span><span>{formatDuration(stage.estimated_time)}</span></div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+        );
+      }
+
+      // 5. Default "Add Date" for non-upload stages if no time status derived (fallback)
+      if (!requiresUpload) {
+        return (
+          <Button variant="ghost" size="sm" className="h-7 px-3 text-gray-600 border border-dashed border-gray-300 hover:border-gray-400" onClick={() => setIsEditing(true)}>
+            <Calendar className="h-3 w-3 mr-1" /> Add Date
+          </Button>
+        );
+      }
+
+      return <span className="text-sm text-gray-500 italic">-</span>;
+    }
+
+    if (renderMode === 'actions') {
+      if (!isStageApplicable) return <span className="text-sm text-gray-400 italic">-</span>;
+
+      // Determine if we should show the button based on the new mapping
+      const showAutomation = !!currentAutomationConfig && !hasLinkedDocument;
+      const showSkip = !isStageCompleted;
+      const hasMoreActions = showAutomation || showSkip;
+
+      return (
+        <div className="flex items-center justify-center gap-1">
+          {/* View Document */}
+          {linkedDocument && (
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-green-600 hover:bg-green-50"
+                  title="View document details"
+                  onClick={handleViewDocument}
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                </Button>
+              </DialogTrigger>
+
+              <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden" onOpenAutoFocus={e => e.preventDefault()}>
+                <DialogHeader className="p-4 border-b">
+                  <DialogTitle className="text-lg">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        {task?.name}
+                        {task?.client_name && ` - ${task.client_name}`}
+                      </div>
+                      <div className="text-sm font-normal text-muted-foreground">
+                        {previewDocuments.length} document{previewDocuments.length !== 1 ? 's' : ''}
+                      </div>
+                    </div>
+                  </DialogTitle>
+                </DialogHeader>
+
+                <div className="flex-1 overflow-auto p-4">
+                  {previewDocuments.length > 0 ? (
+                    previewDocuments.map((doc) => (
+                      <div key={doc.documentId} className="border rounded-lg overflow-hidden mb-4">
+                        <div className="p-4 bg-gray-50 border-b">
+                          <h3 className="font-medium">
+                            {doc.documentName || 'Document'}
+                            <span className="text-muted-foreground text-sm font-normal ml-2">
+                              (Uploaded: {doc.created_at ? formatDateDisplay(doc.created_at) : 'N/A'})
+                            </span>
+                          </h3>
+                        </div>
+                        <div className="p-4">
+                          <ExtractionPreview
+                            documentId={doc.documentId}
+                            documentName={doc.documentName}
+                            extractedData={doc.extractedData || {}}
+                            fields={doc.fields || []}
+                            fileUrl={doc.fileUrl}
+                            fileName={doc.fileName}
+                            onSave={handlePreviewSave}
+                            onDelete={handleDeleteDocument}
+                            expanded={true}
+                            showSaveButton={!!onSave}
+                            readOnly={false}
+                            type={doc.type}
+                            file={doc.file}
+                            onDataChange={(fieldName, value) =>
+                              handlePreviewDataChange(doc.documentId, fieldName, value)
+                            }
+                          />
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="h-full flex items-center justify-center">
+                      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                      <p className="ml-4 text-muted-foreground">Loading documents...</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-4 border-t flex justify-end">
+                  <Button
+                    variant="default"
+                    onClick={() => setIsPreviewOpen(false)}
+                  >
+                    Close
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+          )}
+
+          {/* Upload Document */}
+          {requiresUpload && (
+            <Button variant="ghost" size="icon" className={`h-7 w-7 ${hasLinkedDocument ? 'text-blue-400 hover:bg-blue-50' : 'text-blue-600 hover:bg-blue-50'}`} onClick={handleDocumentUpload} title={hasLinkedDocument ? 'Upload new document' : 'Upload document'}>
+              <Upload className="h-3.5 w-3.5" />
+            </Button>
+          )}
+
+          {/* More Actions Dropdown */}
+          {hasMoreActions && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-500 hover:bg-slate-100">
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {showAutomation && (
+                  <DropdownMenuItem onClick={handleTriggerAutomation} disabled={isAutomationRunning}>
+                    <Zap className="mr-2 h-3.5 w-3.5 text-blue-600 fill-blue-600" />
+                    <div className="flex flex-col">
+                      <span>Run Automation</span>
+                      <span className="text-[10px] text-muted-foreground leading-tight">
+                        via {currentAutomationConfig.docName}
+                      </span>
+                    </div>
+                  </DropdownMenuItem>
+                )}
+                {showSkip && (
+                  <DropdownMenuItem onClick={handleSkipClick}>
+                    <SkipForward className="mr-2 h-3.5 w-3.5" />
+                    Skip Stage
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       );
     }
-
-    // 5. Default "Add Date" for non-upload stages if no time status derived (fallback)
-    if (!requiresUpload) {
-      return (
-        <Button variant="ghost" size="sm" className="h-7 px-3 text-gray-600 border border-dashed border-gray-300 hover:border-gray-400" onClick={() => setIsEditing(true)}>
-          <Calendar className="h-3 w-3 mr-1" /> Add Date
-        </Button>
-      );
-    }
-
-    return <span className="text-sm text-gray-500 italic">-</span>;
-  }
-
-  if (renderMode === 'actions') {
-    if (!isStageApplicable) return <span className="text-sm text-gray-400 italic">-</span>;
-
-    const hasAutomation = !!(stage?.automation?.automationId || stage?.automation?.id || stage?.web_automation?.automationId);
-    const hasAnyAutomation = requiresUpload && stage.documents?.some((doc: any) => isDocumentApplicable(doc, task) && (doc.automationId || doc.automation?.id));
-
-    const showAutomation = (hasAutomation || hasAnyAutomation) && !hasLinkedDocument;
-    const showSkip = !isStageCompleted;
-    const hasMoreActions = showAutomation || showSkip;
-
-    return (
-      <div className="flex items-center justify-center gap-1">
-        {/* View Document */}
-        {linkedDocument && (
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-green-600 hover:bg-green-50"
-                title="View document details"
-                onClick={handleViewDocument}
-              >
-                <Eye className="h-3.5 w-3.5" />
-              </Button>
-            </DialogTrigger>
-
-            <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden" onOpenAutoFocus={e => e.preventDefault()}>
-              <DialogHeader className="p-4 border-b">
-                <DialogTitle className="text-lg">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      {task?.name}
-                      {task?.client_name && ` - ${task.client_name}`}
-                    </div>
-                    <div className="text-sm font-normal text-muted-foreground">
-                      {previewDocuments.length} document{previewDocuments.length !== 1 ? 's' : ''}
-                    </div>
-                  </div>
-                </DialogTitle>
-              </DialogHeader>
-
-              <div className="flex-1 overflow-auto p-4">
-                {previewDocuments.length > 0 ? (
-                  previewDocuments.map((doc) => (
-                    <div key={doc.documentId} className="border rounded-lg overflow-hidden mb-4">
-                      <div className="p-4 bg-gray-50 border-b">
-                        <h3 className="font-medium">
-                          {doc.documentName || 'Document'}
-                          <span className="text-muted-foreground text-sm font-normal ml-2">
-                            (Uploaded: {doc.created_at ? formatDateDisplay(doc.created_at) : 'N/A'})
-                          </span>
-                        </h3>
-                      </div>
-                      <div className="p-4">
-                        <ExtractionPreview
-                          documentId={doc.documentId}
-                          documentName={doc.documentName}
-                          extractedData={doc.extractedData || {}}
-                          fields={doc.fields || []}
-                          fileUrl={doc.fileUrl}
-                          fileName={doc.fileName}
-                          onSave={handlePreviewSave}
-                          onDelete={handleDeleteDocument}
-                          expanded={true}
-                          showSaveButton={!!onSave}
-                          readOnly={false}
-                          type={doc.type}
-                          file={doc.file}
-                          onDataChange={(fieldName, value) =>
-                            handlePreviewDataChange(doc.documentId, fieldName, value)
-                          }
-                        />
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="h-full flex items-center justify-center">
-                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                    <p className="ml-4 text-muted-foreground">Loading documents...</p>
-                  </div>
-                )}
-              </div>
-
-              <div className="p-4 border-t flex justify-end">
-                <Button
-                  variant="default"
-                  onClick={() => setIsPreviewOpen(false)}
-                >
-                  Close
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
-        )}
-
-        {/* Upload Document */}
-        {requiresUpload && (
-          <Button variant="ghost" size="icon" className={`h-7 w-7 ${hasLinkedDocument ? 'text-blue-400 hover:bg-blue-50' : 'text-blue-600 hover:bg-blue-50'}`} onClick={handleDocumentUpload} title={hasLinkedDocument ? 'Upload new document' : 'Upload document'}>
-            <Upload className="h-3.5 w-3.5" />
-          </Button>
-        )}
-
-        {/* More Actions Dropdown */}
-        {hasMoreActions && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-500 hover:bg-slate-100">
-                <MoreHorizontal className="h-3.5 w-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {showAutomation && (
-                <DropdownMenuItem onClick={handleTriggerAutomation} disabled={isAutomationRunning}>
-                  <Zap className="mr-2 h-3.5 w-3.5" />
-                  {isAutomationRunning ? 'Running...' : 'Run Automation'}
-                </DropdownMenuItem>
-              )}
-              {showSkip && (
-                <DropdownMenuItem onClick={handleSkipClick}>
-                  <SkipForward className="mr-2 h-3.5 w-3.5" />
-                  Skip Stage
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </div>
-    );
-  }
     return <span className="text-sm text-gray-500 italic">-</span>;
   };
 
@@ -1266,13 +1299,11 @@ export default function EditableStageCell({
 
       <AutomationMappingDialog
         isOpen={automationDialogOpen}
-        onClose={() => {
-          setAutomationDialogOpen(false);
-        }}
+        onClose={() => setAutomationDialogOpen(false)}
+        automationId={currentAutomationConfig?.automationId}
         classId={task?.class_id || ''}
         requirementId={stage?.id || ''}
         taskId={task?.id}
-        automationId={stage?.automation?.automationId || stage?.automation?.id}
         task={task}
         individualId={task?.individual_id || task?.principal_member}
         stageDocuments={stage?.documents || []}

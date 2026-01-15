@@ -55,10 +55,12 @@ const generateId = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,
   return v.toString(16);
 });
 
-const getEntityKey = (entity: any): string => {
-  if (!entity) return "";
-  // We use "0" as a placeholder for null to keep the key string-friendly
-  return `${entity.subdept_id}:${entity.class_id || 0}:${entity.subclass_id || 0}`;
+const getEntityKey = (jobLevel: any): string => {
+  if (!jobLevel) return "missing";
+  const sub = jobLevel.subdepartment_id || jobLevel.subdept_id || 'none';
+  const cls = jobLevel.class_id || 'none';
+  const sc = jobLevel.subclass_id || 'none';
+  return `${sub}:${cls}:${sc}`;
 };
 
 const transformKycFields = (fields: any[]): DocumentExtraction[] => {
@@ -189,30 +191,54 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
     try {
       const { data: deptsData, error } = await supabase.from('tm_departments').select(`*, tm_subdepartments (*, classes)`);
       if (error) throw error;
+
       const entities: EntityOption[] = [];
       deptsData?.forEach((dept: any) => {
-        if (dept.tm_subdepartments) {
-          dept.tm_subdepartments.forEach((subdept: any) => {
-            entities.push({ id: subdept.id, name: subdept.name, type: 'subdept', level: 0, subdept_id: subdept.id });
-            if (subdept.classes && Array.isArray(subdept.classes)) {
-              subdept.classes.forEach((cls: any, clsIndex: number) => {
-                const classId = cls.id || `${subdept.id}-class-${clsIndex}`;
-                entities.push({ id: classId, name: `${cls.name}`, type: 'class', level: 1, subdept_id: subdept.id, class_id: classId });
-                if (cls.subClasses && Array.isArray(cls.subClasses)) {
-                  cls.subClasses.forEach((subCls: any, subClsIndex: number) => {
-                    const subclassId = subCls.id || `${subdept.id}-class-${clsIndex}-subclass-${subClsIndex}`;
-                    entities.push({ id: subclassId, name: `${subCls.name}`, type: 'subclass', level: 2, subdept_id: subdept.id, class_id: classId, subclass_id: subclassId });
-                  });
-                }
-              });
-            }
+        dept.tm_subdepartments?.forEach((subdept: any) => {
+          // Level 0: Subdepartment
+          entities.push({
+            id: subdept.id,
+            name: subdept.name,
+            type: 'subdept',
+            level: 0,
+            subdept_id: subdept.id,
+            class_id: null,
+            subclass_id: null,
+            department_id: dept.id
           });
-        }
+
+          subdept.classes?.forEach((cls: any) => {
+            // Level 1: Class
+            entities.push({
+              id: cls.id,
+              name: `→ ${cls.name}`,
+              type: 'class',
+              level: 1,
+              subdept_id: subdept.id,
+              class_id: cls.id,
+              subclass_id: null,
+              department_id: dept.id
+            });
+
+            cls.subClasses?.forEach((subCls: any) => {
+              // Level 2: Subclass
+              entities.push({
+                id: subCls.id,
+                name: `→ → ${subCls.name}`,
+                type: 'subclass',
+                level: 2,
+                subdept_id: subdept.id,
+                class_id: cls.id,
+                subclass_id: subCls.id,
+                department_id: dept.id
+              });
+            });
+          });
+        });
       });
       setEntityOptions(entities);
     } catch (error) {
       console.error('Error fetching entities:', error);
-      toast({ title: "Error", description: "Failed to load entities.", variant: "destructive" });
     } finally {
       setLoadingEntities(false);
     }
@@ -253,7 +279,6 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
           // We ensure that if automation is disabled, the object is emptied
           const finalAutomationLinks = doc.hasAutomation ? (doc.automationLinks || {}) : {};
 
-          // 3. Construct the clean document object
           return {
             id: doc.id,
             name: doc.name,
@@ -264,10 +289,10 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
             docType: doc.docType || 'normal_doc',
             isSpecial: !!doc.isSpecial,
             kycId: currentKycId,
-            linkedKycDocument: doc.linkedKycDocument, // Keep reference if it was linked
-            targetEntities: doc.targetEntities || [],
+            linkedKycDocument: doc.linkedKycDocument,
             hasAutomation: !!doc.hasAutomation,
-            automationLinks: finalAutomationLinks
+            // UPDATE: We only save targetEntities. automationLinks is removed.
+            targetEntities: doc.targetEntities || []
           };
         })
       );
@@ -598,15 +623,36 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
 
 function MultiEntityPicker({ entities, selectedEntities = [], onSelectionChange, loading = false, placeholder = "Select target entities..." }: { entities: EntityOption[], selectedEntities: Array<{ entityType: 'subdept' | 'class' | 'subclass', subdept_id: number, class_id?: string | number, subclass_id?: string | number, entityName: string }>, onSelectionChange: (selectedEntities: any[]) => void, loading?: boolean, placeholder?: string }) {
   const [open, setOpen] = useState(false);
-  const toggleEntity = (entity: EntityOption) => {
-    const isSelected = selectedEntities.some(selected => getEntityKey(selected) === getEntityKey(entity));
-    if (isSelected) {
-      onSelectionChange(selectedEntities.filter(selected => getEntityKey(selected) !== getEntityKey(entity)));
-    } else {
-      const newEntity = { entityType: entity.type, subdept_id: entity.subdept_id!, class_id: entity.class_id, subclass_id: entity.subclass_id, entityName: entity.name.replace(/^→\s*/g, '') };
-      onSelectionChange([...selectedEntities, newEntity]);
-    }
-  };
+  // Inside MultiEntityPicker (around line 301)
+ // Inside MultiEntityPicker (around line 301)
+const toggleEntity = (entity: EntityOption) => {
+  // Use the same helper to get a comparable key for the selection
+  const entityKey = getEntityKey(entity); 
+  
+  // Check if this specific entity key already exists in our targeted list
+  const isSelected = selectedEntities.some(selected => 
+    getEntityKey(selected?.job_level) === entityKey
+  );
+
+  if (isSelected) {
+    onSelectionChange(selectedEntities.filter(selected => 
+      getEntityKey(selected?.job_level) !== entityKey
+    ));
+  } else {
+    const newEntity = {
+      entityName: entity.name.replace(/^→\s*/g, ''),
+      automationId: null,
+      job_level: {
+        department_id: entity.department_id,
+        subdepartment_id: entity.subdept_id || 0,
+        class_id: entity.class_id || null,
+        subclass_id: entity.subclass_id || null,
+        level: entity.subclass_id ? 4 : entity.class_id ? 3 : 2
+      }
+    };
+    onSelectionChange([...selectedEntities, newEntity]);
+  }
+};
   const isEntitySelected = (entity: EntityOption) => selectedEntities.some(selected => getEntityKey(selected) === getEntityKey(entity));
   const groupedEntities = entities.reduce((acc, entity) => {
     const subdeptName = entities.find(e => e.type === 'subdept' && e.subdept_id === entity.subdept_id)?.name || 'Unknown';
@@ -645,7 +691,7 @@ function MultiEntityPicker({ entities, selectedEntities = [], onSelectionChange,
       {selectedEntities.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-2">
           {selectedEntities.map((entity, index) => (
-            <Badge key={index} variant="secondary" className="flex items-center gap-1 text-xs bg-blue-100 text-blue-800 hover:bg-blue-200">
+            <Badge key={`${getEntityKey(entity.job_level)}-${index}`} variant="secondary" className="flex items-center gap-1 text-xs bg-blue-100 text-blue-800 hover:bg-blue-200">
               {entity.entityName}
               <Badge variant="outline" className="text-xs ml-1 bg-white">{entity.entityType}</Badge>
               <Button type="button" variant="ghost" size="icon" className="h-4 w-4 ml-1 p-0 hover:bg-destructive hover:text-destructive-foreground rounded-full" onClick={() => onSelectionChange(selectedEntities.filter((_, i) => i !== index))}>
@@ -730,12 +776,13 @@ function DocumentCard({ doc, docIndex, entityOptions, loadingEntities, kycDocume
                   <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">
                     Entity-Specific Automations
                   </Label>
-                  {doc.targetEntities.map((entity) => {
-                    const entityKey = getEntityKey(entity);
-                    if (!entityKey) return null;
+                  {doc.targetEntities.map((entity, index) => {
+                    const entityKey = getEntityKey(entity.job_level);
+
+                    const reactKey = `entity-${entityKey}-${index}`;
 
                     return (
-                      <div key={entityKey} className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center p-3 border rounded-lg bg-white shadow-sm">
+                      <div key={reactKey} className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center p-3 border rounded-lg bg-white shadow-sm">
                         <div className="flex items-center gap-2 overflow-hidden">
                           <div className="bg-slate-100 p-1.5 rounded">
                             {entity.entityType === 'subclass' ? <Layers className="h-3.5 w-3.5 text-orange-600" /> :
@@ -753,33 +800,14 @@ function DocumentCard({ doc, docIndex, entityOptions, loadingEntities, kycDocume
                           <ComboBox
                             options={[
                               { value: 'none', label: 'No automation' },
-                              ...(automationTypes?.map(a => ({
-                                value: a.id,
-                                label: a.name,
-                                icon: <Webhook className="h-4 w-4 text-blue-500 mr-2" />
-                              })) || [])
+                              ...(automationTypes?.map(a => ({ value: a.id, label: a.name, icon: <Webhook /> })))
                             ]}
-                            // Pull value from the nested structure: .automationId
-                            value={doc.automationLinks?.[entityKey]?.automationId || 'none'}
+                            value={entity.automationId || 'none'}
                             onValueChange={(val) => {
-                              const newLinks = { ...(doc.automationLinks || {}) };
-
-                              if (val === 'none') {
-                                delete newLinks[entityKey];
-                              } else {
-                                newLinks[entityKey] = {
-                                  automationId: val,
-                                  job_level: {
-                                    // Use formData instead of stage
-                                    department_id: formData?.department_id || entity.department_id,
-                                    subdepartment_id: entity.subdept_id,
-                                    class_id: entity.class_id || null,
-                                    subclass_id: entity.subclass_id || null,
-                                    level: entity.subclass_id ? 4 : entity.class_id ? 3 : 2
-                                  }
-                                };
-                              }
-                              onUpdateDocument(doc.id, { automationLinks: newLinks });
+                              // We use the index here, which is perfectly safe
+                              const updatedEntities = [...doc.targetEntities];
+                              updatedEntities[index].automationId = val === 'none' ? null : val;
+                              onUpdateDocument(doc.id, { targetEntities: updatedEntities });
                             }}
                             placeholder="Select automation..."
                             className="w-full bg-slate-50"

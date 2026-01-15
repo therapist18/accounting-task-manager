@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Loader2, Zap, User, Database, FileText, Eye, Settings, Link, UploadCloud, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { Loader2, Zap, User, Database, FileText, Eye, Settings, Link, UploadCloud, CheckCircle, XCircle, AlertTriangle, Webhook } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -399,36 +399,42 @@ export const AutomationMappingDialog = ({
     return null;
   }, [getDocumentUrlForAutomation, findStageForDocument, task, allDocuments]);
 
-  // Extract automation mappings from stage documents
-  const extractAutomationMappings = async (stageDocuments: any[]) => {
+const extractAutomationMappings = async (stageDocuments: any[]) => {
     try {
+      const jl = task?.job_level;
+      if (!jl || !stageDocuments) return;
+
+      // 1. Create a matching key for the current task
+      const taskKey = `${jl.subdepartment_id}:${jl.class_id || 0}:${jl.subclass_id || 0}`;
+      
       const mappings: EntityAutomationMapping[] = [];
       const automationIds = new Set<string>();
 
-      // Collect all automation links from stage documents
+      // 2. Scan all documents in the stage
       stageDocuments.forEach(doc => {
-        if (doc.automationLinks && typeof doc.automationLinks === 'object') {
-          Object.entries(doc.automationLinks).forEach(([entityKey, automationId]) => {
-            if (typeof automationId === 'string') {
-              automationIds.add(automationId);
-
-              // Parse entity key to get entity details
-              const parts = entityKey.split('-');
-              const entityType = parts[0]; // 'class', 'subclass', etc.
-              const entityName = `${entityType.charAt(0).toUpperCase() + entityType.slice(1)} ${parts.slice(1).join('-')}`;
-
-              mappings.push({
-                entityKey,
-                entityName,
-                entityType,
-                automationId: automationId
-              });
-            }
+        if (doc.targetEntities && Array.isArray(doc.targetEntities)) {
+          // Find if this specific task's job level is a target in this document
+          const match = doc.targetEntities.find(te => {
+            if (!te.automationId || !te.job_level) return false;
+            
+            const entityKey = `${te.job_level.subdepartment_id}:${te.job_level.class_id || 0}:${te.job_level.subclass_id || 0}`;
+            return entityKey === taskKey;
           });
+
+          if (match) {
+            automationIds.add(match.automationId);
+            mappings.push({
+              entityKey: taskKey,
+              // Distinguish automations by the Form Name (e.g., "Application Form 25")
+              entityName: doc.name || "Untitled Document", 
+              entityType: 'document_link',
+              automationId: match.automationId
+            });
+          }
         }
       });
 
-      // Fetch automation details for all unique automation IDs
+      // 3. Fetch automation details from tm_automations
       if (automationIds.size > 0) {
         const { data: automations, error } = await supabase
           .from('tm_automations')
@@ -436,7 +442,6 @@ export const AutomationMappingDialog = ({
           .in('id', Array.from(automationIds));
 
         if (!error && automations) {
-          // Map automation details to mappings
           mappings.forEach(mapping => {
             const automation = automations.find(a => a.id === mapping.automationId);
             if (automation) {
@@ -448,14 +453,15 @@ export const AutomationMappingDialog = ({
 
       setEntityAutomationMappings(mappings);
 
-      // Set the first automation as selected by default
-      if (mappings.length > 0 && mappings[0].automationId && !selectedAutomationId) {
+      // Set the first one as default if none selected
+      if (mappings.length > 0 && !selectedAutomationId) {
         setSelectedAutomationId(mappings[0].automationId);
       }
     } catch (error) {
       console.error('Error extracting automation mappings:', error);
     }
   };
+
   const getRequirementId = useCallback(() => {
     // 1. Prioritize the job_level structure
     const jobLevel = task?.job_level;
@@ -692,9 +698,8 @@ export const AutomationMappingDialog = ({
           }
         }
 
-        // Extract automation mappings from stage documents if available
-        if (stageDocuments?.length > 0) {
-          await extractAutomationMappings(stageDocuments);
+        if (stage?.documents?.length > 0) {
+          await extractAutomationMappings(stage.documents);
         }
 
       } catch (error) {
@@ -1594,13 +1599,12 @@ export const AutomationMappingDialog = ({
     );
   };
 
-  const renderAutomationConfig = () => {
+const renderAutomationConfig = () => {
     if (entityAutomationMappings.length === 0) {
       return (
         <div className="text-center p-8 text-gray-500">
           <Settings className="h-10 w-10 mb-2 text-gray-300 mx-auto" />
-          <p>No automations found for this requirement.</p>
-          <p className="text-sm mt-1">Add webData configurations to enable automation.</p>
+          <p>No automations configured for this specific job level.</p>
         </div>
       );
     }
@@ -1609,31 +1613,44 @@ export const AutomationMappingDialog = ({
 
     return (
       <div className="space-y-6">
-        {/* Automation Selector */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Link className="h-5 w-5 text-blue-600" />
-              WebData Automation Configuration
-            </CardTitle>
+        <Card className="border-blue-100 shadow-sm overflow-hidden">
+          <CardHeader className="bg-blue-50/50 pb-4">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg flex items-center gap-2 text-blue-800">
+                <Zap className="h-5 w-5 fill-blue-600 text-blue-600" />
+                Select Process
+              </CardTitle>
+              <Badge variant="secondary" className="bg-blue-100 text-blue-700">
+                {entityAutomationMappings.length} Option{entityAutomationMappings.length !== 1 ? 's' : ''}
+              </Badge>
+            </div>
+            <CardDescription>
+              Multiple automations are linked to this stage for your job level.
+            </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <CardContent className="pt-6 space-y-6">
+            <div className="space-y-4">
               <div>
-                <Label className="text-sm font-medium">Select Automation</Label>
+                <Label className="text-xs font-bold uppercase text-slate-500 mb-2 block tracking-wider">
+                  Automation Source
+                </Label>
                 <Select value={selectedAutomationId} onValueChange={setSelectedAutomationId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choose an automation..." />
+                  <SelectTrigger className="w-full h-12 border-slate-200">
+                    <SelectValue placeholder="Select automation process..." />
                   </SelectTrigger>
                   <SelectContent>
-                    {entityAutomationMappings.map((mapping) => (
-                      <SelectItem key={mapping.automationId} value={mapping.automationId}>
-                        <div className="flex items-center gap-2">
-                          <Zap className="h-4 w-4 text-blue-500" />
-                          <span>{mapping.automation?.name || mapping.automationId}</span>
-                          <Badge variant="outline" className="text-xs ml-2">
-                            {mapping.entityName}
-                          </Badge>
+                    {entityAutomationMappings.map((mapping, idx) => (
+                      <SelectItem key={`${mapping.automationId}-${idx}`} value={mapping.automationId}>
+                        <div className="flex flex-col items-start py-1">
+                          <div className="flex items-center gap-2">
+                            <Webhook className="h-4 w-4 text-blue-500" />
+                            <span className="font-medium text-slate-900">
+                              {mapping.automation?.name || "Unnamed Process"}
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-slate-500 ml-6 italic">
+                            Triggered by: {mapping.entityName}
+                          </span>
                         </div>
                       </SelectItem>
                     ))}
@@ -1641,57 +1658,23 @@ export const AutomationMappingDialog = ({
                 </Select>
               </div>
 
-              {selectedMapping && (
-                <div>
-                  <Label className="text-sm font-medium">WebData Document</Label>
-                  <div className="p-2 bg-gray-50 rounded border text-sm">
-                    <span className="font-medium">{selectedMapping.entityName}</span>
-                    <Badge variant="outline" className="ml-2 text-xs">
-                      {selectedMapping.entityType}
+              {selectedMapping?.automation && (
+                <div className="p-4 bg-slate-50 rounded-lg border border-slate-200 animate-in fade-in zoom-in-95 duration-200">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-slate-500 uppercase">Details</span>
+                    <Badge variant="outline" className="bg-white text-[10px]">
+                      ID: {selectedMapping.automation.id.slice(0, 8)}
                     </Badge>
+                  </div>
+                  <p className="text-sm text-slate-700 leading-relaxed mb-3">
+                    {selectedMapping.automation.description || "No description provided for this automation."}
+                  </p>
+                  <div className="text-[10px] font-mono text-slate-400 bg-white p-2 rounded border truncate">
+                    Endpoint: {selectedMapping.automation.webhook_url}
                   </div>
                 </div>
               )}
             </div>
-
-            {selectedMapping?.automation && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
-                <div>
-                  <Label className="text-sm font-medium text-gray-700">Webhook URL</Label>
-                  <div className="p-2 bg-gray-50 rounded border text-xs font-mono text-gray-600 break-all">
-                    {selectedMapping.automation.webhook_url}
-                  </div>
-                </div>
-                {/* Login Configuration if available */}
-                {selectedMapping.automation.login && (
-                  <div className="md:col-span-2">
-                    <Label className="text-sm font-medium text-gray-700">Login Configuration</Label>
-                    <div className="p-3 bg-blue-50 rounded border border-blue-200">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                        {selectedMapping.automation.login.email && (
-                          <div>
-                            <span className="font-medium text-gray-600">Email:</span>
-                            <div className="font-mono text-gray-800">{selectedMapping.automation.login.email}</div>
-                          </div>
-                        )}
-                        {selectedMapping.automation.login.idNumber && (
-                          <div>
-                            <span className="font-medium text-gray-600">ID Number:</span>
-                            <div className="font-mono text-gray-800">{selectedMapping.automation.login.idNumber}</div>
-                          </div>
-                        )}
-                        {selectedMapping.automation.login.password && (
-                          <div>
-                            <span className="font-medium text-gray-600">Password:</span>
-                            <div className="font-mono text-gray-800">{"*".repeat(selectedMapping.automation.login.password.length)}</div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
           </CardContent>
         </Card>
       </div>

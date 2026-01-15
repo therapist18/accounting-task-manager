@@ -44,8 +44,8 @@ const generateId = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,
 });
 
 const getEntityKey = (entity: any): string => {
-  if (!entity) return "";
-  return `${entity.subdept_id}:${entity.class_id || 0}:${entity.subclass_id || 0}`;
+    if (!entity) return "";
+    return `${entity.subdept_id}:${entity.class_id || 0}:${entity.subclass_id || 0}`;
 };
 
 const transformKycFields = (fields: any[]): DocumentExtraction[] => {
@@ -143,13 +143,15 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
             if (error) throw error;
             const entities: EntityOption[] = [];
             deptData?.tm_subdepartments?.forEach((subdept: any) => {
-                entities.push({ id: subdept.id, name: subdept.name, type: 'subdept', level: 0, subdept_id: subdept.id });
-                subdept.classes?.forEach((cls: any, clsIndex: number) => {
-                    const classId = cls.id || `${subdept.id}-class-${clsIndex}`;
-                    entities.push({ id: classId, name: cls.name, type: 'class', level: 1, subdept_id: subdept.id, class_id: classId });
-                    cls.subClasses?.forEach((subCls: any, subClsIndex: number) => {
-                        const subclassId = subCls.id || `${subdept.id}-class-${clsIndex}-subclass-${subClsIndex}`;
-                        entities.push({ id: subclassId, name: subCls.name, type: 'subclass', level: 2, subdept_id: subdept.id, class_id: classId, subclass_id: subclassId });
+                // Add department_id to every entity level
+                entities.push({
+                    id: subdept.id, name: subdept.name, type: 'subdept', level: 0, subdept_id: subdept.id,
+                    department_id: departmentId // <--- Add this
+                });
+                subdept.classes?.forEach((cls: any) => {
+                    entities.push({ ...cls, type: 'class', level: 1, subdept_id: subdept.id, class_id: cls.id, department_id: departmentId });
+                    cls.subClasses?.forEach((subCls: any) => {
+                        entities.push({ ...subCls, type: 'subclass', level: 2, subdept_id: subdept.id, class_id: cls.id, subclass_id: subCls.id, department_id: departmentId });
                     });
                 });
             });
@@ -259,74 +261,73 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
         updateNewStage(stageId, { documents: updatedDocs });
     };
 
-  const handleSubmit = async () => {
-    if (!selectedDepartment) return toast({ title: 'Error', description: 'Please select a department', variant: 'destructive' });
-    const validStages = newStages.filter(stage => stage.name.trim() !== '');
-    if (validStages.length === 0) return toast({ title: 'Error', description: 'Please add at least one stage with a name', variant: 'destructive' });
+    const handleSubmit = async () => {
+        if (!selectedDepartment) return toast({ title: 'Error', description: 'Please select a department', variant: 'destructive' });
+        const validStages = newStages.filter(stage => stage.name.trim() !== '');
+        if (validStages.length === 0) return toast({ title: 'Error', description: 'Please add at least one stage with a name', variant: 'destructive' });
 
-    setSaving(true);
-    try {
-        const departmentName = departments.find(d => d.id === selectedDepartment)?.name || selectedDepartment;
-        
-        const processedStages = await Promise.all(
-            validStages.map(async (stage) => {
-                const processedDocs = await Promise.all(
-                    (stage.documents || []).map(async (doc) => {
-                        // Handle KYC document creation
-                        let currentKycId = doc.linkedKycDocument || doc.kycId;
-                        
-                        if (!currentKycId && doc.name?.trim()) {
-                            currentKycId = await createKYCDocument({
+        setSaving(true);
+        try {
+            const departmentName = departments.find(d => d.id === selectedDepartment)?.name || selectedDepartment;
+
+            const processedStages = await Promise.all(
+                validStages.map(async (stage) => {
+                    const processedDocs = await Promise.all(
+                        (stage.documents || []).map(async (doc) => {
+                            // Handle KYC document creation
+                            let currentKycId = doc.linkedKycDocument || doc.kycId;
+
+                            if (!currentKycId && doc.name?.trim()) {
+                                currentKycId = await createKYCDocument({
+                                    name: doc.name,
+                                    department: departmentName,
+                                    category: 'application-docs',
+                                    document_type: 'one_off',
+                                    fields: doc.extractionSpecs || [],
+                                    display_name: doc.name,
+                                    metadata: {
+                                        ...(doc.isSpecial ? { isSpecial: true, targetEntities: doc.targetEntities || [] } : {}),
+                                        doc_type: doc.docType || 'normal_doc'
+                                    }
+                                });
+                            }
+                            const finalAutomationLinks = doc.hasAutomation ? (doc.automationLinks || {}) : {};
+                            return {
+                                id: doc.id,
                                 name: doc.name,
-                                department: departmentName,
-                                category: 'application-docs',
-                                document_type: 'one_off',
-                                fields: doc.extractionSpecs || [],
-                                display_name: doc.name,
-                                metadata: { 
-                                    ...(doc.isSpecial ? { isSpecial: true, targetEntities: doc.targetEntities || [] } : {}),
-                                    doc_type: doc.docType || 'normal_doc' 
-                                }
-                            });
-                        }
+                                description: doc.description,
+                                isRequired: doc.isRequired,
+                                documentType: doc.documentType,
+                                inputType: doc.inputType,
+                                docType: doc.docType || 'normal_doc',
+                                isSpecial: !!doc.isSpecial,
+                                kycId: currentKycId,
+                                linkedKycDocument: currentKycId,
+                                hasAutomation: !!doc.hasAutomation,
+                                targetEntities: doc.targetEntities || []
+                            };
+                        })
+                    );
 
-                        // Structure the Automation Links
-                        const finalAutomationLinks = doc.hasAutomation ? (doc.automationLinks || {}) : {};
+                    return { ...stage, documents: processedDocs };
+                })
+            );
 
-                        return {
-                            ...doc,
-                            kycId: currentKycId,
-                            linkedKycDocument: currentKycId,
-                            automationLinks: finalAutomationLinks,
-                            // Ensure internal keys are removed if not needed by your DB schema
-                            extractionSpecs: undefined 
-                        };
-                    })
-                );
+            await onAddStages(processedStages, selectedDepartment);
 
-                return { 
-                    ...stage, 
-                    department_id: selectedDepartment,
-                    documents: processedDocs 
-                };
-            })
-        );
+            // Reset state
+            setNewStages([{ id: generateId(), name: '', description: '', isSpecial: false, timeConfigs: [], documents: [] }]);
+            setSelectedDepartment('');
+            onOpenChange(false);
 
-        await onAddStages(processedStages, selectedDepartment);
-        
-        // Reset state
-        setNewStages([{ id: generateId(), name: '', description: '', isSpecial: false, timeConfigs: [], documents: [] }]);
-        setSelectedDepartment('');
-        onOpenChange(false);
-        
-        toast({ title: "Success", description: "Stages added successfully" });
-    } catch (error) {
-        console.error('Error adding stages:', error);
-        toast({ title: 'Error', description: 'Failed to add stages.', variant: 'destructive' });
-    } finally {
-        setSaving(false);
-    }
-};
+            toast({ title: "Success", description: "Stages added successfully" });
+        } catch (error) {
+            console.error('Error adding stages:', error);
+            toast({ title: 'Error', description: 'Failed to add stages.', variant: 'destructive' });
+        } finally {
+            setSaving(false);
+        }
+    };
 
     const isFormValid = selectedDepartment && newStages.every(stage => stage.name.trim());
     const currentStage = newStages.find(s => s.id === activeStageTab);
@@ -369,6 +370,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
                                         <Separator className="my-6" />
                                         <DocumentsSection
                                             stage={stage} entityOptions={entityOptions} loadingEntities={loadingEntities}
+                                            selectedDepartment={selectedDepartment}
                                             kycDocuments={kycDocuments} loadingKycDocs={loadingKycDocs}
                                             automationTypes={automationTypes} loadingAutomations={loadingAutomations}
                                             onAddDocument={(isSpecial) => addDocument(stage.id, isSpecial)}
@@ -388,6 +390,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
                                     <Separator className="my-6" />
                                     <DocumentsSection
                                         stage={currentStage} entityOptions={entityOptions} loadingEntities={loadingEntities}
+                                        selectedDepartment={selectedDepartment}
                                         kycDocuments={kycDocuments} loadingKycDocs={loadingKycDocs}
                                         automationTypes={automationTypes} loadingAutomations={loadingAutomations}
                                         onAddDocument={(isSpecial) => addDocument(currentStage.id, isSpecial)}
@@ -488,11 +491,23 @@ function MultiEntityPicker({ entities, selectedEntities = [], onSelectionChange,
     const [open, setOpen] = useState(false);
     const toggleEntity = (entity: EntityOption) => {
         const entityKey = getEntityKey(entity);
-        const isSelected = selectedEntities.some(selected => getEntityKey(selected) === entityKey);
+        // Check against the job_level inside the existing selections
+        const isSelected = selectedEntities.some(selected => getEntityKey(selected?.job_level) === entityKey);
+
         if (isSelected) {
-            onSelectionChange(selectedEntities.filter(selected => getEntityKey(selected) !== entityKey));
+            onSelectionChange(selectedEntities.filter(selected => getEntityKey(selected?.job_level) !== entityKey));
         } else {
-            const newEntity = { entityType: entity.type, subdept_id: entity.subdept_id!, class_id: entity.class_id, subclass_id: entity.subclass_id, entityName: entity.name.replace(/^→\s*/g, '') };
+            const newEntity = {
+                entityName: entity.name.replace(/^→\s*/g, ''),
+                automationId: null,
+                job_level: {
+                    department_id: entity.department_id,
+                    subdepartment_id: entity.subdept_id || 0,
+                    class_id: entity.class_id || null,
+                    subclass_id: entity.subclass_id || null,
+                    level: entity.subclass_id ? 4 : entity.class_id ? 3 : 2
+                }
+            };
             onSelectionChange([...selectedEntities, newEntity]);
         }
     };
@@ -556,7 +571,7 @@ function DocumentCard({ doc, docIndex, onUpdateDocument, onRemoveDocument, onAdd
 }) {
     const [documentMode, setDocumentMode] = useState<'new' | 'existing'>(doc.linkedKycDocument ? 'existing' : 'new');
     const isLinkedDocument = !!doc.linkedKycDocument;
-    
+
     const handleKycDocumentSelect = (kycDocId: string) => {
         const selectedKycDoc = kycDocuments.find(d => d.id === kycDocId);
         if (selectedKycDoc) onUpdateDocument(doc.id, { linkedKycDocument: selectedKycDoc.id, kycId: selectedKycDoc.id, name: selectedKycDoc.display_name || selectedKycDoc.name, extractionSpecs: selectedKycDoc.fields || [] });
@@ -587,71 +602,58 @@ function DocumentCard({ doc, docIndex, onUpdateDocument, onRemoveDocument, onAdd
                                 <div className="text-center py-6 text-muted-foreground border border-dashed rounded-lg bg-white">
                                     <Info className="h-8 w-8 mx-auto mb-2 text-gray-400" />
                                     <p className="text-sm font-medium">No Target Entities Selected</p>
-                                    <p className="text-xs">To link automations, first mark this as a 'Special' document and select its target entities above.</p>
+                                    <p className="text-xs">Select entities above to link automations to them.</p>
                                 </div>
                             ) : (
                                 <div className="space-y-3">
-                                    <Label className="font-semibold text-gray-800">Link Automation per Entity</Label>
-                             {doc.targetEntities.map((entity) => {
-    const entityKey = getEntityKey(entity);
-    if (!entityKey) return null;
-    
-    return (
-        <div key={entityKey} className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center p-3 border rounded-lg bg-white shadow-sm">
-            <div className="flex items-center gap-2 overflow-hidden">
-                <div className="bg-slate-100 p-1.5 rounded">
-                    {entity.type === 'subclass' ? <Layers className="h-3.5 w-3.5 text-orange-600" /> : 
-                     entity.type === 'class' ? <LayoutGrid className="h-3.5 w-3.5 text-blue-600" /> : 
-                     <FileText className="h-3.5 w-3.5 text-green-600" />}
-                </div>
-                <div className="flex flex-col">
-                    <span className="text-sm font-semibold text-gray-800 truncate" title={entity.name}>
-                        {entity.name}
-                    </span>
-                    <span className="text-[10px] text-gray-400 uppercase font-medium">{entity.type}</span>
-                </div>
-            </div>
-            <div>
-                <ComboBox
-                    options={[
-                        { value: 'none', label: 'No automation' }, 
-                        ...(automationTypes?.map(automation => ({ 
-                            value: automation.id, 
-                            label: automation.name, 
-                            icon: <Webhook className="h-4 w-4 text-blue-500 mr-2" /> 
-                        })) || [])
-                    ]}
-                    // Important: Point to .automationId
-                    value={doc.automationLinks?.[entityKey]?.automationId || 'none'}
-                    onValueChange={(value) => {
-                        const newAutomationLinks = { ...(doc.automationLinks || {}) };
-                        if (value === 'none') {
-                            delete newAutomationLinks[entityKey];
-                        } else {
-                            // STORE STRUCTURED OBJECT
-                            newAutomationLinks[entityKey] = {
-                                automationId: value,
-                                job_level: {
-                                    // departmentId comes from the AddStageDialog's selectedDepartment state
-                                    department_id: selectedDepartment, 
-                                    subdepartment_id: entity.subdept_id,
-                                    class_id: entity.class_id || null,
-                                    subclass_id: entity.subclass_id || null,
-                                    level: entity.subclass_id ? 4 : entity.class_id ? 3 : 2
-                                }
-                            };
-                        }
-                        onUpdateDocument(doc.id, { automationLinks: newAutomationLinks });
-                    }}
-                    placeholder="Select an automation"
-                    emptyText="No automations found"
-                    loading={loadingAutomations}
-                    className="w-full bg-white"
-                />
-            </div>
-        </div>
-    );
-})}
+                                    <Label className="font-semibold text-gray-800">Entity-Specific Automations</Label>
+                                    {doc.targetEntities.map((entity, index) => (
+                                        <div key={index} className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center p-3 border rounded-lg bg-white shadow-sm">
+                                            <div className="flex items-center gap-2 overflow-hidden">
+                                                <div className="bg-slate-100 p-1.5 rounded">
+                                                    {entity.entityType === 'subclass' ? <Layers className="h-3.5 w-3.5 text-orange-600" /> :
+                                                        entity.entityType === 'class' ? <LayoutGrid className="h-3.5 w-3.5 text-blue-600" /> :
+                                                            <FileText className="h-3.5 w-3.5 text-green-600" />}
+                                                </div>
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm font-semibold text-gray-800 truncate">{entity.entityName}</span>
+                                                    <span className="text-[10px] text-gray-400 uppercase font-medium">{entity.entityType}</span>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <ComboBox
+                                                    options={[
+                                                        { value: 'none', label: 'No automation' },
+                                                        ...(automationTypes?.map(a => ({
+                                                            value: a.id,
+                                                            label: a.name,
+                                                            icon: <Webhook className="h-4 w-4 text-blue-500 mr-2" />
+                                                        })) || [])
+                                                    ]}
+                                                    value={entity.automationId || 'none'}
+                                                    onValueChange={(val) => {
+                                                        const updatedEntities = [...doc.targetEntities];
+                                                        if (val === 'none') {
+                                                            updatedEntities[index].automationId = null;
+                                                        } else {
+                                                            updatedEntities[index].automationId = val;
+                                                            updatedEntities[index].job_level = {
+                                                                department_id: selectedDepartment,
+                                                                subdepartment_id: entity.subdept_id || entity.job_level?.subdepartment_id,
+                                                                class_id: entity.class_id || entity.job_level?.class_id || null,
+                                                                subclass_id: entity.subclass_id || entity.job_level?.subclass_id || null,
+                                                                level: (entity.subclass_id || entity.job_level?.subclass_id) ? 4 :
+                                                                    (entity.class_id || entity.job_level?.class_id) ? 3 : 2
+                                                            };
+                                                        }
+                                                        onUpdateDocument(doc.id, { targetEntities: updatedEntities });
+                                                    }}
+                                                    placeholder="Select automation..."
+                                                    className="w-full bg-white"
+                                                />
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
                             )}
                         </div>

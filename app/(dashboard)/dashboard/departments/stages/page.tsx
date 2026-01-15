@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { Pencil, Info, Minus, Plus, Clock, FileText, ChevronLeft, ChevronRight, FileSpreadsheet, ChevronDown, ChevronUp, Star, RotateCcw, RotateCw, Trash2, Zap, Settings } from "lucide-react"
+import { Pencil, Info, Minus, Plus, Clock, FileText, ChevronLeft, ChevronRight, FileSpreadsheet, ChevronDown, ChevronUp, Star, RotateCcw, RotateCw, Trash2, Zap, Settings, Users } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { supabase } from "@/lib/supabase/client"
 import { AddStageDialog } from "./components/add-stage-dialog"
@@ -98,20 +98,36 @@ export default function Stages() {
   const [columnVisibility, setColumnVisibility] = useState({ index: true, entity: true, stageName: true, duration: true, followUp: true, status: true, controls: true })
   const [entityVisibility, setEntityVisibility] = useState<Record<string, boolean>>({})
 
-  // Helper to check if a specific entity has an automation linked in a stage
   const getEntityAutomation = (stage: Stage, entityKey: string) => {
     if (!stage.documents) return null;
-    // Find the first document that has an automation link for this specific entity
-    const docWithAutomation = stage.documents.find(
-      (doc) => doc.hasAutomation && doc.automationLinks?.[entityKey]
-    );
-    return docWithAutomation?.automationLinks?.[entityKey];
+
+    // Search through all documents in the stage
+    for (const doc of stage.documents) {
+      if (doc.targetEntities && Array.isArray(doc.targetEntities)) {
+        // Find the specific entity in this document's target list
+        const match = doc.targetEntities.find(te => {
+          // Construct the key from the nested job_level to compare
+          const teKey = te.job_level ?
+            `${te.job_level.subdepartment_id}:${te.job_level.class_id || 0}:${te.job_level.subclass_id || 0}` :
+            "";
+          return teKey === entityKey;
+        });
+
+        if (match?.automationId) {
+          return {
+            automationId: match.automationId,
+            docName: doc.name
+          };
+        }
+      }
+    }
+    return null;
   };
 
-  // Helper to check if a stage has ANY automation at all
+  // Updated: Check if the stage has any automation configured for any entity
   const hasAnyAutomation = (stage: Stage) => {
-    return stage.documents?.some(
-      (doc) => doc.hasAutomation && doc.automationLinks && Object.keys(doc.automationLinks).length > 0
+    return stage.documents?.some(doc =>
+      doc.targetEntities?.some(te => !!te.automationId)
     );
   };
 
@@ -343,12 +359,34 @@ export default function Stages() {
                     <span>Target Entities ({doc.targetEntities.length}):</span>
                   </div>
                   <div className="flex flex-wrap gap-1">
-                    {doc.targetEntities.map((entity, entityIndex) => (
-                      <Badge key={entityIndex} variant="outline" className="text-xs">
-                        {entity.entityName}
-                        <span className="ml-1 text-amber-600">({entity.entityType})</span>
-                      </Badge>
-                    ))}
+                    {doc.targetEntities && doc.targetEntities.length > 0 && (
+                      <div className="space-y-1 mt-2 pt-2 border-t border-gray-200">
+                        <div className="flex items-center gap-1 text-xs text-slate-500 font-medium">
+                          <Users className="h-3 w-3" />
+                          <span>Target Entities & Automations:</span>
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          {doc.targetEntities.map((entity, entityIndex) => (
+                            <div key={entityIndex} className="flex items-center justify-between bg-white p-1.5 rounded border text-[10px]">
+                              <div className="flex items-center gap-1">
+                                <span className="font-semibold text-slate-700">{entity.entityName}</span>
+                                <Badge variant="outline" className="px-1 py-0 h-3 text-[8px] uppercase">
+                                  {entity.job_level?.level ? `L${entity.job_level.level}` : entity.entityType}
+                                </Badge>
+                              </div>
+                              {entity.automationId ? (
+                                <Badge className="bg-amber-100 text-amber-700 border-amber-200 h-4 px-1 gap-0.5">
+                                  <Zap className="h-2 w-2 fill-amber-700" />
+                                  Auto
+                                </Badge>
+                              ) : (
+                                <span className="text-slate-400">Manual</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -2570,7 +2608,7 @@ export default function Stages() {
                     </>
                   )}
                   {leafEntities.map((entity, entityIndex) => {
-                    const entityKey = `${entity.subdeptId}:${entity.classIndex !== undefined ? (currentDept.subdepartments.find(sd => sd.id === entity.subdeptId)?.classes[entity.classIndex]?.id || 0) : 0}:${entity.subclassIndex !== undefined ? (currentDept.subdepartments.find(sd => sd.id === entity.subdeptId)?.classes[entity.classIndex]?.subClasses[entity.subclassIndex]?.id || 0) : 0}`;
+                    const entityKey = `${entity.subdeptId}:${entity.id.includes('class') ? entity.id.split('-').pop() : (entity.class_id || 0)}:${entity.id.includes('subclass') ? entity.id.split('-').pop() : (entity.subclass_id || 0)}`;
 
                     const allocation = getStageAllocation(stage, entity);
                     const automation = getEntityAutomation(stage, entityKey);
