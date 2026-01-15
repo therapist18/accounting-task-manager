@@ -114,8 +114,35 @@ export function RequirementsTable({
     return { type: 'unknown', documentId: cleanId, fieldId: null };
   }, []);
 
+  const filteredTasks = useMemo(() => tasks.filter(task => activeTab === "completed" ? (task.status === "completed" || task.status === "approved") : (task.status !== "completed" && task.status !== "approved")), [tasks, activeTab]);
+
+  const companyIds = useMemo(() =>
+    [...new Set(filteredTasks.map(t => t.company_id).filter(Boolean))],
+    [filteredTasks]
+  );
+
+  // Memoize individual IDs extraction
+  const individualIds = useMemo(() => {
+    const ids = new Set<number>();
+    filteredTasks.forEach(task => {
+      if (Array.isArray(task.participants_details)) {
+        task.participants_details.forEach(participant => {
+          if (participant.id && participant.type === 'individual') {
+            ids.add(participant.id);
+          }
+        });
+      }
+      if (Array.isArray(task.references)) {
+        task.references.forEach(ref => ref.id && ids.add(ref.id));
+      }
+    });
+    return Array.from(ids);
+  }, [filteredTasks]);
+
   const fetchAllIndividualData = useCallback(async (tasksToFetch: any[]) => {
-    // 1. Collect all unique individual IDs from tasks and store director details
+    console.log('🔄 [fetchAllIndividualData] Starting optimized fetch...');
+
+    // 1. COLLECT ALL UNIQUE IDs IN ONE PASS
     const uniqueIds = new Set<number>();
     const directorMap = new Map<number, any>();
 
@@ -128,6 +155,8 @@ export function RequirementsTable({
           }
         });
       }
+
+      // Get references
       if (Array.isArray(task.references)) {
         task.references.forEach(ref => ref.id && uniqueIds.add(ref.id));
       }
@@ -148,95 +177,77 @@ export function RequirementsTable({
       }
     });
 
-    // 2. Convert to array and filter out null/undefined
     const validIds = Array.from(uniqueIds).filter(id => id != null);
-    if (validIds.length === 0) return;
+    if (validIds.length === 0) {
+      console.log('⏭️ No individual IDs to fetch');
+      return;
+    }
+
+    console.log(`📋 Fetching data for ${validIds.length} individuals`);
 
     try {
-      // 3. Fetch data in parallel
+      // 2. PARALLEL FETCH - Both queries run simultaneously
       const [individualsRes, documentsRes] = await Promise.all([
-        // Get basic individual info
         supabase
           .from('registry_individuals')
           .select('id, full_name')
           .in('id', validIds),
 
-        // Get documents for these individuals
         supabase
           .from('acc_portal_directors_documents')
-          .select(`*, acc_portal_kyc (id, name, display_name)`)
+          .select('*, acc_portal_kyc (id, name, display_name)')
           .in('director_id', validIds)
           .order('created_at', { ascending: false })
       ]);
 
-      // 4. Handle errors
+      // 3. ERROR HANDLING
       if (individualsRes.error) throw individualsRes.error;
       if (documentsRes.error) throw documentsRes.error;
 
-      // 5. Process and store individual names, prioritizing director details
-      const namesMap = {};
+      console.log(`✅ Fetched ${individualsRes.data?.length || 0} individuals and ${documentsRes.data?.length || 0} documents`);
 
-      // First add registry individuals
+      // 4. BUILD NAMES MAP (Single Pass)
+      const namesMap: Record<number, string> = {};
+
       individualsRes.data?.forEach(ind => {
         namesMap[ind.id] = ind.full_name;
       });
 
-      // Then override with director details if available
+      // Override with director details if available
       directorMap.forEach((details, id) => {
         if (details?.full_name) {
           namesMap[id] = details.full_name;
         }
       });
 
-      setIndividualNames(prev => ({ ...prev, ...namesMap }));
+      // 5. BUILD DOCUMENTS MAP (Single Pass)
+      const documentsByDirector: Record<string, any[]> = {};
 
-      const documentMap = new Map();
       documentsRes.data?.forEach(doc => {
-        if (doc.document_id) {
-          documentMap.set(doc.document_id, doc);
-        }
-      });
-
-      // 6. Process and store documents by director with additional metadata
-      const documentsByDirector = documentsRes.data?.reduce((acc, doc) => {
         const directorId = doc.director_id;
-        if (!directorId) return acc;
+        if (!directorId) return;
 
-        // Check if this document matches any KYC document ID
-        const kycDocId = doc.kyc_document_id || doc.document_id;
-        const matchingKycDoc = kycDocId ? documentMap.get(kycDocId) : null;
-
-        if (!acc[directorId]) {
-          acc[directorId] = [];
+        if (!documentsByDirector[directorId]) {
+          documentsByDirector[directorId] = [];
         }
 
-        // Create document with merged data
-        const documentWithMetadata = {
+        // Enrich document with director details
+        const enrichedDoc = {
           ...doc,
           director_details: directorMap.get(directorId) || null,
-          // If we have a matching KYC document, merge its data
-          ...(matchingKycDoc ? {
-            kyc_document: {
-              id: matchingKycDoc.id,
-              name: matchingKycDoc.acc_portal_kyc?.name,
-              display_name: matchingKycDoc.acc_portal_kyc?.display_name,
-              file_path: matchingKycDoc.file_path,
-              extracted_details: matchingKycDoc.extracted_details
-            }
-          } : {})
         };
 
-        acc[directorId].push(documentWithMetadata);
-        return acc;
-      }, {});
+        documentsByDirector[directorId].push(enrichedDoc);
+      });
 
-      setAllIndividualDocuments(prev => ({
-        ...prev,
-        ...(documentsByDirector || {})
-      }));
+      // 6. SINGLE STATE UPDATE
+      setIndividualNames(prev => ({ ...prev, ...namesMap }));
+      setAllIndividualDocuments(prev => ({ ...prev, ...documentsByDirector }));
+
+      console.log('✅ [fetchAllIndividualData] Complete!');
 
     } catch (err) {
-      console.error('Error fetching individual data:', err);
+      console.error('❌ Error fetching individual data:', err);
       toast({
         title: "Error fetching individual data",
         description: err.message,
@@ -247,43 +258,106 @@ export function RequirementsTable({
 
   const fetchCompanyData = useCallback(async (tasksToFetch: any[]) => {
     const companyIds = [...new Set(tasksToFetch.map(t => t.company_id).filter(Boolean))];
-    if (companyIds.length === 0) return;
+    if (companyIds.length === 0) {
+      console.log('⏭️ No company IDs to fetch');
+      return;
+    }
+
+    console.log(`📋 Fetching data for ${companyIds.length} companies`);
+
     try {
-      const { data, error } = await supabase.from('acc_portal_company_duplicate').select('id, company_name').in('id', companyIds);
+      const { data, error } = await supabase
+        .from('acc_portal_company_duplicate')
+        .select('id, company_name')
+        .in('id', companyIds);
+
       if (error) throw error;
-      const companiesMap = data?.reduce((acc, co) => ({ ...acc, [co.id]: co }), {});
+
+      // Single pass reduce
+      const companiesMap = data?.reduce((acc, co) => {
+        acc[co.id] = co;
+        return acc;
+      }, {} as Record<number, any>);
+
       setCompanyData(companiesMap || {});
-    } catch (err) { console.error('Error fetching company data:', err); }
+      console.log(`✅ Fetched ${data?.length || 0} companies`);
+
+    } catch (err) {
+      console.error('❌ Error fetching company data:', err);
+    }
   }, []);
 
   const fetchAllCompanyDocuments = useCallback(async (tasksToFetch: any[]) => {
     const companyIds = [...new Set(tasksToFetch.map(t => t.company_id).filter(Boolean))];
-    if (companyIds.length === 0) return;
+    if (companyIds.length === 0) {
+      console.log('⏭️ No company IDs to fetch documents for');
+      return;
+    }
+
+    console.log(`📋 Fetching documents for ${companyIds.length} companies`);
+
     try {
-      const { data, error } = await supabase.from('acc_portal_kyc_uploads').select(`*, acc_portal_kyc (id, name, display_name)`).in('company_id', companyIds).order('created_at', { ascending: false });
+      const { data, error } = await supabase
+        .from('acc_portal_kyc_uploads')
+        .select('*, acc_portal_kyc (id, name, display_name)')
+        .in('company_id', companyIds)
+        .order('created_at', { ascending: false });
+
       if (error) throw error;
+
+      console.log(`✅ Fetched ${data?.length || 0} company documents`);
+
+      // Single pass reduce - group by company_id
       const documentsByCompany = data?.reduce((acc, doc) => {
-        acc[doc.company_id] = [...(acc[doc.company_id] || []), doc];
+        const companyId = doc.company_id;
+        if (!companyId) return acc;
+
+        if (!acc[companyId]) {
+          acc[companyId] = [];
+        }
+        acc[companyId].push(doc);
         return acc;
-      }, {});
+      }, {} as Record<string, any[]>);
+
       setAllCompanyDocuments(documentsByCompany || {});
-    } catch (err) { console.error('Error fetching company documents:', err); }
+
+    } catch (err) {
+      console.error('❌ Error fetching company documents:', err);
+    }
   }, []);
 
-  const filteredTasks = useMemo(() => tasks.filter(task => activeTab === "completed" ? (task.status === "completed" || task.status === "approved") : (task.status !== "completed" && task.status !== "approved")), [tasks, activeTab]);
   const hasReferencesColumn = useMemo(() => filteredTasks.some(task => REFERENCE_SUBDEPARTMENT_IDS.includes(task.subdepartment?.id) || REFERENCE_SUBDEPARTMENT_IDS.includes(task.subdepartment?.parent_id)), [filteredTasks]);
 
   useEffect(() => {
-    if (!filteredTasks.length) { setDocumentsLoading(false); return; }
+    if (!filteredTasks.length) {
+      setDocumentsLoading(false);
+      return;
+    }
+
     const loadAllData = async () => {
       setDocumentsLoading(true);
-      await Promise.all([
-        fetchAllIndividualData(filteredTasks),
-        fetchCompanyData(filteredTasks),
-        fetchAllCompanyDocuments(filteredTasks)
-      ]);
-      setDocumentsLoading(false);
+      console.log('🚀 [loadAllData] Starting parallel data fetch for', filteredTasks.length, 'tasks');
+
+      const startTime = performance.now();
+
+      try {
+        // PARALLEL EXECUTION - All 3 fetches run simultaneously
+        await Promise.all([
+          fetchAllIndividualData(filteredTasks),
+          fetchCompanyData(filteredTasks),
+          fetchAllCompanyDocuments(filteredTasks)
+        ]);
+
+        const endTime = performance.now();
+        console.log(`✅ [loadAllData] Complete in ${Math.round(endTime - startTime)}ms`);
+
+      } catch (error) {
+        console.error('❌ [loadAllData] Error:', error);
+      } finally {
+        setDocumentsLoading(false);
+      }
     };
+
     loadAllData();
   }, [filteredTasks, fetchAllIndividualData, fetchCompanyData, fetchAllCompanyDocuments]);
 
@@ -296,11 +370,11 @@ export function RequirementsTable({
         if (!isMounted) return;
         if (docsErr) throw docsErr;
         setDocuments((docsRes || []).map(doc => ({ ...doc, display_name: doc.display_name || doc.name })));
-        
+
         // Fetch class requirements for each task
         const taskDataPromises = filteredTasks.map(async (task) => {
           const jobLevel = task.job_level || {};
-          
+
           // Construct a query that targets the job_level JSON structure
           let query = supabase
             .from('tm_class_requirements')
@@ -313,10 +387,10 @@ export function RequirementsTable({
           if (jobLevel.subdepartment_id) {
             query = query.eq('job_level->>subdepartment_id', jobLevel.subdepartment_id.toString());
           }
-          
+
           // Use .is() for null values in JSONB
           query = query.eq('job_level->>class_id', jobLevel.class_id ? jobLevel.class_id.toString() : 'null');
-          
+
           if (jobLevel.subclass_id) {
             query = query.eq('job_level->>subclass_id', jobLevel.subclass_id.toString());
           } else {
@@ -405,7 +479,7 @@ export function RequirementsTable({
 
         if (docDef && !documentsMap.has(docId)) {
           const itemWithSettings = { ...item, ...docDef, selectionId: item.id };
-          
+
           // Determine category - prioritize template status
           let category: 'company' | 'individual' | 'template' = 'individual';
           if (docDef.has_template === true || docDef.has_template === 'true') {

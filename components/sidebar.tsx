@@ -13,6 +13,7 @@ import {
   Home,
   LayoutDashboard,
   Users,
+  Zap,
 } from "lucide-react"
 import {
   Sidebar,
@@ -109,6 +110,11 @@ const navItems = [
         href: "/dashboard/departments/documents+fields",
         icon: FileText,
       },
+      {
+        title: "Automations",
+        href: "/dashboard/departments/automation",
+        icon: Zap,
+      }
     ],
   },
   {

@@ -85,12 +85,13 @@ const generateRequirementId = (index: number, existingRequirements: ApiRequireme
 }
 
 export default function UploadRequirements({ departments: initialDepartments }: UploadRequirementsProps) {
-  const [departments, setDepartments] = useState<Department[]>(initialDepartments)
+const [departments, setDepartments] = useState<Department[]>(initialDepartments || [])
   const [activeDept, setActiveDept] = useState<string>('')
   const [activeSubdept, setActiveSubdept] = useState<Record<string, string>>({})
   const [activeClass, setActiveClass] = useState<Record<string, string>>({})
   const [activeSubclass, setActiveSubclass] = useState<Record<string, string>>({})
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({})
+  const [showDefaultDisplayOnly, setShowDefaultDisplayOnly] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [deleteContext, setDeleteContext] = useState<{ type: string, index: number } | null>(null)
@@ -128,7 +129,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
 
   useEffect(() => {
-    if (departments.length === 0 || isReady) return
+    if (!departments || departments.length === 0 || isReady) return
 
     const initialDept = departments[0]?.id || ''
     setActiveDept(initialDept)
@@ -155,9 +156,11 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     setIsReady(true)
   }, [departments, isReady])
 
-  useEffect(() => {
-    setDepartments(initialDepartments)
-  }, [initialDepartments])
+useEffect(() => {
+  if (initialDepartments) {
+    setDepartments(initialDepartments);
+  }
+}, [initialDepartments])
 
   const toggleExpanded = (key: string) => {
     setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }))
@@ -420,301 +423,197 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   }
 
   const saveRequirementsForContext = async (context: EditingContext, requirements: ApiRequirement[]) => {
-    console.log('[saveRequirementsForContext] Starting save with context:', JSON.stringify(context, null, 2));
-    console.log('[saveRequirementsForContext] Requirements to save:', JSON.stringify(requirements, null, 2));
-  
-    try {
-      let classId = '';
-      let requirementType = '';
-  
-      if (context.type === 'subdepartment') {
-        classId = context.subdepartmentId;
-        requirementType = 'subdepartment';
-      } else if (context.type === 'class') {
-        classId = `${context.subdepartmentId}_${context.classId}`;
-        requirementType = 'class';
-      } else if (context.type === 'subclass') {
-        classId = `${context.subdepartmentId}_${context.classId}_${context.subclassId}`;
-        requirementType = 'subclass';
+  try {
+    // 1. Construct the job_level object based on context
+    const jobLevel = {
+      department_id: parseInt(context.departmentId),
+      subdepartment_id: parseInt(context.subdepartmentId),
+      class_id: context.classId ? context.classId : null,
+      subclass_id: context.subclassId ? context.subclassId : null,
+      level: context.subclassId ? 4 : context.classId ? 3 : 2 // 2:Subdept, 3:Class, 4:Subclass
+    };
+
+    console.log('[saveRequirementsForContext] Target Job Level:', jobLevel);
+
+    // 2. Build query to find existing record using job_level keys
+    let query = supabase
+      .from('tm_class_requirements')
+      .select('*')
+      .eq('job_level->department_id', jobLevel.department_id)
+      .eq('job_level->subdepartment_id', jobLevel.subdepartment_id)
+      .eq('job_level->class_id', jobLevel.class_id);
+
+    if (jobLevel.subclass_id) {
+      query = query.eq('job_level->subclass_id', jobLevel.subclass_id);
+    } else {
+      query = query.is('job_level->subclass_id', null);
+    }
+
+    const { data: existingRecord, error: fetchError } = await query.maybeSingle();
+
+    if (fetchError) throw fetchError;
+
+    // 3. Prepare the Clean Requirements (logic remains similar)
+    const cleanRequirementsToSave = requirements.map(req => {
+      const { requirement_context, web_automation, ...cleanReq } = req;
+      return {
+        ...cleanReq,
+        id: req.id?.toString() || Date.now().toString(),
+        name: req.name || '',
+        description: req.description || '',
+        type: req.type || 'standard',
+        order: req.order || 0,
+        isVisible: req.isVisible !== false,
+        isRequired: req.isRequired !== false,
+        kycDocumentId: req.kycDocumentId || undefined,
+        applicantType: req.applicantType || 'individual',
+        requiredDocumentCount: req.requiredDocumentCount || 1,
+        billingEntity: req.billingEntity || 'applicant',
+        instructions: req.instructions || ''
+      };
+    });
+
+    const requirementContexts = requirements.map(req => ({
+      requirementId: req.id?.toString() || cleanRequirementsToSave.find(c => c.name === req.name)?.id,
+      context: req.requirement_context || {
+        applicantType: req.applicantType || 'individual',
+        requiredDocumentCount: req.requiredDocumentCount || 1,
+        billingEntity: req.billingEntity || 'applicant',
+        instructions: req.instructions || '',
+        type: req.type || 'standard'
       }
-  
-      console.log(`[saveRequirementsForContext] Generated classId: ${classId}, type: ${requirementType}`);
-  
-      const { data: existingRecord, error: fetchError } = await supabase
+    }));
+
+    const webAutomations = requirements
+      .filter(req => req.web_automation)
+      .map(req => ({
+        requirementId: req.id?.toString() || cleanRequirementsToSave.find(c => c.name === req.name)?.id,
+        automation: req.web_automation
+      }));
+
+    const recordData = {
+      requirements: cleanRequirementsToSave,
+      requirement_context: requirementContexts,
+      web_automation: webAutomations.length > 0 ? webAutomations : null,
+      job_level: jobLevel, // Save the new structure
+      updated_at: new Date().toISOString()
+    };
+
+    if (existingRecord) {
+      const { error: updateError } = await supabase
         .from('tm_class_requirements')
-        .select('*')
-        .eq('class_id', classId)
-        .eq('type', requirementType)
-        .single();
-  
-      if (fetchError && fetchError.code !== 'PGRST116') {
-        console.error('[saveRequirementsForContext] Error fetching existing record:', fetchError);
-        throw fetchError;
-      }
-  
-      // Process requirements - clean the data for storage
-      const cleanRequirementsToSave = requirements.map(req => {
-        // Remove JSON columns from the main requirement object to avoid duplication
-        const { requirement_context, web_automation, ...cleanReq } = req;
+        .update(recordData)
+        .eq('id', existingRecord.id);
+
+      if (updateError) throw updateError;
+    } else {
+      const { error: insertError } = await supabase
+        .from('tm_class_requirements')
+        .insert({
+          ...recordData,
+          created_at: new Date().toISOString()
+        });
+
+      if (insertError) throw insertError;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('[saveRequirementsForContext] Error:', error);
+    throw error;
+  }
+}
+
+const refreshDepartments = async () => {
+  try {
+    const { data: departmentsData, error } = await supabase
+      .from('tm_departments')
+      .select('*, tm_subdepartments(*)')
+      .order('order', { ascending: true });
+
+    if (error) throw error;
+
+    const data = departmentsData || [];
+    const { data: allReqRecords, error: reqError } = await supabase
+      .from('tm_class_requirements')
+      .select('*');
+
+    if (reqError) throw reqError;
+
+    const processedDepartments = data.map(dept => {
+      const subdepartments = (dept.tm_subdepartments || []).map(subdept => {
+        
+        // Helper to find requirement record by job_level
+        const findRecord = (cId: string | null, scId: string | null) => {
+          return allReqRecords?.find(r => 
+            r.job_level?.department_id === dept.id &&
+            r.job_level?.subdepartment_id === subdept.id &&
+            String(r.job_level?.class_id) === String(cId || 'null') && // Handle null vs undefined
+            String(r.job_level?.subclass_id) === String(scId || 'null')
+          ) || allReqRecords?.find(r => // Fallback for legacy records or exact null match
+             r.job_level?.department_id === dept.id &&
+             r.job_level?.subdepartment_id === subdept.id &&
+             r.job_level?.class_id == cId &&
+             r.job_level?.subclass_id == scId
+          );
+        };
+
+        const classes = (subdept.classes || []).map(cls => {
+          // Find record for this class (level 3)
+          const classRec = findRecord(cls.id.toString(), null);
+
+          const subClasses = (cls.subClasses || []).map(subCls => {
+            // Find record for this subclass (level 4)
+            const subClsRec = findRecord(cls.id.toString(), subCls.id.toString());
+            
+            return {
+              ...subCls,
+              requirements: mapRequirementsData(subClsRec)
+            };
+          });
+
+          return {
+            ...cls,
+            requirements: mapRequirementsData(classRec),
+            subClasses
+          };
+        });
+
+        // Find record for subdepartment (level 2)
+        const subDeptRec = findRecord(null, null);
+
         return {
-          ...cleanReq,
-          id: req.id?.toString() || Date.now().toString(),
-          name: req.name || '',
-          description: req.description || '',
-          type: req.type || 'standard',
-          order: req.order || 0,
-          isVisible: req.isVisible !== false,
-          isRequired: req.isRequired !== false,
-          kycDocumentId: req.kycDocumentId || undefined,
-          hasWebForm: req.hasWebForm || false,
-          webFormName: req.webFormName || undefined,
-          automationId: req.automationId || undefined,
-          // Keep backward compatibility fields
-          applicantType: req.applicantType || 'individual',
-          requiredDocumentCount: req.requiredDocumentCount || 1,
-          billingEntity: req.billingEntity || 'applicant',
-          instructions: req.instructions || ''
+          ...subdept,
+          classes,
+          upload_requirements: mapRequirementsData(subDeptRec)
         };
       });
-  
-      // Extract requirement contexts and web automations separately
-      const requirementContexts = requirements.map(req => ({
-        requirementId: req.id?.toString() || Date.now().toString(),
-        context: req.requirement_context || {
-          applicantType: req.applicantType || 'individual',
-          requiredDocumentCount: req.requiredDocumentCount || 1,
-          billingEntity: req.billingEntity || 'applicant',
-          instructions: req.instructions || '',
-          type: req.type || 'standard',
-          conditions: [],
-          documentTypes: []
-        }
-      }));
-  
-      const webAutomations = requirements
-        .filter(req => req.web_automation !== null)
-        .map(req => ({
-          requirementId: req.id?.toString() || Date.now().toString(),
-          automation: req.web_automation
-        }));
-  
-      console.log('[saveRequirementsForContext] Clean requirements:', JSON.stringify(cleanRequirementsToSave, null, 2));
-      console.log('[saveRequirementsForContext] Extracted contexts:', JSON.stringify(requirementContexts, null, 2));
-      console.log('[saveRequirementsForContext] Extracted automations:', JSON.stringify(webAutomations, null, 2));
-  
-      const recordData = {
-        requirements: cleanRequirementsToSave,
-        requirement_context: requirementContexts, // Store as array in single column
-        web_automation: webAutomations.length > 0 ? webAutomations : null,
-        updated_at: new Date().toISOString()
-      };
-  
-      if (existingRecord) {
-        const { data: updatedRecord, error: updateError } = await supabase
-          .from('tm_class_requirements')
-          .update(recordData)
-          .eq('class_id', classId)
-          .eq('type', requirementType)
-          .select();
-  
-        if (updateError) {
-          console.error('[saveRequirementsForContext] Error updating requirements:', updateError);
-          throw updateError;
-        }
-        console.log('[saveRequirementsForContext] Update successful');
-      } else {
-        const { data: insertedRecord, error: insertError } = await supabase
-          .from('tm_class_requirements')
-          .insert({
-            class_id: classId,
-            type: requirementType,
-            ...recordData,
-            created_at: new Date().toISOString()
-          })
-          .select();
-  
-        if (insertError) {
-          console.error('[saveRequirementsForContext] Error inserting requirements:', insertError);
-          throw insertError;
-        }
-        console.log('[saveRequirementsForContext] Insert successful');
-      }
-  
-      return true;
-    } catch (error) {
-      console.error('[saveRequirementsForContext] Error:', error);
-      throw error;
-    }
-  }
 
-  const refreshDepartments = async () => {
-    try {
-      const { data: departmentsData, error } = await supabase
-        .from('tm_departments')
-        .select('*, tm_subdepartments(*)')
-        .order('order', { ascending: true })
-  
-      if (error) throw error
-  
-      const { data: requirements, error: reqError } = await supabase
-        .from('tm_class_requirements')
-        .select('*')
-        .order('id', { ascending: true })
-  
-      if (reqError) throw reqError
-  
-      // Process departments and merge requirement contexts
-      const processedDepartments = departmentsData.map(dept => {
-        const subdepartments = (dept.tm_subdepartments || []).map(subdept => {
-          const classes = (subdept.classes || []).map(cls => {
-            const classId = `${subdept.id}_${cls.id}`
-            const classRequirementsRecord = requirements?.find(req =>
-              req.class_id === classId && req.type === 'class'
-            )
-  
-            const classRequirements = classRequirementsRecord?.requirements?.map((r: any, idx: number) => {
-              // Find the corresponding context and automation
-              const contextData = classRequirementsRecord.requirement_context?.find(
-                (ctx: any) => ctx.requirementId === r.id
-              )?.context;
-              
-              const automationData = classRequirementsRecord.web_automation?.find(
-                (auto: any) => auto.requirementId === r.id
-              )?.automation;
-  
-              return {
-                id: r.id?.toString() || generateRequirementId(idx, classRequirementsRecord.requirements),
-                name: r.name || '',
-                description: r.description || '',
-                type: r.type || 'standard',
-                order: r.order || idx,
-                isVisible: r.isVisible !== false,
-                isRequired: r.isRequired !== false,
-                kycDocumentId: r.kycDocumentId || undefined,
-                hasWebForm: r.hasWebForm || false,
-                webFormName: r.webFormName || '',
-                automationId: r.automationId || '',
-                // Merge the extracted JSON data back
-                requirement_context: contextData || null,
-                web_automation: automationData || null,
-                // Keep backward compatibility
-                applicantType: r.applicantType || contextData?.applicantType || 'individual',
-                requiredDocumentCount: r.requiredDocumentCount || contextData?.requiredDocumentCount || 1,
-                billingEntity: r.billingEntity || contextData?.billingEntity || 'applicant',
-                instructions: r.instructions || contextData?.instructions || ''
-              }
-            }) || []
-  
-            // Apply similar logic for subClasses...
-            const subClasses = (cls.subClasses || []).map(subCls => {
-              const subClassId = `${classId}_${subCls.id}`
-              const subClassRequirementsRecord = requirements?.find(req =>
-                req.class_id === subClassId && req.type === 'subclass'
-              )
-  
-              const subClassRequirements = subClassRequirementsRecord?.requirements?.map((r: any, idx: number) => {
-                const contextData = subClassRequirementsRecord.requirement_context?.find(
-                  (ctx: any) => ctx.requirementId === r.id
-                )?.context;
-                
-                const automationData = subClassRequirementsRecord.web_automation?.find(
-                  (auto: any) => auto.requirementId === r.id
-                )?.automation;
-  
-                return {
-                  id: r.id?.toString() || generateRequirementId(idx, subClassRequirementsRecord.requirements),
-                  name: r.name || '',
-                  description: r.description || '',
-                  type: r.type || 'standard',
-                  order: r.order || idx,
-                  isVisible: r.isVisible !== false,
-                  isRequired: r.isRequired !== false,
-                  kycDocumentId: r.kycDocumentId || undefined,
-                  hasWebForm: r.hasWebForm || false,
-                  webFormName: r.webFormName || '',
-                  automationId: r.automationId || '',
-                  requirement_context: contextData || null,
-                  web_automation: automationData || null,
-                  applicantType: r.applicantType || contextData?.applicantType || 'individual',
-                  requiredDocumentCount: r.requiredDocumentCount || contextData?.requiredDocumentCount || 1,
-                  billingEntity: r.billingEntity || contextData?.billingEntity || 'applicant',
-                  instructions: r.instructions || contextData?.instructions || ''
-                }
-              }) || []
-  
-              return {
-                ...subCls,
-                parentClassId: classId,
-                requirements: subClassRequirements
-              }
-            })
-  
-            return {
-              ...cls,
-              requirements: classRequirements,
-              subClasses
-            }
-          })
-  
-          // Apply similar logic for subdepartment requirements...
-          const subdeptRequirementsRecord = requirements?.find(req =>
-            req.class_id === subdept.id.toString() && req.type === 'subdepartment'
-          )
-  
-          const uploadRequirements = subdeptRequirementsRecord?.requirements?.map((r: any, idx: number) => {
-            const contextData = subdeptRequirementsRecord.requirement_context?.find(
-              (ctx: any) => ctx.requirementId === r.id
-            )?.context;
-            
-            const automationData = subdeptRequirementsRecord.web_automation?.find(
-              (auto: any) => auto.requirementId === r.id
-            )?.automation;
-  
-            return {
-              id: r.id?.toString() || generateRequirementId(idx, subdeptRequirementsRecord.requirements),
-              name: r.name || '',
-              description: r.description || '',
-              type: r.type || 'standard',
-              order: r.order || idx,
-              isVisible: r.isVisible !== false,
-              isRequired: r.isRequired !== false,
-              kycDocumentId: r.kycDocumentId || undefined,
-              hasWebForm: r.hasWebForm || false,
-              webFormName: r.webFormName || '',
-              automationId: r.automationId || '',
-              requirement_context: contextData || null,
-              web_automation: automationData || null,
-              applicantType: r.applicantType || contextData?.applicantType || 'individual',
-              requiredDocumentCount: r.requiredDocumentCount || contextData?.requiredDocumentCount || 1,
-              billingEntity: r.billingEntity || contextData?.billingEntity || 'applicant',
-              instructions: r.instructions || contextData?.instructions || ''
-            }
-          }) || []
-  
-          return {
-            ...subdept,
-            classes,
-            upload_requirements: uploadRequirements
-          }
-        })
-  
-        return {
-          ...dept,
-          tm_subdepartments: subdepartments,
-          subdepartments: subdepartments
-        }
-      })
-  
-      setDepartments(processedDepartments)
-    } catch (error) {
-      console.error('Error refreshing departments:', error)
-      toast({
-        title: "Error",
-        description: "Failed to refresh departments. Please try again.",
-        variant: "destructive"
-      })
-    }
+      return { ...dept, subdepartments: subdepartments, tm_subdepartments: subdepartments };
+    });
+
+     setDepartments(processedDepartments || []);
+  } catch (error) {
+    console.error('Error refreshing departments:', error);
+    setDepartments([]); 
   }
+};
+
+// Helper to map the JSON structure back to the component state
+const mapRequirementsData = (record: any) => {
+  if (!record || !record.requirements) return [];
+  
+  return record.requirements.map((r: any) => {
+    const contextData = record.requirement_context?.find((ctx: any) => ctx.requirementId === r.id)?.context;
+    const automationData = record.web_automation?.find((auto: any) => auto.requirementId === r.id)?.automation;
+
+    return {
+      ...r,
+      requirement_context: contextData || null,
+      web_automation: automationData || null
+    };
+  });
+};
 
   useEffect(() => {
     refreshDepartments()
@@ -1423,6 +1322,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
           onClassClick={handleClassClick}
           onSubclassClick={handleSubclassClick}
           onToggleExpand={toggleExpanded}
+          showDefaultDisplayOnly={showDefaultDisplayOnly}
+          onToggleDefaultDisplay={() => setShowDefaultDisplayOnly(!showDefaultDisplayOnly)}
         />
         <div className="flex-1 p-4 bg-white dark:bg-gray-900">
           {renderMainContent()}

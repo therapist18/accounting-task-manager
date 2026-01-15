@@ -541,34 +541,62 @@ const processImageField = (placeholder, targetEntity, combinedCache, masterField
     }
 
     const searchId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id);
+    console.log(`🖼️ processImageField: Looking for image with searchId: ${searchId}`);
 
     for (const id of placeholder.master_field_ids) {
         const mf = masterFields.get(parseInt(id, 10));
-        if (!mf?.sources) continue;
+        console.log(`🖼️ processImageField: Master field ${id}:`, mf);
+
+        if (!mf?.sources) {
+            console.log(`🖼️ processImageField: No sources found for master field ${id}`);
+            continue;
+        }
 
         for (const source of mf.sources) {
+            console.log(`🖼️ processImageField: Checking source:`, source);
+
             const tableData = combinedCache[source.table];
-            if (!tableData) continue;
+            console.log(`🖼️ processImageField: Table data for ${source.table}:`, tableData);
+
+            if (!tableData) {
+                console.log(`🖼️ processImageField: No table data found for ${source.table}`);
+                continue;
+            }
 
             const linkingVar = source.linking_variable || 'id';
             const reqDocIds = Array.isArray(source.document_id)
                 ? source.document_id
                 : [source.document_id];
 
-            const match = Object.values(tableData).find(d =>
-                reqDocIds.includes(d.document_id || d.kyc_document_id) &&
-                String(d[linkingVar] || d.id) === searchId
-            );
+            console.log(`🖼️ processImageField: Looking for document_ids: ${reqDocIds}, linkingVar: ${linkingVar}`);
+
+            const match = Object.values(tableData).find(d => {
+                const docIdMatch = reqDocIds.includes(d.document_id || d.kyc_document_id);
+                const entityIdMatch = String(d[linkingVar] || d.id) === searchId;
+                console.log(`🖼️ processImageField: Checking record:`, {
+                    record: d,
+                    docIdMatch,
+                    entityIdMatch,
+                    recordDocId: d.document_id || d.kyc_document_id,
+                    recordEntityId: d[linkingVar] || d.id
+                });
+                return docIdMatch && entityIdMatch;
+            });
+
+            console.log(`🖼️ processImageField: Match found:`, match);
 
             if (match?.file_path) {
+                const imageUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${match.file_path}`;
+                console.log(`🖼️ processImageField: Found image URL:`, imageUrl);
                 return {
-                    value: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${match.file_path}`,
+                    value: imageUrl,
                     source: 'Image Cache'
                 };
             }
         }
     }
 
+    console.log(`🖼️ processImageField: No image found, returning empty result`);
     return { value: '', source: null };
 };
 
@@ -636,6 +664,7 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
     // Log entity_type for debugging
     if (placeholder.entity_type) {
         console.log(`🏷️ entity_type: ${placeholder.entity_type}`);
+        console.log(`master_field_ids:`, placeholder.master_field_ids);
     }
 
     // CHECK FOR CURRENT DATE FIRST (before getting target entity)
@@ -1331,10 +1360,197 @@ export default function TemplateGenerationDialog({
     const [additionalCache, setAdditionalCache] = useState({});
     const [fetchingTables, setFetchingTables] = useState(new Set());
     const [availableDocuments, setAvailableDocuments] = useState<Array<{ id: string; display_name: string; name: string }>>([]);
+    const [headerContent, setHeaderContent] = useState('');
+    const [footerContent, setFooterContent] = useState('');
 
     const docxTemplateBuffer = useRef(null);
     const isWordTemplate = selectedTemplate?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    // Add to state declarations (around line 108)
+    const [loadedDraft, setLoadedDraft] = useState<any>(null);
+    const [isLoadingDraft, setIsLoadingDraft] = useState(false);
 
+    // Add this function to detect and load drafts
+    const loadExistingDraft = useCallback(async () => {
+        if (!isOpen || !selectedTemplate || !entityIdMap) return;
+
+        setIsLoadingDraft(true);
+        try {
+            console.log('[loadExistingDraft] Starting draft detection...');
+
+            // Determine which table to query based on entity type
+            const documentId = selectedTemplate.document_id;
+
+            // Try to find a draft for this document
+            let query;
+
+            // For individual documents (directors)
+            if (entityIdMap.director || entityIdMap.principal) {
+                const individualId = entityIdMap.director || entityIdMap.principal;
+                query = supabase
+                    .from('acc_portal_directors_documents')
+                    .select('*')
+                    .eq('document_id', documentId)
+                    .eq('director_id', individualId)
+                    .eq('status', 'draft')
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .single();
+            }
+            // For company documents
+            else if (entityIdMap.company) {
+                query = supabase
+                    .from('acc_portal_kyc_uploads')
+                    .select('*')
+                    .eq('kyc_document_id', documentId)
+                    .eq('company_id', entityIdMap.company)
+                    .eq('status', 'draft')
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .single();
+            }
+
+            if (!query) {
+                console.log('[loadExistingDraft] No query constructed');
+                return;
+            }
+
+            const { data: draftData, error } = await query;
+
+            if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+                console.error('[loadExistingDraft] Error:', error);
+                return;
+            }
+
+            if (draftData) {
+                console.log('[loadExistingDraft] Found draft:', draftData);
+                setLoadedDraft(draftData);
+
+                toast({
+                    title: "Draft Loaded",
+                    description: `Continuing from draft saved on ${new Date(draftData.created_at).toLocaleString()}`,
+                    duration: 5000,
+                });
+
+                // Parse the draft data and populate form
+                await parseDraftAndPopulateForm(draftData);
+            } else {
+                console.log('[loadExistingDraft] No draft found');
+            }
+
+        } catch (error) {
+            console.error('[loadExistingDraft] Unexpected error:', error);
+        } finally {
+            setIsLoadingDraft(false);
+        }
+    }, [isOpen, selectedTemplate, entityIdMap]);
+
+    const parseDraftAndPopulateForm = useCallback(async (draft: any) => {
+        try {
+            console.log('[parseDraftAndPopulateForm] Processing draft...');
+
+            // First, try to use metadata if available
+            if (draft.metadata && typeof draft.metadata === 'object') {
+                console.log('[parseDraftAndPopulateForm] Using metadata:', draft.metadata);
+
+                if (draft.metadata.formData) {
+                    setFormData(draft.metadata.formData);
+                    setOriginalFormData(JSON.parse(JSON.stringify(draft.metadata.formData)));
+                }
+
+                if (draft.metadata.imageStyles) {
+                    setImageStyles(draft.metadata.imageStyles);
+                }
+
+                return; // Metadata approach succeeded
+            }
+
+            // The draft contains file_content as base64 - we need to parse it
+            if (!draft.file_content) {
+                console.warn('[parseDraftAndPopulateForm] No file_content in draft');
+                return;
+            }
+
+            // Convert base64 to array buffer
+            const base64Data = draft.file_content.split('base64,')[1];
+            const binaryStr = atob(base64Data);
+            const len = binaryStr.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryStr.charCodeAt(i);
+            }
+            const arrayBuffer = bytes.buffer;
+
+            // Parse the DOCX to extract placeholder values
+            const zip = new PizZip(arrayBuffer);
+            const doc = new Docxtemplater(zip, {
+                paragraphLoop: true,
+                linebreaks: true,
+            });
+
+            // Get the template XML content
+            const xmlContent = zip.file('word/document.xml')?.asText();
+
+            if (!xmlContent) {
+                console.warn('[parseDraftAndPopulateForm] Could not extract XML from draft');
+                return;
+            }
+
+            // Extract values by matching placeholders
+            const extractedValues = {};
+
+            selectedTemplate.placeholders?.forEach(placeholder => {
+                const placeholderName = placeholder.name;
+
+                // Look for the placeholder value in the XML
+                // This is a simplified extraction - you may need to enhance this
+                const regex = new RegExp(`<w:t[^>]*>([^<]*)</w:t>`, 'g');
+                let match;
+                let foundValue = null;
+
+                while ((match = regex.exec(xmlContent)) !== null) {
+                    const text = match[1];
+                    // Check if this text appears near our placeholder
+                    if (text && text.trim() && !text.includes('{') && !text.includes('}')) {
+                        // Store potential value
+                        foundValue = text;
+                    }
+                }
+
+                if (foundValue) {
+                    extractedValues[placeholderName] = foundValue;
+                }
+            });
+
+            console.log('[parseDraftAndPopulateForm] Extracted values:', extractedValues);
+
+            // Update form data with extracted values
+            setFormData(prev => ({
+                ...prev,
+                ...extractedValues
+            }));
+
+            // Update original form data to track changes
+            setOriginalFormData(prev => ({
+                ...prev,
+                ...extractedValues
+            }));
+
+        } catch (error) {
+            console.error('[parseDraftAndPopulateForm] Error:', error);
+            toast({
+                title: "Error Loading Draft",
+                description: "Could not parse draft content. Starting fresh.",
+                variant: "destructive"
+            });
+        }
+    }, [selectedTemplate]);
+
+    // Add useEffect to trigger draft loading
+    useEffect(() => {
+        if (isOpen && selectedTemplate && entityIdMap) {
+            loadExistingDraft();
+        }
+    }, [isOpen, selectedTemplate?.id, entityIdMap]);
     const groupedPlaceholders = useMemo(() => {
         if (!selectedTemplate?.placeholders) return { topLevel: [], blocks: {} };
 
@@ -1357,48 +1573,165 @@ export default function TemplateGenerationDialog({
     const fetchMissingDataSources = useCallback(async () => {
         if (!isOpen || !selectedTemplate || !masterFields) return;
 
-        const allIds = new Set();
-        if (entityIdMap.company) allIds.add(String(entityIdMap.company));
-        const dirIds = Array.isArray(entityIdMap.directors) ? entityIdMap.directors : [entityIdMap.director];
-        dirIds.forEach(id => id && allIds.add(String(id)));
-        relationshipData?.dependants?.forEach(d => d.id && allIds.add(String(d.id)));
+        console.log('🔄 [fetchMissingDataSources] Starting optimized data fetch...');
 
-        const tables = new Map();
+        // 1. COLLECT ALL ENTITY IDS
+        const allIds = new Set<string>();
+        if (entityIdMap.company) allIds.add(String(entityIdMap.company));
+
+        const dirIds = Array.isArray(entityIdMap.directors)
+            ? entityIdMap.directors
+            : [entityIdMap.director];
+        dirIds.forEach(id => id && allIds.add(String(id)));
+
+        relationshipData?.dependants?.forEach(d => d.id && allIds.add(String(d.id)));
+        if (entityIdMap.principal) allIds.add(String(entityIdMap.principal));
+        if (entityIdMap.understudy) allIds.add(String(entityIdMap.understudy));
+
+        const idList = Array.from(allIds).filter(Boolean);
+        console.log('📋 Entity IDs to fetch:', idList);
+
+        // 2. COLLECT ALL REQUIRED TABLES AND THEIR CONFIGURATIONS
+        const tableConfigs = new Map<string, {
+            linkingVars: Set<string>;
+            documentIds: Set<string>;
+        }>();
+
         selectedTemplate.placeholders?.forEach(p => {
             p.master_field_ids?.forEach(mId => {
-                masterFields.get(parseInt(mId))?.sources?.forEach(s => {
-                    if (!s.table) return;
-                    if (!tables.has(s.table)) tables.set(s.table, s.linking_variable || 'id');
+                const masterField = masterFields.get(parseInt(mId));
+                masterField?.sources?.forEach(source => {
+                    if (!source.table) return;
+
+                    if (!tableConfigs.has(source.table)) {
+                        tableConfigs.set(source.table, {
+                            linkingVars: new Set(),
+                            documentIds: new Set()
+                        });
+                    }
+
+                    const config = tableConfigs.get(source.table)!;
+                    config.linkingVars.add(source.linking_variable || 'id');
+
+                    // Collect document IDs for filtering
+                    if (source.document_id) {
+                        const docIds = Array.isArray(source.document_id)
+                            ? source.document_id
+                            : [source.document_id];
+                        docIds.forEach(id => config.documentIds.add(id));
+                    }
                 });
             });
         });
 
-        const idList = Array.from(allIds).filter(Boolean);
-        for (const [table, linkVar] of tables.entries()) {
-            if (fetchingTables.has(table)) continue;
+        console.log('📊 Tables to fetch:', Array.from(tableConfigs.keys()));
+
+        // 3. BATCH FETCH ALL TABLES IN PARALLEL
+        const fetchPromises = Array.from(tableConfigs.entries()).map(async ([table, config]) => {
+            if (fetchingTables.has(table)) {
+                console.log(`⏭️ Skipping ${table} - already fetching`);
+                return { table, data: null };
+            }
+
             setFetchingTables(prev => new Set(prev).add(table));
+
             try {
-                const { data, error } = await supabase.from(table).select('*').in(linkVar, idList);
-                if (error) throw error;
-                setAdditionalCache(prev => {
-                    const cache = { ...(prev[table] || {}) };
-                    data?.forEach(row => {
-                        const id = row.id || row.director_id || row.individual_id;
-                        if (id) cache[id] = row;
-                        if (row[linkVar]) cache[row[linkVar]] = row;
-                    });
-                    return { ...prev, [table]: cache };
+                // Build optimized query that covers ALL linking variables
+                const linkingVars = Array.from(config.linkingVars);
+                const documentIds = Array.from(config.documentIds);
+
+                console.log(`🔍 Fetching ${table} with:`, {
+                    linkingVars,
+                    documentIds: documentIds.slice(0, 5), // Log first 5
+                    entityIds: idList.slice(0, 5) // Log first 5
                 });
+
+                // OPTIMIZED: Single query with OR conditions for all linking variables
+                let query = supabase.from(table).select('*');
+
+                // Build OR filter for all linking variables
+                if (linkingVars.length === 1) {
+                    // Simple case: single linking variable
+                    query = query.in(linkingVars[0], idList);
+                } else {
+                    // Complex case: multiple linking variables - use OR
+                    const orConditions = linkingVars
+                        .map(linkVar => `${linkVar}.in.(${idList.join(',')})`)
+                        .join(',');
+                    query = query.or(orConditions);
+                }
+
+                // Add document ID filter if present
+                if (documentIds.length > 0) {
+                    // Try both common document ID fields
+                    const docOrConditions = [
+                        `document_id.in.(${documentIds.join(',')})`,
+                        `kyc_document_id.in.(${documentIds.join(',')})`
+                    ].join(',');
+                    query = query.or(docOrConditions);
+                }
+
+                const { data, error } = await query;
+
+                if (error) {
+                    console.error(`❌ Error fetching ${table}:`, error);
+                    throw error;
+                }
+
+                console.log(`✅ Fetched ${data?.length || 0} records from ${table}`);
+                return { table, data: data || [] };
+
             } catch (err) {
-                console.error(`Fetch Error ${table}:`, err);
+                console.error(`❌ Fetch Error ${table}:`, err);
+                return { table, data: null };
             } finally {
                 setFetchingTables(prev => {
-                    const n = new Set(prev);
-                    n.delete(table);
-                    return n;
+                    const next = new Set(prev);
+                    next.delete(table);
+                    return next;
                 });
             }
-        }
+        });
+
+        // 4. WAIT FOR ALL FETCHES TO COMPLETE
+        const results = await Promise.all(fetchPromises);
+
+        // 5. BUILD UNIFIED CACHE
+        const newCache: Record<string, Record<string, any>> = {};
+
+        results.forEach(({ table, data }) => {
+            if (!data) return;
+
+            const cache: Record<string, any> = {};
+            const config = tableConfigs.get(table);
+
+            data.forEach(row => {
+                // Index by primary ID
+                const primaryId = row.id || row.director_id || row.individual_id || row.company_id;
+                if (primaryId) {
+                    cache[primaryId] = row;
+                }
+
+                // ALSO index by all linking variables for easier lookup
+                config?.linkingVars.forEach(linkVar => {
+                    if (row[linkVar]) {
+                        cache[row[linkVar]] = row;
+                    }
+                });
+            });
+
+            newCache[table] = cache;
+            console.log(`📦 Cached ${Object.keys(cache).length} entries for ${table}`);
+        });
+
+        // 6. UPDATE STATE ONCE
+        setAdditionalCache(prev => ({
+            ...prev,
+            ...newCache
+        }));
+
+        console.log('✅ [fetchMissingDataSources] Complete! Fetched from', results.length, 'tables');
+
     }, [isOpen, selectedTemplate, masterFields, entityIdMap, relationshipData]);
 
     useEffect(() => {
@@ -1586,13 +1919,16 @@ export default function TemplateGenerationDialog({
         console.groupEnd();
         return result;
     }, [extractedData, personData, companyData]);
+    const combinedCache = useMemo(() => ({
+        ...sourceDataCache,
+        ...additionalCache
+    }), [sourceDataCache, additionalCache]);
 
     useEffect(() => {
         if (isOpen && selectedTemplate && Object.keys(sourceDataCache).length > 0) {
             // Start with a copy of existing data to prevent blanking out fields
             const initData = { ...formData };
             const autoMap = new Map();
-            const combinedCache = { ...sourceDataCache, ...additionalCache };
 
             groupedPlaceholders.topLevel.forEach(p => {
                 const match = processPlaceholderValue(
@@ -1717,6 +2053,63 @@ export default function TemplateGenerationDialog({
         });
 
         setManuallyEditedFields(prev => new Set(prev).add(`${blockName}[${index}].${fieldName}`));
+    };
+
+    // Add this function to extract headers/footers from DOCX
+    const extractHeadersFooters = async (templateBuffer) => {
+        const zip = new PizZip(templateBuffer);
+        const headers = [];
+        const footers = [];
+
+        // Extract all header files
+        for (let i = 1; i <= 3; i++) {
+            const headerFile = zip.file(`word/header${i}.xml`);
+            if (headerFile) {
+                const headerXml = headerFile.asText();
+                // Convert XML to HTML using Mammoth or custom parser
+                headers.push({
+                    index: i,
+                    xml: headerXml,
+                    html: await convertWordXmlToHtml(headerXml)
+                });
+            }
+        }
+
+        // Extract all footer files
+        for (let i = 1; i <= 3; i++) {
+            const footerFile = zip.file(`word/footer${i}.xml`);
+            if (footerFile) {
+                const footerXml = footerFile.asText();
+                footers.push({
+                    index: i,
+                    xml: footerXml,
+                    html: await convertWordXmlToHtml(footerXml)
+                });
+            }
+        }
+
+        return { headers, footers };
+    };
+
+    // Helper to convert Word XML to HTML
+    const convertWordXmlToHtml = async (xml) => {
+        // Create a minimal DOCX structure with just this content
+        const tempZip = new PizZip();
+        tempZip.file('word/document.xml', xml);
+
+        // Add required DOCX structure files
+        tempZip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+            <Default Extension="xml" ContentType="application/xml"/>
+            <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+            <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+        </Types>`);
+
+        const arrayBuffer = tempZip.generate({ type: 'arraybuffer' });
+
+        // Convert using Mammoth
+        const result = await mammoth.convertToHtml({ arrayBuffer });
+        return result.value;
     };
 
     const renderArrayInputs = (blockName, blockData) => {
@@ -1896,8 +2289,11 @@ export default function TemplateGenerationDialog({
             console.error('❌ No template content available!');
             return '[NO TEMPLATE CONTENT]';
         }
-
+ console.log('🔍 Header content:', headerContent);
+ console.log('🔍 Footer content:', footerContent);
         let content = selectedTemplate.content;
+        let processedHeader = headerContent;
+        let processedFooter = footerContent;
 
         Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
             const block = groupedPlaceholders.blocks[blockName];
@@ -1960,111 +2356,44 @@ export default function TemplateGenerationDialog({
         groupedPlaceholders.topLevel.forEach(placeholder => {
             const rawValue = data[placeholder.name];
             const cleanName = placeholder.name.replace(/[{}]/g, '').trim();
-
-            if (placeholder.is_digit_split) {
-                const chars = processDigitSplit(rawValue, placeholder.digit_count || 8);
-                const count = placeholder.digit_count || 8;
-                for (let i = 1; i <= count; i++) {
-                    const seqRegex = new RegExp(`\\{+\\s*${cleanName}_${i}\\s*\\}+`, 'gi');
-                    const charVal = chars[i - 1] || '&nbsp;';
-                    content = content.replace(seqRegex, charVal);
-                }
-                const baseRegex = new RegExp(`\\{+\\s*${cleanName}\\s*\\}+`, 'gi');
-                content = content.replace(baseRegex, extractDisplayValue(rawValue) || '');
-                return;
-            }
-
             let value = extractDisplayValue(rawValue);
             const regex = new RegExp(`\\{+\\s*${cleanName}\\s*\\}+`, 'gi');
 
-            if (value) {
+            if (placeholder.type === 'image' && value && value.startsWith('http')) {
+                const style = styles[placeholder.name] || {};
+                const imgWidth = style.imageWidth ? `${style.imageWidth}px` : style.maxWidth || '100%';
+                const imageHtml = `<div style="text-align:${style.textAlign || 'center'};margin:5px 0;">
+                <img src="${value}" style="width:${imgWidth};height:auto;max-width:100%;" />
+            </div>`;
 
-                if (placeholder.type === 'document_checklist') {
-                    // Format the checklist for HTML display
-                    const lines = String(value).split('\n');
-                    const formattedLines = lines.map(line => {
-                        // Style checked items in green, unchecked in gray
-                        if (line.startsWith('✓')) {
-                            return `<div style="color: #16a34a; padding: 2px 0;">✓ ${line.substring(1).trim()}</div>`;
-                        } else if (line.startsWith('•')) {
-                            return `<div style="padding: 2px 0;">${line}</div>`;
-                        } else if (line.startsWith('|')) {
-                            // Table row - will be handled by table formatting
-                            return line;
-                        }
-                        return line;
-                    });
-                    // Check if it's a table format
-                    if (lines.some(line => line.startsWith('|'))) {
-                        // Convert markdown table to HTML
-                        const tableHtml = `
-                            <table style="width: 100%; border-collapse: collapse; margin: 10px 0;">
-                                ${formattedLines.map(line => {
-                            if (!line.startsWith('|')) return '';
-                            const cells = line.split('|').filter(Boolean);
-                            const isHeader = line.includes('Status') && line.includes('Document');
-                            const tag = isHeader ? 'th' : 'td';
-                            return `<tr>
-                                        ${cells.map(cell => `<${tag} style="border: 1px solid #e5e7eb; padding: 8px; text-align: left;">${cell.trim()}</${tag}>`).join('')}
-                                    </tr>`;
-                        }).join('')}
-                            </table>
-                        `;
-                        content = content.replace(regex, tableHtml);
-                    } else {
-                        content = content.replace(regex, `<div style="padding: 5px 0;">${formattedLines.join('')}</div>`);
-                    }
-                }
-                else if (placeholder.type === 'image' && value.startsWith('http')) {
-                    const style = styles[placeholder.name] || {};
-                    const imgWidth = style.imageWidth
-                        ? `${style.imageWidth}px`
-                        : style.maxWidth || '100%';
-
-                    content = content.replace(
-                        regex,
-                        `<div style="text-align:${style.textAlign || 'center'};margin:5px 0;">
-                        <img src="${value}" style="width:${imgWidth};height:auto;max-width:100%;" />
-                    </div>`
-                    );
-                } else if (placeholder.type === 'boolean') {
-                    const options = Array.isArray(rawValue) ? rawValue : [];
-
-                    options.forEach(option => {
-                        if (option && option.tag) {
-                            const rawTag = String(option.tag).replace(/[{}]/g, '').trim();
-                            const optRegex = new RegExp(`\\{+\\s*${rawTag}\\s*\\}+`, 'gi');
-
-                            const displayLabel = extractDisplayValue([option].filter(o => o.checked));
-
-                            if (option.checked) {
-                                content = content.replace(optRegex, `<span style="color:#16a34a; font-weight:bold;">${displayLabel}</span>`);
-                            } else {
-                                content = content.replace(optRegex, `<span style="color:#ccc;">[ ]</span>`);
-                            }
-                        }
-                    });
-
-                    content = content.replace(regex, value);
-                } else {
-                    const formattedValue = /<[a-z][\s\S]*>/i.test(String(value))
-                        ? value
-                        : String(value).replace(/\n/g, '<br />');
-
-                    content = content.replace(regex, formattedValue);
-                }
+                processedHeader = processedHeader.replace(regex, imageHtml);
+                processedFooter = processedFooter.replace(regex, imageHtml);
             } else {
-                content = content.replace(
-                    regex,
-                    `<span style="background:#fef08a;padding:2px 4px;color:#854d0e;">
-                    [${placeholder.name}]
-                </span>`
-                );
+                processedHeader = processedHeader.replace(regex, value || '');
+                processedFooter = processedFooter.replace(regex, value || '');
             }
         });
 
-        return content;
-    }, [selectedTemplate, groupedPlaceholders]);
+       const fullDocument = `
+        ${processedHeader ? `
+            <div style="position: sticky; top: 0; background: white; border-bottom: 1px solid #e5e7eb; padding: 20px; z-index: 10; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                ${processedHeader}
+            </div>
+        ` : ''}
+        
+        <div style="min-height: 800px; padding: 40px 20px;">
+            ${content}
+        </div>
+        
+        ${processedFooter ? `
+            <div style="position: sticky; bottom: 0; background: white; border-top: 1px solid #e5e7eb; padding: 20px; box-shadow: 0 -2px 4px rgba(0,0,0,0.05);">
+                ${processedFooter}
+            </div>
+        ` : ''}
+    `;
+
+    return fullDocument;
+}, [selectedTemplate, groupedPlaceholders, headerContent, footerContent]);
 
     const prepareRenderData = useCallback(async (data) => {
         const renderData = {};
@@ -2263,7 +2592,19 @@ export default function TemplateGenerationDialog({
 
                     try {
                         const res = await fetch(publicUrl);
-                        docxTemplateBuffer.current = await res.arrayBuffer();
+                        const arrayBuffer = await res.arrayBuffer();
+                        docxTemplateBuffer.current = arrayBuffer;
+
+                        // 🔥 EXTRACT HEADERS AND FOOTERS
+                        const { headers, footers } = await extractHeadersFooters(arrayBuffer);
+
+                        if (headers.length > 0) {
+                            setHeaderContent(headers[0].html);
+                        }
+                        if (footers.length > 0) {
+                            setFooterContent(footers[0].html);
+                        }
+
                     } catch (error) {
                         console.error('Error loading template:', error);
                         return;
@@ -2612,115 +2953,117 @@ export default function TemplateGenerationDialog({
         };
     }, [formData, groupedPlaceholders]);
 
-  const saveAsDraft = async () => {
-    console.log('[saveAsDraft] Starting draft save');
-    setIsGenerating(true);
+    const saveAsDraft = async () => {
+        console.log('[saveAsDraft] Starting draft save');
+        setIsGenerating(true);
 
-    try {
-        const fileName = `${documentName.replace(/[^\w\s-]/g, '_')}_draft_${formatDate(new Date(), 'YYYYMMDD')}`;
-        
-        // 1. Determine applicant type
-        let applicantType = 'company'; 
-        if (personData?.applicant_details?.type) {
-            applicantType = personData.applicant_details.type;
-        } else if (companyData?.applicant_details?.type) {
-            applicantType = companyData.applicant_details.type;
-        } else if (extractedData?.type) {
-            applicantType = extractedData.type;
+        try {
+            const fileName = `${documentName.replace(/[^\w\s-]/g, '_')}_draft_${formatDate(new Date(), 'YYYYMMDD_HHmmss')}`;
+
+            // Determine applicant type
+            let applicantType = 'company';
+            if (personData?.applicant_details?.type) {
+                applicantType = personData.applicant_details.type;
+            } else if (companyData?.applicant_details?.type) {
+                applicantType = companyData.applicant_details.type;
+            } else if (extractedData?.type) {
+                applicantType = extractedData.type;
+            }
+
+            const isCompany = applicantType.toLowerCase() === 'company';
+            const targetTable = isCompany ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents';
+
+            const kycDocId = template?.document_id;
+
+            // Create metadata object with ONLY placeholder values - NO file_content
+            const draftMetadata = {
+                formData: formData,
+                imageStyles: imageStyles,
+                savedAt: new Date().toISOString(),
+                templateId: selectedTemplate?.id,
+                documentName: documentName,
+                version: 1
+            };
+
+            const insertPayload = {
+                // NO file_content - just placeholder values in metadata
+                file_path: null, // Mark as draft with no file
+                file_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                created_at: new Date().toISOString(),
+                status: 'draft',
+                metadata: draftMetadata // Only store form state
+            };
+
+            if (isCompany) {
+                insertPayload.company_id = entityIdMap?.company || relationshipData?.company?.id;
+                insertPayload.kyc_document_id = kycDocId;
+            } else {
+                insertPayload.director_id = entityIdMap?.principal || entityIdMap?.director || relationshipData?.principal?.id;
+                insertPayload.document_id = kycDocId;
+            }
+
+            console.log('[saveAsDraft] Submitting to:', targetTable, insertPayload);
+
+            // Check if there's an existing draft to update
+            let query;
+            if (isCompany) {
+                query = supabase
+                    .from(targetTable)
+                    .select('id')
+                    .eq('kyc_document_id', kycDocId)
+                    .eq('company_id', insertPayload.company_id)
+                    .eq('status', 'draft')
+                    .single();
+            } else {
+                query = supabase
+                    .from(targetTable)
+                    .select('id')
+                    .eq('document_id', kycDocId)
+                    .eq('director_id', insertPayload.director_id)
+                    .eq('status', 'draft')
+                    .single();
+            }
+
+            const { data: existingDraft } = await query;
+
+            let result;
+            if (existingDraft) {
+                // Update existing draft
+                result = await supabase
+                    .from(targetTable)
+                    .update(insertPayload)
+                    .eq('id', existingDraft.id)
+                    .select();
+            } else {
+                // Insert new draft
+                result = await supabase
+                    .from(targetTable)
+                    .insert(insertPayload)
+                    .select();
+            }
+
+            if (result.error) throw result.error;
+
+            console.log('[saveAsDraft] Draft saved successfully:', result.data);
+            setLoadedDraft(result.data[0]); // Update loaded draft reference
+
+            toast({
+                title: "Success",
+                description: `Draft ${existingDraft ? 'updated' : 'saved'} successfully`,
+            });
+
+        } catch (e) {
+            const errorMessage = e instanceof Error ? e.message : String(e);
+            console.error('[saveAsDraft] Error:', e);
+            toast({
+                title: "Error",
+                description: errorMessage,
+                variant: "destructive"
+            });
+        } finally {
+            setIsGenerating(false);
         }
-
-        const isCompany = applicantType.toLowerCase() === 'company';
-        const targetTable = isCompany ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents';
-
-        console.log('[saveAsDraft] Applicant type:', applicantType);
-        console.log('[saveAsDraft] Target table:', targetTable);
-
-        // 2. Generate the document content
-        const renderData = await prepareRenderData(formData);
-        let templateBuffer = docxTemplateBuffer.current;
-        if (templateBuffer && typeof templateBuffer.then === 'function') {
-            templateBuffer = await templateBuffer;
-        }
-
-        if (!templateBuffer) {
-            throw new Error('No template buffer available for draft save');
-        }
-
-        const zip = new PizZip(templateBuffer);
-        const doc = new Docxtemplater(zip, {
-            linebreaks: true,
-            paragraphLoop: true,
-            nullGetter: () => ""
-        });
-
-        doc.setData(renderData);
-        doc.render();
-
-        const blob = doc.getZip().generate({
-            type: "blob",
-            mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        });
-
-        // 3. Convert to base64
-        const draftBase64 = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-        });
-
-        // 4. Prepare Table-Specific Payload
-        // We get the KYC Document ID from the template metadata
-        const kycDocId = template?.document_id; 
-
-        const insertPayload = {
-            file_path: `drafts/${fileName}.docx`,
-            file_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            file_content: draftBase64,
-            created_at: new Date().toISOString(),
-            status: 'draft'
-        };
-
-        if (isCompany) {
-            // For acc_portal_kyc_uploads
-            insertPayload.company_id = entityIdMap?.company || relationshipData?.company?.id;
-            insertPayload.kyc_document_id = kycDocId; // Use kyc_document_id field
-        } else {
-            // For acc_portal_directors_documents
-            // Use director_id instead of individual_id
-            insertPayload.director_id = entityIdMap?.principal || entityIdMap?.director || relationshipData?.principal?.id;
-            insertPayload.document_id = kycDocId; // Use document_id field
-            // Ensure company_id is NOT included here
-        }
-
-        console.log('[saveAsDraft] Submitting to:', targetTable, insertPayload);
-
-        // 5. Save to database
-        const { data, error } = await supabase
-            .from(targetTable)
-            .insert(insertPayload)
-            .select();
-
-        if (error) throw error;
-
-        console.log('[saveAsDraft] Draft saved successfully:', data);
-        toast({
-            title: "Success",
-            description: `Draft saved to ${targetTable}`,
-        });
-
-    } catch (e) {
-        const errorMessage = e instanceof Error ? e.message : String(e);
-        console.error('[saveAsDraft] Error:', e);
-        toast({
-            title: "Error",
-            description: errorMessage,
-            variant: "destructive"
-        });
-    } finally {
-        setIsGenerating(false);
-    }
-};
+    };
 
     const generateAndDownload = async (type) => {
         console.log(`[generateAndDownload] Starting ${type.toUpperCase()} document generation`);
@@ -2889,6 +3232,42 @@ export default function TemplateGenerationDialog({
                                 <div>
                                     <DialogTitle className="text-xl font-bold">{documentName}</DialogTitle>
                                     <DialogDescription className="text-sm">Auto-populate and generate</DialogDescription>
+                                    {loadedDraft && (
+                                        <div className="flex items-center gap-2 mt-2">
+                                            <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 flex items-center gap-1">
+                                                <FileText className="h-3 w-3" />
+                                                <span className="font-medium">Draft in Progress</span>
+                                            </Badge>
+                                            <span className="text-xs text-muted-foreground">
+                                                Last saved {new Date(loadedDraft.created_at).toLocaleString()}
+                                            </span>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => {
+                                                    setLoadedDraft(null);
+                                                    setFormData({});
+                                                    setOriginalFormData({});
+                                                    setImageStyles({});
+                                                    toast({
+                                                        title: "Draft Cleared",
+                                                        description: "Starting fresh",
+                                                    });
+                                                }}
+                                                className="h-6 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                                            >
+                                                <X className="h-3 w-3 mr-1" />
+                                                Discard Draft
+                                            </Button>
+                                        </div>
+                                    )}
+
+                                    {isLoadingDraft && (
+                                        <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
+                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                            Loading draft...
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                             <div className="flex items-center justify-between">
@@ -2935,10 +3314,20 @@ export default function TemplateGenerationDialog({
                         </div>
                         <div className="mt-2 space-y-1">
                             <div className="flex items-center justify-between text-xs">
-                                <span className="font-medium">{completionStats.filled}/{completionStats.total} Fields</span>
+                                <span className="font-medium">
+                                    {completionStats.filled}/{completionStats.total} Fields
+                                    {loadedDraft && (
+                                        <Badge variant="outline" className="ml-2 text-[8px] bg-amber-50 text-amber-700 border-amber-200">
+                                            DRAFT
+                                        </Badge>
+                                    )}
+                                </span>
                                 <span>{completionStats.percentage}%</span>
                             </div>
-                            <Progress value={completionStats.percentage} className="h-1.5" />
+                            <Progress
+                                value={completionStats.percentage}
+                                className={`h-1.5 ${loadedDraft ? '[&>div]:bg-amber-500' : ''}`}
+                            />
                         </div>
                     </DialogHeader>
 
@@ -3032,13 +3421,18 @@ export default function TemplateGenerationDialog({
                             {isWordTemplate ? 'Word + Images' : 'HTML'}
                         </div>
                         <div className='flex gap-2'>
-                            <Button variant="outline" size="sm" onClick={saveAsDraft} disabled={isGenerating}>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={saveAsDraft}
+                                disabled={isGenerating}
+                            >
                                 {isGenerating ? (
                                     <Loader2 className="animate-spin mr-2 h-4 w-4" />
                                 ) : (
                                     <Save className="mr-2 h-4 w-4" />
                                 )}
-                                Save as Draft
+                                {loadedDraft ? 'Update Draft' : 'Save as Draft'}
                             </Button>
                             <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
                             <DropdownMenu>

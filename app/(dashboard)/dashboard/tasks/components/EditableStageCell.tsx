@@ -20,7 +20,7 @@ import { supabase } from "@/lib/supabase/client"
 import { format, parse, isValid } from "date-fns"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { formatDuration, getTimeStatus, isDocumentApplicable, parseDate } from "../overall-view/tableUtils"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { calculateStageDate } from "../utils/dateUtils"
 import { AutomationMappingDialog } from "./AutomationMappingDialog"
 
@@ -815,8 +815,8 @@ export default function EditableStageCell({
     }
   }, [onSave, previewDocuments, currentPreviewIndex, stage.id, task.id, onFetchData]);
 
-  // --- RENDER ---
-
+  const renderCellContent = () => {
+    if (!isStageApplicable) return <span className="text-sm text-gray-400 italic">N/A</span>;
   if (renderMode === 'date') {
     if (!isStageApplicable) return <span className="text-sm text-gray-400 italic">N/A</span>;
 
@@ -1256,10 +1256,37 @@ export default function EditableStageCell({
       </div>
     );
   }
+    return <span className="text-sm text-gray-500 italic">-</span>;
+  };
 
   return (
     <>
       <SkipStageDialog />
+      {renderCellContent()}
+
+      {/* Test Dialog for debugging */}
+      <Dialog open={automationDialogOpen} onOpenChange={(open) => {
+        console.log('🧪 [Test Dialog] onOpenChange:', open);
+        if (!open) setAutomationDialogOpen(false);
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Test Dialog</DialogTitle>
+            <DialogDescription>
+              This is a test to see if dialogs work. Stage: {stage?.name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <p>If you can see this, the Dialog component is working!</p>
+            <p>Stage ID: {stage?.id}</p>
+            <p>Task ID: {task?.id}</p>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setAutomationDialogOpen(false)}>Close Test</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <AutomationMappingDialog
         isOpen={automationDialogOpen}
         onClose={() => {

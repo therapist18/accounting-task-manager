@@ -89,6 +89,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   const [isPreparingTemplate, setIsPreparingTemplate] = useState(false);
   const [masterFields, setMasterFields] = useState<Map<number, any>>(new Map());
   const hasFetchedMasterFields = useRef(false);
+  
+  // Missing state variables for document storage
+  const [allIndividualDocuments, setAllIndividualDocuments] = useState<Record<string, any[]>>({});
+  const [allCompanyDocuments, setAllCompanyDocuments] = useState<Record<string, any[]>>({});
+  
   // RequirementsTableCombined.tsx - Around line 105
   const classDocsAndFields = useMemo(() => { return classRequirements?.[0]?.documents_and_fields || []; }, [classRequirements]);
 
@@ -1015,43 +1020,62 @@ if (table === 'acc_portal_kyc_uploads' || table === 'acc_portal_directors_docume
                 </div>
               </TableCell>
 
-              {columnDefinitions.map((col, colIdx) => {
-                // Determine applicability based on the Supabase requirement flags
-                const isApplicable = checkApplicability(col.type, requirementConfig);
-                const docData = isApplicable ? getDocumentDataForPreview(col.task, docItem.document, col.type, col.id) : null;
+         {columnDefinitions.map((col, colIdx) => {
+  // Determine applicability based on the Supabase requirement flags
+  const isApplicable = checkApplicability(col.type, requirementConfig);
+  const docData = isApplicable ? getDocumentDataForPreview(col.task, docItem.document, col.type, col.id) : null;
+  const existingDraft = isApplicable ? checkForDraft(docItem.document, col.task, col.type, col.id) : null;
 
-                return (
-                  <TableCell key={`${documentId}-col-${colIdx}`} className="text-center border p-2">
-                    {!isApplicable ? (
-                      <span className="text-[10px] text-gray-300 font-medium italic">N/A</span>
-                    ) : docData ? (
-                      <div
-                        className="cursor-pointer hover:opacity-70 transition-opacity"
-                        onClick={() => {
-                          const docsArray = Array.isArray(docData) ? docData : [docData];
-                          handleViewDocuments(docsArray, docItem.document, col);
-                        }}
-                      >
-                        {renderDocumentStatus(col.task, docItem.document, col.type, col.id)}
-                      </div>
-                    ) : (sectionName === 'templates' || sectionName === 'letters' || docItem.document?.category === 'letters') ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
-                        onClick={() => handleOpenTemplateGenerator(docItem, col.task, col.type, col.id)}
-                        disabled={isPreparingTemplate}
-                      >
-                        {isPreparingTemplate ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3 mr-1" />}
-                        <span className="text-[10px] font-bold uppercase">Generate</span>
-                      </Button>
-                    ) : (
-                      // Renders the standard Upload icon via your renderDocumentStatus helper
-                      renderDocumentStatus(col.task, docItem.document, col.type, col.id)
-                    )}
-                  </TableCell>
-                );
-              })}
+  return (
+    <TableCell key={`${documentId}-col-${colIdx}`} className="text-center border p-2">
+      {!isApplicable ? (
+        <span className="text-[10px] text-gray-300 font-medium italic">N/A</span>
+      ) : docData ? (
+        <div
+          className="cursor-pointer hover:opacity-70 transition-opacity"
+          onClick={() => {
+            const docsArray = Array.isArray(docData) ? docData : [docData];
+            handleViewDocuments(docsArray, docItem.document, col);
+          }}
+        >
+          {renderDocumentStatus(col.task, docItem.document, col.type, col.id)}
+        </div>
+      ) : existingDraft ? (
+        // DRAFT EXISTS - Show "Continue Editing" button
+        <div className="flex flex-col items-center gap-1">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-amber-600 hover:text-amber-800 hover:bg-amber-50 border-amber-200"
+            onClick={() => handleOpenTemplateGenerator(docItem, col.task, col.type, col.id)}
+            disabled={isPreparingTemplate}
+          >
+            {isPreparingTemplate ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3 mr-1" />}
+            <span className="text-[10px] font-bold uppercase">Continue Draft</span>
+          </Button>
+          <span className="text-[8px] text-amber-600 italic">
+            Saved {new Date(existingDraft.created_at).toLocaleDateString()}
+          </span>
+        </div>
+      ) : (sectionName === 'templates' || sectionName === 'letters' || docItem.document?.category === 'letters') ? (
+        // NO DRAFT - Show "Generate" button
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+          onClick={() => handleOpenTemplateGenerator(docItem, col.task, col.type, col.id)}
+          disabled={isPreparingTemplate}
+        >
+          {isPreparingTemplate ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3 mr-1" />}
+          <span className="text-[10px] font-bold uppercase">Generate</span>
+        </Button>
+      ) : (
+        // Renders the standard Upload icon via your renderDocumentStatus helper
+        renderDocumentStatus(col.task, docItem.document, col.type, col.id)
+      )}
+    </TableCell>
+  );
+})}
             </TableRow>
 
             {/* Field Rows */}
@@ -1074,6 +1098,36 @@ if (table === 'acc_portal_kyc_uploads' || table === 'acc_portal_directors_docume
         );
       });
   };
+
+  // Helper function to check for existing drafts
+const checkForDraft = useCallback((docItem: any, task: any, colType: string, colId?: number): any => {
+  const requiredDocId = docItem.id;
+  
+  if (colType === 'company') {
+    if (task.company_id && allCompanyDocuments[task.company_id]) {
+      const draft = allCompanyDocuments[task.company_id].find(
+        doc => (doc.kyc_document_id === requiredDocId || doc.document_id === requiredDocId) && 
+               doc.status === 'draft'
+      );
+      return draft;
+    }
+  } else {
+    let individualId: number | null = null;
+    if (colType === 'principal') individualId = task.principal_member || task.individual_id;
+    else if (colType === 'understudy') individualId = task.understudy_member;
+    else if (colType === 'dependant' || colType === 'reference' || colType === 'director') individualId = colId;
+
+    if (individualId && allIndividualDocuments[individualId]) {
+      const draft = allIndividualDocuments[individualId].find(
+        doc => (doc.document_id === requiredDocId || doc.kyc_document_id === requiredDocId) && 
+               doc.status === 'draft'
+      );
+      return draft;
+    }
+  }
+  
+  return null;
+}, [allCompanyDocuments, allIndividualDocuments]);
 
   return (
     <div className="space-y-4">

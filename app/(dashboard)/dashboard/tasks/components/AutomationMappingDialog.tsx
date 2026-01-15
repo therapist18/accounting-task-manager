@@ -177,6 +177,21 @@ export const AutomationMappingDialog = ({
   allDocuments = [], // Add allDocuments prop
   stage // Add stage prop
 }: AutomationMappingDialogProps) => {
+  // Log when component receives props
+  useEffect(() => {
+    console.log('🤖 [AutomationMappingDialog] Props received:', {
+      isOpen,
+      classId,
+      requirementId,
+      taskId,
+      automationId,
+      stageId: stage?.id,
+      stageName: stage?.name,
+      taskName: task?.name,
+      individualId
+    });
+  }, [isOpen, classId, requirementId, taskId, automationId, stage?.id, stage?.name, task?.name, individualId]);
+
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isAutomationRunning, setIsAutomationRunning] = useState(false);
@@ -192,14 +207,14 @@ export const AutomationMappingDialog = ({
   const [previewDocument, setPreviewDocument] = useState<any>(null);
   const [editingCell, setEditingCell] = useState<any>(null);
   const [editValue, setEditValue] = useState('');
- const getIndividualId = () => {
+  const getIndividualId = () => {
     if (individualId) return individualId;
     if (task?.individual_id) return task.individual_id.toString();
     if (task?.principal_member) return task.principal_member.toString();
     return '';
   };
   const [currentIndividualId, setCurrentIndividualId] = useState(getIndividualId());
-  
+
   const getDocumentUrlForAutomation = useCallback((): string | null => {
     console.log('🔍 Getting document URL for automation...', {
       hasStage: !!stage,
@@ -456,23 +471,40 @@ export const AutomationMappingDialog = ({
       console.error('Error extracting automation mappings:', error);
     }
   };
+const getRequirementId = useCallback(() => {
+  // 1. Prioritize the job_level structure
+  const jobLevel = task?.job_level;
+  
+  if (jobLevel) {
+    const subDept = jobLevel.subdepartment_id;
+    const clsId = jobLevel.class_id;
+    const subClsId = jobLevel.subclass_id;
 
-  const getRequirementId = useCallback(() => {
-    let effectiveSubDeptId = subDeptId;
-    if (!effectiveSubDeptId && task) {
-      if (task.subdepartment?.id) effectiveSubDeptId = task.subdepartment.id.toString();
-      else if (task.subdepartment_id) effectiveSubDeptId = task.subdepartment_id.toString();
-      else if (task.sub_dept_id) effectiveSubDeptId = task.sub_dept_id.toString();
+    // Construct ID based on hierarchy depth (e.g., "1_1750687059294")
+    if (subDept && clsId && subClsId) {
+      return `${subDept}_${clsId}_${subClsId}`;
+    } 
+    if (subDept && clsId) {
+      return `${subDept}_${clsId}`;
     }
+    if (clsId) return clsId.toString();
+  }
 
-    if (!effectiveSubDeptId) {
-      if (isSubclass && subclassId) return classId;
-      return classId;
-    }
+  // 2. Fallback to props (Legacy/Manual)
+  let effectiveSubDeptId = subDeptId;
+  if (!effectiveSubDeptId && task) {
+    if (task.subdepartment?.id) effectiveSubDeptId = task.subdepartment.id.toString();
+    else if (task.subdepartment_id) effectiveSubDeptId = task.subdepartment_id.toString();
+    else if (task.sub_dept_id) effectiveSubDeptId = task.sub_dept_id.toString();
+  }
 
-    if (isSubclass && subclassId) return `${effectiveSubDeptId}_${classId}_${subclassId}`;
-    return `${effectiveSubDeptId}_${classId}`;
-  }, [subDeptId, task, isSubclass, subclassId, classId]);
+  if (!effectiveSubDeptId) {
+    return subclassId || classId;
+  }
+
+  if (isSubclass && subclassId) return `${effectiveSubDeptId}_${classId}_${subclassId}`;
+  return `${effectiveSubDeptId}_${classId}`;
+}, [task, subDeptId, classId, subclassId, isSubclass]);
 
   const fetchSourceData = useCallback(async (individualId: string) => {
     if ((!individualId && !taskId) || !jobFields || Object.keys(jobFields).length === 0) return;
@@ -491,14 +523,14 @@ export const AutomationMappingDialog = ({
         try {
           let queryField = 'id';
           let queryValue = individualId;
-          
+
           if (table === 'acc_portal_directors_documents') {
             queryField = 'director_id';
           } else if (table === 'tm_tasks' && taskId) {
             queryField = 'id';
             queryValue = taskId; // Use taskId instead of individualId for tm_tasks
           }
-          
+
           const { data, error } = await supabase.from(table).select('*').eq(queryField, queryValue).maybeSingle();
 
           if (error) {
@@ -588,7 +620,7 @@ export const AutomationMappingDialog = ({
     }
   }, [webData, isLoadingDocuments]);
 
-  useEffect(() => {
+useEffect(() => {
     if (!isOpen) {
       // Reset state when dialog closes
       setWebData([]);
@@ -603,52 +635,63 @@ export const AutomationMappingDialog = ({
 
     let isMounted = true;
 
-    const fetchData = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
+const fetchData = async () => {
+  try {
+    setIsLoading(true);
+    setError(null);
 
-        const requirementId = getRequirementId();
+    // 1. Get job_level from task
+    const jobLevel = task?.job_level;
+    
+    if (!jobLevel) {
+      throw new Error("Task does not contain job_level configuration.");
+    }
 
-        const { data: requirement, error: requirementError } = await supabase
-          .from('tm_class_requirements').select('*').eq('class_id', requirementId).maybeSingle();
+    console.log('🔍 [AutomationMapping] Fetching requirement by job_level:', jobLevel);
 
-        if (!isMounted) return;
+    // 2. Build the query using ->> (Double Arrow) 
+    // This converts JSON values to text, making null/empty/int comparisons consistent.
+    let query = supabase
+      .from('tm_class_requirements')
+      .select('*')
+      .eq('job_level->>department_id', String(jobLevel.department_id))
+      .eq('job_level->>subdepartment_id', String(jobLevel.subdepartment_id));
 
-        if (requirementError || !requirement) {
-          const { data: fallbackReq, error: fallbackError } = await supabase
-            .from('tm_class_requirements').select('*').eq('class_id', classId).maybeSingle();
+    // Handle class_id matching
+    if (jobLevel.class_id !== null && jobLevel.class_id !== undefined && jobLevel.class_id !== "") {
+      query = query.eq('job_level->>class_id', String(jobLevel.class_id));
+    } else {
+      // Use ->> with .is(..., null) to find an explicit JSON null or missing key
+      query = query.is('job_level->>class_id', null);
+    }
 
-          if (!isMounted) return;
+    // Handle subclass_id matching
+    if (jobLevel.subclass_id !== null && jobLevel.subclass_id !== undefined && jobLevel.subclass_id !== "") {
+      query = query.eq('job_level->>subclass_id', String(jobLevel.subclass_id));
+    } else {
+      query = query.is('job_level->>subclass_id', null);
+    }
 
-          if (fallbackReq && !fallbackError) {
-            const webDataItems = fallbackReq.webData || [];
-            setWebData(webDataItems);
+    const { data: requirement, error: requirementError } = await query.maybeSingle();
 
-            // Fetch automation details from webData automationId
-            await fetchAutomationFromWebData(webDataItems);
+    if (!isMounted) return;
 
-            const allMasterFieldIds = webDataItems.flatMap((item: any) =>
-              item.fields?.flatMap(field => field.masterFieldIds || []) || []
-            ).filter(Boolean);
+    if (requirementError) {
+      console.error('Supabase Query Error:', requirementError);
+      throw requirementError;
+    }
 
-            if (allMasterFieldIds.length > 0 && isMounted) {
-              const { data: fields, error: fieldsError } = await supabase
-                .from('tm_job_fields').select('*').in('id', allMasterFieldIds);
-              if (fieldsError) throw new Error('Failed to fetch job fields');
-              if (fields && isMounted) {
-                setJobFields(fields.reduce((acc, field) => ({ ...acc, [field.id.toString()]: field }), {}));
-              }
-            }
-            return;
-          }
-          throw new Error(`No requirement found for ID: ${requirementId}`);
-        }
+    if (!requirement) {
+      console.error('Requirement record not found for:', jobLevel);
+      // Helpful error message showing the path searched
+      throw new Error(`Requirement configuration not found for Dept: ${jobLevel.department_id}, Subdept: ${jobLevel.subdepartment_id}`);
+    }
 
-        const webDataItems = requirement.webData || [];
-        if (isMounted) setWebData(webDataItems);
+    // 3. Process webData from the found record
+    const webDataItems = requirement.webData || [];
+    setWebData(webDataItems);
 
-        // Fetch automation details from webData automationId
+        // Fetch automation details from found webData
         await fetchAutomationFromWebData(webDataItems);
 
         const allMasterFieldIds = webDataItems.flatMap((item: any) =>
@@ -670,9 +713,9 @@ export const AutomationMappingDialog = ({
         }
 
       } catch (error) {
-        console.error('Error fetching mapping data:', error);
+        console.error('❌ Error fetching mapping data:', error);
         if (isMounted) {
-          setError('Failed to load mapping data. Please try again.');
+          setError(error instanceof Error ? error.message : 'Failed to load mapping data.');
         }
       } finally {
         if (isMounted) {
@@ -686,8 +729,8 @@ export const AutomationMappingDialog = ({
     return () => {
       isMounted = false;
     };
-  }, [isOpen]); // Remove dynamic dependencies to prevent infinite loops
-
+  }, [isOpen, task?.job_level]); // Depend on job_level
+  
   // New function to fetch automation details from webData
   const fetchAutomationFromWebData = async (webDataItems: any[]) => {
     try {
@@ -1773,7 +1816,7 @@ export const AutomationMappingDialog = ({
                 >
                   <span className="font-medium">{doc.entityType || 'Document'}</span>
                   <span className="ml-1.5 font-mono text-[11px] text-blue-600">
-                    {doc.kycDocument?.display_name || 'N/A'}  
+                    {doc.kycDocument?.display_name || 'N/A'}
                   </span>
                 </Badge>
               ))}
@@ -2005,7 +2048,12 @@ export const AutomationMappingDialog = ({
 
   return (
     <>
-      <Dialog open={isOpen} onOpenChange={onClose}>
+      {/* Debug log to track rendering */}
+      {console.log('🤖 [AutomationMappingDialog] Rendering dialog with isOpen:', isOpen) || null}
+      <Dialog open={isOpen} onOpenChange={(open) => {
+        console.log('🤖 [AutomationMappingDialog] Dialog onOpenChange called with:', open);
+        if (!open) onClose();
+      }}>
         <DialogContent className="max-w-6xl max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -2018,7 +2066,7 @@ export const AutomationMappingDialog = ({
               )}
             </DialogTitle>
             <DialogDescription>
-              View the data mapping for this requirement and preview source data for a specific individual.
+              Configure automation mappings and preview extracted data for this stage.
               {selectedAutomationId && (
                 <div className="text-xs text-blue-600 mt-1">
                   Selected: {entityAutomationMappings.find(m => m.automationId === selectedAutomationId)?.automation?.name || 'Unknown'}
