@@ -98,6 +98,23 @@ export default function Stages() {
   const [columnVisibility, setColumnVisibility] = useState({ index: true, entity: true, stageName: true, duration: true, followUp: true, status: true, controls: true })
   const [entityVisibility, setEntityVisibility] = useState<Record<string, boolean>>({})
 
+  // Helper to check if a specific entity has an automation linked in a stage
+  const getEntityAutomation = (stage: Stage, entityKey: string) => {
+    if (!stage.documents) return null;
+    // Find the first document that has an automation link for this specific entity
+    const docWithAutomation = stage.documents.find(
+      (doc) => doc.hasAutomation && doc.automationLinks?.[entityKey]
+    );
+    return docWithAutomation?.automationLinks?.[entityKey];
+  };
+
+  // Helper to check if a stage has ANY automation at all
+  const hasAnyAutomation = (stage: Stage) => {
+    return stage.documents?.some(
+      (doc) => doc.hasAutomation && doc.automationLinks && Object.keys(doc.automationLinks).length > 0
+    );
+  };
+
   // Enhanced function to get KYC fields for a document
   const getKycFields = useCallback(
     (doc: any) => {
@@ -1750,7 +1767,7 @@ export default function Stages() {
 
   const currentDept = getCurrentDepartment()
 
- const styleCell = (cell: ExcelJS.Cell, customStyle: Partial<ExcelJS.Style> = {}) => {
+  const styleCell = (cell: ExcelJS.Cell, customStyle: Partial<ExcelJS.Style> = {}) => {
     cell.font = { name: 'Calibri', size: 11, ...customStyle.font };
     cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true, ...customStyle.alignment };
     cell.border = {
@@ -1779,7 +1796,7 @@ export default function Stages() {
       worksheet.mergeCells('A1:E1');
       worksheet.getCell('A1').value = `Stages: ${currentDept.name}`;
       worksheet.getCell('A1').font = { name: 'Calibri', size: 16, bold: true };
-      
+
       worksheet.mergeCells('A2:E2');
       worksheet.getCell('A2').value = `Export Date: ${new Date().toLocaleDateString()}`;
       worksheet.getCell('A2').font = { name: 'Calibri', size: 12 };
@@ -1800,14 +1817,14 @@ export default function Stages() {
         if (columnVisibility.index) fixedHeaders.push({ header: '#', key: 'index', width: 6 });
         if (columnVisibility.entity) fixedHeaders.push({ header: 'Stage Name', key: 'name', width: 30 });
         if (columnVisibility.stageName) {
-           fixedHeaders.push({ header: 'Duration', key: 'duration', width: 15 });
-           fixedHeaders.push({ header: 'Follow Up', key: 'followUp', width: 15 });
+          fixedHeaders.push({ header: 'Duration', key: 'duration', width: 15 });
+          fixedHeaders.push({ header: 'Follow Up', key: 'followUp', width: 15 });
         }
 
         // 2. Build Header Rows
         const mainHeaderRow = worksheet.getRow(headerStartRow);
         const subHeaderRow = worksheet.getRow(headerStartRow + 1);
-        
+
         let colIndex = 1;
 
         // Write Fixed Headers
@@ -1817,8 +1834,8 @@ export default function Stages() {
           const cell = mainHeaderRow.getCell(colIndex);
           cell.value = h.header;
           worksheet.getColumn(colIndex).width = h.width;
-          styleCell(cell, { 
-            font: { bold: true, color: { argb: 'FFFFFFFF' } }, 
+          styleCell(cell, {
+            font: { bold: true, color: { argb: 'FFFFFFFF' } },
             fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF002060' } },
             alignment: { horizontal: 'center' }
           });
@@ -1831,36 +1848,36 @@ export default function Stages() {
         leafEntities.forEach(entity => {
           // Determine span (Controls visibility)
           const span = columnVisibility.controls ? 2 : 1;
-          
+
           if (span > 1) {
             worksheet.mergeCells(headerStartRow, colIndex, headerStartRow, colIndex + span - 1);
           }
-          
+
           const mainCell = mainHeaderRow.getCell(colIndex);
           mainCell.value = entity.name; // Top header is Entity Name
           styleCell(mainCell, {
-             font: { bold: true, color: { argb: 'FFFFFFFF' } },
-             fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } }, // Lighter blue
-             alignment: { horizontal: 'center' }
+            font: { bold: true, color: { argb: 'FFFFFFFF' } },
+            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } }, // Lighter blue
+            alignment: { horizontal: 'center' }
           });
 
           // Sub headers
           if (columnVisibility.controls) {
             const sub1 = subHeaderRow.getCell(colIndex);
             sub1.value = "App.";
-            styleCell(sub1, { font: { size: 9, bold: true }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }, alignment: { horizontal: 'center' }});
-            
+            styleCell(sub1, { font: { size: 9, bold: true }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }, alignment: { horizontal: 'center' } });
+
             const sub2 = subHeaderRow.getCell(colIndex + 1);
             sub2.value = "Disp.";
-            styleCell(sub2, { font: { size: 9, bold: true }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }, alignment: { horizontal: 'center' }});
-            
+            styleCell(sub2, { font: { size: 9, bold: true }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }, alignment: { horizontal: 'center' } });
+
             worksheet.getColumn(colIndex).width = 8;
             worksheet.getColumn(colIndex + 1).width = 8;
           } else {
-             const sub1 = subHeaderRow.getCell(colIndex);
-             sub1.value = "Status";
-             styleCell(sub1, { font: { size: 9 }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }});
-             worksheet.getColumn(colIndex).width = 10;
+            const sub1 = subHeaderRow.getCell(colIndex);
+            sub1.value = "Status";
+            styleCell(sub1, { font: { size: 9 }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } } });
+            worksheet.getColumn(colIndex).width = 10;
           }
 
           colIndex += span;
@@ -1873,48 +1890,48 @@ export default function Stages() {
 
           // Fixed Data
           if (columnVisibility.index) {
-             const c = row.getCell(currentCell++); 
-             c.value = stage.order_num;
-             styleCell(c, { alignment: { horizontal: 'center' }});
+            const c = row.getCell(currentCell++);
+            c.value = stage.order_num;
+            styleCell(c, { alignment: { horizontal: 'center' } });
           }
           if (columnVisibility.entity) {
-             const c = row.getCell(currentCell++);
-             c.value = stage.name;
-             styleCell(c, { font: { bold: true } });
+            const c = row.getCell(currentCell++);
+            c.value = stage.name;
+            styleCell(c, { font: { bold: true } });
           }
           if (columnVisibility.stageName) {
-             const cDur = row.getCell(currentCell++);
-             cDur.value = minutesToTimeString(stage.estimated_time);
-             const cFol = row.getCell(currentCell++);
-             cFol.value = stage.follow_up || '-';
+            const cDur = row.getCell(currentCell++);
+            cDur.value = minutesToTimeString(stage.estimated_time);
+            const cFol = row.getCell(currentCell++);
+            cFol.value = stage.follow_up || '-';
           }
 
           // Dynamic Entity Data
           leafEntities.forEach(entity => {
-             const allocation = getStageAllocation(stage, entity);
-             
-             if (columnVisibility.controls) {
-                // Applicable Cell
-                const cApp = row.getCell(currentCell++);
-                cApp.value = allocation.applicable ? "Yes" : "No";
-                styleCell(cApp, { 
-                  font: { color: { argb: allocation.applicable ? 'FF006100' : 'FF9C0006' } },
-                  fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: allocation.applicable ? 'FFC6EFCE' : 'FFFFC7CE' } }, // Light Green / Light Red
-                  alignment: { horizontal: 'center' }
-                });
+            const allocation = getStageAllocation(stage, entity);
 
-                // Display Cell
-                const cDisp = row.getCell(currentCell++);
-                cDisp.value = allocation.display ? "Yes" : "No";
-                styleCell(cDisp, { 
-                   font: { color: { argb: allocation.display ? 'FF000000' : 'FF808080' } },
-                   alignment: { horizontal: 'center' }
-                });
-             } else {
-                // Single Status Cell
-                const cStat = row.getCell(currentCell++);
-                cStat.value = allocation.applicable ? "Active" : "-";
-             }
+            if (columnVisibility.controls) {
+              // Applicable Cell
+              const cApp = row.getCell(currentCell++);
+              cApp.value = allocation.applicable ? "Yes" : "No";
+              styleCell(cApp, {
+                font: { color: { argb: allocation.applicable ? 'FF006100' : 'FF9C0006' } },
+                fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: allocation.applicable ? 'FFC6EFCE' : 'FFFFC7CE' } }, // Light Green / Light Red
+                alignment: { horizontal: 'center' }
+              });
+
+              // Display Cell
+              const cDisp = row.getCell(currentCell++);
+              cDisp.value = allocation.display ? "Yes" : "No";
+              styleCell(cDisp, {
+                font: { color: { argb: allocation.display ? 'FF000000' : 'FF808080' } },
+                alignment: { horizontal: 'center' }
+              });
+            } else {
+              // Single Status Cell
+              const cStat = row.getCell(currentCell++);
+              cStat.value = allocation.applicable ? "Active" : "-";
+            }
           });
         });
 
@@ -1922,7 +1939,7 @@ export default function Stages() {
         // ==========================================
         // STANDARD VIEW (Entities as Rows - HIERARCHICAL)
         // ==========================================
-        
+
         // 1. Calculate Dynamic Columns per Stage
         // What columns do we show for each stage?
         const stageSubCols = [];
@@ -1930,14 +1947,14 @@ export default function Stages() {
         if (columnVisibility.followUp) stageSubCols.push({ label: 'F/U', width: 8 });
         if (columnVisibility.status) stageSubCols.push({ label: 'Status', width: 10 });
         if (columnVisibility.controls) {
-           stageSubCols.push({ label: 'App.', width: 6 });
-           stageSubCols.push({ label: 'Disp.', width: 6 });
+          stageSubCols.push({ label: 'App.', width: 6 });
+          stageSubCols.push({ label: 'Disp.', width: 6 });
         }
-        
+
         const colsPerStage = stageSubCols.length;
         if (colsPerStage === 0) {
-           toast({ title: "No stage columns visible", variant: "destructive" });
-           return;
+          toast({ title: "No stage columns visible", variant: "destructive" });
+          return;
         }
 
         const headerStartRow = 4;
@@ -1950,55 +1967,55 @@ export default function Stages() {
 
         // Static Headers (Index, Entity)
         if (columnVisibility.index) {
-           worksheet.mergeCells(headerStartRow, colIndex, headerStartRow + 1, colIndex);
-           const c = mainHeaderRow.getCell(colIndex);
-           c.value = "#";
-           worksheet.getColumn(colIndex).width = 6;
-           styleCell(c, { 
-             font: { bold: true, color: { argb: 'FFFFFFFF' } }, 
-             fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF002060' } },
-             alignment: { horizontal: 'center' }
-           });
-           colIndex++;
+          worksheet.mergeCells(headerStartRow, colIndex, headerStartRow + 1, colIndex);
+          const c = mainHeaderRow.getCell(colIndex);
+          c.value = "#";
+          worksheet.getColumn(colIndex).width = 6;
+          styleCell(c, {
+            font: { bold: true, color: { argb: 'FFFFFFFF' } },
+            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF002060' } },
+            alignment: { horizontal: 'center' }
+          });
+          colIndex++;
         }
 
         if (columnVisibility.entity) {
-           worksheet.mergeCells(headerStartRow, colIndex, headerStartRow + 1, colIndex);
-           const c = mainHeaderRow.getCell(colIndex);
-           c.value = "Department / Entity";
-           worksheet.getColumn(colIndex).width = 40;
-           styleCell(c, { 
-             font: { bold: true, color: { argb: 'FFFFFFFF' } }, 
-             fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF002060' } }
-           });
-           colIndex++;
+          worksheet.mergeCells(headerStartRow, colIndex, headerStartRow + 1, colIndex);
+          const c = mainHeaderRow.getCell(colIndex);
+          c.value = "Department / Entity";
+          worksheet.getColumn(colIndex).width = 40;
+          styleCell(c, {
+            font: { bold: true, color: { argb: 'FFFFFFFF' } },
+            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF002060' } }
+          });
+          colIndex++;
         }
 
         // Dynamic Stage Headers
         currentDept.stages.forEach(stage => {
-           // Merge cells for Stage Name
-           worksheet.mergeCells(headerStartRow, colIndex, headerStartRow, colIndex + colsPerStage - 1);
-           const mainC = mainHeaderRow.getCell(colIndex);
-           mainC.value = stage.name;
-           styleCell(mainC, { 
-             font: { bold: true, color: { argb: 'FFFFFFFF' } }, 
-             fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } }, // Medium Blue
-             alignment: { horizontal: 'center' }
-           });
+          // Merge cells for Stage Name
+          worksheet.mergeCells(headerStartRow, colIndex, headerStartRow, colIndex + colsPerStage - 1);
+          const mainC = mainHeaderRow.getCell(colIndex);
+          mainC.value = stage.name;
+          styleCell(mainC, {
+            font: { bold: true, color: { argb: 'FFFFFFFF' } },
+            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } }, // Medium Blue
+            alignment: { horizontal: 'center' }
+          });
 
-           // Sub columns
-           stageSubCols.forEach((subCol, i) => {
-              const subC = subHeaderRow.getCell(colIndex + i);
-              subC.value = subCol.label;
-              worksheet.getColumn(colIndex + i).width = subCol.width;
-              styleCell(subC, { 
-                 font: { size: 10, bold: true }, 
-                 fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }, // Light Gray
-                 alignment: { horizontal: 'center' }
-              });
-           });
-           
-           colIndex += colsPerStage;
+          // Sub columns
+          stageSubCols.forEach((subCol, i) => {
+            const subC = subHeaderRow.getCell(colIndex + i);
+            subC.value = subCol.label;
+            worksheet.getColumn(colIndex + i).width = subCol.width;
+            styleCell(subC, {
+              font: { size: 10, bold: true },
+              fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }, // Light Gray
+              alignment: { horizontal: 'center' }
+            });
+          });
+
+          colIndex += colsPerStage;
         });
 
         // 3. Write Data with Hierarchy
@@ -2007,121 +2024,121 @@ export default function Stages() {
 
         // Helper to add a row
         const addEntityRow = (entityName: string, entityObj: any, level: number, subdeptId: number, clsId: number | null, subClsId: number | null) => {
-           rowCounter++;
-           const row = worksheet.addRow([]);
-           row.outlineLevel = level;
-           let currCell = 1;
+          rowCounter++;
+          const row = worksheet.addRow([]);
+          row.outlineLevel = level;
+          let currCell = 1;
 
-           // Index
-           if (columnVisibility.index) {
-              row.getCell(currCell++).value = rowCounter; // Could make this 1.1, 1.1.1 if desired
-           }
-           
-           // Entity Name with indentation
-           if (columnVisibility.entity) {
+          // Index
+          if (columnVisibility.index) {
+            row.getCell(currCell++).value = rowCounter; // Could make this 1.1, 1.1.1 if desired
+          }
+
+          // Entity Name with indentation
+          if (columnVisibility.entity) {
+            const c = row.getCell(currCell++);
+            c.value = entityName;
+            styleCell(c, { alignment: { indent: level } });
+          }
+
+          // Background colors for group rows
+          const bgColors = ['FFDDEBF7', 'FFF2F2F2', 'FFFFFFFF']; // Level 0 (Blue), 1 (Gray), 2 (White)
+          const bgColor = bgColors[level] || 'FFFFFFFF';
+          const isGroupHeader = (level === 0) || (level === 1 && subClsId === null && entityObj.subClasses && entityObj.subClasses.length > 0);
+
+          if (isGroupHeader) {
+            row.eachCell({ includeEmpty: true }, c => {
+              c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+              c.font = { bold: true };
+              c.border = { bottom: { style: 'thin', color: { argb: 'FFD4D4D4' } } };
+            });
+          }
+
+          // Stage Data
+          currentDept.stages.forEach(stage => {
+            // Calculate allocation manually based on ids passed
+            let stageAllocation;
+
+            if (subClsId !== null && clsId !== null) {
+              // Subclass
+              stageAllocation = entityObj.stages?.find((s: any) => s.stage_id === stage.id);
+            } else if (clsId !== null) {
+              // Class
+              stageAllocation = entityObj.stages?.find((s: any) => s.stage_id === stage.id);
+              // Check inheritance if visual only (not done here for raw data export, sticking to direct allocation)
+            } else {
+              // Subdept
+              stageAllocation = entityObj.stages?.find((s: any) => s.stage_id === stage.id);
+            }
+
+            const isApp = stageAllocation?.applicable ?? true;
+            const isDisp = stageAllocation?.display ?? true;
+
+            // Write columns
+            if (columnVisibility.duration) {
               const c = row.getCell(currCell++);
-              c.value = entityName;
-              styleCell(c, { alignment: { indent: level } });
-           }
-
-           // Background colors for group rows
-           const bgColors = ['FFDDEBF7', 'FFF2F2F2', 'FFFFFFFF']; // Level 0 (Blue), 1 (Gray), 2 (White)
-           const bgColor = bgColors[level] || 'FFFFFFFF';
-           const isGroupHeader = (level === 0) || (level === 1 && subClsId === null && entityObj.subClasses && entityObj.subClasses.length > 0);
-
-           if (isGroupHeader) {
-             row.eachCell({ includeEmpty: true }, c => {
-                c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
-                c.font = { bold: true };
-                c.border = { bottom: { style: 'thin', color: { argb: 'FFD4D4D4' } } };
-             });
-           }
-
-           // Stage Data
-           currentDept.stages.forEach(stage => {
-              // Calculate allocation manually based on ids passed
-              let stageAllocation;
-              
-              if (subClsId !== null && clsId !== null) {
-                 // Subclass
-                 stageAllocation = entityObj.stages?.find((s:any) => s.stage_id === stage.id);
-              } else if (clsId !== null) {
-                 // Class
-                 stageAllocation = entityObj.stages?.find((s:any) => s.stage_id === stage.id);
-                 // Check inheritance if visual only (not done here for raw data export, sticking to direct allocation)
+              c.value = minutesToTimeString(stage.estimated_time);
+              c.alignment = { horizontal: 'center' };
+            }
+            if (columnVisibility.followUp) {
+              const c = row.getCell(currCell++);
+              c.value = stage.follow_up || '-';
+              c.alignment = { horizontal: 'center' };
+            }
+            if (columnVisibility.status) {
+              const c = row.getCell(currCell++);
+              c.value = stage.status || '-';
+              c.alignment = { horizontal: 'center' };
+            }
+            if (columnVisibility.controls) {
+              // Applicable
+              const cApp = row.getCell(currCell++);
+              if (!hasClasses(entityObj, level)) { // Only show controls for "leaves" or editable rows? 
+                // Current logic allows editing everywhere, so show everywhere
+                cApp.value = isApp ? "Yes" : "No";
+                styleCell(cApp, {
+                  font: { color: { argb: isApp ? 'FF006100' : 'FF9C0006' }, size: 10 },
+                  fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: isApp ? 'FFC6EFCE' : 'FFFFC7CE' } },
+                  alignment: { horizontal: 'center' }
+                });
               } else {
-                 // Subdept
-                 stageAllocation = entityObj.stages?.find((s:any) => s.stage_id === stage.id);
+                cApp.value = "-"; // Group header visual filler
               }
 
-              const isApp = stageAllocation?.applicable ?? true;
-              const isDisp = stageAllocation?.display ?? true;
-
-              // Write columns
-              if (columnVisibility.duration) {
-                 const c = row.getCell(currCell++);
-                 c.value = minutesToTimeString(stage.estimated_time);
-                 c.alignment = { horizontal: 'center' };
+              // Display
+              const cDisp = row.getCell(currCell++);
+              if (!hasClasses(entityObj, level)) {
+                cDisp.value = isDisp ? "Yes" : "No";
+                styleCell(cDisp, { alignment: { horizontal: 'center' }, font: { size: 10 } });
+              } else {
+                cDisp.value = "-";
               }
-              if (columnVisibility.followUp) {
-                 const c = row.getCell(currCell++);
-                 c.value = stage.follow_up || '-';
-                 c.alignment = { horizontal: 'center' };
-              }
-              if (columnVisibility.status) {
-                 const c = row.getCell(currCell++);
-                 c.value = stage.status || '-';
-                 c.alignment = { horizontal: 'center' };
-              }
-              if (columnVisibility.controls) {
-                 // Applicable
-                 const cApp = row.getCell(currCell++);
-                 if (!hasClasses(entityObj, level)) { // Only show controls for "leaves" or editable rows? 
-                    // Current logic allows editing everywhere, so show everywhere
-                    cApp.value = isApp ? "Yes" : "No";
-                    styleCell(cApp, { 
-                       font: { color: { argb: isApp ? 'FF006100' : 'FF9C0006' }, size: 10 },
-                       fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: isApp ? 'FFC6EFCE' : 'FFFFC7CE' } },
-                       alignment: { horizontal: 'center' }
-                    });
-                 } else {
-                    cApp.value = "-"; // Group header visual filler
-                 }
-
-                 // Display
-                 const cDisp = row.getCell(currCell++);
-                 if (!hasClasses(entityObj, level)) {
-                    cDisp.value = isDisp ? "Yes" : "No";
-                    styleCell(cDisp, { alignment: { horizontal: 'center' }, font: { size: 10 } });
-                 } else {
-                    cDisp.value = "-";
-                 }
-              }
-           });
+            }
+          });
         };
 
         // Helper to check if an object acts as a group header (has children)
         const hasClasses = (obj: any, level: number) => {
-           if (level === 0) return obj.classes && obj.classes.length > 0;
-           if (level === 1) return obj.subClasses && obj.subClasses.length > 0;
-           return false;
+          if (level === 0) return obj.classes && obj.classes.length > 0;
+          if (level === 1) return obj.subClasses && obj.subClasses.length > 0;
+          return false;
         };
 
         // Iterate Hierarchy
         processedSubdepartments.forEach(subdept => {
-           addEntityRow(subdept.name, subdept, 0, subdept.id, null, null);
+          addEntityRow(subdept.name, subdept, 0, subdept.id, null, null);
 
-           if (subdept.classes && subdept.classes.length > 0) {
-              subdept.classes.forEach((cls: any, clsIndex: number) => {
-                 addEntityRow(cls.name, cls, 1, subdept.id, cls.id || clsIndex, null);
+          if (subdept.classes && subdept.classes.length > 0) {
+            subdept.classes.forEach((cls: any, clsIndex: number) => {
+              addEntityRow(cls.name, cls, 1, subdept.id, cls.id || clsIndex, null);
 
-                 if (cls.subClasses && cls.subClasses.length > 0) {
-                    cls.subClasses.forEach((subCls: any, subClsIndex: number) => {
-                       addEntityRow(subCls.name, subCls, 2, subdept.id, cls.id || clsIndex, subCls.id || subClsIndex);
-                    });
-                 }
-              });
-           }
+              if (cls.subClasses && cls.subClasses.length > 0) {
+                cls.subClasses.forEach((subCls: any, subClsIndex: number) => {
+                  addEntityRow(subCls.name, subCls, 2, subdept.id, cls.id || clsIndex, subCls.id || subClsIndex);
+                });
+              }
+            });
+          }
         });
       }
 
@@ -2130,10 +2147,10 @@ export default function Stages() {
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const kycDocCount = allKycDocuments.size;
       saveAs(blob, `${currentDept.name}_Stages_${viewType}_${kycDocCount}Docs_${new Date().toISOString().split('T')[0]}.xlsx`);
-      
-      toast({ 
-         title: "Export Successful", 
-         description: `Exported ${viewType} view to Excel` 
+
+      toast({
+        title: "Export Successful",
+        description: `Exported ${viewType} view to Excel`
       });
 
     } catch (error) {
@@ -2397,7 +2414,7 @@ export default function Stages() {
               <TableRow className="border-b-0">
                 <TableCell className="sticky left-0 bg-slate-500 border-r-2 border-slate-300 z-10" rowSpan={2} colSpan={3}></TableCell>
                 <TableCell className="bg-slate-500 border-r-2 border-slate-300 z-20" rowSpan={2} colSpan={2}></TableCell>
-             </TableRow>
+              </TableRow>
               {/* Applicable/Display Controls Header Row */}
               {columnVisibility.controls && (
                 <TableRow className="border-b-0">
@@ -2431,7 +2448,7 @@ export default function Stages() {
                     >
                       <div className="flex justify-between">
                         <span className="font-semibold text-slate-800">{stage.name}</span>
-                      <div>  {stage.documents && stage.documents.length > 0 && (
+                        <div>  {stage.documents && stage.documents.length > 0 && (
                           <Popover>
                             <PopoverTrigger asChild>
                               <Button
@@ -2553,80 +2570,74 @@ export default function Stages() {
                     </>
                   )}
                   {leafEntities.map((entity, entityIndex) => {
-                    const allocation = getStageAllocation(stage, entity)
-                    const columnClass = entityIndex % 2 === 0 ? "bg-white" : "bg-gray-50/80"
+                    const entityKey = `${entity.subdeptId}:${entity.classIndex !== undefined ? (currentDept.subdepartments.find(sd => sd.id === entity.subdeptId)?.classes[entity.classIndex]?.id || 0) : 0}:${entity.subclassIndex !== undefined ? (currentDept.subdepartments.find(sd => sd.id === entity.subdeptId)?.classes[entity.classIndex]?.subClasses[entity.subclassIndex]?.id || 0) : 0}`;
+
+                    const allocation = getStageAllocation(stage, entity);
+                    const automation = getEntityAutomation(stage, entityKey);
+                    const columnClass = entityIndex % 2 === 0 ? "bg-white" : "bg-gray-50/80";
 
                     return (
                       <React.Fragment key={`${stage.id}-${entity.id}`}>
-                        {columnVisibility.controls ? (
-                          <>
-                            <TableCell className={cn("border-x border-gray-200 p-1", columnClass)}>
-                              <div className="flex justify-center">
-                                <Select
-                                  value={allocation.applicable ? "applicable" : "not-applicable"}
-                                  onValueChange={(value) =>
-                                    handleAllocationChange(
-                                      entity.subdeptId,
-                                      stage.id,
-                                      value === "applicable",
-                                      entity.classIndex,
-                                      entity.subclassIndex,
-                                    )
-                                  }
-                                >
-                                  <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-gray-200/50">
-                                    <SelectValue>
-                                      <div className="flex items-center gap-1">
-                                        <div
-                                          className={`w-2 h-2 rounded-full ${allocation.applicable ? "bg-green-500" : "bg-red-500"}`}
-                                        ></div>
-                                        <span className="font-medium">{allocation.applicable ? "Yes" : "No"}</span>
-                                      </div>
-                                    </SelectValue>
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="applicable">
-                                      <div className="flex items-center gap-2">
-                                        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                                        Applicable
-                                      </div>
-                                    </SelectItem>
-                                    <SelectItem value="not-applicable">
-                                      <div className="flex items-center gap-2">
-                                        <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                                        Not Applicable
-                                      </div>
-                                    </SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            </TableCell>
-                            <TableCell className={cn("border-x border-gray-200 p-1", columnClass)}>
-                              <div className="flex justify-center items-center">
-                                <Checkbox
-                                  checked={allocation.display}
-                                  onCheckedChange={(checked) =>
-                                    handleDisplayToggle(
-                                      entity.subdeptId,
-                                      stage.id,
-                                      checked as boolean,
-                                      entity.classIndex,
-                                      entity.subclassIndex,
-                                    )
-                                  }
-                                  disabled={!allocation.applicable}
-                                  className="h-4 w-4 text-blue-500"
-                                />
-                              </div>
-                            </TableCell>
-                          </>
-                        ) : (
-                          <TableCell className={cn("border-x border-gray-200 p-1 text-center", columnClass)}>
-                            <div className={`w-2 h-2 rounded-full mx-auto ${allocation.applicable ? "bg-green-500" : "bg-red-500"}`} title={allocation.applicable ? "Applicable" : "Not Applicable"}></div>
-                          </TableCell>
-                        )}
+                        <TableCell className={cn("border-x border-gray-200 p-1", columnClass)}>
+                          <div className="flex items-center justify-center gap-1">
+                            {/* Status Select */}
+                            <Select
+                              value={allocation.applicable ? "applicable" : "not-applicable"}
+                              onValueChange={(val) => handleAllocationChange(entity.subdeptId, stage.id, val === "applicable", entity.classIndex, entity.subclassIndex)}
+                            >
+                              <SelectTrigger className="h-7 border-0 shadow-none text-xs bg-transparent hover:bg-gray-200/50">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="applicable">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                    Applicable
+                                  </div>
+                                </SelectItem>
+                                <SelectItem value="not-applicable">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                                    Not Applicable
+                                  </div>
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {automation && (
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <div className="cursor-help p-1 bg-amber-100 rounded-full">
+                                    <Zap className="h-3 w-3 text-amber-600 fill-amber-600" />
+                                  </div>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-48 p-2">
+                                  <p className="text-[10px] font-bold text-amber-800 uppercase">Automation Linked</p>
+                                  <p className="text-xs text-slate-600">ID: {automation.automationId}</p>
+                                </PopoverContent>
+                              </Popover>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className={cn("border-x border-gray-200 p-1", columnClass)}>
+                          <div className="flex justify-center items-center">
+                            <Checkbox
+                              checked={allocation.display}
+                              onCheckedChange={(checked) =>
+                                handleDisplayToggle(
+                                  entity.subdeptId,
+                                  stage.id,
+                                  checked as boolean,
+                                  entity.classIndex,
+                                  entity.subclassIndex,
+                                )
+                              }
+                              disabled={!allocation.applicable}
+                              className="h-4 w-4 text-blue-500"
+                            />
+                          </div>
+                        </TableCell>
                       </React.Fragment>
-                    )
+                    );
                   })}
                 </TableRow>
               ))}
@@ -2943,81 +2954,32 @@ export default function Stages() {
                 </TableRow>
               )}
               {/* Automation Row */}
+              {/* Automation Row in Standard View */}
               <TableRow className="border-b-0">
                 {columnVisibility.stageName && (
-                  <TableHead
-                    className={cn(
-                      "sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white",
-                      columnVisibility.index && columnVisibility.entity
-                        ? "left-80"
-                        : columnVisibility.index || columnVisibility.entity
-                          ? "left-64"
-                          : "left-0",
-                    )}
-                  >
+                  <TableHead className={cn(
+                    "sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white",
+                    columnVisibility.index && columnVisibility.entity ? "left-80" : "left-64"
+                  )}>
                     Automation
                   </TableHead>
                 )}
                 {currentDept.stages.map((stage) => {
-                  const automationName = stage.web_automation?.automationName;
+                  const isAutomated = hasAnyAutomation(stage);
                   return (
-                    <TableHead
-                      key={`automation-${stage.id}`}
-                      className="border-r border-blue-400 text-center bg-blue-600"
-                    >
-                      {automationName ? (
-                        <div className="flex items-center justify-center gap-1 bg-blue-700/80 rounded-full px-2 py-1 mx-2">
-                          <Zap className="h-3 w-3 text-amber-300" />
-                          <span className="text-xs font-medium text-white truncate max-w-[120px]" title={automationName}>
-                            {automationName}
-                          </span>
+                    <TableHead key={`auto-${stage.id}`} className="border-r border-blue-400 text-center bg-blue-600">
+                      {isAutomated ? (
+                        <div className="flex items-center justify-center gap-1 bg-amber-400/20 py-1 px-2 rounded-md mx-4">
+                          <Zap className="h-4 w-4 text-amber-300 fill-amber-300" />
+                          <span className="text-[10px] text-white font-bold uppercase tracking-tighter">Automated</span>
                         </div>
                       ) : (
-                        <div className="text-xs text-gray-300">-</div>
+                        <span className="text-blue-400 text-xs">-</span>
                       )}
                     </TableHead>
                   );
                 })}
               </TableRow>
-              {/* Automation Row */}
-              {columnVisibility.automation && (
-                <TableRow className="border-b-0">
-                  {columnVisibility.stageName && (
-                    <TableHead
-                      className={cn(
-                        "sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white",
-                        columnVisibility.index && columnVisibility.entity
-                          ? "left-80"
-                          : columnVisibility.index || columnVisibility.entity
-                            ? "left-64"
-                            : "left-0",
-                      )}
-                    >
-                      Automation
-                    </TableHead>
-                  )}
-                  {currentDept.stages.map((stage) => {
-                    const automationName = stage.web_automation?.automationName;
-                    return (
-                      <TableHead
-                        key={`automation-${stage.id}`}
-                        className="border-r border-blue-400 text-center bg-blue-600"
-                      >
-                        {automationName ? (
-                          <div className="flex items-center justify-center gap-1 bg-blue-700/80 rounded-full px-2 py-1 mx-2">
-                            <Zap className="h-3 w-3 text-amber-300" />
-                            <span className="text-xs font-medium text-white truncate max-w-[120px]" title={automationName}>
-                              {automationName}
-                            </span>
-                          </div>
-                        ) : (
-                          <div className="text-xs text-gray-300">-</div>
-                        )}
-                      </TableHead>
-                    );
-                  })}
-                </TableRow>
-              )}
               {/* Status Row */}
               {columnVisibility.status && (
                 <TableRow className="border-b-0">

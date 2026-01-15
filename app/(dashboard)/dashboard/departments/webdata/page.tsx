@@ -304,7 +304,7 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
     }
   };
 
-  const refreshDepartments = async () => {
+const refreshDepartments = async () => {
     try {
       const { data: departmentsData, error } = await supabase
         .from('tm_departments')
@@ -313,40 +313,37 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
 
       if (error) throw error
 
-      const { data: webData, error: reqError } = await supabase
+      const { data: allReqRecords, error: reqError } = await supabase
         .from('tm_class_requirements')
         .select('*')
-        .order('id')
 
       if (reqError) throw reqError
 
       const processedDepartments = departmentsData.map(dept => {
         const subdepartments = (dept.tm_subdepartments || []).map(subdept => {
-          const classes = (subdept.classes || []).map(cls => {
-            const classId = `${subdept.id}_${cls.id}`
-            const classWebDataRecord = webData?.find(req =>
-              req.class_id === classId && req.type === 'class'
-            )
+          
+          // Helper to find requirement record by job_level matches
+          const findRecord = (cId: string | null, scId: string | null) => {
+            return allReqRecords?.find(r => 
+              r.job_level?.department_id === dept.id &&
+              r.job_level?.subdepartment_id === subdept.id &&
+              String(r.job_level?.class_id || 'null') === String(cId || 'null') &&
+              String(r.job_level?.subclass_id || 'null') === String(scId || 'null')
+            );
+          };
 
-            let classWebData: WebDataEntry[] = [];
-            if (classWebDataRecord?.webData && Array.isArray(classWebDataRecord.webData)) {
-              classWebData = classWebDataRecord.webData;
-            }
+          const classes = (subdept.classes || []).map(cls => {
+            // Find record for Class (Level 3)
+            const classWebDataRecord = findRecord(cls.id.toString(), null);
+            const classWebData = Array.isArray(classWebDataRecord?.webData) ? classWebDataRecord.webData : [];
 
             const subClasses = (cls.subClasses || []).map(subCls => {
-              const subClassId = `${classId}_${subCls.id}`
-              const subClassWebDataRecord = webData?.find(req =>
-                req.class_id === subClassId && req.type === 'subclass'
-              )
-
-              let subClassWebData: WebDataEntry[] = [];
-              if (subClassWebDataRecord?.webData && Array.isArray(subClassWebDataRecord.webData)) {
-                subClassWebData = subClassWebDataRecord.webData;
-              }
+              // Find record for Subclass (Level 4)
+              const subClassWebDataRecord = findRecord(cls.id.toString(), subCls.id.toString());
+              const subClassWebData = Array.isArray(subClassWebDataRecord?.webData) ? subClassWebDataRecord.webData : [];
 
               return {
                 ...subCls,
-                parentClassId: classId,
                 webData: subClassWebData
               }
             })
@@ -358,14 +355,9 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
             }
           })
 
-          const subdeptWebDataRecord = webData?.find(req =>
-            req.class_id === subdept.id.toString() && req.type === 'subdepartment'
-          )
-
-          let uploadWebData: WebDataEntry[] = [];
-          if (subdeptWebDataRecord?.webData && Array.isArray(subdeptWebDataRecord.webData)) {
-            uploadWebData = subdeptWebDataRecord.webData;
-          }
+          // Find record for Subdepartment (Level 2)
+          const subdeptWebDataRecord = findRecord(null, null);
+          const uploadWebData = Array.isArray(subdeptWebDataRecord?.webData) ? subdeptWebDataRecord.webData : [];
 
           return {
             ...subdept,
@@ -386,7 +378,7 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
       console.error('Error refreshing departments:', error)
       toast({
         title: "Error",
-        description: "Failed to refresh departments. Please try again.",
+        description: "Failed to refresh departments.",
         variant: "destructive"
       })
     }
@@ -545,50 +537,64 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
     }
   }
 
-  const replaceWebDataForContext = async (context: EditingContext, webDataArray: WebDataEntry[]) => {
+const replaceWebDataForContext = async (context: EditingContext, webDataArray: WebDataEntry[]) => {
     try {
-      let classId = '';
-      let webDataType = '';
+      // 1. Construct the job_level object based on context
+      const jobLevel = {
+        department_id: parseInt(context.departmentId),
+        subdepartment_id: parseInt(context.subdepartmentId),
+        class_id: context.classId || null,
+        subclass_id: context.subclassId || null,
+        level: context.subclassId ? 4 : context.classId ? 3 : 2
+      };
 
-      if (context.type === 'subdepartment') {
-        classId = context.subdepartmentId;
-        webDataType = 'subdepartment';
-      } else if (context.type === 'class') {
-        classId = `${context.subdepartmentId}_${context.classId}`;
-        webDataType = 'class';
-      } else if (context.type === 'subclass') {
-        classId = `${context.subdepartmentId}_${context.classId}_${context.subclassId}`;
-        webDataType = 'subclass';
-      }
+      const webDataType = context.type; // 'subdepartment', 'class', or 'subclass'
 
-      const { data: existingRecord, error: fetchError } = await supabase
+      console.log('[replaceWebDataForContext] Target Job Level:', jobLevel);
+
+      // 2. Build query using JSON keys
+      let query = supabase
         .from('tm_class_requirements')
         .select('*')
-        .eq('class_id', classId)
-        .eq('type', webDataType)
-        .single();
+        .eq('job_level->department_id', jobLevel.department_id)
+        .eq('job_level->subdepartment_id', jobLevel.subdepartment_id)
+        .eq('type', webDataType);
+
+      if (jobLevel.class_id) {
+        query = query.eq('job_level->class_id', jobLevel.class_id);
+      } else {
+        query = query.is('job_level->class_id', null);
+      }
+
+      if (jobLevel.subclass_id) {
+        query = query.eq('job_level->subclass_id', jobLevel.subclass_id);
+      } else {
+        query = query.is('job_level->subclass_id', null);
+      }
+
+      const { data: existingRecord, error: fetchError } = await query.maybeSingle();
 
       if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
+
+      const recordData = {
+        webData: webDataArray,
+        job_level: jobLevel,
+        type: webDataType,
+        updated_at: new Date().toISOString()
+      };
 
       if (existingRecord) {
         const { error: updateError } = await supabase
           .from('tm_class_requirements')
-          .update({
-            webData: webDataArray,
-            updated_at: new Date().toISOString()
-          })
-          .eq('class_id', classId)
-          .eq('type', webDataType);
+          .update(recordData)
+          .eq('id', existingRecord.id);
         if (updateError) throw updateError;
       } else {
         const { error: insertError } = await supabase
           .from('tm_class_requirements')
           .insert({
-            class_id: classId,
-            type: webDataType,
-            webData: webDataArray,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+            ...recordData,
+            created_at: new Date().toISOString()
           });
         if (insertError) throw insertError;
       }

@@ -2289,8 +2289,8 @@ export default function TemplateGenerationDialog({
             console.error('❌ No template content available!');
             return '[NO TEMPLATE CONTENT]';
         }
- console.log('🔍 Header content:', headerContent);
- console.log('🔍 Footer content:', footerContent);
+        console.log('🔍 Header content:', headerContent);
+        console.log('🔍 Footer content:', footerContent);
         let content = selectedTemplate.content;
         let processedHeader = headerContent;
         let processedFooter = footerContent;
@@ -2374,7 +2374,7 @@ export default function TemplateGenerationDialog({
             }
         });
 
-       const fullDocument = `
+        const fullDocument = `
         ${processedHeader ? `
             <div style="position: sticky; top: 0; background: white; border-bottom: 1px solid #e5e7eb; padding: 20px; z-index: 10; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
                 ${processedHeader}
@@ -2392,8 +2392,8 @@ export default function TemplateGenerationDialog({
         ` : ''}
     `;
 
-    return fullDocument;
-}, [selectedTemplate, groupedPlaceholders, headerContent, footerContent]);
+        return fullDocument;
+    }, [selectedTemplate, groupedPlaceholders, headerContent, footerContent]);
 
     const prepareRenderData = useCallback(async (data) => {
         const renderData = {};

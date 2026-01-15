@@ -110,17 +110,6 @@ export default function EditableStageCell({
   const inputRef = useRef<HTMLInputElement>(null);
   const [documentFields, setDocumentFields] = useState<any[]>([]);
   const [isLoadingFields, setIsLoadingFields] = useState(false);
-
-  // Log automation dialog state changes
-  useEffect(() => {
-    console.log('🤖 [EditableStageCell] Automation dialog state changed:', {
-      automationDialogOpen,
-      stageId: stage?.id,
-      stageName: stage?.name,
-      taskId: task?.id
-    });
-  }, [automationDialogOpen, stage?.id, stage?.name, task?.id]);
-
   const handlePreviewDataChange = useCallback((docId: string, fieldName: string, value: any) => {
     setPreviewDocuments(prev =>
       prev.map(doc =>
@@ -630,19 +619,7 @@ export default function EditableStageCell({
 
   const handleTriggerAutomation = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    console.log('🤖 [EditableStageCell] Automation button clicked!', {
-      stageId: stage?.id,
-      stageName: stage?.name,
-      taskId: task?.id,
-      taskName: task?.name,
-      hasAutomation: !!(stage?.automation?.automationId || stage?.automation?.id || stage?.web_automation?.automationId),
-      automationId: stage?.automation?.automationId || stage?.automation?.id,
-      isAutomationRunning,
-      automationDialogOpen
-    });
-    
     setAutomationDialogOpen(true);
-    console.log('🤖 [EditableStageCell] Automation dialog should now be open');
   }, [stage, task, isAutomationRunning, automationDialogOpen]);
 
   const fetchKycDocumentData = useCallback(async (kycId: string) => {
@@ -1290,7 +1267,6 @@ export default function EditableStageCell({
       <AutomationMappingDialog
         isOpen={automationDialogOpen}
         onClose={() => {
-          console.log('🤖 [EditableStageCell] Automation dialog closing');
           setAutomationDialogOpen(false);
         }}
         classId={task?.class_id || ''}

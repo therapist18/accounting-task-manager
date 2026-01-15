@@ -43,9 +43,9 @@ const generateId = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,
     return v.toString(16);
 });
 
-const getEntityKey = (entity: any): string | null => {
-  if (!entity) return null;
-  return `${entity.entityType}-${entity.subdept_id}-${entity.class_id || 'null'}-${entity.subclass_id || 'null'}`;
+const getEntityKey = (entity: any): string => {
+  if (!entity) return "";
+  return `${entity.subdept_id}:${entity.class_id || 0}:${entity.subclass_id || 0}`;
 };
 
 const transformKycFields = (fields: any[]): DocumentExtraction[] => {
@@ -259,48 +259,74 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
         updateNewStage(stageId, { documents: updatedDocs });
     };
 
-    const handleSubmit = async () => {
-        if (!selectedDepartment) return toast({ title: 'Error', description: 'Please select a department', variant: 'destructive' });
-        const validStages = newStages.filter(stage => stage.name.trim() !== '');
-        if (validStages.length === 0) return toast({ title: 'Error', description: 'Please add at least one stage with a name', variant: 'destructive' });
+  const handleSubmit = async () => {
+    if (!selectedDepartment) return toast({ title: 'Error', description: 'Please select a department', variant: 'destructive' });
+    const validStages = newStages.filter(stage => stage.name.trim() !== '');
+    if (validStages.length === 0) return toast({ title: 'Error', description: 'Please add at least one stage with a name', variant: 'destructive' });
 
-        setSaving(true);
-        try {
-            const departmentName = departments.find(d => d.id === selectedDepartment)?.name || selectedDepartment;
-            const processedStages = await Promise.all(
-                validStages.map(async (stage) => {
-                    const processedDocs = await Promise.all(
-                        (stage.documents || []).map(async (doc) => {
-                            if (!doc.name?.trim() || !!doc.linkedKycDocument) return doc;
-                            try {
-                                const kycId = await createKYCDocument({
-                                    name: doc.name, department: departmentName, category: 'application-docs', document_type: 'one_off',
-                                    fields: doc.extractionSpecs || [], display_name: doc.name, doc_type: doc.docType || 'normal_doc',
-                                    metadata: { ...(doc.isSpecial ? { isSpecial: true, targetEntities: doc.targetEntities || [] } : {}), doc_type: doc.docType || 'normal_doc' }
-                                });
-                                return { ...doc, kycId, linkedKycDocument: kycId };
-                            } catch (error) {
-                                console.error('Error creating KYC document:', error);
-                                toast({ title: "Warning", description: `Failed to create KYC document for "${doc.name}".`, variant: "warning" });
-                                return doc;
-                            }
-                        })
-                    );
-                    return { ...stage, documents: processedDocs.map(({ extractionSpecs, ...doc }) => doc) };
-                })
-            );
+    setSaving(true);
+    try {
+        const departmentName = departments.find(d => d.id === selectedDepartment)?.name || selectedDepartment;
+        
+        const processedStages = await Promise.all(
+            validStages.map(async (stage) => {
+                const processedDocs = await Promise.all(
+                    (stage.documents || []).map(async (doc) => {
+                        // Handle KYC document creation
+                        let currentKycId = doc.linkedKycDocument || doc.kycId;
+                        
+                        if (!currentKycId && doc.name?.trim()) {
+                            currentKycId = await createKYCDocument({
+                                name: doc.name,
+                                department: departmentName,
+                                category: 'application-docs',
+                                document_type: 'one_off',
+                                fields: doc.extractionSpecs || [],
+                                display_name: doc.name,
+                                metadata: { 
+                                    ...(doc.isSpecial ? { isSpecial: true, targetEntities: doc.targetEntities || [] } : {}),
+                                    doc_type: doc.docType || 'normal_doc' 
+                                }
+                            });
+                        }
 
-            await onAddStages(processedStages, selectedDepartment);
-            setNewStages([{ id: generateId(), name: '', description: '', isSpecial: false, timeConfigs: [] }]);
-            setSelectedDepartment('');
-            onOpenChange(false);
-        } catch (error) {
-            console.error('Error adding stages:', error);
-            toast({ title: 'Error', description: 'Failed to add stages. Please try again.', variant: 'destructive' });
-        } finally {
-            setSaving(false);
-        }
-    };
+                        // Structure the Automation Links
+                        const finalAutomationLinks = doc.hasAutomation ? (doc.automationLinks || {}) : {};
+
+                        return {
+                            ...doc,
+                            kycId: currentKycId,
+                            linkedKycDocument: currentKycId,
+                            automationLinks: finalAutomationLinks,
+                            // Ensure internal keys are removed if not needed by your DB schema
+                            extractionSpecs: undefined 
+                        };
+                    })
+                );
+
+                return { 
+                    ...stage, 
+                    department_id: selectedDepartment,
+                    documents: processedDocs 
+                };
+            })
+        );
+
+        await onAddStages(processedStages, selectedDepartment);
+        
+        // Reset state
+        setNewStages([{ id: generateId(), name: '', description: '', isSpecial: false, timeConfigs: [], documents: [] }]);
+        setSelectedDepartment('');
+        onOpenChange(false);
+        
+        toast({ title: "Success", description: "Stages added successfully" });
+    } catch (error) {
+        console.error('Error adding stages:', error);
+        toast({ title: 'Error', description: 'Failed to add stages.', variant: 'destructive' });
+    } finally {
+        setSaving(false);
+    }
+};
 
     const isFormValid = selectedDepartment && newStages.every(stage => stage.name.trim());
     const currentStage = newStages.find(s => s.id === activeStageTab);
@@ -566,38 +592,66 @@ function DocumentCard({ doc, docIndex, onUpdateDocument, onRemoveDocument, onAdd
                             ) : (
                                 <div className="space-y-3">
                                     <Label className="font-semibold text-gray-800">Link Automation per Entity</Label>
-                                    {doc.targetEntities.map((entity) => {
-                                        const entityKey = getEntityKey(entity);
-                                        if (!entityKey) return null;
-                                        return (
-                                            <div key={entityKey} className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center p-3 border rounded-lg bg-white shadow-sm">
-                                                <div className="flex items-center gap-2 overflow-hidden">
-                                                    <User className="h-4 w-4 text-slate-500 shrink-0" />
-                                                    <span className="font-medium text-gray-800 truncate" title={entity.entityName}>{entity.entityName}</span>
-                                                    <Badge variant="outline" className="text-xs">{entity.entityType}</Badge>
-                                                </div>
-                                                <div>
-                                                    <ComboBox
-                                                        options={[{ value: 'none', label: 'No automation' }, ...(automationTypes?.map(automation => ({ value: automation.id, label: automation.name, icon: <Webhook className="h-4 w-4 text-blue-500 mr-2" /> })) || [])]}
-                                                        value={doc.automationLinks?.[entityKey] || 'none'}
-                                                        onValueChange={(value) => {
-                                                            const newAutomationLinks = { ...(doc.automationLinks || {}) };
-                                                            if (value === 'none') {
-                                                                delete newAutomationLinks[entityKey];
-                                                            } else {
-                                                                newAutomationLinks[entityKey] = value;
-                                                            }
-                                                            onUpdateDocument(doc.id, { automationLinks: newAutomationLinks });
-                                                        }}
-                                                        placeholder="Select an automation"
-                                                        emptyText="No automations found"
-                                                        loading={loadingAutomations}
-                                                        className="w-full bg-white"
-                                                    />
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
+                             {doc.targetEntities.map((entity) => {
+    const entityKey = getEntityKey(entity);
+    if (!entityKey) return null;
+    
+    return (
+        <div key={entityKey} className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center p-3 border rounded-lg bg-white shadow-sm">
+            <div className="flex items-center gap-2 overflow-hidden">
+                <div className="bg-slate-100 p-1.5 rounded">
+                    {entity.type === 'subclass' ? <Layers className="h-3.5 w-3.5 text-orange-600" /> : 
+                     entity.type === 'class' ? <LayoutGrid className="h-3.5 w-3.5 text-blue-600" /> : 
+                     <FileText className="h-3.5 w-3.5 text-green-600" />}
+                </div>
+                <div className="flex flex-col">
+                    <span className="text-sm font-semibold text-gray-800 truncate" title={entity.name}>
+                        {entity.name}
+                    </span>
+                    <span className="text-[10px] text-gray-400 uppercase font-medium">{entity.type}</span>
+                </div>
+            </div>
+            <div>
+                <ComboBox
+                    options={[
+                        { value: 'none', label: 'No automation' }, 
+                        ...(automationTypes?.map(automation => ({ 
+                            value: automation.id, 
+                            label: automation.name, 
+                            icon: <Webhook className="h-4 w-4 text-blue-500 mr-2" /> 
+                        })) || [])
+                    ]}
+                    // Important: Point to .automationId
+                    value={doc.automationLinks?.[entityKey]?.automationId || 'none'}
+                    onValueChange={(value) => {
+                        const newAutomationLinks = { ...(doc.automationLinks || {}) };
+                        if (value === 'none') {
+                            delete newAutomationLinks[entityKey];
+                        } else {
+                            // STORE STRUCTURED OBJECT
+                            newAutomationLinks[entityKey] = {
+                                automationId: value,
+                                job_level: {
+                                    // departmentId comes from the AddStageDialog's selectedDepartment state
+                                    department_id: selectedDepartment, 
+                                    subdepartment_id: entity.subdept_id,
+                                    class_id: entity.class_id || null,
+                                    subclass_id: entity.subclass_id || null,
+                                    level: entity.subclass_id ? 4 : entity.class_id ? 3 : 2
+                                }
+                            };
+                        }
+                        onUpdateDocument(doc.id, { automationLinks: newAutomationLinks });
+                    }}
+                    placeholder="Select an automation"
+                    emptyText="No automations found"
+                    loading={loadingAutomations}
+                    className="w-full bg-white"
+                />
+            </div>
+        </div>
+    );
+})}
                                 </div>
                             )}
                         </div>

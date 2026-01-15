@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Plus, X, Clock, User, FileText, Info, Pencil, MessageSquare, Star, Trash2, Check, Zap, Webhook } from "lucide-react"
+import { Plus, X, Clock, User, FileText, Info, Pencil, MessageSquare, Star, Trash2, Check, Zap, Webhook, Layers, LayoutGrid } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
@@ -55,9 +55,10 @@ const generateId = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,
   return v.toString(16);
 });
 
-const getEntityKey = (entity: any): string | null => {
-  if (!entity) return null;
-  return `${entity.entityType}-${entity.subdept_id}-${entity.class_id || 'null'}-${entity.subclass_id || 'null'}`;
+const getEntityKey = (entity: any): string => {
+  if (!entity) return "";
+  // We use "0" as a placeholder for null to keep the key string-friendly
+  return `${entity.subdept_id}:${entity.class_id || 0}:${entity.subclass_id || 0}`;
 };
 
 const transformKycFields = (fields: any[]): DocumentExtraction[] => {
@@ -220,58 +221,68 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData) return;
-    const trimmedName = formData.name.trim();
-    if (!trimmedName) return;
 
     setSaving(true);
     try {
       const targetDepartment = getTargetDepartmentName();
 
-     // In the handleSubmit function, modify the docsWithKyc mapping to remove the unwanted fields
-const docsWithKyc = await Promise.all(
-  (formData.documents || []).map(async (doc) => {
-    if (!doc.name?.trim()) return doc;
+      const docsWithKyc = await Promise.all(
+        (formData.documents || []).map(async (doc) => {
+          if (!doc.name?.trim()) return doc;
 
-    const isLinked = !!doc.linkedKycDocument;
-    const kycPayload = {
-      name: doc.name, 
-      fields: doc.extractionSpecs || [], 
-      display_name: doc.name,
-      department: targetDepartment, 
-      category: 'application-docs', 
-      document_type: 'one_off',
-      metadata: doc.isSpecial ? { isSpecial: true, targetEntities: doc.targetEntities || [] } : undefined
-    };
+          // 1. Handle KYC Registration/Update logic
+          let currentKycId = doc.linkedKycDocument || doc.kycId;
 
-    if (isLinked) {
-      // Remove unwanted fields when document is linked
-      const { automationId, web_automation, hasWebForm, ...cleanDoc } = doc;
-      return cleanDoc;
-    } else if (doc.kycId) {
-      await updateKYCDocument(doc.kycId, kycPayload);
-      const { automationId, web_automation, hasWebForm, ...cleanDoc } = doc;
-      return cleanDoc;
-    } else {
-      const kycId = await createKYCDocument(kycPayload);
-      // Don't include the unwanted fields in the new document
-      const { automationId, web_automation, hasWebForm, ...restDoc } = doc;
-      return { ...restDoc, kycId, linkedKycDocument: kycId };
-    }
-  })
-);
+          const kycPayload = {
+            name: doc.name,
+            fields: doc.extractionSpecs || [],
+            display_name: doc.name,
+            department: targetDepartment,
+            category: 'application-docs',
+            document_type: 'one_off'
+          };
+
+          if (!currentKycId) {
+            currentKycId = await createKYCDocument(kycPayload);
+          } else if (!doc.linkedKycDocument) {
+            // Only update if it's not a read-only linked document
+            await updateKYCDocument(currentKycId, kycPayload);
+          }
+
+          // 2. Structure the Automation Links
+          // We ensure that if automation is disabled, the object is emptied
+          const finalAutomationLinks = doc.hasAutomation ? (doc.automationLinks || {}) : {};
+
+          // 3. Construct the clean document object
+          return {
+            id: doc.id,
+            name: doc.name,
+            description: doc.description,
+            isRequired: doc.isRequired,
+            documentType: doc.documentType,
+            inputType: doc.inputType,
+            docType: doc.docType || 'normal_doc',
+            isSpecial: !!doc.isSpecial,
+            kycId: currentKycId,
+            linkedKycDocument: doc.linkedKycDocument, // Keep reference if it was linked
+            targetEntities: doc.targetEntities || [],
+            hasAutomation: !!doc.hasAutomation,
+            automationLinks: finalAutomationLinks
+          };
+        })
+      );
+
       const updatedStage = {
         ...formData,
-        name: trimmedName,
-        description: formData.description?.trim() || undefined,
-        documents: docsWithKyc.map(({ extractionSpecs, ...doc }) => doc),
-        timeConfigs: formData.timeConfigs?.map(tc => ({ ...tc, applicationType: tc.applicationType || 'Default', days: tc.days || 0, hours: tc.hours || 0, minutes: tc.minutes || 0 })) || [],
+        documents: docsWithKyc,
+        updated_at: new Date().toISOString(),
       };
 
       await onSave(updatedStage);
       onOpenChange(false);
     } catch (error) {
       console.error('Error saving stage:', error);
-      toast({ title: "Error", description: "Failed to save stage.", variant: "destructive" });
+      toast({ title: "Error", description: "Failed to save stage details.", variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -558,7 +569,7 @@ const docsWithKyc = await Promise.all(
                   {(formData.documents || []).length > 0 ? (
                     <div className="space-y-4 pt-4 border-t">
                       {(formData.documents || []).map((doc, index) => (
-                        <DocumentCard key={doc.id || index} doc={doc} docIndex={index} entityOptions={entityOptions} loadingEntities={loadingEntities} kycDocuments={kycDocuments} loadingKycDocs={loadingKycDocs} automationTypes={automationTypes} loadingAutomations={loadingAutomations} onUpdateDocument={updateDocument} onRemoveDocument={removeDocument} onAddExtraction={addExtractionField} onUpdateExtraction={updateExtraction} onRemoveExtraction={removeExtraction} />
+                        <DocumentCard key={doc.id || index} doc={doc} docIndex={index} entityOptions={entityOptions} loadingEntities={loadingEntities} kycDocuments={kycDocuments} loadingKycDocs={loadingKycDocs} automationTypes={automationTypes} loadingAutomations={loadingAutomations} onUpdateDocument={updateDocument} onRemoveDocument={removeDocument} onAddExtraction={addExtractionField} onUpdateExtraction={updateExtraction} onRemoveExtraction={removeExtraction} formData={formData} />
                       ))}
                     </div>
                   ) : (
@@ -648,7 +659,7 @@ function MultiEntityPicker({ entities, selectedEntities = [], onSelectionChange,
   );
 }
 
-function DocumentCard({ doc, docIndex, entityOptions, loadingEntities, kycDocuments, loadingKycDocs, automationTypes, loadingAutomations, onUpdateDocument, onRemoveDocument, onAddExtraction, onUpdateExtraction, onRemoveExtraction }: { doc: StageDocument, docIndex: number, entityOptions: EntityOption[], loadingEntities: boolean, kycDocuments: KYCDocument[], loadingKycDocs: boolean, automationTypes: any[], loadingAutomations: boolean, onUpdateDocument: (docId: string, updates: Partial<StageDocument>) => void, onRemoveDocument: (docId: string) => void, onAddExtraction: (docId: string) => void, onUpdateExtraction: (docId: string, extractionId: string, updates: Partial<DocumentExtraction>) => void, onRemoveExtraction: (docId: string, extractionId: string) => void }) {
+function DocumentCard({ doc, docIndex, entityOptions, loadingEntities, kycDocuments, loadingKycDocs, automationTypes, loadingAutomations, onUpdateDocument, onRemoveDocument, onAddExtraction, onUpdateExtraction, onRemoveExtraction, formData }: { doc: StageDocument, docIndex: number, entityOptions: EntityOption[], loadingEntities: boolean, kycDocuments: KYCDocument[], loadingKycDocs: boolean, automationTypes: any[], loadingAutomations: boolean, onUpdateDocument: (docId: string, updates: Partial<StageDocument>) => void, onRemoveDocument: (docId: string) => void, onAddExtraction: (docId: string) => void, onUpdateExtraction: (docId: string, extractionId: string, updates: Partial<DocumentExtraction>) => void, onRemoveExtraction: (docId: string, extractionId: string) => void, formData: Stage | null }) {
   const [documentMode, setDocumentMode] = useState<'new' | 'existing'>(doc.linkedKycDocument ? 'existing' : 'new');
   const handleModeChange = (mode: 'new' | 'existing') => {
     setDocumentMode(mode);
@@ -710,41 +721,68 @@ function DocumentCard({ doc, docIndex, entityOptions, loadingEntities, kycDocume
           {doc.hasAutomation && (
             <div className="space-y-4 pl-8 border-l-2 border-blue-100 py-4">
               {!doc.isSpecial || !doc.targetEntities || doc.targetEntities.length === 0 ? (
-                <div className="text-center py-6 text-muted-foreground border border-dashed rounded-lg bg-white">
-                  <Info className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-                  <p className="text-sm font-medium">No Target Entities Selected</p>
-                  <p className="text-xs">To link automations, first mark this as a 'Special' document and select its target entities above.</p>
+                <div className="bg-amber-50 p-4 rounded-md border border-amber-200 flex gap-2 items-center">
+                  <Info className="h-4 w-4 text-amber-600" />
+                  <p className="text-xs text-amber-700">Select target entities above to enable per-class automation.</p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <Label className="font-semibold text-gray-800">Link Automation per Entity</Label>
+                  <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                    Entity-Specific Automations
+                  </Label>
                   {doc.targetEntities.map((entity) => {
                     const entityKey = getEntityKey(entity);
                     if (!entityKey) return null;
+
                     return (
                       <div key={entityKey} className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center p-3 border rounded-lg bg-white shadow-sm">
                         <div className="flex items-center gap-2 overflow-hidden">
-                          <User className="h-4 w-4 text-slate-500 shrink-0" />
-                          <span className="font-medium text-gray-800 truncate" title={entity.entityName}>{entity.entityName}</span>
-                          <Badge variant="outline" className="text-xs">{entity.entityType}</Badge>
+                          <div className="bg-slate-100 p-1.5 rounded">
+                            {entity.entityType === 'subclass' ? <Layers className="h-3.5 w-3.5 text-orange-600" /> :
+                              entity.entityType === 'class' ? <LayoutGrid className="h-3.5 w-3.5 text-blue-600" /> :
+                                <FileText className="h-3.5 w-3.5 text-green-600" />}
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-sm font-semibold text-gray-800 truncate" title={entity.entityName}>
+                              {entity.entityName}
+                            </span>
+                            <span className="text-[10px] text-gray-400 uppercase font-medium">{entity.entityType}</span>
+                          </div>
                         </div>
                         <div>
                           <ComboBox
-                            options={[{ value: 'none', label: 'No automation' }, ...(automationTypes?.map(automation => ({ value: automation.id, label: automation.name, icon: <Webhook className="h-4 w-4 text-blue-500 mr-2" /> })) || [])]}
-                            value={doc.automationLinks?.[entityKey] || 'none'}
-                            onValueChange={(value) => {
-                              const newAutomationLinks = { ...(doc.automationLinks || {}) };
-                              if (value === 'none') {
-                                delete newAutomationLinks[entityKey];
+                            options={[
+                              { value: 'none', label: 'No automation' },
+                              ...(automationTypes?.map(a => ({
+                                value: a.id,
+                                label: a.name,
+                                icon: <Webhook className="h-4 w-4 text-blue-500 mr-2" />
+                              })) || [])
+                            ]}
+                            // Pull value from the nested structure: .automationId
+                            value={doc.automationLinks?.[entityKey]?.automationId || 'none'}
+                            onValueChange={(val) => {
+                              const newLinks = { ...(doc.automationLinks || {}) };
+
+                              if (val === 'none') {
+                                delete newLinks[entityKey];
                               } else {
-                                newAutomationLinks[entityKey] = value;
+                                newLinks[entityKey] = {
+                                  automationId: val,
+                                  job_level: {
+                                    // Use formData instead of stage
+                                    department_id: formData?.department_id || entity.department_id,
+                                    subdepartment_id: entity.subdept_id,
+                                    class_id: entity.class_id || null,
+                                    subclass_id: entity.subclass_id || null,
+                                    level: entity.subclass_id ? 4 : entity.class_id ? 3 : 2
+                                  }
+                                };
                               }
-                              onUpdateDocument(doc.id, { automationLinks: newAutomationLinks });
+                              onUpdateDocument(doc.id, { automationLinks: newLinks });
                             }}
-                            placeholder="Select an automation"
-                            emptyText="No automations found"
-                            loading={loadingAutomations}
-                            className="w-full bg-white"
+                            placeholder="Select automation..."
+                            className="w-full bg-slate-50"
                           />
                         </div>
                       </div>

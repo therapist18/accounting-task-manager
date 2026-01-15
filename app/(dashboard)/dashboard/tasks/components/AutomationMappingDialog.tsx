@@ -177,21 +177,6 @@ export const AutomationMappingDialog = ({
   allDocuments = [], // Add allDocuments prop
   stage // Add stage prop
 }: AutomationMappingDialogProps) => {
-  // Log when component receives props
-  useEffect(() => {
-    console.log('🤖 [AutomationMappingDialog] Props received:', {
-      isOpen,
-      classId,
-      requirementId,
-      taskId,
-      automationId,
-      stageId: stage?.id,
-      stageName: stage?.name,
-      taskName: task?.name,
-      individualId
-    });
-  }, [isOpen, classId, requirementId, taskId, automationId, stage?.id, stage?.name, task?.name, individualId]);
-
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isAutomationRunning, setIsAutomationRunning] = useState(false);
@@ -471,40 +456,40 @@ export const AutomationMappingDialog = ({
       console.error('Error extracting automation mappings:', error);
     }
   };
-const getRequirementId = useCallback(() => {
-  // 1. Prioritize the job_level structure
-  const jobLevel = task?.job_level;
-  
-  if (jobLevel) {
-    const subDept = jobLevel.subdepartment_id;
-    const clsId = jobLevel.class_id;
-    const subClsId = jobLevel.subclass_id;
+  const getRequirementId = useCallback(() => {
+    // 1. Prioritize the job_level structure
+    const jobLevel = task?.job_level;
 
-    // Construct ID based on hierarchy depth (e.g., "1_1750687059294")
-    if (subDept && clsId && subClsId) {
-      return `${subDept}_${clsId}_${subClsId}`;
-    } 
-    if (subDept && clsId) {
-      return `${subDept}_${clsId}`;
+    if (jobLevel) {
+      const subDept = jobLevel.subdepartment_id;
+      const clsId = jobLevel.class_id;
+      const subClsId = jobLevel.subclass_id;
+
+      // Construct ID based on hierarchy depth (e.g., "1_1750687059294")
+      if (subDept && clsId && subClsId) {
+        return `${subDept}_${clsId}_${subClsId}`;
+      }
+      if (subDept && clsId) {
+        return `${subDept}_${clsId}`;
+      }
+      if (clsId) return clsId.toString();
     }
-    if (clsId) return clsId.toString();
-  }
 
-  // 2. Fallback to props (Legacy/Manual)
-  let effectiveSubDeptId = subDeptId;
-  if (!effectiveSubDeptId && task) {
-    if (task.subdepartment?.id) effectiveSubDeptId = task.subdepartment.id.toString();
-    else if (task.subdepartment_id) effectiveSubDeptId = task.subdepartment_id.toString();
-    else if (task.sub_dept_id) effectiveSubDeptId = task.sub_dept_id.toString();
-  }
+    // 2. Fallback to props (Legacy/Manual)
+    let effectiveSubDeptId = subDeptId;
+    if (!effectiveSubDeptId && task) {
+      if (task.subdepartment?.id) effectiveSubDeptId = task.subdepartment.id.toString();
+      else if (task.subdepartment_id) effectiveSubDeptId = task.subdepartment_id.toString();
+      else if (task.sub_dept_id) effectiveSubDeptId = task.sub_dept_id.toString();
+    }
 
-  if (!effectiveSubDeptId) {
-    return subclassId || classId;
-  }
+    if (!effectiveSubDeptId) {
+      return subclassId || classId;
+    }
 
-  if (isSubclass && subclassId) return `${effectiveSubDeptId}_${classId}_${subclassId}`;
-  return `${effectiveSubDeptId}_${classId}`;
-}, [task, subDeptId, classId, subclassId, isSubclass]);
+    if (isSubclass && subclassId) return `${effectiveSubDeptId}_${classId}_${subclassId}`;
+    return `${effectiveSubDeptId}_${classId}`;
+  }, [task, subDeptId, classId, subclassId, isSubclass]);
 
   const fetchSourceData = useCallback(async (individualId: string) => {
     if ((!individualId && !taskId) || !jobFields || Object.keys(jobFields).length === 0) return;
@@ -620,7 +605,7 @@ const getRequirementId = useCallback(() => {
     }
   }, [webData, isLoadingDocuments]);
 
-useEffect(() => {
+  useEffect(() => {
     if (!isOpen) {
       // Reset state when dialog closes
       setWebData([]);
@@ -635,61 +620,61 @@ useEffect(() => {
 
     let isMounted = true;
 
-const fetchData = async () => {
-  try {
-    setIsLoading(true);
-    setError(null);
+    const fetchData = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
 
-    // 1. Get job_level from task
-    const jobLevel = task?.job_level;
-    
-    if (!jobLevel) {
-      throw new Error("Task does not contain job_level configuration.");
-    }
+        // 1. Get job_level from task
+        const jobLevel = task?.job_level;
 
-    console.log('🔍 [AutomationMapping] Fetching requirement by job_level:', jobLevel);
+        if (!jobLevel) {
+          throw new Error("Task does not contain job_level configuration.");
+        }
 
-    // 2. Build the query using ->> (Double Arrow) 
-    // This converts JSON values to text, making null/empty/int comparisons consistent.
-    let query = supabase
-      .from('tm_class_requirements')
-      .select('*')
-      .eq('job_level->>department_id', String(jobLevel.department_id))
-      .eq('job_level->>subdepartment_id', String(jobLevel.subdepartment_id));
+        console.log('🔍 [AutomationMapping] Fetching requirement by job_level:', jobLevel);
 
-    // Handle class_id matching
-    if (jobLevel.class_id !== null && jobLevel.class_id !== undefined && jobLevel.class_id !== "") {
-      query = query.eq('job_level->>class_id', String(jobLevel.class_id));
-    } else {
-      // Use ->> with .is(..., null) to find an explicit JSON null or missing key
-      query = query.is('job_level->>class_id', null);
-    }
+        // 2. Build the query using ->> (Double Arrow) 
+        // This converts JSON values to text, making null/empty/int comparisons consistent.
+        let query = supabase
+          .from('tm_class_requirements')
+          .select('*')
+          .eq('job_level->>department_id', String(jobLevel.department_id))
+          .eq('job_level->>subdepartment_id', String(jobLevel.subdepartment_id));
 
-    // Handle subclass_id matching
-    if (jobLevel.subclass_id !== null && jobLevel.subclass_id !== undefined && jobLevel.subclass_id !== "") {
-      query = query.eq('job_level->>subclass_id', String(jobLevel.subclass_id));
-    } else {
-      query = query.is('job_level->>subclass_id', null);
-    }
+        // Handle class_id matching
+        if (jobLevel.class_id !== null && jobLevel.class_id !== undefined && jobLevel.class_id !== "") {
+          query = query.eq('job_level->>class_id', String(jobLevel.class_id));
+        } else {
+          // Use ->> with .is(..., null) to find an explicit JSON null or missing key
+          query = query.is('job_level->>class_id', null);
+        }
 
-    const { data: requirement, error: requirementError } = await query.maybeSingle();
+        // Handle subclass_id matching
+        if (jobLevel.subclass_id !== null && jobLevel.subclass_id !== undefined && jobLevel.subclass_id !== "") {
+          query = query.eq('job_level->>subclass_id', String(jobLevel.subclass_id));
+        } else {
+          query = query.is('job_level->>subclass_id', null);
+        }
 
-    if (!isMounted) return;
+        const { data: requirement, error: requirementError } = await query.maybeSingle();
 
-    if (requirementError) {
-      console.error('Supabase Query Error:', requirementError);
-      throw requirementError;
-    }
+        if (!isMounted) return;
 
-    if (!requirement) {
-      console.error('Requirement record not found for:', jobLevel);
-      // Helpful error message showing the path searched
-      throw new Error(`Requirement configuration not found for Dept: ${jobLevel.department_id}, Subdept: ${jobLevel.subdepartment_id}`);
-    }
+        if (requirementError) {
+          console.error('Supabase Query Error:', requirementError);
+          throw requirementError;
+        }
 
-    // 3. Process webData from the found record
-    const webDataItems = requirement.webData || [];
-    setWebData(webDataItems);
+        if (!requirement) {
+          console.error('Requirement record not found for:', jobLevel);
+          // Helpful error message showing the path searched
+          throw new Error(`Requirement configuration not found for Dept: ${jobLevel.department_id}, Subdept: ${jobLevel.subdepartment_id}`);
+        }
+
+        // 3. Process webData from the found record
+        const webDataItems = requirement.webData || [];
+        setWebData(webDataItems);
 
         // Fetch automation details from found webData
         await fetchAutomationFromWebData(webDataItems);
@@ -730,7 +715,7 @@ const fetchData = async () => {
       isMounted = false;
     };
   }, [isOpen, task?.job_level]); // Depend on job_level
-  
+
   // New function to fetch automation details from webData
   const fetchAutomationFromWebData = async (webDataItems: any[]) => {
     try {
@@ -2048,10 +2033,7 @@ const fetchData = async () => {
 
   return (
     <>
-      {/* Debug log to track rendering */}
-      {console.log('🤖 [AutomationMappingDialog] Rendering dialog with isOpen:', isOpen) || null}
       <Dialog open={isOpen} onOpenChange={(open) => {
-        console.log('🤖 [AutomationMappingDialog] Dialog onOpenChange called with:', open);
         if (!open) onClose();
       }}>
         <DialogContent className="max-w-6xl max-h-[90vh] flex flex-col">
