@@ -243,66 +243,24 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
     setAddContext(enhancedContext)
     setIsAddDialogOpen(true)
   }
+// Inside WebData.tsx (around line 145)
 
-  const handleAddWebData = async (webDataArray: WebDataEntry[]) => {
-    if (!addContext) return;
-
-    try {
-      setIsSubmitting(true);
-
-      const existingWebData = getCurrentWebDataForContext(addContext) || [];
-      const updatedWebData = [...existingWebData];
-
-      for (const newEntry of webDataArray) {
-        const existingEntryIndex = updatedWebData.findIndex(existing =>
-          existing.documentId === newEntry.documentId &&
-          existing.automationId === newEntry.automationId
-        );
-
-        if (existingEntryIndex !== -1) {
-          const existingEntry = updatedWebData[existingEntryIndex];
-          const existingFieldNames = new Set(existingEntry.fields.map(f => f.efnsDisplayName || f.name));
-          const newFields = newEntry.fields.filter(f => !existingFieldNames.has(f.efnsDisplayName || f.name));
-          const existingKycIds = new Set(existingEntry.kycDocsUpload.map(k => k.kycDocumentId));
-          const newKycDocs = newEntry.kycDocsUpload.filter(k => !existingKycIds.has(k.kycDocumentId));
-
-          updatedWebData[existingEntryIndex] = {
-            ...existingEntry,
-            fields: [...existingEntry.fields, ...newFields],
-            kycDocsUpload: [...existingEntry.kycDocsUpload, ...newKycDocs]
-          };
-
-          toast({
-            title: "Merged with Existing",
-            description: `Added ${newFields.length} new fields and ${newKycDocs.length} new documents to existing entry`,
-            variant: "default"
-          });
-        } else {
-          updatedWebData.push(newEntry);
-        }
-      }
-
-      await replaceWebDataForContext(addContext, updatedWebData);
-      await refreshDepartments();
-      setIsAddDialogOpen(false);
-
-      toast({
-        title: "Success",
-        description: `WebData added successfully`,
-        variant: "default"
-      });
-
-    } catch (error) {
-      console.error('Error adding webData:', error);
-      toast({
-        title: "Error",
-        description: "Failed to add webData. Please try again.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+const handleAddWebData = async (webDataArray: WebDataEntry[]) => {
+  // We no longer need to calculate merges or call replaceWebDataForContext here
+  // because the AddWebDataDialog now handles the atomic DB write.
+  try {
+    setIsSubmitting(true);
+    
+    // Simply refresh the departments to get the new data from Supabase
+    await refreshDepartments();
+    
+    setIsAddDialogOpen(false);
+  } catch (error) {
+    console.error('Error refreshing after add:', error);
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
 const refreshDepartments = async () => {
     try {

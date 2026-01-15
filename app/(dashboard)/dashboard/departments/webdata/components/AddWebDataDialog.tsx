@@ -1,6 +1,6 @@
 //@ts-nocheck
 "use client"
-import { useEffect, useState, useMemo, useCallback } from "react"
+import React, { useEffect, useState, useMemo, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -13,9 +13,17 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Separator } from "@/components/ui/separator"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import supabase from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
-import { Check, Link2, Merge, Plus, X, FileText, Upload, User, Users, AlertTriangle, Zap } from "lucide-react"
+import {
+  Check, Link2, Merge, Plus, X, FileText, Upload, User, Users,
+  AlertTriangle, Zap, Search, Loader2, ChevronRight, LayoutGrid, Webhook,
+  Info,
+  Trash2
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 
 // Enhanced interfaces
@@ -109,14 +117,13 @@ interface AddWebDataDialogProps {
   onSubmit: (data: any) => void;
   isSubmitting: boolean;
 }
-
 function MasterFieldPicker({ availableFields, onSelect }: { availableFields: JobField[]; onSelect: (field: JobField) => void }) {
   const [open, setOpen] = useState(false)
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="xs" className="text-xs">
-          <Plus className="mr-1 h-3 w-3" />Add
+        <Button variant="outline" size="xs" className="h-7 text-[10px] bg-white">
+          <Plus className="mr-1 h-3.5 w-3.5" />Add Source
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[250px] p-0" align="start">
@@ -138,7 +145,7 @@ function MasterFieldPicker({ availableFields, onSelect }: { availableFields: Job
   )
 }
 
-export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSubmitting }: AddWebDataDialogProps) {
+export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSubmitting: parentSubmitting }: AddWebDataDialogProps) {
   const [activeTab, setActiveTab] = useState<'fields' | 'documents'>('fields')
   const [webDataGroups, setWebDataGroups] = useState<WebDataGroup[]>([])
   const [masterFields, setMasterFields] = useState<JobField[]>([])
@@ -148,936 +155,324 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
   const [loadingMasterFields, setLoadingMasterFields] = useState(false)
   const [loadingForms, setLoadingForms] = useState(false)
   const [loadingKyc, setLoadingKyc] = useState(false)
-  const [profileSearch, setProfileSearch] = useState('')
-  const [companySearch, setCompanySearch] = useState('')
+  const [fieldSearch, setFieldSearch] = useState('')
   const [kycSearch, setKycSearch] = useState('')
   const [selectedTopLevelFieldIds, setSelectedTopLevelFieldIds] = useState<Set<number>>(new Set())
   const [selectedGroupIdsForMerge, setSelectedGroupIdsForMerge] = useState<Set<string>>(new Set())
   const [selectedFormId, setSelectedFormId] = useState<string>('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const getEntityKeyForContext = useCallback(() => {
-    if (!context) return null;
-    return `${context.subdepartmentId}:${context.classId || 0}:${context.subclassId || 0}`;
+  // 1. DATA LOOKUP HELPERS
+  const getAutomationIdFromForm = useCallback((form: FormDocument | null): string | null => {
+    if (!form || !form.targetEntities || !Array.isArray(form.targetEntities)) return null;
+    const match = form.targetEntities.find(target => {
+      const jl = target.job_level;
+      if (!jl) return false;
+      const subMatch = Number(jl.subdepartment_id) === Number(context?.subdepartmentId);
+      const classMatch = String(jl.class_id || 'null') === String(context?.classId || 'null');
+      const subclassMatch = String(jl.subclass_id || 'null') === String(context?.subclassId || 'null');
+      return subMatch && classMatch && subclassMatch;
+    });
+    return match?.automationId || null;
   }, [context]);
 
-const getAutomationIdFromForm = useCallback((form: FormDocument | null): string | null => {
-  if (!form || !form.targetEntities || !Array.isArray(form.targetEntities)) return null;
-
-  const match = form.targetEntities.find(target => {
-    const jl = target.job_level;
-    if (!jl) return false;
-
-    const subMatch = Number(jl.subdepartment_id) === Number(context?.subdepartmentId);
-    const classMatch = String(jl.class_id || 'null') === String(context?.classId || 'null');
-    const subclassMatch = String(jl.subclass_id || 'null') === String(context?.subclassId || 'null');
-
-    return subMatch && classMatch && subclassMatch;
-  });
-
-  return match?.automationId || null;
-}, [context]);
-
-  const fetchKycDocuments = useCallback(async () => {
-    setLoadingKyc(true)
+  const fetchFormDocuments = useCallback(async () => {
+    setLoadingForms(true)
     try {
-      const { data, error } = await supabase
-        .from('acc_portal_kyc')
-        .select('*')
-        .order('display_name')
-
-      if (error) throw error
-
-      const kycDocs: KYCDocument[] = (data || []).map(doc => ({
-        id: doc.id,
-        display_name: doc.display_name,
-        document_type: doc.document_type,
-        entity_type: doc.entity_type || 'both',
-        is_required: doc.is_required || false,
-        file_extensions: doc.file_extensions || [],
-        max_file_size_mb: doc.max_file_size_mb || 5,
-        description: doc.description
-      }))
-
-      setKycDocuments(kycDocs)
-    } catch (error) {
-      console.error('Error fetching KYC documents:', error)
-      toast({ title: 'Error', description: 'Failed to load KYC documents', variant: 'destructive' })
-    } finally {
-      setLoadingKyc(false)
-    }
-  }, []);
-
-  // Around line 170 in AddWebDataDialog.tsx
-const fetchFormDocuments = useCallback(async () => {
-  setLoadingForms(true)
-  try {
-    const { data: departments, error } = await supabase.from('tm_departments').select('stages')
-    if (error) throw error
-
-    const allDocuments: any[] = []
-    departments?.forEach(dept => {
-      if (!dept.stages || !Array.isArray(dept.stages)) return
-      dept.stages.forEach((stage: any) => {
-        if (stage.documents && Array.isArray(stage.documents)) {
-          allDocuments.push(...stage.documents)
-        }
-      })
-    })
-
-    // Filter to only forms and map metadata
-    const forms = allDocuments
-      .filter((doc: any) => doc.docType === 'form')
-      .map((doc: any) => ({
-        id: doc.id,
-        name: doc.name,
-        docType: doc.docType,
-        kycId: doc.kycId,
-        isRequired: !!doc.isRequired,
-        isSpecial: !!doc.isSpecial,
-        // Preserve the nested targetEntities array
+      const { data: departments } = await supabase.from('tm_departments').select('stages')
+      const allDocs = (departments || []).flatMap(d => (d.stages || []).flatMap(s => s.documents || []));
+      const forms = allDocs.filter(doc => doc.docType === 'form').map(doc => ({
+        id: doc.id, name: doc.name, docType: doc.docType, kycId: doc.kycId,
+        isRequired: !!doc.isRequired, isSpecial: !!doc.isSpecial,
         targetEntities: Array.isArray(doc.targetEntities) ? doc.targetEntities : []
-      }))
-
-    const uniqueForms = Array.from(new Map(forms.map(form => [form.id, form])).values())
-    setFormDocuments(uniqueForms)
-  } catch (error) {
-    console.error('Error fetching forms:', error)
-  } finally {
-    setLoadingForms(false)
-  }
-}, []);
+      }));
+      const uniqueForms = Array.from(new Map(forms.map(f => [`${f.name}-${f.kycId}`, f])).values());
+      setFormDocuments(uniqueForms)
+    } finally { setLoadingForms(false) }
+  }, []);
 
   const fetchMasterFields = useCallback(async () => {
     setLoadingMasterFields(true);
-    try {
-      const { data, error } = await supabase.from('tm_job_fields').select('*').order('label');
-      if (error) throw error;
-      setMasterFields(data || []);
-    } catch (error) {
-      console.error('Error fetching master fields:', error);
-      toast({ title: 'Error', description: 'Failed to load master fields', variant: 'destructive' })
-    } finally {
-      setLoadingMasterFields(false)
-    }
+    const { data } = await supabase.from('tm_job_fields').select('*').order('label');
+    setMasterFields(data || []);
+    setLoadingMasterFields(false);
   }, []);
 
+  const fetchKycDocuments = useCallback(async () => {
+    setLoadingKyc(true);
+    const { data } = await supabase.from('acc_portal_kyc').select('*').order('display_name');
+    setKycDocuments(data || []);
+    setLoadingKyc(false);
+  }, []);
+
+  // 2. FETCH AND POPULATE LOGIC
   useEffect(() => {
     if (isOpen) {
-      fetchMasterFields();
-      fetchFormDocuments();
-      fetchKycDocuments();
-
-      // Reset state
-      setSelectedTopLevelFieldIds(new Set());
-      setSelectedGroupIdsForMerge(new Set());
-      setSelectedKycDocuments(new Map());
-      setWebDataGroups([]);
-      setProfileSearch('');
-      setCompanySearch('');
-      setKycSearch('');
-      setSelectedFormId('');
-      setActiveTab('fields');
+      fetchMasterFields(); fetchFormDocuments(); fetchKycDocuments();
+      setSelectedFormId(''); setWebDataGroups([]); setSelectedKycDocuments(new Map());
     }
-  }, [isOpen, fetchMasterFields, fetchFormDocuments, fetchKycDocuments]);
+  }, [isOpen]);
 
+  useEffect(() => {
+    const fetchAndPopulateData = async () => {
+      if (!selectedFormId || selectedFormId === 'none' || masterFields.length === 0) return;
+      console.log("🔍 [WebDataPopulate] Fetching existing data for Form:", selectedFormId);
+      try {
+        let query = supabase.from('tm_class_requirements').select('webData')
+          .eq('job_level->>department_id', String(context.departmentId))
+          .eq('job_level->>subdepartment_id', String(context.subdepartmentId));
+        if (context.classId) query = query.eq('job_level->>class_id', String(context.classId));
+        else query = query.is('job_level->>class_id', null);
+        if (context.subclassId) query = query.eq('job_level->>subclass_id', String(context.subclassId));
+        else query = query.is('job_level->>subclass_id', null);
+
+        const { data } = await query.maybeSingle();
+        if (data?.webData) {
+          const entry = data.webData.find(e => e.documentId === selectedFormId);
+          if (entry) {
+            setWebDataGroups((entry.fields || []).map(f => ({
+              id: crypto.randomUUID(),
+              efnsDisplayName: f.efnsDisplayName || f.name,
+              variableName: f.variableName,
+              fieldType: f.fieldType || 'text',
+              entityType: f.entityType || 'both',
+              arrayItems: f.arrayItems || [],
+              linkedMasterFields: masterFields.filter(mf => f.masterFieldIds?.includes(String(mf.id)))
+            })));
+            const kycMap = new Map();
+            entry.kycDocsUpload?.forEach(k => kycMap.set(k.kycDocumentId, k.entityType || 'both'));
+            setSelectedKycDocuments(kycMap);
+          }
+        }
+      } catch (err) { console.error(err); }
+    };
+    fetchAndPopulateData();
+  }, [selectedFormId, context, masterFields]);
+
+  // 3. HANDLERS (Corrected Reference issues)
+  const updateGroup = (id, field, value) => setWebDataGroups(prev => prev.map(g => g.id === id ? { ...g, [field]: value } : g));
+  
+  const removeGroup = (id) => setWebDataGroups(prev => prev.filter(g => g.id !== id));
+  
+  const linkMasterFieldToGroup = (groupId: string, field: JobField) => {
+    setWebDataGroups(prev => prev.map(g => g.id === groupId ? { ...g, linkedMasterFields: [...g.linkedMasterFields, field] } : g));
+  };
+  
+  const unlinkMasterFieldFromGroup = (groupId: string, fieldId: number) => {
+    setWebDataGroups(prev => prev.map(g => g.id === groupId ? { ...g, linkedMasterFields: g.linkedMasterFields.filter(f => f.id !== fieldId) } : g));
+  };
+
+  const handleArrayItemChange = (groupId, idx, prop, val) => {
+    const group = webDataGroups.find(g => g.id === groupId);
+    const ni = [...(group.arrayItems || [])];
+    ni[idx] = { ...ni[idx], [prop]: val };
+    updateGroup(groupId, 'arrayItems', ni);
+  };
+
+  const addArrayItem = (groupId) => {
+    const group = webDataGroups.find(g => g.id === groupId);
+    updateGroup(groupId, 'arrayItems', [...(group.arrayItems || []), { name: '', variableName: '', type: 'text' }]);
+  };
+
+  const removeArrayItem = (groupId, idx) => {
+    const group = webDataGroups.find(g => g.id === groupId);
+    updateGroup(groupId, 'arrayItems', (group.arrayItems || []).filter((_, i) => i !== idx));
+  };
+
+  const handleSubmit = async () => {
+    if (!selectedFormId) return toast({ title: "Error", description: "Select a form first" });
+    setIsSubmitting(true);
+    try {
+      const newFormEntry = {
+        automationId: automationIdForContext,
+        documentId: selectedFormId,
+        documentName: selectedForm?.name || "Manual Config",
+        fields: webDataGroups.map((g, i) => ({ ...g, name: g.efnsDisplayName, masterFieldIds: g.linkedMasterFields.map(f => String(f.id)), order: i })),
+        kycDocsUpload: Array.from(selectedKycDocuments.entries()).map(([id, type]) => ({
+          kycDocumentId: id, entityType: type, isRequired: true // simplified
+        }))
+      };
+
+      let query = supabase.from('tm_class_requirements').select('id, webData')
+        .eq('job_level->>department_id', String(context.departmentId))
+        .eq('job_level->>subdepartment_id', String(context.subdepartmentId));
+      if (context.classId) query = query.eq('job_level->>class_id', String(context.classId));
+      else query = query.is('job_level->>class_id', null);
+      if (context.subclassId) query = query.eq('job_level->>subclass_id', String(context.subclassId));
+      else query = query.is('job_level->>subclass_id', null);
+
+      const { data: existingRecord } = await query.maybeSingle();
+      const finalWebData = existingRecord ? [...(existingRecord.webData || []).filter(e => e.documentId !== selectedFormId), newFormEntry] : [newFormEntry];
+      
+      const { error } = await supabase.from('tm_class_requirements').upsert({
+        ...(existingRecord?.id && { id: existingRecord.id }),
+        job_level: { department_id: Number(context.departmentId), subdepartment_id: Number(context.subdepartmentId), class_id: context.classId || null, subclass_id: context.subclassId || null, level: context.subclassId ? 4 : context.classId ? 3 : 2 },
+        webData: finalWebData,
+        type: context.type,
+        updated_at: new Date().toISOString()
+      });
+
+      if (error) throw error;
+      toast({ title: "Success", description: "Configuration saved." });
+      onSubmit(finalWebData); onOpenChange(false);
+    } catch (e) { console.error(e); } finally { setIsSubmitting(false); }
+  };
+
+  const filteredMasterFields = useMemo(() => masterFields.filter(f => f.label?.toLowerCase().includes(fieldSearch.toLowerCase()) || f.field_key?.toLowerCase().includes(fieldSearch.toLowerCase())), [masterFields, fieldSearch]);
   const allLinkedMasterFieldIds = useMemo(() => new Set(webDataGroups.flatMap(g => g.linkedMasterFields.map(f => f.id))), [webDataGroups]);
-  const filteredProfileFields = useMemo(() => masterFields.filter(f => f.sources?.some(s => s.source_type === 'profile' || s.source_type === 'document') && f.label?.toLowerCase().includes(profileSearch.toLowerCase())), [masterFields, profileSearch]);
-  const filteredCompanyFields = useMemo(() => masterFields.filter(f => f.sources?.some(s => s.source_type === 'company') && f.label?.toLowerCase().includes(companySearch.toLowerCase())), [masterFields, companySearch]);
+ const availableForPicking = useMemo(() => masterFields.filter(f => !allLinkedMasterFieldIds.has(f.id)), [masterFields, allLinkedMasterFieldIds]);
+  const applicableForms = useMemo(() => formDocuments.filter(f => !f.isSpecial || f.targetEntities?.some(t => Number(t.job_level?.subdepartment_id) === Number(context?.subdepartmentId))), [formDocuments, context]);
+  const selectedForm = useMemo(() => formDocuments.find(f => f.id === selectedFormId), [selectedFormId, formDocuments]);
+  const automationIdForContext = useMemo(() => getAutomationIdFromForm(selectedForm), [selectedForm, getAutomationIdFromForm]);
   const filteredKycDocuments = useMemo(() =>
     kycDocuments.filter(doc =>
       doc.display_name?.toLowerCase().includes(kycSearch.toLowerCase())
     ),
     [kycDocuments, kycSearch]
   );
-  const availableForPicking = useMemo(() => masterFields.filter(f => !allLinkedMasterFieldIds.has(f.id)), [masterFields, allLinkedMasterFieldIds]);
-
-const applicableForms = useMemo(() => {
-  if (!context || !formDocuments.length) return [];
-
-  return formDocuments.filter(form => {
-    // If it's not a special document, it applies to everything (Global)
-    if (!form.isSpecial) return true;
-
-    if (!form.targetEntities || form.targetEntities.length === 0) return false;
-
-    return form.targetEntities.some(target => {
-      // Access the nested job_level object
-      const jl = target.job_level;
-      if (!jl) return false;
-
-      // 1. Match Subdepartment
-      const subMatch = Number(jl.subdepartment_id) === Number(context.subdepartmentId);
-      if (!subMatch) return false;
-
-      // 2. Match Specific Level logic
-      if (context.type === 'subdepartment') {
-        return jl.level === 2;
-      }
-
-      if (context.type === 'class') {
-        return jl.level === 3 && String(jl.class_id) === String(context.classId);
-      }
-
-      if (context.type === 'subclass') {
-        return jl.level === 4 && 
-               String(jl.class_id) === String(context.classId) && 
-               String(jl.subclass_id) === String(context.subclassId);
-      }
-
-      return false;
-    });
-  });
-}, [formDocuments, context]);
-
-  // Get the selected form details
-  const selectedForm = useMemo(() => {
-    return selectedFormId && selectedFormId !== 'none'
-      ? formDocuments.find(f => f.id === selectedFormId)
-      : null;
-  }, [selectedFormId, formDocuments]);
-
-  // Get automation ID for the current context
-  const automationIdForContext = useMemo(() => {
-    return getAutomationIdFromForm(selectedForm);
-  }, [selectedForm, getAutomationIdFromForm]);
-
-  const handleClose = () => { onOpenChange(false) }
-
-  const handleSubmit = async () => {
-    if (webDataGroups.length === 0 && selectedKycDocuments.size === 0) {
-      toast({ title: "Nothing to Save", description: "Please add at least one web data field or select documents before saving." });
-      return;
-    }
-
-    // Check if a form is selected but no automation is configured for this context
-    if (selectedForm && !automationIdForContext) {
-      toast({
-        title: "No Automation Configured",
-        description: `The selected form "${selectedForm.name}" does not have an automation configured for this ${context?.type}. Please configure automation links in the stage editor first.`,
-        variant: "destructive"
-      });
-      return;
-    }
-
-    try {
-      const webDataArray = [];
-
-      const kycDocsUpload = Array.from(selectedKycDocuments.entries()).map(([kycId, entityType]) => {
-        const kycDoc = kycDocuments.find(doc => doc.id === kycId);
-        if (!kycDoc) return null;
-
-        return {
-          kycDocumentId: kycDoc.id,
-          entityType: entityType,
-          isRequired: kycDoc.is_required,
-          documentType: kycDoc.document_type,
-          fileExtensions: kycDoc.file_extensions,
-          maxFileSizeMb: kycDoc.max_file_size_mb,
-          description: kycDoc.description
-        };
-      }).filter(Boolean);
-
-      if (webDataGroups.length > 0 || kycDocsUpload.length > 0) {
-        const webDataFields = webDataGroups.map((group, index) => ({
-          name: group.efnsDisplayName,
-          efnsDisplayName: group.efnsDisplayName,
-          description: `Linked to: ${group.linkedMasterFields.map(f => f.label).join(', ')}`,
-          type: 'standard',
-          order: index,
-          isRequired: group.linkedMasterFields.some(f => f.is_required) || false,
-          variableName: group.variableName,
-          fieldType: group.fieldType,
-          entityType: group.entityType,
-          arrayItems: group.arrayItems || [],
-          masterFieldIds: group.linkedMasterFields.map(f => f.id.toString()),
-          masterFields: group.linkedMasterFields.map(f => ({
-            id: f.id,
-            label: f.label,
-            field_key: f.field_key,
-            type: f.type,
-            is_required: f.is_required
-          })),
-          kycDocumentId: group.kycDocumentId || null
-        }));
-
-        const newEntry = {
-          ...(automationIdForContext && { automationId: automationIdForContext }),
-          fields: webDataFields,
-          documentId: selectedForm?.id || null,
-          documentName: selectedForm?.name || (kycDocsUpload.length > 0 ? 'Document Requirements' : 'Custom Fields'),
-          kycDocsUpload: kycDocsUpload
-        };
-
-        webDataArray.push(newEntry);
-      }
-
-      await onSubmit(webDataArray);
-
-    } catch (error) {
-      console.error('Error submitting webData:', error);
-      toast({
-        title: 'Submission Error',
-        description: `Failed to save data. ${error.message}`,
-        variant: 'destructive'
-      });
-    }
-  }
-
-  // Helper functions for UI interactions
-  const handleCheckboxChange = (fieldId: number, checked: boolean) => {
-    setSelectedTopLevelFieldIds(prev => {
-      const newSet = new Set(prev);
-      if (checked) newSet.add(fieldId);
-      else newSet.delete(fieldId);
-      return newSet
-    })
-  }
-
-  const handleKycDocumentToggle = (docId: string, checked: boolean, entityType?: 'principal' | 'dependant' | 'both') => {
-    setSelectedKycDocuments(prev => {
-      const newMap = new Map(prev);
-      if (checked) {
-        newMap.set(docId, entityType || 'both');
-      } else {
-        newMap.delete(docId);
-      }
-      return newMap;
-    });
-  }
-
-  const handleKycEntityTypeChange = (docId: string, entityType: 'principal' | 'dependant' | 'both') => {
-    setSelectedKycDocuments(prev => {
-      const newMap = new Map(prev);
-      if (newMap.has(docId)) {
-        newMap.set(docId, entityType);
-      }
-      return newMap;
-    });
-  }
-
-  const addSelectedFieldsAsGroups = () => {
-    const fieldsToAdd = masterFields.filter(f => selectedTopLevelFieldIds.has(f.id));
-    const newGroups: WebDataGroup[] = fieldsToAdd.map(field => ({
-      id: crypto.randomUUID(),
-      efnsDisplayName: field.label,
-      variableName: field.field_key.toLowerCase().replace(/[^a-z0-9]+(.)/g, (_, chr) => chr.toUpperCase()),
-      fieldType: 'text',
-      entityType: 'principal',
-      linkedMasterFields: [field]
-    }));
-    setWebDataGroups(prev => [...prev, ...newGroups]);
-    setSelectedTopLevelFieldIds(new Set())
-  }
-
-  const updateGroup = (groupId: string, field: keyof WebDataGroup, value: any) => {
-    setWebDataGroups(prev => prev.map(g => {
-      if (g.id !== groupId) return g;
-      const updated = { ...g, [field]: value };
-      if (field === 'fieldType' && value === 'array' && !updated.arrayItems) updated.arrayItems = [];
-      return updated
-    }))
-  }
-
-  const removeGroup = (groupId: string) => setWebDataGroups(prev => prev.filter(g => g.id !== groupId))
-
-  const linkMasterFieldToGroup = (groupId: string, field: JobField) => {
-    const group = webDataGroups.find(g => g.id === groupId);
-    if (group) {
-      updateGroup(groupId, 'linkedMasterFields', [...group.linkedMasterFields, field]);
-    }
-  }
-
-  const unlinkMasterFieldFromGroup = (groupId: string, fieldId: number) => {
-    const group = webDataGroups.find(g => g.id === groupId);
-    if (group) {
-      updateGroup(groupId, 'linkedMasterFields', group.linkedMasterFields.filter(f => f.id !== fieldId));
-    }
-  }
-
-  const toggleGroupSelectionForMerge = (groupId: string) => {
-    setSelectedGroupIdsForMerge(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(groupId)) newSet.delete(groupId);
-      else newSet.add(groupId);
-      return newSet
-    })
-  }
-
-  const handleMerge = () => {
-    const groupsToMerge = webDataGroups.filter(g => selectedGroupIdsForMerge.has(g.id));
-    if (groupsToMerge.length < 2) return;
-
-    const firstGroup = groupsToMerge[0];
-    const combinedMasterFields = groupsToMerge.flatMap(g => g.linkedMasterFields);
-    const newGroup: WebDataGroup = {
-      id: crypto.randomUUID(),
-      efnsDisplayName: firstGroup.efnsDisplayName,
-      variableName: firstGroup.variableName,
-      fieldType: firstGroup.fieldType,
-      entityType: firstGroup.entityType,
-      linkedMasterFields: combinedMasterFields
-    };
-
-    setWebDataGroups(prev => [...prev.filter(g => !selectedGroupIdsForMerge.has(g.id)), newGroup]);
-    setSelectedGroupIdsForMerge(new Set())
-  }
-
-  const addArrayItem = (groupId: string) => {
-    const group = webDataGroups.find(g => g.id === groupId);
-    const currentItems = group?.arrayItems || [];
-    updateGroup(groupId, 'arrayItems', [...currentItems, { name: '', variableName: '', type: 'text' }]);
-  }
-
-  const removeArrayItem = (groupId: string, itemIndex: number) => {
-    const g = webDataGroups.find(g => g.id === groupId);
-    if (!g || !g.arrayItems) return;
-    const ni = [...g.arrayItems];
-    ni.splice(itemIndex, 1);
-    updateGroup(groupId, 'arrayItems', ni)
-  }
-
-  const handleArrayItemChange = (groupId: string, itemIndex: number, prop: string, value: string) => {
-    const g = webDataGroups.find(g => g.id === groupId);
-    if (!g || !g.arrayItems) return;
-    const ni = [...g.arrayItems];
-    ni[itemIndex] = { ...ni[itemIndex], [prop]: value };
-    updateGroup(groupId, 'arrayItems', ni)
-  }
-
-  if (!context) return null
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-7xl max-h-[95vh] flex flex-col">
-        <DialogHeader>
-          <DialogTitle>Add WebData & Documents</DialogTitle>
-          <DialogDescription>
-            Add form fields and document upload requirements for {context.subdepartmentName}
-            {context.className && ` → ${context.className}`}
-            {context.subclassName && ` → ${context.subclassName}`}
-          </DialogDescription>
-
-          <div className="space-y-2 pt-2">
-            <Label>Select Form*</Label>
-            <Select value={selectedFormId} onValueChange={setSelectedFormId} disabled={loadingForms}>
-              <SelectTrigger>
-                <SelectValue placeholder={loadingForms ? 'Loading forms...' : 'Select an applicable form'} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">No form (Manual Field Entry)</SelectItem>
-                {applicableForms.map(form => {
-                  // Check if THIS specific form has an automation configured for THIS job level
-                  const automationId = getAutomationIdFromForm(form);
-                  const hasAutomation = !!automationId;
-
-                  return (
-                    <SelectItem key={form.id} value={form.id}>
-                      <div className="flex items-center justify-between w-full gap-4">
-                        <div className="flex flex-col">
-                          <span className="font-medium text-sm">{form.name}</span>
-                          <span className="text-[10px] text-muted-foreground italic">
-                            {form.isSpecial ? 'Targeted Configuration' : 'Global Configuration'}
-                          </span>
-                        </div>
-                        {hasAutomation ? (
-                          <Badge variant="outline" className="ml-auto text-[10px] bg-green-50 text-green-700 border-green-200">
-                            <Zap className="h-3 w-3 mr-1 fill-green-700" />
-                            Automated
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="ml-auto text-[10px] bg-slate-50 text-slate-400">
-                            Manual
-                          </Badge>
-                        )}
-                      </div>
+      <DialogContent className="max-w-7xl max-h-[95vh] flex flex-col p-0 overflow-hidden bg-slate-50">
+        {/* HEADER AREA */}
+        <div className="p-6 bg-white border-b z-10">
+          <div className="flex justify-between items-start mb-6">
+            <div>
+              <DialogTitle className="text-2xl font-bold">WebData Configuration</DialogTitle>
+              <div className="flex items-center gap-2 mt-1 text-slate-500 text-sm">
+                <Badge variant="outline" className="bg-slate-50">{context?.subdepartmentName}</Badge>
+                {context?.className && <><ChevronRight className="h-3 w-3"/> <span className="text-blue-600 font-medium">{context.className}</span></>}
+              </div>
+            </div>
+            <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)}><X className="h-5 w-5"/></Button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
+            <div className="space-y-2">
+              <Label className="text-xs font-bold uppercase text-blue-600">1. Target Form</Label>
+              <Select value={selectedFormId} onValueChange={setSelectedFormId}>
+                <SelectTrigger className="h-11 border-slate-200 bg-white"><SelectValue placeholder="Choose an application form..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none" className="italic text-amber-600">Manual Entry (No Automation)</SelectItem>
+                  {applicableForms.map(f => (
+                    <SelectItem key={f.id} value={f.id}>
+                      <div className="flex items-center gap-2">{f.name} {getAutomationIdFromForm(f) && <Zap className="h-3 w-3 fill-green-500 text-green-500"/>}</div>
                     </SelectItem>
-                  );
-                })}
-              </SelectContent>
-            </Select>
-
-            {/* Show automation status for selected form */}
-            {selectedForm && (
-              <div className="p-3 rounded-lg border bg-gray-50">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium">Selected: {selectedForm.name}</p>
-                    <p className="text-xs text-gray-600">
-                      Entity context: {context.type}
-                      {context.type === 'class' && ` (ID: ${context.classId})`}
-                      {context.type === 'subclass' && ` (ID: ${context.subclassId})`}
-                    </p>
-                  </div>
-
-                  {automationIdForContext ? (
-                    <Badge variant="outline" className="text-green-600 border-green-300 bg-green-50">
-                      <Zap className="h-3 w-3 mr-1 fill-green-600" />
-                      Mapped to: {typeof automationIdForContext === 'object'
-                        ? automationIdForContext.automationId.slice(0, 8)
-                        : automationIdForContext.slice(0, 8)}...
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50">
-                      <AlertTriangle className="h-3 w-3 mr-1" />
-                      No Logic Configured
-                    </Badge>
-                  )}
-                </div>
-
-                {!automationIdForContext && (
-                  <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
-                    <AlertTriangle className="h-3 w-3 inline mr-1" />
-                    This form doesn't have an automation configured for the current {context.type}.
-                    Configure automation links in the stage editor to enable form submission automation.
-                  </div>
-                )}
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {selectedFormId && (
+              <div className={cn("p-3 rounded-lg border flex items-center gap-3", automationIdForContext ? "bg-green-50 border-green-200" : "bg-slate-50")}>
+                {automationIdForContext ? <Zap className="h-5 w-5 fill-green-600 text-green-600"/> : <Webhook className="h-5 w-5 text-slate-400"/>}
+                <div className="text-xs font-semibold">{automationIdForContext ? "Automated via Stage Config" : "Manual Processing Only"}</div>
               </div>
             )}
           </div>
-        </DialogHeader>
+        </div>
 
-        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'fields' | 'documents')} className="flex-1 flex flex-col">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="fields" className="flex items-center space-x-2">
-              <FileText className="h-4 w-4" />
-              <span>Form Fields ({webDataGroups.length})</span>
-            </TabsTrigger>
-            <TabsTrigger value="documents" className="flex items-center space-x-2">
-              <Upload className="h-4 w-4" />
-              <span>Document Uploads ({selectedKycDocuments.size})</span>
-            </TabsTrigger>
-          </TabsList>
+        {/* MAIN BODY */}
+        <div className="flex-1 overflow-hidden flex flex-col p-6">
+          {!selectedFormId ? (
+            <div className="flex-1 flex flex-col items-center justify-center space-y-4 rounded-xl border-2 border-dashed bg-white">
+              <LayoutGrid className="h-12 w-12 text-slate-200" /><p className="text-slate-500 font-medium">Please select a form to begin configuration.</p>
+            </div>
+          ) : (
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
+              <TabsList className="w-fit bg-slate-200/50 mb-4">
+                <TabsTrigger value="fields" className="px-8">Fields ({webDataGroups.length})</TabsTrigger>
+                <TabsTrigger value="documents" className="px-8">Uploads ({selectedKycDocuments.size})</TabsTrigger>
+              </TabsList>
 
-          <TabsContent value="fields" className="flex-1 flex flex-col space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Select Master Fields</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {['Profile', 'Company'].map(type => {
-                    const fields = type === 'Profile' ? filteredProfileFields : filteredCompanyFields;
-                    const searchVal = type === 'Profile' ? profileSearch : companySearch;
-                    const setSearch = type === 'Profile' ? setProfileSearch : setCompanySearch;
-                    return (
-                      <div className="space-y-3" key={type}>
-                        <Label className="text-base font-medium">{type} Fields</Label>
-                        <Input
-                          placeholder={`Search ${type.toLowerCase()} fields...`}
-                          value={searchVal}
-                          onChange={e => setSearch(e.target.value)}
-                          className="h-9"
-                        />
-                        <div className="border rounded-md p-2 h-[200px] overflow-y-auto">
-                          {loadingMasterFields ? (
-                            <p>Loading...</p>
-                          ) : fields.length > 0 ? (
-                            <div className="space-y-1">
-                              {fields.map(field => {
-                                const isInUse = allLinkedMasterFieldIds.has(field.id);
-                                const isSelected = selectedTopLevelFieldIds.has(field.id);
-                                return (
-                                  <div key={field.id} className="flex items-center space-x-3 p-2 hover:bg-gray-50 rounded">
-                                    <Checkbox
-                                      id={`field-sel-${field.id}`}
-                                      checked={isSelected}
-                                      onCheckedChange={(checked) => handleCheckboxChange(field.id, checked)}
-                                      disabled={isInUse}
-                                    />
-                                    <label
-                                      htmlFor={`field-sel-${field.id}`}
-                                      className={cn(
-                                        "flex-1 flex items-center justify-between text-sm",
-                                        isInUse ? "text-muted-foreground cursor-not-allowed" : "cursor-pointer"
-                                      )}
-                                    >
-                                      <span>{field.label}</span>
-                                      {isInUse && (
-                                        <Badge variant="outline" className="font-normal text-xs py-0.5 px-1.5">
-                                          <Link2 className="h-3 w-3 mr-1" />In Use
-                                        </Badge>
-                                      )}
-                                    </label>
-                                  </div>
-                                )
-                              })}
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <TabsContent value="fields" className="h-full m-0 space-y-4 flex flex-col">
+                  {/* STEP 2: SEARCH MASTER FIELDS */}
+                  <Card className="border-slate-200 flex flex-col min-h-0">
+                    <CardHeader className="py-2.5 bg-slate-50/50 border-b flex-shrink-0">
+                      <div className="flex items-center justify-between">
+                        <Label className="font-bold text-[11px] text-slate-500 uppercase tracking-wider">2. Link Master Fields</Label>
+                        <div className="relative w-64"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" /><Input value={fieldSearch} onChange={e => setFieldSearch(e.target.value)} placeholder="Filter fields..." className="pl-8 h-8 text-xs bg-white" /></div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="p-3 overflow-auto max-h-[180px] bg-slate-50/30">
+                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        {filteredMasterFields.map(f => {
+                          const used = allLinkedMasterFieldIds.has(f.id);
+                          return (
+                            <div key={f.id} className={cn("flex items-center space-x-2 p-1.5 rounded border bg-white", used && "opacity-50 grayscale bg-slate-50")}>
+                              <Checkbox id={`f-${f.id}`} checked={selectedTopLevelFieldIds.has(f.id)} onCheckedChange={c => setSelectedTopLevelFieldIds(prev => {const n = new Set(prev); c ? n.add(f.id) : n.delete(f.id); return n})} disabled={used} />
+                              <label htmlFor={`f-${f.id}`} className="text-[11px] font-medium truncate flex-1 cursor-pointer">{f.label}</label>
+                              {used && <Check className="h-3 w-3 text-green-600" />}
                             </div>
-                          ) : (
-                            <div className="h-full flex items-center justify-center text-sm text-gray-500">
-                              No fields found.
+                          )
+                        })}
+                       </div>
+                    </CardContent>
+                    <div className="p-2 border-t flex justify-end"><Button size="sm" onClick={() => {
+                        const newGroups = masterFields.filter(f => selectedTopLevelFieldIds.has(f.id)).map(f => ({
+                          id: crypto.randomUUID(), efnsDisplayName: f.label, variableName: f.field_key.toLowerCase().replace(/[^a-z0-9]+(.)/g, (_, chr) => chr.toUpperCase()), fieldType: 'text', entityType: 'principal', linkedMasterFields: [f]
+                        }));
+                        setWebDataGroups(prev => [...prev, ...newGroups]);
+                        setSelectedTopLevelFieldIds(new Set());
+                    }} disabled={selectedTopLevelFieldIds.size === 0} className="h-7 text-xs">Add Selected</Button></div>
+                  </Card>
+
+                  {/* STEP 3: REFINE CONFIG */}
+                  <Card className="flex-1 flex flex-col min-h-0 border-slate-200 overflow-hidden shadow-inner">
+                    <CardHeader className="py-2 bg-slate-100/50 border-b flex-shrink-0"><CardTitle className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">3. Refine Configuration</CardTitle></CardHeader>
+                    <CardContent className="flex-1 overflow-auto p-4 space-y-3 bg-slate-50/50">
+                      {webDataGroups.map((group, index) => (
+                        <div key={group.id} className="p-4 border rounded-lg bg-white shadow-sm hover:border-blue-300 transition-all relative group">
+                          <div className="grid grid-cols-4 gap-4 mb-3">
+                            <div className="space-y-1"><Label className="text-[10px] font-bold">Display Name</Label><Input value={group.efnsDisplayName} onChange={e => updateGroup(group.id, 'efnsDisplayName', e.target.value)} className="h-8 text-xs" /></div>
+                            <div className="space-y-1"><Label className="text-[10px] font-bold">Variable ID</Label><Input value={group.variableName} onChange={e => updateGroup(group.id, 'variableName', e.target.value)} className="h-8 text-xs font-mono text-blue-600" /></div>
+                            <div className="space-y-1"><Label className="text-[10px] font-bold">Input Type</Label><Select value={group.fieldType} onValueChange={v => updateGroup(group.id, 'fieldType', v)}><SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="text">Text</SelectItem><SelectItem value="number">Number</SelectItem><SelectItem value="date">Date</SelectItem><SelectItem value="array">Array (Component Group)</SelectItem></SelectContent></Select></div>
+                            <div className="space-y-1"><Label className="text-[10px] font-bold">Target Applicant</Label><Select value={group.entityType} onValueChange={v => updateGroup(group.id, 'entityType', v)}><SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="both">Both</SelectItem><SelectItem value="principal">Principal</SelectItem><SelectItem value="dependant">Dependant</SelectItem></SelectContent></Select></div>
+                          </div>
+                          
+                          <div className="flex flex-wrap gap-2 pt-2 border-t items-center">
+                            <span className="text-[9px] font-bold text-slate-400 uppercase">Sources:</span>
+                            {group.linkedMasterFields.map(f => <Badge key={f.id} variant="secondary" className="text-[9px] h-5 py-0 px-1 gap-1">{f.label}<X className="h-2.5 w-2.5 cursor-pointer" onClick={() => unlinkMasterFieldFromGroup(group.id, f.id)} /></Badge>)}
+                            <MasterFieldPicker availableFields={availableForPicking} onSelect={f => linkMasterFieldToGroup(group.id, f)} />
+                          </div>
+
+                          {group.fieldType === 'array' && (
+                            <div className="mt-3 p-3 border rounded bg-blue-50/40 space-y-2">
+                               <div className="flex justify-between items-center"><Label className="text-[10px] font-bold text-blue-700">Sub-Fields</Label><Button size="xs" variant="outline" className="h-5 text-[9px]" onClick={() => addArrayItem(group.id)}>+ Add Item</Button></div>
+                               {group.arrayItems?.map((ai, i) => (
+                                 <div key={i} className="flex gap-2 items-end"><Input value={ai.name} onChange={e => handleArrayItemChange(group.id, i, 'name', e.target.value)} placeholder="Name" className="h-7 text-[10px] flex-1 bg-white" /><Input value={ai.variableName} onChange={e => handleArrayItemChange(group.id, i, 'variableName', e.target.value)} placeholder="ID" className="h-7 text-[10px] font-mono flex-1 bg-white" /><Button size="icon" variant="ghost" className="h-7 w-7 text-red-400" onClick={() => removeArrayItem(group.id, i)}><Trash2 className="h-3.5 w-3.5" /></Button></div>
+                               ))}
                             </div>
                           )}
+                          <Button variant="ghost" size="icon" className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 h-6 w-6 text-slate-300 hover:text-red-500" onClick={() => removeGroup(group.id)}><X className="h-4 w-4" /></Button>
                         </div>
-                      </div>
-                    )
-                  })}
-                </div>
-                <div className="flex justify-end mt-4">
-                  <Button
-                    onClick={addSelectedFieldsAsGroups}
-                    disabled={selectedTopLevelFieldIds.size === 0}
-                  >
-                    <Plus className="mr-2 h-4 w-4" />
-                    Add Selected Fields ({selectedTopLevelFieldIds.size})
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+                      ))}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
 
-            <Card className="flex-1">
-              <CardHeader>
-                <div className="flex justify-between items-center">
-                  <CardTitle>Configure Web Data Fields ({webDataGroups.length})</CardTitle>
-                  {selectedGroupIdsForMerge.size > 1 && (
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="outline" size="sm">
-                          <Merge className="mr-2 h-4 w-4" />
-                          Merge Selected ({selectedGroupIdsForMerge.size})
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Confirm Merge</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            This will combine {selectedGroupIdsForMerge.size} fields into one.
-                            The name and type of the first selected field will be used for the new merged field.
-                            You can edit it afterward.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction onClick={handleMerge}>Confirm & Merge</AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent className="flex-1 overflow-y-auto space-y-4 h-[calc(30vh)]">
-                {webDataGroups.length === 0 ? (
-                  <p className="text-sm text-gray-500 text-center py-8">
-                    Select fields from above to begin configuring web data fields.
-                  </p>
-                ) : (
-                  webDataGroups.map((group) => (
-                    <div key={group.id} className="border rounded-lg p-4 space-y-4 bg-card shadow-sm flex gap-4">
-                      <Checkbox
-                        id={`group-sel-${group.id}`}
-                        checked={selectedGroupIdsForMerge.has(group.id)}
-                        onCheckedChange={() => toggleGroupSelectionForMerge(group.id)}
-                        className="mt-2"
-                      />
-                      <div className="flex-grow space-y-4">
-                        <div className="flex items-start justify-between">
-                          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 flex-grow">
-                            <div className="space-y-1">
-                              <Label htmlFor={`efnsDisplayName-${group.id}`}>EFNS Display Name</Label>
-                              <Input
-                                id={`efnsDisplayName-${group.id}`}
-                                value={group.efnsDisplayName}
-                                onChange={(e) => updateGroup(group.id, 'efnsDisplayName', e.target.value)}
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label htmlFor={`variableName-${group.id}`}>Variable Name</Label>
-                              <Input
-                                id={`variableName-${group.id}`}
-                                value={group.variableName}
-                                onChange={(e) => updateGroup(group.id, 'variableName', e.target.value)}
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label htmlFor={`fieldType-${group.id}`}>Field Type</Label>
-                              <Select
-                                value={group.fieldType}
-                                onValueChange={(value) => updateGroup(group.id, 'fieldType', value)}
-                              >
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="text">Text</SelectItem>
-                                  <SelectItem value="number">Number</SelectItem>
-                                  <SelectItem value="boolean">Boolean</SelectItem>
-                                  <SelectItem value="date">Date</SelectItem>
-                                  <SelectItem value="select">Select</SelectItem>
-                                  <SelectItem value="array">Array</SelectItem>
-                                  <SelectItem value="object">Object</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1">
-                              <Label htmlFor={`entityType-${group.id}`}>Entity Type</Label>
-                              <Select
-                                value={group.entityType}
-                                onValueChange={(value) => updateGroup(group.id, 'entityType', value)}
-                              >
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="both">
-                                    <div className="flex items-center space-x-2">
-                                      <Users className="h-4 w-4" />
-                                      <span>Both (Principal & Dependant)</span>
-                                    </div>
-                                  </SelectItem>
-                                  <SelectItem value="principal">
-                                    <div className="flex items-center space-x-2">
-                                      <User className="h-4 w-4" />
-                                      <span>Principal Only</span>
-                                    </div>
-                                  </SelectItem>
-                                  <SelectItem value="dependant">
-                                    <div className="flex items-center space-x-2">
-                                      <User className="h-4 w-4" />
-                                      <span>Dependant Only</span>
-                                    </div>
-                                  </SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 ml-4"
-                            onClick={() => removeGroup(group.id)}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label className="text-xs font-semibold">Linked Master Fields</Label>
-                          <div className="flex flex-wrap gap-2 items-center">
-                            {group.linkedMasterFields.map(field => (
-                              <Badge key={field.id} variant="secondary" className="pl-2 pr-1 py-1">
-                                {field.label}
-                                <button
-                                  onClick={() => unlinkMasterFieldFromGroup(group.id, field.id)}
-                                  className="ml-1.5 rounded-full hover:bg-gray-400/20 p-0.5"
-                                >
-                                  <X className="h-3 w-3" />
-                                </button>
-                              </Badge>
-                            ))}
-                            <MasterFieldPicker
-                              availableFields={availableForPicking}
-                              onSelect={(field) => linkMasterFieldToGroup(group.id, field)}
-                            />
+                <TabsContent value="documents" className="h-full m-0 overflow-auto bg-slate-50 p-4 rounded-lg">
+                   <div className="grid grid-cols-3 gap-3">
+                      {filteredKycDocuments.map(doc => (
+                        <div key={doc.id} className={cn("p-3 border rounded-lg bg-white shadow-sm flex items-start gap-3", selectedKycDocuments.has(doc.id) && "border-blue-500 ring-1 ring-blue-500")}>
+                          <Checkbox checked={selectedKycDocuments.has(doc.id)} onCheckedChange={c => {
+                             const n = new Map(selectedKycDocuments); c ? n.set(doc.id, 'both') : n.delete(doc.id); setSelectedKycDocuments(n);
+                          }} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[12px] font-bold truncate">{doc.display_name}</p>
+                            <p className="text-[10px] text-slate-500">{doc.document_type} • {doc.max_file_size_mb}MB</p>
                           </div>
                         </div>
-
-                        {group.fieldType === 'array' && (
-                          <div className="mt-2 p-4 border rounded-lg bg-gray-50/50 space-y-3">
-                            <Label className="font-medium">Array Item Structure</Label>
-                            {group.arrayItems?.map((arrayItem, itemIdx) => (
-                              <div key={itemIdx} className="flex items-end gap-2 p-3 border rounded-md bg-white">
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 flex-grow">
-                                  <div className="space-y-1">
-                                    <Label className="text-xs">Display Name</Label>
-                                    <Input
-                                      value={arrayItem.name}
-                                      onChange={(e) => handleArrayItemChange(group.id, itemIdx, 'name', e.target.value)}
-                                    />
-                                  </div>
-                                  <div className="space-y-1">
-                                    <Label className="text-xs">Variable Name</Label>
-                                    <Input
-                                      value={arrayItem.variableName}
-                                      onChange={(e) => handleArrayItemChange(group.id, itemIdx, 'variableName', e.target.value)}
-                                    />
-                                  </div>
-                                  <div className="space-y-1">
-                                    <Label className="text-xs">Type</Label>
-                                    <Select
-                                      value={arrayItem.type}
-                                      onValueChange={(v) => handleArrayItemChange(group.id, itemIdx, 'type', v)}
-                                    >
-                                      <SelectTrigger><SelectValue /></SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="text">Text</SelectItem>
-                                        <SelectItem value="number">Number</SelectItem>
-                                        <SelectItem value="boolean">Boolean</SelectItem>
-                                        <SelectItem value="date">Date</SelectItem>
-                                        <SelectItem value="select">Select</SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
-                                </div>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => removeArrayItem(group.id, itemIdx)}
-                                >
-                                  <X className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            ))}
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => addArrayItem(group.id)}
-                            >
-                              <Plus className="h-4 w-4 mr-2" />Add Item
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="documents" className="flex-1 flex flex-col space-y-4">
-            <Card className="flex-1">
-              <CardHeader>
-                <CardTitle>Document Upload Requirements</CardTitle>
-                <div className="space-y-2">
-                  <Label>Search KYC Documents</Label>
-                  <Input
-                    placeholder="Search document types..."
-                    value={kycSearch}
-                    onChange={e => setKycSearch(e.target.value)}
-                    className="h-9"
-                  />
-                </div>
-              </CardHeader>
-              <CardContent className="flex-1 overflow-y-auto h-[50vh]">
-                {loadingKyc ? (
-                  <div className="flex items-center justify-center h-48">
-                    <p>Loading KYC documents...</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {filteredKycDocuments.map(doc => (
-                      <div key={doc.id} className="flex items-start space-x-3 p-3 border rounded-lg hover:bg-muted/50">
-                        <Checkbox
-                          id={`kyc-${doc.id}`}
-                          checked={selectedKycDocuments.has(doc.id)}
-                          onCheckedChange={(checked) => handleKycDocumentToggle(doc.id, checked, 'both')}
-                        />
-                        <div className="flex-1 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <label
-                              htmlFor={`kyc-${doc.id}`}
-                              className="font-medium cursor-pointer"
-                            >
-                              {doc.display_name}
-                            </label>
-                            <div className="flex items-center space-x-2">
-                              {doc.is_required && (
-                                <Badge variant="destructive" className="text-xs">Required</Badge>
-                              )}
-                            </div>
-                          </div>
-                          {doc.description && (
-                            <p className="text-sm text-muted-foreground">{doc.description}</p>
-                          )}
-                          <div className="flex items-center space-x-4 text-xs text-muted-foreground">
-                            <span>Type: {doc.document_type}</span>
-                            <span>Max size: {doc.max_file_size_mb}MB</span>
-                            {doc.file_extensions.length > 0 && (
-                              <span>Formats: {doc.file_extensions.join(', ')}</span>
-                            )}
-                          </div>
-                          {selectedKycDocuments.has(doc.id) && (
-                            <div className="mt-2">
-                              <Label className="text-xs font-medium">Entity Type for Upload</Label>
-                              <Select
-                                value={selectedKycDocuments.get(doc.id) || 'both'}
-                                onValueChange={(value) => handleKycEntityTypeChange(doc.id, value as 'principal' | 'dependant' | 'both')}
-                              >
-                                <SelectTrigger className="h-8 mt-1">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="both">
-                                    <div className="flex items-center space-x-2">
-                                      <Users className="h-3 w-3" />
-                                      <span>Both (Principal & Dependant)</span>
-                                    </div>
-                                  </SelectItem>
-                                  <SelectItem value="principal">
-                                    <div className="flex items-center space-x-2">
-                                      <User className="h-3 w-3" />
-                                      <span>Principal Only</span>
-                                    </div>
-                                  </SelectItem>
-                                  <SelectItem value="dependant">
-                                    <div className="flex items-center space-x-2">
-                                      <User className="h-3 w-3" />
-                                      <span>Dependant Only</span>
-                                    </div>
-                                  </SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                    {filteredKycDocuments.length === 0 && (
-                      <div className="text-center py-8 text-muted-foreground">
-                        <Upload className="h-12 w-12 mx-auto mb-4" />
-                        <p>No KYC documents found.</p>
-                        <p className="text-sm">Try adjusting your search criteria.</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-
-        <DialogFooter className="mt-4 pt-4 border-t">
-          <div className="flex items-center justify-between w-full">
-            <div className="flex items-center gap-4">
-              <div className="text-sm text-muted-foreground">
-                {webDataGroups.length} fields + {selectedKycDocuments.size} documents = {webDataGroups.length + selectedKycDocuments.size} total items
+                      ))}
+                   </div>
+                </TabsContent>
               </div>
+            </Tabs>
+          )}
+        </div>
 
-              {/* Show automation status in footer */}
-              {selectedForm && (
-                <div className="flex items-center gap-2">
-                  {automationIdForContext ? (
-                    <Badge variant="outline" className="text-green-600 border-green-300">
-                      <Check className="h-3 w-3 mr-1" />
-                      Automation Ready
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-amber-600 border-amber-300">
-                      <AlertTriangle className="h-3 w-3 mr-1" />
-                      No Automation
-                    </Badge>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="flex space-x-2">
-              <Button variant="outline" onClick={handleClose} disabled={isSubmitting}>
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                onClick={handleSubmit}
-                disabled={isSubmitting || (webDataGroups.length === 0 && selectedKycDocuments.size === 0)}
-                className={cn(
-                  "transition-colors",
-                  selectedForm && !automationIdForContext
-                    ? "bg-amber-600 hover:bg-amber-700"
-                    : "bg-blue-600 hover:bg-blue-700"
-                )}
-              >
-                {isSubmitting ? 'Saving...' : 'Save WebData & Documents'}
-              </Button>
-            </div>
-          </div>
+        <DialogFooter className="p-4 bg-white border-t flex justify-between items-center">
+          <div className="text-[11px] font-medium text-slate-500">{webDataGroups.length} Fields link ready</div>
+          <div className="flex gap-2"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleSubmit} disabled={!selectedFormId || isSubmitting} className="bg-blue-600 px-6 font-bold">{isSubmitting ? <Loader2 className="h-4 w-4 animate-spin"/> : "Save Configuration"}</Button></div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
