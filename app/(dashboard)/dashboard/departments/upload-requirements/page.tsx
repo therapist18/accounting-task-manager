@@ -85,6 +85,7 @@ interface ApiRequirement {
   instructions?: string
   requirement_context?: any
   web_automation?: any
+  category?: 'general' | 'processing' | 'issuance'
 }
 
 interface RequirementTableEntry extends ApiRequirement {
@@ -261,7 +262,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     setActiveDept(String(deptId))
   }
 
-  const renderMainContent = () => {
+const renderMainContent = () => {
     const currentDept = departments.find(d => String(d.id) === String(activeDept))
     
     if (!currentDept) return <div className="p-10 text-center text-gray-400">Select a department from the sidebar to begin.</div>
@@ -292,10 +293,13 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       ? { type: 'class', departmentId: currentDept.id, subdepartmentId: currentSubdept.id, classId: currentClass.id, subdepartmentName: currentSubdept.name, className: currentClass.name }
       : { type: 'subdepartment', departmentId: currentDept.id, subdepartmentId: currentSubdept.id, subdepartmentName: currentSubdept.name }
     
-    const reqsToDisplay = currentSubclass ? currentSubclass.requirements : currentClass ? currentClass.requirements : currentSubdept.upload_requirements
+    const reqsToDisplay = (currentSubclass ? currentSubclass.requirements : currentClass ? currentClass.requirements : currentSubdept.upload_requirements) || []
+
+    // SPECIAL LOGIC FOR DEPARTMENT ID 1
+    const isDept1 = String(activeDept) === "1"
 
     return (
-      <div className="space-y-6">
+      <div className="space-y-8">
         <div className="flex items-center justify-between border-b pb-4">
           <div>
             <h2 className="text-xl font-bold flex items-center gap-2">
@@ -303,21 +307,11 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                {currentSubclass ? currentSubclass.name : currentClass ? currentClass.name : currentSubdept.name}
             </h2>
             <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
-               <span>{currentDept.name}</span>
+               <Badge variant="outline" className="bg-slate-100">{currentDept.name}</Badge>
                <span>&rsaquo;</span>
                <span>{currentSubdept.name}</span>
-               {currentClass && (
-                 <>
-                   <span>&rsaquo;</span>
-                   <span>{currentClass.name}</span>
-                 </>
-               )}
-               {currentSubclass && (
-                 <>
-                   <span>&rsaquo;</span>
-                   <span>{currentSubclass.name}</span>
-                 </>
-               )}
+               {currentClass && <><span className="text-slate-300">&rsaquo;</span><span>{currentClass.name}</span></>}
+               {currentSubclass && <><span className="text-slate-300">&rsaquo;</span><span>{currentSubclass.name}</span></>}
             </div>
           </div>
           <Button onClick={() => { setAddContext(targetContext); setIsAddDialogOpen(true); }}>
@@ -325,12 +319,103 @@ export default function UploadRequirements({ departments: initialDepartments }: 
           </Button>
         </div>
 
-        {renderRequirements(reqsToDisplay, targetContext)}
+        {isDept1 ? (
+          <div className="space-y-12">
+            {/* SECTION 1: GENERAL REQUIREMENTS */}
+            <section>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-8 w-1 bg-blue-600 rounded-full" />
+                <h3 className="text-lg font-semibold">General Requirements</h3>
+              </div>
+              {renderRequirements(reqsToDisplay.filter(r => r.category === 'general'), targetContext)}
+            </section>
+
+            {/* SECTION 2: UPLOAD PROCESSING REQUIREMENTS */}
+            <section>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-8 w-1 bg-amber-500 rounded-full" />
+                <h3 className="text-lg font-semibold">Upload Processing Requirements</h3>
+              </div>
+              {/* Note: We default items with no category to 'processing' to preserve existing data display */}
+              {renderRequirements(reqsToDisplay.filter(r => r.category === 'processing' || !r.category), targetContext)}
+            </section>
+
+            {/* SECTION 3: UPLOAD ISSUANCE REQUIREMENTS */}
+            <section>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-8 w-1 bg-emerald-500 rounded-full" />
+                <h3 className="text-lg font-semibold">Upload Issuance Requirements</h3>
+              </div>
+              {renderRequirements(reqsToDisplay.filter(r => r.category === 'issuance'), targetContext)}
+            </section>
+          </div>
+        ) : (
+          /* STANDARD DISPLAY FOR OTHER DEPARTMENTS */
+          renderRequirements(reqsToDisplay, targetContext)
+        )}
       </div>
     )
   }
 
-  // --- UI DISPLAY HELPERS ---
+  // Renamed from renderRequirements to renderRequirements for clarity
+  const renderRequirements = (requirements: RequirementTableEntry[], context: EditingContext) => {
+    return (
+      <div className="border rounded-lg overflow-hidden bg-white shadow-sm">
+        <div className="overflow-auto max-h-[600px]">
+          <Table>
+            <TableHeader className="bg-slate-50 sticky top-0 z-10">
+              <TableRow>
+                <TableHead className="w-12 text-center border-r">#</TableHead>
+                <TableHead className="min-w-[200px] border-r">Requirement Name</TableHead>
+                <TableHead className="border-r">Type</TableHead>
+                <TableHead className="border-r">Applies To</TableHead>
+                <TableHead className="border-r">Documents</TableHead>
+                <TableHead className="border-r">Automation</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {requirements.length > 0 ? (
+                requirements.map((req, idx) => (
+                  <TableRow key={req.id || idx} className="hover:bg-slate-50/50">
+                    <TableCell className="text-center font-mono text-xs text-muted-foreground border-r">{idx + 1}</TableCell>
+                    <TableCell className="border-r">
+                      <div className="font-medium">{req.name}</div>
+                      {req.description && <div className="text-xs text-muted-foreground line-clamp-1">{req.description}</div>}
+                    </TableCell>
+                    <TableCell className="border-r">{getTypeDisplay(req)}</TableCell>
+                    <TableCell className="border-r">{getContextDisplay(req)}</TableCell>
+                    <TableCell className="border-r">{getDocumentsDisplay(req)}</TableCell>
+                    <TableCell className="border-r">{getAutomationDisplay(req)}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600" onClick={() => { setEditingRequirement(req); setEditingContext(context); setIsEditDialogOpen(true); }}>
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => { 
+                          setEditingContext(context); 
+                          setDeleteContext({ type: context.type, index: idx, requirementId: req.id }); 
+                          setIsDeleteDialogOpen(true); 
+                        }}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground italic bg-slate-50/30">
+                     No requirements found in this section.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+    )
+  }
 
   const getTypeDisplay = (req: RequirementTableEntry) => {
     const baseType = req.type || 'standard'
@@ -394,66 +479,6 @@ export default function UploadRequirements({ departments: initialDepartments }: 
           </Command>
         </PopoverContent>
       </Popover>
-    )
-  }
-
-  const renderRequirements = (requirements: RequirementTableEntry[] | null | undefined, context: EditingContext) => {
-    const safeReqs = requirements || []
-    return (
-      <div className="border rounded-lg overflow-hidden bg-white shadow-sm">
-        <div className="overflow-auto max-h-[calc(100vh-300px)]">
-          <Table>
-            <TableHeader className="bg-blue-500 sticky top-0 z-10">
-              <TableRow>
-                <TableHead className="w-12 text-center text-white border-r">#</TableHead>
-                <TableHead className="min-w-[200px] text-white border-r">Requirement</TableHead>
-                <TableHead className="text-white border-r">Type</TableHead>
-                <TableHead className="text-white border-r">Applies To</TableHead>
-                <TableHead className="text-white border-r">Documents</TableHead>
-                <TableHead className="text-white border-r">Automation</TableHead>
-                <TableHead className="text-right text-white border-r">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {safeReqs.length > 0 ? (
-                safeReqs.map((req, idx) => (
-                  <TableRow key={req.id || idx}>
-                    <TableCell className="text-center font-mono text-xs text-muted-foreground border-r">{idx + 1}</TableCell>
-                    <TableCell>
-                      <div className="font-medium">{req.name}</div>
-                      {req.description && <div className="text-xs text-muted-foreground line-clamp-1">{req.description}</div>}
-                    </TableCell>
-                    <TableCell>{getTypeDisplay(req)}</TableCell>
-                    <TableCell>{getContextDisplay(req)}</TableCell>
-                    <TableCell>{getDocumentsDisplay(req)}</TableCell>
-                    <TableCell>{getAutomationDisplay(req)}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-1">
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600" onClick={() => { setEditingRequirement(req); setEditingContext(context); setIsEditDialogOpen(true); }}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => { 
-                          setEditingContext(context); 
-                          setDeleteContext({ type: context.type, index: idx, requirementId: req.id }); 
-                          setIsDeleteDialogOpen(true); 
-                        }}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center py-12 text-muted-foreground italic">
-                     No specific requirements found for this level.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </div>
     )
   }
 
