@@ -1368,6 +1368,14 @@ export default function TemplateGenerationDialog({
     // Add to state declarations (around line 108)
     const [loadedDraft, setLoadedDraft] = useState<any>(null);
     const [isLoadingDraft, setIsLoadingDraft] = useState(false);
+    // Add near the top with other state declarations
+    const [dataConflicts, setDataConflicts] = useState<Array<{
+        field: string;
+        draftValue: any;
+        liveValue: any;
+        source: string;
+    }>>([]);
+    const [showConflictBanner, setShowConflictBanner] = useState(false);
 
     // Add this function to detect and load drafts
     const loadExistingDraft = useCallback(async () => {
@@ -1375,15 +1383,8 @@ export default function TemplateGenerationDialog({
 
         setIsLoadingDraft(true);
         try {
-            console.log('[loadExistingDraft] Starting draft detection...');
-
-            // Determine which table to query based on entity type
             const documentId = selectedTemplate.document_id;
-
-            // Try to find a draft for this document
             let query;
-
-            // For individual documents (directors)
             if (entityIdMap.director || entityIdMap.principal) {
                 const individualId = entityIdMap.director || entityIdMap.principal;
                 query = supabase
@@ -1416,6 +1417,13 @@ export default function TemplateGenerationDialog({
 
             const { data: draftData, error } = await query;
 
+            console.log('[loadExistingDraft] Query executed. Results:', {
+                draftData,
+                error,
+                hasData: !!draftData,
+                dataKeys: draftData ? Object.keys(draftData) : null
+            });
+
             if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
                 console.error('[loadExistingDraft] Error:', error);
                 return;
@@ -1423,6 +1431,18 @@ export default function TemplateGenerationDialog({
 
             if (draftData) {
                 console.log('[loadExistingDraft] Found draft:', draftData);
+                console.log('[loadExistingDraft] Draft metadata:', draftData.metadata);
+                console.log('[loadExistingDraft] Draft metadata contents:', {
+                    hasMetadata: !!draftData.metadata,
+                    metadataType: typeof draftData.metadata,
+                    metadataKeys: draftData.metadata ? Object.keys(draftData.metadata) : null,
+                    formDataKeys: draftData.metadata?.formData ? Object.keys(draftData.metadata.formData) : null,
+                    imageStylesCount: draftData.metadata?.imageStyles ? Object.keys(draftData.metadata.imageStyles).length : 0,
+                    savedAt: draftData.metadata?.savedAt,
+                    created_at: draftData.created_at,
+                    status: draftData.status,
+                    file_path: draftData.file_path
+                });
                 setLoadedDraft(draftData);
 
                 toast({
@@ -1444,31 +1464,128 @@ export default function TemplateGenerationDialog({
         }
     }, [isOpen, selectedTemplate, entityIdMap]);
 
-    const parseDraftAndPopulateForm = useCallback(async (draft: any) => {
-        try {
-            console.log('[parseDraftAndPopulateForm] Processing draft...');
+const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) => {
+    const conflicts: Array<{
+        field: string;
+        draftValue: any;
+        liveValue: any;
+        source: string;
+    }> = [];
 
-            // First, try to use metadata if available
-            if (draft.metadata && typeof draft.metadata === 'object') {
-                console.log('[parseDraftAndPopulateForm] Using metadata:', draft.metadata);
+    console.log('[detectDataConflicts] Comparing draft vs live data...');
+    console.log('[detectDataConflicts] Draft keys:', Object.keys(draftFormData).slice(0, 10));
+    console.log('[detectDataConflicts] Live keys:', Object.keys(liveFormData).slice(0, 10));
 
-                if (draft.metadata.formData) {
-                    setFormData(draft.metadata.formData);
-                    setOriginalFormData(JSON.parse(JSON.stringify(draft.metadata.formData)));
-                }
+    // Check all placeholders for conflicts
+    selectedTemplate?.placeholders?.forEach(placeholder => {
+        const fieldName = placeholder.name;
+        const draftValue = draftFormData[fieldName];
+        const liveValue = liveFormData[fieldName];
+
+        // Skip if both are empty/undefined
+        if (!draftValue && !liveValue) return;
+
+        // Compare values (handle different types)
+        const draftStr = typeof draftValue === 'object'
+            ? JSON.stringify(draftValue)
+            : String(draftValue || '');
+        const liveStr = typeof liveValue === 'object'
+            ? JSON.stringify(liveValue)
+            : String(liveValue || '');
+
+        // 🆕 Only flag as conflict if live value exists AND differs from draft
+        if (liveValue && draftStr !== liveStr) {
+            conflicts.push({
+                field: fieldName,
+                draftValue,
+                liveValue,
+                source: 'Database'
+            });
+        }
+    });
+
+    console.log(`[detectDataConflicts] Found ${conflicts.length} conflicts`);
+    setDataConflicts(conflicts);
+    setShowConflictBanner(conflicts.length > 0);
+
+    return conflicts;
+}, [selectedTemplate]);
+
+  const parseDraftAndPopulateForm = useCallback(async (draft: any) => {
+    try {
+        console.log('[parseDraftAndPopulateForm] Processing draft...');
+
+        // First, try to use metadata if available
+        if (draft.metadata && typeof draft.metadata === 'object') {
+            console.log('[parseDraftAndPopulateForm] Using metadata:', draft.metadata);
+
+            if (draft.metadata.formData) {
+                const draftFormData = draft.metadata.formData;
+
+                // 🆕 Generate live data FIRST for comparison
+                console.log('🔄 Generating live data for conflict detection...');
+                const liveData = {};
+                const liveAutoMap = new Map();
+
+                groupedPlaceholders.topLevel.forEach(p => {
+                    const match = processPlaceholderValue(
+                        p,
+                        relationshipData,
+                        combinedCache,
+                        masterFields,
+                        entityIdMap,
+                        extractedData,
+                        companyData
+                    );
+
+                    let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
+
+                    if (val) {
+                        liveData[p.name] = val;
+                        if (match.source) liveAutoMap.set(p.name, match.source);
+                    }
+
+                    // Smart Match fallback
+                    if (!liveData[p.name]) {
+                        const smartMatch = smartFieldMatch(p.name);
+                        if (smartMatch.value) {
+                            liveData[p.name] = smartMatch.value;
+                            liveAutoMap.set(p.name, smartMatch.source);
+                        }
+                    }
+                });
+
+                // 🆕 Detect conflicts between draft and live data
+                const conflicts = await detectDataConflicts(draftFormData, liveData);
+
+                console.log(`✅ Found ${conflicts.length} conflicts between draft and live data`);
+
+                // 🆕 PRIORITY: Apply draft data first
+                setFormData(draftFormData);
+                setOriginalFormData(JSON.parse(JSON.stringify(draftFormData)));
 
                 if (draft.metadata.imageStyles) {
                     setImageStyles(draft.metadata.imageStyles);
                 }
 
-                return; // Metadata approach succeeded
-            }
+                // Update preview with draft data
+                setTimeout(() => {
+                    if (docxTemplateBuffer.current) {
+                        updateWordPreview(draftFormData, draft.metadata.imageStyles || {});
+                    } else {
+                        setPreviewContent(populateHtmlContent(draftFormData, selectedTemplate?.placeholders || [], draft.metadata.imageStyles || {}));
+                    }
+                }, 100);
 
-            // The draft contains file_content as base64 - we need to parse it
-            if (!draft.file_content) {
-                console.warn('[parseDraftAndPopulateForm] No file_content in draft');
                 return;
             }
+        }
+
+        // Fallback: Parse file_content if metadata is not available
+        if (!draft.file_content) {
+            console.warn('[parseDraftAndPopulateForm] No file_content in draft');
+            return;
+        }
 
             // Convert base64 to array buffer
             const base64Data = draft.file_content.split('base64,')[1];
@@ -1543,7 +1660,7 @@ export default function TemplateGenerationDialog({
                 variant: "destructive"
             });
         }
-    }, [selectedTemplate]);
+    }, [selectedTemplate, formData, detectDataConflicts]);
 
     // Add useEffect to trigger draft loading
     useEffect(() => {
@@ -1569,6 +1686,47 @@ export default function TemplateGenerationDialog({
 
         return { topLevel, blocks };
     }, [selectedTemplate]);
+
+    const combinedCache = useMemo(() => ({
+        ...sourceDataCache,
+        ...additionalCache
+    }), [sourceDataCache, additionalCache]);
+
+    const refreshWithLiveData = useCallback(() => {
+        // Reprocess all placeholders with current database values
+        const initData = { ...formData };
+        const autoMap = new Map();
+
+        groupedPlaceholders.topLevel.forEach(p => {
+            const match = processPlaceholderValue(
+                p,
+                relationshipData,
+                combinedCache,
+                masterFields,
+                entityIdMap,
+                extractedData,
+                companyData
+            );
+
+            let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
+
+            if (val) {
+                initData[p.name] = val;
+                if (match.source) autoMap.set(p.name, match.source);
+            }
+        });
+
+        setFormData(initData);
+        setOriginalFormData(JSON.parse(JSON.stringify(initData)));
+        setAutoPopulatedFields(autoMap);
+        setDataConflicts([]);
+        setShowConflictBanner(false);
+
+        toast({
+            title: "Refreshed",
+            description: "Form updated with latest database values",
+        });
+    }, [formData, groupedPlaceholders, relationshipData, combinedCache, masterFields, entityIdMap, extractedData, companyData]);
 
     const fetchMissingDataSources = useCallback(async () => {
         if (!isOpen || !selectedTemplate || !masterFields) return;
@@ -1919,79 +2077,82 @@ export default function TemplateGenerationDialog({
         console.groupEnd();
         return result;
     }, [extractedData, personData, companyData]);
-    const combinedCache = useMemo(() => ({
-        ...sourceDataCache,
-        ...additionalCache
-    }), [sourceDataCache, additionalCache]);
 
-    useEffect(() => {
-        if (isOpen && selectedTemplate && Object.keys(sourceDataCache).length > 0) {
-            // Start with a copy of existing data to prevent blanking out fields
-            const initData = { ...formData };
-            const autoMap = new Map();
-
-            groupedPlaceholders.topLevel.forEach(p => {
-                const match = processPlaceholderValue(
-                    p,
-                    relationshipData,
-                    combinedCache,
-                    masterFields,
-                    entityIdMap,     // Arg 5
-                    extractedData,   // Arg 6
-                    companyData      // Arg 7
-                );
-
-                // Use the calculated value if found
-                let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
-
-                if (val) {
-                    initData[p.name] = val;
-                    if (match.source) autoMap.set(p.name, match.source);
-                }
-
-                // Smart Match fallback if DB search was empty
-                if (!initData[p.name]) {
-                    const smartMatch = smartFieldMatch(p.name);
-                    if (smartMatch.value) {
-                        initData[p.name] = smartMatch.value;
-                        autoMap.set(p.name, smartMatch.source);
-                    }
-                }
-            });
-
-            // Process blocks...
-            Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
-                const block = groupedPlaceholders.blocks[blockName];
-                const resolvedRows = resolveArrayData(
-                    block.config,
-                    selectedTemplate.placeholders,
-                    combinedCache,
-                    masterFields,
-                    entityIdMap,
-                    relationshipData,
-                    extractedData,
-                    companyData
-                );
-                initData[blockName] = resolvedRows;
-                if (resolvedRows.length > 0) {
-                    autoMap.set(blockName, `Auto-populated (${resolvedRows.length} items)`);
-                }
-            });
-
-            setFormData(initData); // This updates the state
-            setOriginalFormData(JSON.parse(JSON.stringify(initData)));
-            setAutoPopulatedFields(autoMap);
-
-            // Update preview
-            setTimeout(() => {
-                if (docxTemplateBuffer.current) {
-                    updateWordPreview(initData, imageStyles);
-                } else {
-                    setPreviewContent(populateHtmlContent(initData, selectedTemplate.placeholders || [], imageStyles));
-                }
-            }, 100);
+  useEffect(() => {
+    if (isOpen && selectedTemplate && Object.keys(sourceDataCache).length > 0) {
+        // 🆕 Skip auto-population if we've already loaded a draft
+        if (loadedDraft && Object.keys(formData).length > 0) {
+            console.log('✅ Draft already loaded, skipping auto-population');
+            return;
         }
-    }, [isOpen, selectedTemplate?.id, sourceDataCache, additionalCache]); // Ensure dependencies are correct
+
+        console.log('🔄 Auto-populating from database...');
+        
+        // Start with a copy of existing data to prevent blanking out fields
+        const initData = { ...formData };
+        const autoMap = new Map();
+
+        groupedPlaceholders.topLevel.forEach(p => {
+            const match = processPlaceholderValue(
+                p,
+                relationshipData,
+                combinedCache,
+                masterFields,
+                entityIdMap,
+                extractedData,
+                companyData
+            );
+
+            let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
+
+            if (val) {
+                initData[p.name] = val;
+                if (match.source) autoMap.set(p.name, match.source);
+            }
+
+            // Smart Match fallback if DB search was empty
+            if (!initData[p.name]) {
+                const smartMatch = smartFieldMatch(p.name);
+                if (smartMatch.value) {
+                    initData[p.name] = smartMatch.value;
+                    autoMap.set(p.name, smartMatch.source);
+                }
+            }
+        });
+
+        // Process blocks...
+        Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
+            const block = groupedPlaceholders.blocks[blockName];
+            const resolvedRows = resolveArrayData(
+                block.config,
+                selectedTemplate.placeholders,
+                combinedCache,
+                masterFields,
+                entityIdMap,
+                relationshipData,
+                extractedData,
+                companyData
+            );
+            initData[blockName] = resolvedRows;
+            if (resolvedRows.length > 0) {
+                autoMap.set(blockName, `Auto-populated (${resolvedRows.length} items)`);
+            }
+        });
+
+        setFormData(initData);
+        setOriginalFormData(JSON.parse(JSON.stringify(initData)));
+        setAutoPopulatedFields(autoMap);
+
+        // Update preview
+        setTimeout(() => {
+            if (docxTemplateBuffer.current) {
+                updateWordPreview(initData, imageStyles);
+            } else {
+                setPreviewContent(populateHtmlContent(initData, selectedTemplate.placeholders || [], imageStyles));
+            }
+        }, 100);
+    }
+}, [isOpen, selectedTemplate?.id, sourceDataCache, additionalCache, loadedDraft]); // 🆕 Add loadedDraft dependency
 
     const handleInputChange = (name, val) => {
         setFormData(prev => {
@@ -2356,21 +2517,54 @@ export default function TemplateGenerationDialog({
         groupedPlaceholders.topLevel.forEach(placeholder => {
             const rawValue = data[placeholder.name];
             const cleanName = placeholder.name.replace(/[{}]/g, '').trim();
+
+            if (placeholder.is_digit_split) {
+                const chars = processDigitSplit(rawValue, placeholder.digit_count || 8);
+                const count = placeholder.digit_count || 8;
+                for (let i = 1; i <= count; i++) {
+                    const seqRegex = new RegExp(`\\{+\\s*${cleanName}_${i}\\s*\\}+`, 'gi');
+                    const charVal = chars[i - 1] || '&nbsp;';
+
+                    // Process in all three locations
+                    content = content.replace(seqRegex, charVal);
+                    processedHeader = processedHeader.replace(seqRegex, charVal);
+                    processedFooter = processedFooter.replace(seqRegex, charVal);
+                }
+                const baseRegex = new RegExp(`\\{+\\s*${cleanName}\\s*\\}+`, 'gi');
+                content = content.replace(baseRegex, extractDisplayValue(rawValue) || '');
+                return;
+            }
+
             let value = extractDisplayValue(rawValue);
             const regex = new RegExp(`\\{+\\s*${cleanName}\\s*\\}+`, 'gi');
 
-            if (placeholder.type === 'image' && value && value.startsWith('http')) {
-                const style = styles[placeholder.name] || {};
-                const imgWidth = style.imageWidth ? `${style.imageWidth}px` : style.maxWidth || '100%';
-                const imageHtml = `<div style="text-align:${style.textAlign || 'center'};margin:5px 0;">
-                <img src="${value}" style="width:${imgWidth};height:auto;max-width:100%;" />
-            </div>`;
+            if (value) {
+                if (placeholder.type === 'image' && value.startsWith('http')) {
+                    const style = styles[placeholder.name] || {};
+                    const imgWidth = style.imageWidth ? `${style.imageWidth}px` : style.maxWidth || '100%';
+                    const imageHtml = `<div style="text-align:${style.textAlign || 'center'};margin:5px 0;">
+                    <img src="${value}" style="width:${imgWidth};height:auto;max-width:100%;" />
+                </div>`;
 
-                processedHeader = processedHeader.replace(regex, imageHtml);
-                processedFooter = processedFooter.replace(regex, imageHtml);
+                    // Replace in ALL sections
+                    content = content.replace(regex, imageHtml);
+                    processedHeader = processedHeader.replace(regex, imageHtml);
+                    processedFooter = processedFooter.replace(regex, imageHtml);
+                } else {
+                    // For non-image fields, also replace in header/footer
+                    const formattedValue = /<[a-z][\s\S]*>/i.test(String(value))
+                        ? value
+                        : String(value).replace(/\n/g, '<br />');
+
+                    content = content.replace(regex, formattedValue);
+                    processedHeader = processedHeader.replace(regex, formattedValue);
+                    processedFooter = processedFooter.replace(regex, formattedValue);
+                }
             } else {
-                processedHeader = processedHeader.replace(regex, value || '');
-                processedFooter = processedFooter.replace(regex, value || '');
+                const placeholder_marker = `<span style="background:#fef08a;padding:2px 4px;color:#854d0e;">[${placeholder.name}]</span>`;
+                content = content.replace(regex, placeholder_marker);
+                processedHeader = processedHeader.replace(regex, placeholder_marker);
+                processedFooter = processedFooter.replace(regex, placeholder_marker);
             }
         });
 
@@ -2577,6 +2771,7 @@ export default function TemplateGenerationDialog({
         }
     }, [selectedTemplate, toast, prepareRenderData]);
 
+    // Update the useEffect that loads the template
     useEffect(() => {
         if (!isOpen) return;
 
@@ -2595,22 +2790,36 @@ export default function TemplateGenerationDialog({
                         const arrayBuffer = await res.arrayBuffer();
                         docxTemplateBuffer.current = arrayBuffer;
 
-                        // 🔥 EXTRACT HEADERS AND FOOTERS
+                        // 🔥 Extract headers and footers
                         const { headers, footers } = await extractHeadersFooters(arrayBuffer);
 
+                        console.log('🔍 Extracted headers:', headers);
+                        console.log('🔍 Extracted footers:', footers);
+
                         if (headers.length > 0) {
+                            console.log('🔍 Setting header content:', headers[0].html);
                             setHeaderContent(headers[0].html);
                         }
                         if (footers.length > 0) {
+                            console.log('🔍 Setting footer content:', footers[0].html);
                             setFooterContent(footers[0].html);
                         }
+
+                        // 🆕 CRITICAL: Wait for state updates before generating preview
+                        await new Promise(resolve => setTimeout(resolve, 100));
 
                     } catch (error) {
                         console.error('Error loading template:', error);
                         return;
+                    } finally {
+                        setIsPreviewLoading(false);
                     }
                 }
-                updateWordPreview(formData, imageStyles);
+
+                // 🆕 Only update preview after header/footer are set
+                if (headerContent || footerContent) {
+                    updateWordPreview(formData, imageStyles);
+                }
             } else {
                 docxTemplateBuffer.current = null;
                 setDocPreviewUrl(null);
@@ -2619,7 +2828,22 @@ export default function TemplateGenerationDialog({
         };
 
         updatePreview();
-    }, [isOpen, selectedTemplate?.id]);
+    }, [isOpen, selectedTemplate?.id, headerContent, footerContent]); // 🆕 Add dependencies
+
+    // 🆕 Add separate effect to trigger preview update when header/footer changes
+    useEffect(() => {
+        if (isOpen && (headerContent || footerContent) && formData) {
+            console.log('🔄 Header/Footer changed, updating preview');
+            console.log('📄 Current headerContent:', headerContent?.substring(0, 100));
+            console.log('📄 Current footerContent:', footerContent?.substring(0, 100));
+
+            if (docxTemplateBuffer.current) {
+                updateWordPreview(formData, imageStyles);
+            } else {
+                setPreviewContent(populateHtmlContent(formData, selectedTemplate?.placeholders || [], imageStyles));
+            }
+        }
+    }, [headerContent, footerContent, isOpen]);
 
     const changedFields = useMemo(() => {
         const changes = [];
@@ -2844,15 +3068,12 @@ export default function TemplateGenerationDialog({
     };
 
     const refineAllFieldsWithAI = useCallback(async () => {
-        console.log(' [AI Refine All] Button clicked!');
-        console.log(' [AI Refine All] Selected template:', selectedTemplate);
-        console.log(' [AI Refine All] Form data:', formData);
+        console.log('🤖 [AI Refine All] Starting batch refinement');
 
         const aiFields = selectedTemplate.placeholders?.filter(p => p.is_ai_generated && p.ai_prompt) || [];
-        console.log(' [AI Refine All] AI fields found:', aiFields.length, aiFields.map(f => f.name));
+        console.log(`🤖 [AI Refine All] Found ${aiFields.length} AI fields`);
 
         if (aiFields.length === 0) {
-            console.log(' [AI Refine All] No AI fields found!');
             toast({
                 title: "No AI Fields",
                 description: "No fields with AI prompts found in this template",
@@ -2862,36 +3083,67 @@ export default function TemplateGenerationDialog({
         }
 
         setIsGenerating(true);
-        try {
-            const updatedData = { ...formData };
 
-            for (const field of aiFields) {
-                console.log(` [AI Refine All] Processing field: ${field.name}`);
-                const refinedValue = await refineFieldWithAI(field, updatedData);
-                if (refinedValue) {
-                    console.log(` [AI Refine All] Success for ${field.name}:`, refinedValue);
-                    updatedData[field.name] = refinedValue;
-                } else {
-                    console.log(` [AI Refine All] Failed for ${field.name}`);
-                }
+        try {
+            // Build batch request with all fields
+            const batchRequest = aiFields.map(field => {
+                // Replace variables in prompt
+                const regex = /\{([^}]+)\}/g;
+                const finalPrompt = field.ai_prompt.replace(regex, (match, key) => {
+                    const val = formData[key];
+                    return (val && typeof val !== 'object') ? val : match;
+                });
+
+                return {
+                    fieldName: field.name,
+                    prompt: finalPrompt
+                };
+            });
+
+            console.log('🤖 [AI Refine All] Sending batch request:', batchRequest);
+
+            // Use the same /api/ai/refine endpoint with batch format
+            const response = await fetch('/api/ai/refine', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: batchRequest })
+            });
+
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error || 'Batch AI refinement failed');
             }
 
+            const data = await response.json();
+            console.log('🤖 [AI Refine All] Received results:', data);
+
+            // Apply all results at once
+            const updatedData = { ...formData };
+            data.results.forEach(result => {
+                if (result.success && result.value) {
+                    updatedData[result.fieldName] = result.value;
+                }
+            });
+
             setFormData(updatedData);
+
+            const successCount = data.results.filter(r => r.success).length;
             toast({
                 title: "AI Refine Complete",
-                description: `Refined ${aiFields.length} fields using AI`,
+                description: `Successfully refined ${successCount}/${aiFields.length} fields`,
             });
+
         } catch (error) {
-            console.error('Error refining fields:', error);
+            console.error('🤖 [AI Refine All] Error:', error);
             toast({
                 title: "Error",
-                description: "Failed to refine fields with AI",
+                description: error instanceof Error ? error.message : "Failed to refine fields with AI",
                 variant: "destructive"
             });
         } finally {
             setIsGenerating(false);
         }
-    }, [formData, selectedTemplate]);
+    }, [formData, selectedTemplate, toast]);
 
     const handleSingleFieldAIRefine = async (placeholder) => {
         console.log(' [Single Field Refine] Button clicked for:', placeholder.name);
@@ -3329,6 +3581,61 @@ export default function TemplateGenerationDialog({
                                 className={`h-1.5 ${loadedDraft ? '[&>div]:bg-amber-500' : ''}`}
                             />
                         </div>
+                        {showConflictBanner && dataConflicts.length > 0 && (
+                            <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                <div className="flex items-start gap-3">
+                                    <div className="flex-shrink-0 mt-0.5">
+                                        <svg className="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                        </svg>
+                                    </div>
+                                    <div className="flex-1">
+                                        <h4 className="text-sm font-semibold text-amber-900 mb-1">
+                                            ⚠️ Data Changes Detected
+                                        </h4>
+                                        <p className="text-xs text-amber-800 mb-2">
+                                            The following fields have been updated in the database since this draft was saved:
+                                        </p>
+                                        <div className="space-y-1 mb-3">
+                                            {dataConflicts.slice(0, 3).map((conflict, idx) => (
+                                                <div key={idx} className="text-xs text-amber-700 font-mono bg-white/50 p-2 rounded">
+                                                    <span className="font-semibold">{conflict.field}:</span>{' '}
+                                                    <span className="line-through opacity-60">{String(conflict.draftValue).substring(0, 30)}</span>
+                                                    {' → '}
+                                                    <span className="font-semibold text-green-700">{String(conflict.liveValue).substring(0, 30)}</span>
+                                                </div>
+                                            ))}
+                                            {dataConflicts.length > 3 && (
+                                                <div className="text-xs text-amber-600 italic">
+                                                    ...and {dataConflicts.length - 3} more field{dataConflicts.length - 3 > 1 ? 's' : ''}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <Button
+                                                size="sm"
+                                                variant="default"
+                                                onClick={refreshWithLiveData}
+                                                className="h-7 text-xs bg-amber-600 hover:bg-amber-700"
+                                            >
+                                                <svg className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                                </svg>
+                                                Refresh with Latest Data
+                                            </Button>
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                onClick={() => setShowConflictBanner(false)}
+                                                className="h-7 text-xs text-amber-700 hover:bg-amber-100"
+                                            >
+                                                Keep Draft Values
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </DialogHeader>
 
                     <div className="flex-1 overflow-hidden grid grid-cols-12 gap-0">
