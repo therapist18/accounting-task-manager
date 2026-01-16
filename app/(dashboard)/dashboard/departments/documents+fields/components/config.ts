@@ -1,6 +1,7 @@
 export const CATEGORY_MAPPING = {
   company: "company-docs",
-  individual: "directors-docs"
+  individual: "directors-docs",
+  application: "application-docs"
 } as const
 
 // Class D ID for understudy column

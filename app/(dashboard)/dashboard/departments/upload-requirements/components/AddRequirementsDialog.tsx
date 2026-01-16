@@ -6,11 +6,16 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Switch } from "@/components/ui/switch"
-import { FileText, Info, Plus, X, Zap, Webhook, Users } from "lucide-react"
+import { FileText, Plus, Zap, Check, ChevronsUpDown, Search, Trash2, Eraser } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command"
+import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
 import supabase from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
+
+export type ApplicantType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependent' | 'employee' | 'understudy';
 
 export interface RequirementForm {
   name: string
@@ -18,32 +23,50 @@ export interface RequirementForm {
   type: 'standard' | 'conditional' | 'optional' | 'company' | 'multi-document'
   isRequired: boolean
   isVisible: boolean
-  kycDocumentId?: string
-  kycDocumentOption?: 'existing' | 'create_new'
-  hasWebForm?: boolean
-  webFormName?: string
-  automationId?: string
-  kycDocumentName?: string
+  kycDocumentIds: string[]
+  applicantTypes: ApplicantType[]
+  requiredDocumentCount: number
+  instructions: string
+}
 
-  // New fields
-  applicantType?: 'individual' | 'company' | 'both'
-  requiredDocumentCount?: number
-  billingEntity?: 'applicant' | 'company' | 'either'
-  instructions?: string
+const DEFAULT_REQUIREMENT: RequirementForm = {
+  name: '',
+  description: '',
+  type: 'standard',
+  isRequired: true,
+  isVisible: true,
+  kycDocumentIds: [],
+  applicantTypes: ['principal'],
+  requiredDocumentCount: 1,
+  instructions: ''
 }
 
 interface AddRequirementsDialogProps {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
-  onSubmit: (requirements: RequirementForm[]) => Promise<void>
+  onSubmit: (data: any) => Promise<void>
   isSubmitting: boolean
   context: {
     type: 'subdepartment' | 'class' | 'subclass'
+    departmentId: number
+    subdepartmentId: number
     subdepartmentName: string
+    classId?: string | number
     className?: string
+    subclassId?: string | number
     subclassName?: string
   } | null
 }
+
+const APPLICANT_OPTIONS = [
+  { label: 'Company', value: 'company' },
+  { label: 'Principal', value: 'principal' },
+  { label: 'Director', value: 'director' },
+  { label: 'Shareholder', value: 'shareholder' },
+  { label: 'Dependent', value: 'dependent' },
+  { label: 'Employee', value: 'employee' },
+  { label: 'Understudy', value: 'understudy' },
+]
 
 export function AddRequirementsDialog({
   isOpen,
@@ -52,669 +75,299 @@ export function AddRequirementsDialog({
   isSubmitting,
   context
 }: AddRequirementsDialogProps) {
-  const [newRequirements, setNewRequirements] = useState<RequirementForm[]>([{
-    name: '',
-    description: '',
-    type: 'standard',
-    isRequired: true,
-    isVisible: true,
-    kycDocumentOption: 'create_new',
-    hasWebForm: false,
-    webFormName: '',
-    automationId: '',
-    kycDocumentName: '',
-    applicantType: 'individual',
-    requiredDocumentCount: 1,
-    billingEntity: 'applicant',
-    instructions: ''
-  }])
+  const [newRequirements, setNewRequirements] = useState<RequirementForm[]>([{ ...DEFAULT_REQUIREMENT }])
   const [bulkInput, setBulkInput] = useState('')
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
-  const [automationTypes, setAutomationTypes] = useState<any[]>([])
   const [loadingKycDocs, setLoadingKycDocs] = useState(false)
-  const [loadingAutomations, setLoadingAutomations] = useState(false)
 
-  // Fetch KYC documents and automations when dialog opens
   useEffect(() => {
-    if (isOpen) {
-      fetchKycDocuments()
-      fetchAutomationTypes()
-    }
+    if (isOpen) fetchKycDocuments()
   }, [isOpen])
 
   const fetchKycDocuments = async () => {
     try {
       setLoadingKycDocs(true)
-
-      const { data, error } = await supabase
-        .from('acc_portal_kyc')
-        .select('id, name, display_name')
-        .order('name')
-
+      const { data, error } = await supabase.from('acc_portal_kyc').select('id, name, display_name').order('name')
       if (error) throw error
-
       setKycDocuments(data || [])
-    } catch (error) {
-      console.error('Error fetching KYC documents:', error)
-      toast({
-        title: 'Error',
-        description: 'Failed to load document types',
-        variant: 'destructive'
-      })
     } finally {
       setLoadingKycDocs(false)
     }
   }
 
-  const fetchAutomationTypes = async () => {
-    try {
-      setLoadingAutomations(true)
-
-      const { data, error } = await supabase
-        .from('tm_automations')
-        .select('id, name, description, webhook_url, webhook_type, is_active')
-        .eq('is_active', true)
-        .order('name')
-
-      if (error) throw error
-
-      setAutomationTypes(data || [])
-    } catch (error) {
-      console.error('Error fetching automation types:', error)
-      toast({
-        title: 'Error',
-        description: 'Failed to load automation types',
-        variant: 'destructive'
-      })
-    } finally {
-      setLoadingAutomations(false)
-    }
-  }
-
-  const createNewKycDocument = async (requirementName: string, departmentName: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('acc_portal_kyc')
-        .insert({
-          name: requirementName,
-          display_name: requirementName,
-          department: departmentName,
-          category: 'application-docs',
-          fields: [],
-          listed: true,
-          created_at: new Date().toISOString()
-        })
-        .select('id')
-        .single()
-
-      if (error) throw error
-
-      return data.id
-    } catch (error) {
-      console.error('Error creating KYC document:', error)
-      throw error
-    }
-  }
-
   const handleSubmit = async () => {
-    const validRequirements = newRequirements.filter(req => req.name.trim() !== '')
-    if (validRequirements.length === 0) {
-      handleClose()
-      return
-    }
+    const validReqs = newRequirements.filter(req => req.name.trim() !== '')
+    if (validReqs.length === 0 || !context) return
+
+    console.log("🚀 [AddRequirements] Starting submission flow...");
 
     try {
-      // Process requirements and handle KYC document creation/linking
-      const processedRequirements = await Promise.all(
-        validRequirements.map(async (req) => {
-          let kycDocumentId = req.kycDocumentId
+      // 1. Determine Job Level mapping
+      const jobLevelObj = {
+        department_id: Number(context.departmentId),
+        subdepartment_id: Number(context.subdepartmentId),
+        class_id: context.classId ? Number(context.classId) : null,
+        subclass_id: context.subclassId ? Number(context.subclassId) : null,
+        level: context.type === 'subdepartment' ? 2 : context.type === 'class' ? 3 : 4
+      }
 
-          if (req.kycDocumentOption === 'create_new') {
-            const departmentName = context?.subdepartmentName?.split(' ')[0] || 'General'
-            const docName = req.kycDocumentName?.trim() || req.name.trim()
-            if (!docName) {
-              throw new Error('Document type name is required when creating a new document type')
-            }
-            kycDocumentId = await createNewKycDocument(docName, departmentName)
-          }
+      console.log("🔍 [AddRequirements] Querying existing requirements for job_level:", jobLevelObj);
 
-          // Prepare web automation data for JSON column
-          let webAutomation = null;
-          if (req.hasWebForm && req.automationId) {
-            const selectedAutomation = automationTypes.find(a => a.id === req.automationId);
-            if (selectedAutomation) {
-              webAutomation = {
-                automationId: req.automationId,
-                automationName: selectedAutomation.name,
-                webFormName: req.webFormName?.trim(),
-                webhookUrl: selectedAutomation.webhook_url,
-                webhookType: selectedAutomation.webhook_type,
-                isActive: selectedAutomation.is_active,
-                description: selectedAutomation.description,
-                createdAt: new Date().toISOString()
-              };
-            }
-          }
+      // 2. Fetch existing record to merge (match by job_level string)
+      const jobLevelString = JSON.stringify(jobLevelObj)
+      const { data: existingRecord, error: fetchError } = await supabase
+        .from('tm_class_requirements')
+        .select('*')
+        .eq('job_level', jobLevelString)
+        .maybeSingle();
+      
+      if (fetchError) throw fetchError;
 
-          // Prepare requirement context data for JSON column
-          const requirementContext = {
-            applicantType: req.applicantType || 'individual',
-            requiredDocumentCount: req.requiredDocumentCount || 1,
-            billingEntity: req.billingEntity || 'applicant',
-            instructions: req.instructions?.trim() || '',
-            type: req.type,
-            conditions: [],
-            documentTypes: []
-          };
+      // 3. Prepare processing
+      const startIdCount = existingRecord?.requirements?.length || 0;
+      
+      const processedNewReqs = validReqs.map((req, index) => ({
+        id: (Date.now() + index).toString(),
+        name: req.name.trim(),
+        description: req.description,
+        type: req.type,
+        isRequired: req.isRequired,
+        is_mandatory: req.isRequired,
+        isVisible: req.isVisible,
+        applicantTypes: req.applicantTypes,
+        instructions: req.instructions,
+        requiredDocumentCount: req.requiredDocumentCount,
+        kyc_document_ids: req.kycDocumentIds,
+        order: startIdCount + index
+      }));
 
-          // Return the processed requirement
-          return {
-            name: req.name.trim(),
-            description: req.description?.trim() || '',
-            type: req.type,
-            isVisible: req.isVisible,
-            isRequired: req.isRequired,
-            kycDocumentId: kycDocumentId || undefined,
-            hasWebForm: req.hasWebForm || false,
-            webFormName: req.webFormName?.trim() || '',
-            automationId: req.automationId || '',
+      // 4. Final Payload (Legacy format with proper field names)
+      const finalRequirements = existingRecord 
+        ? [...existingRecord.requirements, ...processedNewReqs]
+        : processedNewReqs;
 
-            // JSON column data
-            requirement_context: requirementContext,
-            web_automation: webAutomation,
+      console.log(existingRecord 
+        ? `✅ [AddRequirements] Merging with existing record (ID: ${existingRecord.id})` 
+        : `🆕 [AddRequirements] Creating new requirement record`
+      );
 
-            // Backward compatibility fields
-            applicantType: req.applicantType || 'individual',
-            requiredDocumentCount: req.requiredDocumentCount || 1,
-            billingEntity: req.billingEntity || 'applicant',
-            instructions: req.instructions?.trim() || ''
-          };
-        })
-      )
+      const payload = {
+        requirements: finalRequirements,
+        job_level: jobLevelObj,
+        type: context.type === 'subdepartment' ? 'subdepartment' : context.type === 'class' ? 'class' : 'subclass',
+        is_mandatory: true,
+        updated_at: new Date().toISOString(),
+        ...(existingRecord && { id: existingRecord.id }) // Include ID for the update/upsert
+      };
 
-      console.log('Submitting requirements with JSON data:', processedRequirements)
+      console.log("📤 [AddRequirements] Payload generated:", payload);
 
-      await onSubmit(processedRequirements)
-
-      // Reset form after successful submission
-      setNewRequirements([{
-        name: '',
-        description: '',
-        type: 'standard',
-        isRequired: true,
-        isVisible: true,
-        kycDocumentOption: 'create_new',
-        hasWebForm: false,
-        webFormName: '',
-        automationId: '',
-        kycDocumentName: '',
-        applicantType: 'individual',
-        requiredDocumentCount: 1,
-        billingEntity: 'applicant',
-        instructions: ''
-      }])
-      setBulkInput('')
+      await onSubmit(payload);
+      
+      toast({ title: "Success", description: "Requirements updated." });
+      handleClose();
 
     } catch (error) {
-      console.error('Error processing requirements:', error)
-      toast({
-        title: 'Error',
-        description: 'Failed to process requirements',
-        variant: 'destructive'
-      })
+      console.error("❌ [AddRequirements] Submission failed:", error);
+      toast({ title: 'Error', description: 'Failed to save requirements', variant: 'destructive' });
     }
   }
 
   const handleClose = () => {
     onOpenChange(false)
-    setNewRequirements([{
-      name: '',
-      description: '',
-      type: 'standard',
-      isRequired: true,
-      isVisible: true,
-      kycDocumentOption: 'create_new',
-      hasWebForm: false,
-      webFormName: '',
-      automationId: '',
-      kycDocumentName: '',
-      applicantType: 'individual',
-      requiredDocumentCount: 1,
-      billingEntity: 'applicant',
-      instructions: ''
-    }])
+    setNewRequirements([{ ...DEFAULT_REQUIREMENT }])
     setBulkInput('')
   }
 
-  const addNewRequirement = () => {
-    setNewRequirements([...newRequirements, {
-      name: '',
-      description: '',
-      type: 'standard',
-      isRequired: true,
-      isVisible: true,
-      kycDocumentOption: 'create_new',
-      hasWebForm: false,
-      webFormName: '',
-      automationId: '',
-      kycDocumentName: '',
-      applicantType: 'individual',
-      requiredDocumentCount: 1,
-      billingEntity: 'applicant',
-      instructions: ''
-    }])
-  }
-
-  const removeNewRequirement = (index: number) => {
-    if (newRequirements.length > 1) {
-      setNewRequirements(newRequirements.filter((_, i) => i !== index))
-    }
-  }
-
-  const handleNewRequirementChange = (index: number, field: string, value: any) => {
+  const updateReq = (idx: number, fields: Partial<RequirementForm>) => {
     const updated = [...newRequirements]
-    updated[index] = { ...updated[index], [field]: value }
-
-    // If hasWebForm is turned off, clear the automation fields
-    if (field === 'hasWebForm' && !value) {
-      updated[index].webFormName = ''
-      updated[index].automationId = ''
-    }
-
+    updated[idx] = { ...updated[idx], ...fields }
     setNewRequirements(updated)
   }
 
-  const handleBulkInput = (text: string) => {
-    setBulkInput(text)
-
-    if (!text.trim()) {
-      setNewRequirements([{
-        name: '',
-        description: '',
-        type: 'standard',
-        isRequired: true,
-        isVisible: true,
-        kycDocumentOption: 'create_new',
-        hasWebForm: false,
-        webFormName: '',
-        automationId: '',
-        kycDocumentName: '',
-        applicantType: 'individual',
-        requiredDocumentCount: 1,
-        billingEntity: 'applicant',
-        instructions: ''
-      }])
-      return
-    }
-
-    const lines = text.split('\n').filter(line => line.trim() !== '')
-    const requirements = lines.map(line => ({
-      name: line.trim(),
-      description: '',
-      type: 'standard' as const,
-      isRequired: true,
-      isVisible: true,
-      kycDocumentOption: 'create_new' as const,
-      hasWebForm: false,
-      webFormName: '',
-      automationId: '',
-      kycDocumentName: '',
-      applicantType: 'individual' as const,
-      requiredDocumentCount: 1,
-      billingEntity: 'applicant' as const,
-      instructions: ''
-    }))
-
-    setNewRequirements(requirements)
+  const toggleKycDoc = (idx: number, docId: string) => {
+    const current = newRequirements[idx].kycDocumentIds || []
+    const updated = current.includes(docId) ? current.filter(id => id !== docId) : [...current, docId]
+    updateReq(idx, { kycDocumentIds: updated })
   }
 
   if (!context) return null
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add Requirements</DialogTitle>
-          <DialogDescription className="space-y-2">
-            <div className="space-y-1">
-              <p className="text-sm font-medium">
-                Adding requirements to: <span className="font-semibold">
-                  {context.subdepartmentName}
-                  {context.className && ` > ${context.className}`}
-                  {context.subclassName && ` > ${context.subclassName}`}
-                </span>
-              </p>
-            </div>
+          <DialogDescription>
+            Target Path: <span className="font-bold text-primary">{context.subdepartmentName} {context.className && `> ${context.className}`}</span>
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-6">
           <div className="space-y-2">
-            <Label>Bulk Add Requirements (one per line)</Label>
+            <Label className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Bulk Add (One per line)</Label>
             <Textarea
               value={bulkInput}
-              onChange={(e) => handleBulkInput(e.target.value)}
-              placeholder="Enter requirements, one per line"
-              rows={4}
+              onChange={(e) => {
+                setBulkInput(e.target.value)
+                const lines = e.target.value.split('\n').filter(l => l.trim())
+                if (lines.length > 0) {
+                  setNewRequirements(lines.map(l => ({ ...DEFAULT_REQUIREMENT, name: l.trim() })))
+                }
+              }}
+              placeholder="Requirement A&#10;Requirement B"
+              className="min-h-[80px] bg-slate-50/50"
             />
-            <p className="text-xs text-muted-foreground">
-              Or add them individually below
-            </p>
           </div>
 
-          <div className="space-y-4">
-            {newRequirements.map((req, idx) => (
-              <div key={idx} className="border rounded-lg p-4 space-y-4 bg-card">
-                <div className="flex items-center justify-between">
-                  <Label className="font-medium">Requirement {idx + 1}</Label>
-                  {newRequirements.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      onClick={() => removeNewRequirement(idx)}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  )}
+          {newRequirements.map((req, idx) => (
+            <div key={idx} className="group relative border p-5 rounded-xl bg-card hover:shadow-md transition-all space-y-4">
+              <Button 
+                variant="ghost" size="icon" 
+                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100"
+                onClick={() => {
+                  if (newRequirements.length > 1) {
+                    setNewRequirements(newRequirements.filter((_, i) => i !== idx))
+                  }
+                }}
+              >
+                <Trash2 className="h-4 w-4 text-destructive" />
+              </Button>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <Label>Requirement Name</Label>
+                  <Input value={req.name} onChange={e => updateReq(idx, { name: e.target.value })} />
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Requirement Name *</Label>
-                    <Input
-                      value={req.name}
-                      onChange={(e) => handleNewRequirementChange(idx, 'name', e.target.value)}
-                      placeholder="Requirement name"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Description</Label>
-                    <Input
-                      value={req.description}
-                      onChange={(e) => handleNewRequirementChange(idx, 'description', e.target.value)}
-                      placeholder="Description (optional)"
-                    />
-                  </div>
-                </div>
-
-                {/* Requirement Type & Context Section */}
-                <div className="space-y-4 border-t pt-4">
-                  <Label className="font-medium flex items-center gap-2">
-                    <Users className="h-4 w-4" />
-                    Requirement Context
-                  </Label>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label className="text-sm">Requirement Type</Label>
-                      <Select
-                        value={req.type}
-                        onValueChange={(value) => handleNewRequirementChange(idx, 'type', value)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="standard">Standard</SelectItem>
-                          <SelectItem value="conditional">Conditional</SelectItem>
-                          <SelectItem value="optional">Optional</SelectItem>
-                          <SelectItem value="company">Company Document</SelectItem>
-                          <SelectItem value="multi-document">Multiple Documents</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label className="text-sm">Applies To</Label>
-                      <Select
-                        value={req.applicantType || 'individual'}
-                        onValueChange={(value) => handleNewRequirementChange(idx, 'applicantType', value)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select applicant type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="individual">Individual Only</SelectItem>
-                          <SelectItem value="company">Company Only</SelectItem>
-                          <SelectItem value="both">Both Individual & Company</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  {req.type === 'company' && (
-                    <div className="space-y-2">
-                      <Label className="text-sm">Billing Entity</Label>
-                      <Select
-                        value={req.billingEntity || 'company'}
-                        onValueChange={(value) => handleNewRequirementChange(idx, 'billingEntity', value)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select billing entity" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="company">Company Documents Required</SelectItem>
-                          <SelectItem value="applicant">Applicant Must Provide</SelectItem>
-                          <SelectItem value="either">Either Can Provide</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-
-                  {req.type === 'multi-document' && (
-                    <div className="space-y-2">
-                      <Label className="text-sm">Required Document Count</Label>
-                      <Input
-                        type="number"
-                        min="1"
-                        max="10"
-                        value={req.requiredDocumentCount || 1}
-                        onChange={(e) => handleNewRequirementChange(idx, 'requiredDocumentCount', parseInt(e.target.value))}
-                        placeholder="Number of documents required"
-                      />
-                    </div>
-                  )}
-
-                  <div className="space-y-2">
-                    <Label className="text-sm">Special Instructions</Label>
-                    <Textarea
-                      value={req.instructions || ''}
-                      onChange={(e) => handleNewRequirementChange(idx, 'instructions', e.target.value)}
-                      placeholder="e.g., 'This document should be from the company that will be billed for this application'"
-                      rows={2}
-                    />
-                  </div>
-                </div>
-
-                {/* Document Type Association */}
-                <div className="space-y-4 border-t pt-4">
-                  <Label className="font-medium flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    Document Type Association
-                  </Label>
-
-                  <div className="space-y-3">
-                    <div className="flex items-center space-x-2">
-                      <input
-                        type="radio"
-                        id="create-new-option"
-                        name="kyc-option"
-                        checked={req.kycDocumentOption === 'create_new'}
-                        onChange={() => handleNewRequirementChange(idx, 'kycDocumentOption', 'create_new')}
-                      />
-                      <Label htmlFor="create-new-option" className="text-sm">
-                        Create new document type
-                      </Label>
-                    </div>
-
-                    <div className="flex items-center space-x-2">
-                      <input
-                        type="radio"
-                        id="existing-option"
-                        name="kyc-option"
-                        checked={req.kycDocumentOption === 'existing'}
-                        onChange={() => handleNewRequirementChange(idx, 'kycDocumentOption', 'existing')}
-                      />
-                      <Label htmlFor="existing-option" className="text-sm">
-                        Link to existing document type
-                      </Label>
-                    </div>
-
-                    {req.kycDocumentOption === 'existing' && (
-                      <div className="ml-6 space-y-2">
-                        <Label className="text-sm">Select Document Type</Label>
-                        <Select
-                          value={req.kycDocumentId || ''}
-                          onValueChange={(value) => handleNewRequirementChange(idx, 'kycDocumentId', value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select a document type" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {loadingKycDocs ? (
-                              <SelectItem value="loading" disabled>
-                                Loading document types...
-                              </SelectItem>
-                            ) : (
-                              kycDocuments.map((doc) => (
-                                <SelectItem key={doc.id} value={doc.id.toString()}>
-                                  {doc.display_name || doc.name}
-                                </SelectItem>
-                              ))
-                            )}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-
-                    {req.kycDocumentOption === 'create_new' && (
-                      <div className="ml-6 space-y-3">
-                        <div className="text-sm text-muted-foreground bg-blue-50 p-3 rounded">
-                          <Info className="h-4 w-4 inline mr-2" />
-                          Specify a custom name for the new document type
+                <div className="space-y-2">
+                  <Label>Applies To</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="w-full justify-between overflow-hidden bg-white">
+                        <div className="flex gap-1 truncate">
+                          {req.applicantTypes.length > 0 ? req.applicantTypes.map(t => (
+                            <Badge key={t} variant="secondary" className="capitalize text-[10px]">{t}</Badge>
+                          )) : <span className="text-muted-foreground">Select applicants...</span>}
                         </div>
-                        <div className="space-y-2">
-                          <Label className="text-sm">Document Type Name *</Label>
-                          <Input
-                            value={req.kycDocumentName || ''}
-                            onChange={(e) => handleNewRequirementChange(idx, 'kycDocumentName', e.target.value)}
-                            placeholder="Enter custom document type name"
-                          />
-                          <p className="text-xs text-muted-foreground">
-                            Leave empty to use requirement name
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Web Form Automation Section */}
-                <div className="space-y-4 border-t pt-4">
-                  <div className="flex items-center justify-between">
-                    <Label className="font-medium flex items-center gap-2">
-                      <Zap className="h-4 w-4" />
-                      Web Form Automation
-                    </Label>
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        id={`has-webform-${idx}`}
-                        checked={req.hasWebForm}
-                        onCheckedChange={(checked) => handleNewRequirementChange(idx, 'hasWebForm', checked)}
-                      />
-                      <Label htmlFor={`has-webform-${idx}`} className="text-sm">
-                        Enable web form
-                      </Label>
-                    </div>
-                  </div>
-
-                  {req.hasWebForm && (
-                    <div className="space-y-4 ml-6">
-                      <div className="space-y-2">
-                        <Label className="text-sm">Web Form Name</Label>
-                        <Input
-                          value={req.webFormName}
-                          onChange={(e) => handleNewRequirementChange(idx, 'webFormName', e.target.value)}
-                          placeholder="e.g., Personal Information Form, Address Verification"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label className="text-sm flex items-center gap-2">
-                          <Webhook className="h-4 w-4" />
-                          Automation Type
-                        </Label>
-                        <Select
-                          value={req.automationId || ''}
-                          onValueChange={(value) => handleNewRequirementChange(idx, 'automationId', value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select automation type" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {loadingAutomations ? (
-                              <SelectItem value="loading" disabled>
-                                Loading automation types...
-                              </SelectItem>
-                            ) : (
-                              <>
-                                <SelectItem value="no-automation">No automation</SelectItem>
-                                {automationTypes.map((automation) => (
-                                  <SelectItem key={automation.id} value={automation.id.toString()}>
-                                    <div className="flex items-center gap-2">
-                                      <Webhook className="h-3 w-3" />
-                                      <span>{automation.name}</span>
-                                      {automation.description && (
-                                        <span className="text-xs text-muted-foreground">
-                                          - {automation.description}
-                                        </span>
-                                      )}
-                                    </div>
-                                  </SelectItem>
-                                ))}
-                              </>
-                            )}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      {req.automationId && req.automationId !== 'no-automation' && (
-                        <div className="text-sm text-muted-foreground bg-green-50 p-3 rounded">
-                          <Info className="h-4 w-4 inline mr-2" />
-                          This requirement will trigger the selected automation when the form is submitted.
-                        </div>
-                      )}
-                    </div>
-                  )}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[300px] p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Search types..." />
+                        <CommandList>
+                          <CommandEmpty>No results found.</CommandEmpty>
+                          <CommandGroup>
+                            {APPLICANT_OPTIONS.map((opt) => (
+                              <CommandItem
+                                key={opt.value}
+                                onSelect={() => {
+                                  const current = req.applicantTypes
+                                  const updated = current.includes(opt.value) ? current.filter(t => t !== opt.value) : [...current, opt.value]
+                                  updateReq(idx, { applicantTypes: updated })
+                                }}
+                              >
+                                <Check className={cn("mr-2 h-4 w-4", req.applicantTypes.includes(opt.value) ? "opacity-100" : "opacity-0")} />
+                                {opt.label}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                          <CommandSeparator />
+                          <CommandGroup>
+                            <CommandItem onSelect={() => updateReq(idx, { applicantTypes: [] })} className="justify-center text-destructive font-medium cursor-pointer">
+                              <Eraser className="mr-2 h-4 w-4" />
+                              Clear All Selections
+                            </CommandItem>
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 </div>
               </div>
-            ))}
 
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="mt-2"
-              onClick={addNewRequirement}
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Another Requirement
-            </Button>
-          </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t pt-4">
+                <div className="space-y-2">
+                  <Label>Required Document Count</Label>
+                  <Input 
+                    type="number" min="1" 
+                    value={req.requiredDocumentCount} 
+                    onChange={e => updateReq(idx, { requiredDocumentCount: parseInt(e.target.value) || 1 })} 
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Requirement Type</Label>
+                  <Select value={req.type} onValueChange={v => updateReq(idx, { type: v })}>
+                    <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="standard">Standard</SelectItem>
+                      <SelectItem value="conditional">Conditional</SelectItem>
+                      <SelectItem value="optional">Optional</SelectItem>
+                      <SelectItem value="multi-document">Multi-Document</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-3 bg-slate-50 p-4 rounded-lg border border-slate-100">
+                <Label className="flex items-center gap-2 text-primary font-semibold">
+                  <FileText className="h-4 w-4"/> Document Mapping (Existing Portal Docs)
+                </Label>
+                
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-between bg-white">
+                      <div className="flex gap-1 truncate">
+                        {req.kycDocumentIds.length > 0 
+                          ? `${req.kycDocumentIds.length} types linked` 
+                          : "Search & Select Document Types..."}
+                      </div>
+                      <Search className="ml-2 h-4 w-4 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[450px] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Search documents..." />
+                      <CommandList>
+                        {loadingKycDocs && <div className="p-4 text-center text-sm italic">Loading documents...</div>}
+                        <CommandEmpty>No documents found.</CommandEmpty>
+                        <CommandGroup>
+                          {kycDocuments.map((doc) => (
+                            <CommandItem key={doc.id} onSelect={() => toggleKycDoc(idx, doc.id.toString())}>
+                              <Check className={cn("mr-2 h-4 w-4", req.kycDocumentIds.includes(doc.id.toString()) ? "opacity-100" : "opacity-0")} />
+                              {doc.display_name || doc.name}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                        <CommandSeparator />
+                        <CommandGroup>
+                          <CommandItem onSelect={() => updateReq(idx, { kycDocumentIds: [] })} className="justify-center text-destructive font-medium cursor-pointer">
+                            <Eraser className="mr-2 h-4 w-4" />
+                            Clear Links
+                          </CommandItem>
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+          ))}
+
+          <Button 
+            variant="outline" 
+            className="w-full border-dashed py-6 hover:bg-slate-100" 
+            onClick={() => setNewRequirements([...newRequirements, { ...DEFAULT_REQUIREMENT }])}
+          >
+            <Plus className="mr-2 h-4 w-4"/> Add Individual Requirement
+          </Button>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={handleClose}>
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={handleSubmit}
-            disabled={isSubmitting || !newRequirements.some(req => req.name.trim())}
-          >
-            {isSubmitting ? 'Saving...' : 'Save Requirements'}
+        <DialogFooter className="mt-6">
+          <Button variant="outline" onClick={handleClose}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={isSubmitting || !newRequirements.some(r => r.name.trim())}>
+            {isSubmitting ? "Saving..." : "Save Requirements"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -2,36 +2,26 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import {
-    Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import {
-    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import {
-    AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp,
-    Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles
-} from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp, Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { saveAs } from 'file-saver';
 import supabase from "@/lib/supabase/client";
-
-// --- Generation Libraries ---
 import Docxtemplater from "docxtemplater";
 import PizZip from "pizzip";
 import ImageModule from 'docxtemplater-image-module-free';
 import * as mammoth from "mammoth";
 import { Checkbox } from '@/components/ui/checkbox';
 
-// --- SHARED STYLING ---
 const EDITOR_PREVIEW_STYLES = `
   prose prose-sm sm:prose-base dark:prose-invert max-w-full focus:outline-none 
   [&_table]:border-collapse [&_table]:border [&_table]:border-border [&_table]:w-full [&_table]:my-4
@@ -40,7 +30,6 @@ const EDITOR_PREVIEW_STYLES = `
   [&_img]:rounded-lg [&_img]:border [&_img]:border-border [&_img]:max-w-full [&_img]:mx-auto
 `.replace(/\s+/g, ' ').trim();
 
-// --- HELPER FUNCTIONS ---
 const isDate = (str) => {
     if (!str || typeof str !== 'string') return false;
 
@@ -210,6 +199,17 @@ const getOrdinalWord = (index: number): string => {
     return words[index] || getOrdinalNumber(index);
 };
 
+const parseImageDimension = (dimension: string | undefined): number | null => {
+    if (!dimension) return null;
+    
+    const cleaned = dimension.toString().trim();
+    const numericValue = parseFloat(cleaned);
+    
+    if (isNaN(numericValue)) return null;
+    
+    return numericValue;
+};
+
 const checkDocumentStatus = (
     documentId: string,
     entityId: string,
@@ -238,11 +238,8 @@ const checkDocumentStatus = (
     const documentFound = Object.values(uploads).some(upload => {
         // Must match the document ID using the specified field
         const uploadDocId = upload[config.document_id_field];
-        if (uploadDocId !== documentId) return false;
-
-        // Must have a file uploaded
-        if (!upload.file_path) return false;
-
+        const uploadEntityId = upload[config.linking_variable];
+        return uploadDocId === documentId && uploadEntityId === entityId;
         // Match based on the specified linking variable
         return String(upload[config.linking_variable]) === String(entityId);
     });
@@ -357,9 +354,6 @@ const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourc
     return null;
 };
 
-/**
- * Process ordinal fields
- */
 const processOrdinalField = (placeholder, arrayIndex) => {
     const ordinalFormat = placeholder.ordinal_format || 'number';
 
@@ -384,9 +378,6 @@ const processOrdinalField = (placeholder, arrayIndex) => {
     }
 };
 
-/**
- * Process current date fields
- */
 const processCurrentDateField = (placeholder, masterFields) => {
     if (!placeholder.master_field_ids?.length || !masterFields) {
         return { value: '', source: null };
@@ -405,9 +396,6 @@ const processCurrentDateField = (placeholder, masterFields) => {
     return { value: '', source: null };
 };
 
-/**
- * Process conditional fields
- */
 const processConditionalField = (placeholder, targetEntity, combinedCache, masterFields) => {
     if (!placeholder.conditions || !targetEntity) {
         return { value: '', source: null };
@@ -463,9 +451,6 @@ const processConditionalField = (placeholder, targetEntity, combinedCache, maste
     return { value: '', source: null };
 };
 
-/**
- * Process boolean fields
- */
 const processBooleanField = (placeholder, targetEntity, combinedCache, masterFields) => {
     if (!placeholder.boolean_conditions) {
         return { value: [], source: null };
@@ -532,9 +517,6 @@ const processBooleanField = (placeholder, targetEntity, combinedCache, masterFie
     };
 };
 
-/**
- * Process image fields
- */
 const processImageField = (placeholder, targetEntity, combinedCache, masterFields) => {
     if (!placeholder.master_field_ids?.length) {
         return { value: '', source: null };
@@ -600,9 +582,6 @@ const processImageField = (placeholder, targetEntity, combinedCache, masterField
     return { value: '', source: null };
 };
 
-/**
- * Process text fields using master field sources - handles MULTIPLE master fields
- */
 const processTextField = (placeholder, targetEntity, combinedCache, masterFields) => {
     if (!placeholder.master_field_ids?.length) {
         return { value: '', source: null };
@@ -655,48 +634,24 @@ const processTextField = (placeholder, targetEntity, combinedCache, masterFields
     return { value: '', source: null };
 };
 
-/**
- * MAIN UNIFIED PROCESSOR - handles all placeholder types
- */
 const processPlaceholderValue = (placeholder, relationshipData, combinedCache, masterFields, entityIdMap = null, extractedData, companyData, arrayIndex = null, sourceArray = null) => {
     console.group(`🔍 Processing: ${placeholder.name} (${placeholder.type || 'text'})`);
-
-    // Log entity_type for debugging
-    if (placeholder.entity_type) {
-        console.log(`🏷️ entity_type: ${placeholder.entity_type}`);
-        console.log(`master_field_ids:`, placeholder.master_field_ids);
-    }
-
-    // CHECK FOR CURRENT DATE FIRST (before getting target entity)
     if (placeholder.master_field_ids?.length) {
         const dateResult = processCurrentDateField(placeholder, masterFields);
         if (dateResult.value) {
-            console.log('✅ Current date field detected');
-            console.groupEnd();
             return dateResult;
         }
     }
 
-    // Get target entity
     const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData);
 
     if (!targetEntity) {
-        console.warn('⚠️ No target entity found');
-        console.log('🔍 Debug - relationshipData.company:', relationshipData.company);
-        console.log('🔍 Debug - placeholder.entity_type:', placeholder.entity_type);
-        console.groupEnd();
         return { value: '', source: null };
     }
-
-    console.log('Target Entity:', targetEntity?.name || targetEntity?.full_name || targetEntity?.id);
-
     let result = { value: '', source: null };
 
-    // Route to appropriate processor based on field type
     switch (placeholder.type) {
         case 'document_checklist': {
-            // Get available documents from a prop or fetch them
-            // For now, we'll use an empty array - this should be passed as a prop
             const availableDocuments = window.__availableDocuments || [];
 
             const entityId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id);
@@ -736,7 +691,6 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
             break;
 
         default:
-            // For all other text fields, use master field sources
             result = processTextField(placeholder, targetEntity, combinedCache, masterFields);
     }
 
@@ -746,9 +700,6 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
     return result;
 };
 
-/**
- * Extract display value from processed result
- */
 const extractDisplayValue = (value) => {
     if (value === null || value === undefined) {
         return '';
@@ -790,8 +741,6 @@ const extractDisplayValue = (value) => {
 
     return String(value);
 };
-
-// --- UI COMPONENTS ---
 
 const ImagePlaceholderControls = ({ styles, onStyleChange }) => {
     const sizeMap = { small: '25%', medium: '50%', large: '75%', 'full-width': '100%' };
@@ -980,9 +929,6 @@ const UpdateProfileDialog = ({ open, onOpenChange, changedFields, onSave, isSavi
     );
 };
 
-/**
- * Unified placeholder input renderer
- */
 const PlaceholderInput = ({
     placeholder,
     value,
@@ -1116,14 +1062,9 @@ const PlaceholderInput = ({
                         </div>
                     </div>
                 ) : (
-                    <Button
-                        variant="outline"
-                        className="w-full h-20 border-dashed border-2 flex flex-col gap-1"
-                        onClick={() => document.getElementById(`file-${fieldKey}`).click()}
-                    >
-                        <ImageIcon className="h-4 w-4 text-slate-400" />
-                        <span className="text-[10px] text-slate-500">Upload {placeholder.name}</span>
-                    </Button>
+                    <div className="text-xs text-muted-foreground italic">
+                        {autoPopulated ? `Auto-populated: ${autoPopulated}` : `Upload ${placeholder.name}`}
+                    </div>
                 )}
                 <input
                     id={`file-${fieldKey}`}
@@ -1282,68 +1223,9 @@ const PlaceholderInput = ({
     );
 };
 
-export default function TemplateGenerationDialog({
-    isOpen, onClose, template, availableTemplates = [], documentName, masterFields,
-    entityIdMap, sourceDataCache, extractedData = {}, personData = {}, companyData = {},
-    relationshipData = { directors: [], dependants: [], company: {}, principal: null, understudy: null },
-}) {
+export default function TemplateGenerationDialog({ isOpen, onClose, template, availableTemplates = [], documentName, masterFields, entityIdMap, sourceDataCache, extractedData = {}, personData = {}, companyData = {}, relationshipData = { directors: [], dependants: [], company: {}, principal: null, understudy: null } }) {
     const { toast } = useToast();
-
-    // Debug: Log the relationshipData structure
-    useEffect(() => {
-        if (isOpen && relationshipData) {
-            console.log('🔗 TemplateGenerationDialog received relationshipData:', {
-                company: relationshipData.company,
-                directors: relationshipData.directors,
-                dependants: relationshipData.dependants,
-                principal: relationshipData.principal,
-                understudy: relationshipData.understudy
-            });
-        }
-    }, [isOpen, relationshipData]);
-
-    // Debug: Log applicant_details.type from all data sources
-    useEffect(() => {
-        if (isOpen) {
-            console.log('📋 Applicant Details Type Logging:');
-            console.log('extractedData:', extractedData);
-            console.log('personData:', personData);
-            console.log('companyData:', companyData);
-
-            // Log applicant_details.type if it exists in any data source
-            if (extractedData?.applicant_details?.type) {
-                console.log('🏢 applicant_details.type from extractedData:', extractedData.applicant_details.type);
-            }
-            if (personData?.applicant_details?.type) {
-                console.log('👤 applicant_details.type from personData:', personData.applicant_details.type);
-            }
-            if (companyData?.applicant_details?.type) {
-                console.log('🏢 applicant_details.type from companyData:', companyData.applicant_details.type);
-            }
-            if (relationshipData?.company?.type) {
-                console.log('🏢 company.type from relationshipData:', relationshipData.company.type);
-            }
-
-            // Log the type field directly from each data source
-            if (extractedData?.type) {
-                console.log('🏢 extractedData.type:', extractedData.type);
-            }
-            if (personData?.type) {
-                console.log('👤 personData.type:', personData.type);
-            }
-            if (companyData?.type) {
-                console.log('🏢 companyData.type:', companyData.type);
-            }
-        }
-    }, [isOpen, extractedData, personData, companyData, relationshipData]);
-
-    const [formData, setFormData] = useState(() => ({
-        ...extractedData,
-        ...personData,
-        ...companyData,
-        directors: relationshipData.directors || [],
-        company: relationshipData.company || {}
-    }));
+    const [formData, setFormData] = useState(() => ({ ...extractedData, ...personData, ...companyData, directors: relationshipData.directors || [], company: relationshipData.company || {} }));
     const [refiningFields, setRefiningFields] = useState(new Set());
     const [originalFormData, setOriginalFormData] = useState({ ...formData });
     const [isGenerating, setIsGenerating] = useState(false);
@@ -1362,13 +1244,10 @@ export default function TemplateGenerationDialog({
     const [availableDocuments, setAvailableDocuments] = useState<Array<{ id: string; display_name: string; name: string }>>([]);
     const [headerContent, setHeaderContent] = useState('');
     const [footerContent, setFooterContent] = useState('');
-
     const docxTemplateBuffer = useRef(null);
     const isWordTemplate = selectedTemplate?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    // Add to state declarations (around line 108)
     const [loadedDraft, setLoadedDraft] = useState<any>(null);
     const [isLoadingDraft, setIsLoadingDraft] = useState(false);
-    // Add near the top with other state declarations
     const [dataConflicts, setDataConflicts] = useState<Array<{
         field: string;
         draftValue: any;
@@ -1377,7 +1256,6 @@ export default function TemplateGenerationDialog({
     }>>([]);
     const [showConflictBanner, setShowConflictBanner] = useState(false);
 
-    // Add this function to detect and load drafts
     const loadExistingDraft = useCallback(async () => {
         if (!isOpen || !selectedTemplate || !entityIdMap) return;
 
@@ -1464,130 +1342,107 @@ export default function TemplateGenerationDialog({
         }
     }, [isOpen, selectedTemplate, entityIdMap]);
 
-const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) => {
-    const conflicts: Array<{
-        field: string;
-        draftValue: any;
-        liveValue: any;
-        source: string;
-    }> = [];
-
-    console.log('[detectDataConflicts] Comparing draft vs live data...');
-    console.log('[detectDataConflicts] Draft keys:', Object.keys(draftFormData).slice(0, 10));
-    console.log('[detectDataConflicts] Live keys:', Object.keys(liveFormData).slice(0, 10));
-
-    // Check all placeholders for conflicts
-    selectedTemplate?.placeholders?.forEach(placeholder => {
-        const fieldName = placeholder.name;
-        const draftValue = draftFormData[fieldName];
-        const liveValue = liveFormData[fieldName];
-
-        // Skip if both are empty/undefined
-        if (!draftValue && !liveValue) return;
-
-        // Compare values (handle different types)
-        const draftStr = typeof draftValue === 'object'
-            ? JSON.stringify(draftValue)
-            : String(draftValue || '');
-        const liveStr = typeof liveValue === 'object'
-            ? JSON.stringify(liveValue)
-            : String(liveValue || '');
-
-        // 🆕 Only flag as conflict if live value exists AND differs from draft
-        if (liveValue && draftStr !== liveStr) {
-            conflicts.push({
-                field: fieldName,
-                draftValue,
-                liveValue,
-                source: 'Database'
-            });
-        }
-    });
-
-    console.log(`[detectDataConflicts] Found ${conflicts.length} conflicts`);
-    setDataConflicts(conflicts);
-    setShowConflictBanner(conflicts.length > 0);
-
-    return conflicts;
-}, [selectedTemplate]);
-
-  const parseDraftAndPopulateForm = useCallback(async (draft: any) => {
-    try {
-        console.log('[parseDraftAndPopulateForm] Processing draft...');
-
-        // First, try to use metadata if available
-        if (draft.metadata && typeof draft.metadata === 'object') {
-            console.log('[parseDraftAndPopulateForm] Using metadata:', draft.metadata);
-
-            if (draft.metadata.formData) {
-                const draftFormData = draft.metadata.formData;
-
-                // 🆕 Generate live data FIRST for comparison
-                console.log('🔄 Generating live data for conflict detection...');
-                const liveData = {};
-                const liveAutoMap = new Map();
-
-                groupedPlaceholders.topLevel.forEach(p => {
-                    const match = processPlaceholderValue(
-                        p,
-                        relationshipData,
-                        combinedCache,
-                        masterFields,
-                        entityIdMap,
-                        extractedData,
-                        companyData
-                    );
-
-                    let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
-
-                    if (val) {
-                        liveData[p.name] = val;
-                        if (match.source) liveAutoMap.set(p.name, match.source);
-                    }
-
-                    // Smart Match fallback
-                    if (!liveData[p.name]) {
-                        const smartMatch = smartFieldMatch(p.name);
-                        if (smartMatch.value) {
-                            liveData[p.name] = smartMatch.value;
-                            liveAutoMap.set(p.name, smartMatch.source);
-                        }
-                    }
+    const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) => {
+        const conflicts: Array<{
+            field: string;
+            draftValue: any;
+            liveValue: any;
+            source: string;
+        }> = [];
+        selectedTemplate?.placeholders?.forEach(placeholder => {
+            const fieldName = placeholder.name;
+            const draftValue = draftFormData[fieldName];
+            const liveValue = liveFormData[fieldName];
+            if (!draftValue && !liveValue) return;
+            const draftStr = typeof draftValue === 'object'
+                ? JSON.stringify(draftValue)
+                : String(draftValue || '');
+            const liveStr = typeof liveValue === 'object'
+                ? JSON.stringify(liveValue)
+                : String(liveValue || '');
+            if (liveValue && draftStr !== liveStr) {
+                conflicts.push({
+                    field: fieldName,
+                    draftValue,
+                    liveValue,
+                    source: 'Database'
                 });
+            }
+        });
+        setDataConflicts(conflicts);
+        setShowConflictBanner(conflicts.length > 0);
 
-                // 🆕 Detect conflicts between draft and live data
-                const conflicts = await detectDataConflicts(draftFormData, liveData);
+        return conflicts;
+    }, [selectedTemplate]);
 
-                console.log(`✅ Found ${conflicts.length} conflicts between draft and live data`);
+    const parseDraftAndPopulateForm = useCallback(async (draft: any) => {
+        try {
+            if (draft.metadata && typeof draft.metadata === 'object') {
+                if (draft.metadata.formData) {
+                    const draftFormData = draft.metadata.formData;
 
-                // 🆕 PRIORITY: Apply draft data first
-                setFormData(draftFormData);
-                setOriginalFormData(JSON.parse(JSON.stringify(draftFormData)));
+                    // 🆕 Generate live data FIRST for comparison
+                    console.log('🔄 Generating live data for conflict detection...');
+                    const liveData = {};
+                    const liveAutoMap = new Map();
 
-                if (draft.metadata.imageStyles) {
-                    setImageStyles(draft.metadata.imageStyles);
-                }
+                    groupedPlaceholders.topLevel.forEach(p => {
+                        const match = processPlaceholderValue(
+                            p,
+                            relationshipData,
+                            combinedCache,
+                            masterFields,
+                            entityIdMap,
+                            extractedData,
+                            companyData
+                        );
 
-                // Update preview with draft data
-                setTimeout(() => {
-                    if (docxTemplateBuffer.current) {
-                        updateWordPreview(draftFormData, draft.metadata.imageStyles || {});
-                    } else {
-                        setPreviewContent(populateHtmlContent(draftFormData, selectedTemplate?.placeholders || [], draft.metadata.imageStyles || {}));
+                        let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
+
+                        if (val) {
+                            liveData[p.name] = val;
+                            if (match.source) liveAutoMap.set(p.name, match.source);
+                        }
+
+                        // Smart Match fallback
+                        if (!liveData[p.name]) {
+                            const smartMatch = smartFieldMatch(p.name);
+                            if (smartMatch.value) {
+                                liveData[p.name] = smartMatch.value;
+                                liveAutoMap.set(p.name, smartMatch.source);
+                            }
+                        }
+                    });
+
+                    // 🆕 Detect conflicts between draft and live data
+                    const conflicts = await detectDataConflicts(draftFormData, liveData);
+
+                    console.log(`✅ Found ${conflicts.length} conflicts between draft and live data`);
+
+                    // 🆕 PRIORITY: Apply draft data first
+                    setFormData(draftFormData);
+                    setOriginalFormData(JSON.parse(JSON.stringify(draftFormData)));
+
+                    if (draft.metadata.imageStyles) {
+                        setImageStyles(draft.metadata.imageStyles);
                     }
-                }, 100);
 
+                    // Update preview with draft data
+                    setTimeout(() => {
+                        if (docxTemplateBuffer.current) {
+                            updateWordPreview(draftFormData, draft.metadata.imageStyles || {});
+                        } else {
+                            setPreviewContent(populateHtmlContent(draftFormData, selectedTemplate?.placeholders || [], draft.metadata.imageStyles || {}));
+                        }
+                    }, 100);
+
+                    return;
+                }
+            }
+            if (!draft.file_content) {
                 return;
             }
-        }
 
-        // Fallback: Parse file_content if metadata is not available
-        if (!draft.file_content) {
-            console.warn('[parseDraftAndPopulateForm] No file_content in draft');
-            return;
-        }
-
-            // Convert base64 to array buffer
             const base64Data = draft.file_content.split('base64,')[1];
             const binaryStr = atob(base64Data);
             const len = binaryStr.length;
@@ -1596,23 +1451,17 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
                 bytes[i] = binaryStr.charCodeAt(i);
             }
             const arrayBuffer = bytes.buffer;
-
-            // Parse the DOCX to extract placeholder values
             const zip = new PizZip(arrayBuffer);
             const doc = new Docxtemplater(zip, {
                 paragraphLoop: true,
                 linebreaks: true,
             });
-
-            // Get the template XML content
             const xmlContent = zip.file('word/document.xml')?.asText();
 
             if (!xmlContent) {
                 console.warn('[parseDraftAndPopulateForm] Could not extract XML from draft');
                 return;
             }
-
-            // Extract values by matching placeholders
             const extractedValues = {};
 
             selectedTemplate.placeholders?.forEach(placeholder => {
@@ -1637,23 +1486,16 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
                     extractedValues[placeholderName] = foundValue;
                 }
             });
-
-            console.log('[parseDraftAndPopulateForm] Extracted values:', extractedValues);
-
-            // Update form data with extracted values
             setFormData(prev => ({
                 ...prev,
                 ...extractedValues
             }));
-
-            // Update original form data to track changes
             setOriginalFormData(prev => ({
                 ...prev,
                 ...extractedValues
             }));
 
         } catch (error) {
-            console.error('[parseDraftAndPopulateForm] Error:', error);
             toast({
                 title: "Error Loading Draft",
                 description: "Could not parse draft content. Starting fresh.",
@@ -1662,12 +1504,12 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
         }
     }, [selectedTemplate, formData, detectDataConflicts]);
 
-    // Add useEffect to trigger draft loading
     useEffect(() => {
         if (isOpen && selectedTemplate && entityIdMap) {
             loadExistingDraft();
         }
     }, [isOpen, selectedTemplate?.id, entityIdMap]);
+
     const groupedPlaceholders = useMemo(() => {
         if (!selectedTemplate?.placeholders) return { topLevel: [], blocks: {} };
 
@@ -1693,10 +1535,8 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
     }), [sourceDataCache, additionalCache]);
 
     const refreshWithLiveData = useCallback(() => {
-        // Reprocess all placeholders with current database values
         const initData = { ...formData };
         const autoMap = new Map();
-
         groupedPlaceholders.topLevel.forEach(p => {
             const match = processPlaceholderValue(
                 p,
@@ -1730,10 +1570,6 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
 
     const fetchMissingDataSources = useCallback(async () => {
         if (!isOpen || !selectedTemplate || !masterFields) return;
-
-        console.log('🔄 [fetchMissingDataSources] Starting optimized data fetch...');
-
-        // 1. COLLECT ALL ENTITY IDS
         const allIds = new Set<string>();
         if (entityIdMap.company) allIds.add(String(entityIdMap.company));
 
@@ -1747,9 +1583,6 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
         if (entityIdMap.understudy) allIds.add(String(entityIdMap.understudy));
 
         const idList = Array.from(allIds).filter(Boolean);
-        console.log('📋 Entity IDs to fetch:', idList);
-
-        // 2. COLLECT ALL REQUIRED TABLES AND THEIR CONFIGURATIONS
         const tableConfigs = new Map<string, {
             linkingVars: Set<string>;
             documentIds: Set<string>;
@@ -1767,11 +1600,8 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
                             documentIds: new Set()
                         });
                     }
-
                     const config = tableConfigs.get(source.table)!;
                     config.linkingVars.add(source.linking_variable || 'id');
-
-                    // Collect document IDs for filtering
                     if (source.document_id) {
                         const docIds = Array.isArray(source.document_id)
                             ? source.document_id
@@ -1783,8 +1613,6 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
         });
 
         console.log('📊 Tables to fetch:', Array.from(tableConfigs.keys()));
-
-        // 3. BATCH FETCH ALL TABLES IN PARALLEL
         const fetchPromises = Array.from(tableConfigs.entries()).map(async ([table, config]) => {
             if (fetchingTables.has(table)) {
                 console.log(`⏭️ Skipping ${table} - already fetching`);
@@ -1794,34 +1622,18 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
             setFetchingTables(prev => new Set(prev).add(table));
 
             try {
-                // Build optimized query that covers ALL linking variables
                 const linkingVars = Array.from(config.linkingVars);
                 const documentIds = Array.from(config.documentIds);
-
-                console.log(`🔍 Fetching ${table} with:`, {
-                    linkingVars,
-                    documentIds: documentIds.slice(0, 5), // Log first 5
-                    entityIds: idList.slice(0, 5) // Log first 5
-                });
-
-                // OPTIMIZED: Single query with OR conditions for all linking variables
                 let query = supabase.from(table).select('*');
-
-                // Build OR filter for all linking variables
                 if (linkingVars.length === 1) {
-                    // Simple case: single linking variable
                     query = query.in(linkingVars[0], idList);
                 } else {
-                    // Complex case: multiple linking variables - use OR
                     const orConditions = linkingVars
                         .map(linkVar => `${linkVar}.in.(${idList.join(',')})`)
                         .join(',');
                     query = query.or(orConditions);
                 }
-
-                // Add document ID filter if present
                 if (documentIds.length > 0) {
-                    // Try both common document ID fields
                     const docOrConditions = [
                         `document_id.in.(${documentIds.join(',')})`,
                         `kyc_document_id.in.(${documentIds.join(',')})`
@@ -1850,11 +1662,7 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
                 });
             }
         });
-
-        // 4. WAIT FOR ALL FETCHES TO COMPLETE
         const results = await Promise.all(fetchPromises);
-
-        // 5. BUILD UNIFIED CACHE
         const newCache: Record<string, Record<string, any>> = {};
 
         results.forEach(({ table, data }) => {
@@ -1864,13 +1672,10 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
             const config = tableConfigs.get(table);
 
             data.forEach(row => {
-                // Index by primary ID
                 const primaryId = row.id || row.director_id || row.individual_id || row.company_id;
                 if (primaryId) {
                     cache[primaryId] = row;
                 }
-
-                // ALSO index by all linking variables for easier lookup
                 config?.linkingVars.forEach(linkVar => {
                     if (row[linkVar]) {
                         cache[row[linkVar]] = row;
@@ -1879,17 +1684,11 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
             });
 
             newCache[table] = cache;
-            console.log(`📦 Cached ${Object.keys(cache).length} entries for ${table}`);
         });
-
-        // 6. UPDATE STATE ONCE
         setAdditionalCache(prev => ({
             ...prev,
             ...newCache
         }));
-
-        console.log('✅ [fetchMissingDataSources] Complete! Fetched from', results.length, 'tables');
-
     }, [isOpen, selectedTemplate, masterFields, entityIdMap, relationshipData]);
 
     useEffect(() => {
@@ -1912,8 +1711,6 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
                 if (error) throw error;
 
                 setAvailableDocuments(data || []);
-
-                // Make available globally for the processor functions
                 window.__availableDocuments = data || [];
             } catch (error) {
                 console.error('Error fetching available documents:', error);
@@ -1923,7 +1720,6 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
         fetchAvailableDocuments();
 
         return () => {
-            // Cleanup
             window.__availableDocuments = undefined;
         };
     }, [isOpen]);
@@ -2078,81 +1874,66 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
         return result;
     }, [extractedData, personData, companyData]);
 
-  useEffect(() => {
-    if (isOpen && selectedTemplate && Object.keys(sourceDataCache).length > 0) {
-        // 🆕 Skip auto-population if we've already loaded a draft
-        if (loadedDraft && Object.keys(formData).length > 0) {
-            console.log('✅ Draft already loaded, skipping auto-population');
-            return;
-        }
-
-        console.log('🔄 Auto-populating from database...');
-        
-        // Start with a copy of existing data to prevent blanking out fields
-        const initData = { ...formData };
-        const autoMap = new Map();
-
-        groupedPlaceholders.topLevel.forEach(p => {
-            const match = processPlaceholderValue(
-                p,
-                relationshipData,
-                combinedCache,
-                masterFields,
-                entityIdMap,
-                extractedData,
-                companyData
-            );
-
-            let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
-
-            if (val) {
-                initData[p.name] = val;
-                if (match.source) autoMap.set(p.name, match.source);
+    useEffect(() => {
+        if (isOpen && selectedTemplate && Object.keys(sourceDataCache).length > 0) {
+            if (loadedDraft && Object.keys(formData).length > 0) {
+                return;
             }
-
-            // Smart Match fallback if DB search was empty
-            if (!initData[p.name]) {
-                const smartMatch = smartFieldMatch(p.name);
-                if (smartMatch.value) {
-                    initData[p.name] = smartMatch.value;
-                    autoMap.set(p.name, smartMatch.source);
+            const initData = { ...formData };
+            const autoMap = new Map();
+            groupedPlaceholders.topLevel.forEach(p => {
+                const match = processPlaceholderValue(
+                    p,
+                    relationshipData,
+                    combinedCache,
+                    masterFields,
+                    entityIdMap,
+                    extractedData,
+                    companyData
+                );
+                let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
+                if (val) {
+                    initData[p.name] = val;
+                    if (match.source) autoMap.set(p.name, match.source);
                 }
-            }
-        });
+                if (!initData[p.name]) {
+                    const smartMatch = smartFieldMatch(p.name);
+                    if (smartMatch.value) {
+                        initData[p.name] = smartMatch.value;
+                        autoMap.set(p.name, smartMatch.source);
+                    }
+                }
+            });
+            Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
+                const block = groupedPlaceholders.blocks[blockName];
+                const resolvedRows = resolveArrayData(
+                    block.config,
+                    selectedTemplate.placeholders,
+                    combinedCache,
+                    masterFields,
+                    entityIdMap,
+                    relationshipData,
+                    extractedData,
+                    companyData
+                );
+                initData[blockName] = resolvedRows;
+                if (resolvedRows.length > 0) {
+                    autoMap.set(blockName, `Auto-populated (${resolvedRows.length} items)`);
+                }
+            });
 
-        // Process blocks...
-        Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
-            const block = groupedPlaceholders.blocks[blockName];
-            const resolvedRows = resolveArrayData(
-                block.config,
-                selectedTemplate.placeholders,
-                combinedCache,
-                masterFields,
-                entityIdMap,
-                relationshipData,
-                extractedData,
-                companyData
-            );
-            initData[blockName] = resolvedRows;
-            if (resolvedRows.length > 0) {
-                autoMap.set(blockName, `Auto-populated (${resolvedRows.length} items)`);
-            }
-        });
-
-        setFormData(initData);
-        setOriginalFormData(JSON.parse(JSON.stringify(initData)));
-        setAutoPopulatedFields(autoMap);
-
-        // Update preview
-        setTimeout(() => {
-            if (docxTemplateBuffer.current) {
-                updateWordPreview(initData, imageStyles);
-            } else {
-                setPreviewContent(populateHtmlContent(initData, selectedTemplate.placeholders || [], imageStyles));
-            }
-        }, 100);
-    }
-}, [isOpen, selectedTemplate?.id, sourceDataCache, additionalCache, loadedDraft]); // 🆕 Add loadedDraft dependency
+            setFormData(initData);
+            setOriginalFormData(JSON.parse(JSON.stringify(initData)));
+            setAutoPopulatedFields(autoMap);
+            setTimeout(() => {
+                if (docxTemplateBuffer.current) {
+                    updateWordPreview(initData, imageStyles);
+                } else {
+                    setPreviewContent(populateHtmlContent(initData, selectedTemplate.placeholders || [], imageStyles));
+                }
+            }, 100);
+        }
+    }, [isOpen, selectedTemplate?.id, sourceDataCache, additionalCache, loadedDraft]); // 🆕 Add loadedDraft dependency
 
     const handleInputChange = (name, val) => {
         setFormData(prev => {
@@ -2216,18 +1997,14 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
         setManuallyEditedFields(prev => new Set(prev).add(`${blockName}[${index}].${fieldName}`));
     };
 
-    // Add this function to extract headers/footers from DOCX
     const extractHeadersFooters = async (templateBuffer) => {
         const zip = new PizZip(templateBuffer);
         const headers = [];
         const footers = [];
-
-        // Extract all header files
         for (let i = 1; i <= 3; i++) {
             const headerFile = zip.file(`word/header${i}.xml`);
             if (headerFile) {
                 const headerXml = headerFile.asText();
-                // Convert XML to HTML using Mammoth or custom parser
                 headers.push({
                     index: i,
                     xml: headerXml,
@@ -2235,8 +2012,6 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
                 });
             }
         }
-
-        // Extract all footer files
         for (let i = 1; i <= 3; i++) {
             const footerFile = zip.file(`word/footer${i}.xml`);
             if (footerFile) {
@@ -2252,13 +2027,9 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
         return { headers, footers };
     };
 
-    // Helper to convert Word XML to HTML
     const convertWordXmlToHtml = async (xml) => {
-        // Create a minimal DOCX structure with just this content
         const tempZip = new PizZip();
         tempZip.file('word/document.xml', xml);
-
-        // Add required DOCX structure files
         tempZip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
             <Default Extension="xml" ContentType="application/xml"/>
@@ -2297,7 +2068,6 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
                                 variant="outline"
                                 size="sm"
                                 onClick={() => {
-                                    // Add a new empty row for manual input
                                     const newRow = blockData.children.reduce((acc, child) => {
                                         acc[child.name] = '';
                                         return acc;
@@ -2319,7 +2089,6 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
                                         value=""
                                         onChange={(e) => {
                                             if (blockData?.children?.[0]?.name) {
-                                                // Create new row with the entered value
                                                 const newRow = {};
                                                 newRow[blockData.children[0].name] = e.target.value;
                                                 setFormData(prev => ({ ...prev, [blockName]: [newRow] }));
@@ -2340,7 +2109,6 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
                                             placeholder={child}
                                             value=""
                                             onChange={(val) => {
-                                                // Create new row with the entered value
                                                 const newRow = {};
                                                 newRow[child.name] = val;
                                                 setFormData(prev => ({ ...prev, [blockName]: [newRow] }));
@@ -2447,11 +2215,8 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
 
     const populateHtmlContent = useCallback((data, placeholders, styles) => {
         if (!selectedTemplate?.content) {
-            console.error('❌ No template content available!');
             return '[NO TEMPLATE CONTENT]';
         }
-        console.log('🔍 Header content:', headerContent);
-        console.log('🔍 Footer content:', footerContent);
         let content = selectedTemplate.content;
         let processedHeader = headerContent;
         let processedFooter = footerContent;
@@ -2665,8 +2430,6 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
 
         try {
             setIsPreviewLoading(true);
-
-            // Ensure we have the template buffer, await if it's a promise
             let templateBuffer = docxTemplateBuffer.current;
             if (templateBuffer && typeof templateBuffer.then === 'function') {
                 templateBuffer = await templateBuffer;
@@ -2771,7 +2534,6 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
         }
     }, [selectedTemplate, toast, prepareRenderData]);
 
-    // Update the useEffect that loads the template
     useEffect(() => {
         if (!isOpen) return;
 
@@ -2790,12 +2552,7 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
                         const arrayBuffer = await res.arrayBuffer();
                         docxTemplateBuffer.current = arrayBuffer;
 
-                        // 🔥 Extract headers and footers
                         const { headers, footers } = await extractHeadersFooters(arrayBuffer);
-
-                        console.log('🔍 Extracted headers:', headers);
-                        console.log('🔍 Extracted footers:', footers);
-
                         if (headers.length > 0) {
                             console.log('🔍 Setting header content:', headers[0].html);
                             setHeaderContent(headers[0].html);
@@ -2804,8 +2561,6 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
                             console.log('🔍 Setting footer content:', footers[0].html);
                             setFooterContent(footers[0].html);
                         }
-
-                        // 🆕 CRITICAL: Wait for state updates before generating preview
                         await new Promise(resolve => setTimeout(resolve, 100));
 
                     } catch (error) {
@@ -2815,8 +2570,6 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
                         setIsPreviewLoading(false);
                     }
                 }
-
-                // 🆕 Only update preview after header/footer are set
                 if (headerContent || footerContent) {
                     updateWordPreview(formData, imageStyles);
                 }
@@ -2828,9 +2581,8 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
         };
 
         updatePreview();
-    }, [isOpen, selectedTemplate?.id, headerContent, footerContent]); // 🆕 Add dependencies
+    }, [isOpen, selectedTemplate?.id, headerContent, footerContent]);
 
-    // 🆕 Add separate effect to trigger preview update when header/footer changes
     useEffect(() => {
         if (isOpen && (headerContent || footerContent) && formData) {
             console.log('🔄 Header/Footer changed, updating preview');
@@ -3021,8 +2773,6 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
         console.log(' [AI Refine] Form data keys:', Object.keys(allFormData));
 
         if (!placeholder.ai_prompt) return null;
-
-        // Replace variables like {applicant_full_name} in prompt
         const regex = /\{([^}]+)\}/g;
         const finalPrompt = placeholder.ai_prompt.replace(regex, (match, key) => {
             // Lookup value in formData
@@ -3068,11 +2818,7 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
     };
 
     const refineAllFieldsWithAI = useCallback(async () => {
-        console.log('🤖 [AI Refine All] Starting batch refinement');
-
         const aiFields = selectedTemplate.placeholders?.filter(p => p.is_ai_generated && p.ai_prompt) || [];
-        console.log(`🤖 [AI Refine All] Found ${aiFields.length} AI fields`);
-
         if (aiFields.length === 0) {
             toast({
                 title: "No AI Fields",
@@ -3085,9 +2831,7 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
         setIsGenerating(true);
 
         try {
-            // Build batch request with all fields
             const batchRequest = aiFields.map(field => {
-                // Replace variables in prompt
                 const regex = /\{([^}]+)\}/g;
                 const finalPrompt = field.ai_prompt.replace(regex, (match, key) => {
                     const val = formData[key];
@@ -3099,10 +2843,6 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
                     prompt: finalPrompt
                 };
             });
-
-            console.log('🤖 [AI Refine All] Sending batch request:', batchRequest);
-
-            // Use the same /api/ai/refine endpoint with batch format
             const response = await fetch('/api/ai/refine', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -3115,9 +2855,6 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
             }
 
             const data = await response.json();
-            console.log('🤖 [AI Refine All] Received results:', data);
-
-            // Apply all results at once
             const updatedData = { ...formData };
             data.results.forEach(result => {
                 if (result.success && result.value) {
@@ -3134,7 +2871,6 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
             });
 
         } catch (error) {
-            console.error('🤖 [AI Refine All] Error:', error);
             toast({
                 title: "Error",
                 description: error instanceof Error ? error.message : "Failed to refine fields with AI",
@@ -3146,22 +2882,17 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
     }, [formData, selectedTemplate, toast]);
 
     const handleSingleFieldAIRefine = async (placeholder) => {
-        console.log(' [Single Field Refine] Button clicked for:', placeholder.name);
-        console.log(' [Single Field Refine] Placeholder:', placeholder);
-
         setRefiningFields(prev => new Set(prev).add(placeholder.name));
 
         const refinedValue = await refineFieldWithAI(placeholder, formData);
 
         if (refinedValue) {
-            console.log(' [Single Field Refine] Success! Updating field with:', refinedValue);
             handleInputChange(placeholder.name, refinedValue);
             toast({
                 title: "AI Refined",
                 description: `Refined content for ${placeholder.name}`,
             });
         } else {
-            console.log(' [Single Field Refine] Failed! No refined value returned');
             toast({
                 title: "Refinement Failed",
                 description: "Could not generate AI content. Check your API settings.",
@@ -3206,13 +2937,10 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
     }, [formData, groupedPlaceholders]);
 
     const saveAsDraft = async () => {
-        console.log('[saveAsDraft] Starting draft save');
         setIsGenerating(true);
 
         try {
             const fileName = `${documentName.replace(/[^\w\s-]/g, '_')}_draft_${formatDate(new Date(), 'YYYYMMDD_HHmmss')}`;
-
-            // Determine applicant type
             let applicantType = 'company';
             if (personData?.applicant_details?.type) {
                 applicantType = personData.applicant_details.type;
@@ -3221,13 +2949,9 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
             } else if (extractedData?.type) {
                 applicantType = extractedData.type;
             }
-
             const isCompany = applicantType.toLowerCase() === 'company';
             const targetTable = isCompany ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents';
-
             const kycDocId = template?.document_id;
-
-            // Create metadata object with ONLY placeholder values - NO file_content
             const draftMetadata = {
                 formData: formData,
                 imageStyles: imageStyles,
@@ -3236,14 +2960,12 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
                 documentName: documentName,
                 version: 1
             };
-
             const insertPayload = {
-                // NO file_content - just placeholder values in metadata
-                file_path: null, // Mark as draft with no file
+                file_path: null,
                 file_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                 created_at: new Date().toISOString(),
                 status: 'draft',
-                metadata: draftMetadata // Only store form state
+                metadata: draftMetadata
             };
 
             if (isCompany) {
@@ -3253,10 +2975,6 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
                 insertPayload.director_id = entityIdMap?.principal || entityIdMap?.director || relationshipData?.principal?.id;
                 insertPayload.document_id = kycDocId;
             }
-
-            console.log('[saveAsDraft] Submitting to:', targetTable, insertPayload);
-
-            // Check if there's an existing draft to update
             let query;
             if (isCompany) {
                 query = supabase
@@ -3280,25 +2998,19 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
 
             let result;
             if (existingDraft) {
-                // Update existing draft
                 result = await supabase
                     .from(targetTable)
                     .update(insertPayload)
                     .eq('id', existingDraft.id)
                     .select();
             } else {
-                // Insert new draft
                 result = await supabase
                     .from(targetTable)
                     .insert(insertPayload)
                     .select();
             }
-
             if (result.error) throw result.error;
-
-            console.log('[saveAsDraft] Draft saved successfully:', result.data);
-            setLoadedDraft(result.data[0]); // Update loaded draft reference
-
+            setLoadedDraft(result.data[0]);
             toast({
                 title: "Success",
                 description: `Draft ${existingDraft ? 'updated' : 'saved'} successfully`,
@@ -3306,7 +3018,6 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
 
         } catch (e) {
             const errorMessage = e instanceof Error ? e.message : String(e);
-            console.error('[saveAsDraft] Error:', e);
             toast({
                 title: "Error",
                 description: errorMessage,
@@ -3318,13 +3029,9 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
     };
 
     const generateAndDownload = async (type) => {
-        console.log(`[generateAndDownload] Starting ${type.toUpperCase()} document generation`);
         setIsGenerating(true);
-
         try {
             const fileName = `${documentName.replace(/[^\w\s-]/g, '_')}_${formatDate(new Date(), 'YYYYMMDD')}`;
-
-            // Ensure we have the template buffer, await if it's a promise
             let templateBuffer = docxTemplateBuffer.current;
             if (templateBuffer && typeof templateBuffer.then === 'function') {
                 templateBuffer = await templateBuffer;
@@ -3332,19 +3039,11 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
 
             if (!templateBuffer) {
                 const errorMsg = 'No template buffer available for document generation';
-                console.error('[generateAndDownload] Error:', errorMsg);
                 toast({ title: "Error", description: errorMsg, variant: "destructive" });
                 return;
             }
 
-            // Debug: Check what we're passing to PizZip
-            console.log('[generateAndDownload] templateBuffer type:', typeof templateBuffer);
-            console.log('[generateAndDownload] templateBuffer is ArrayBuffer:', templateBuffer instanceof ArrayBuffer);
-            console.log('[generateAndDownload] templateBuffer length:', templateBuffer?.byteLength);
-
             const renderData = await prepareRenderData(formData);
-
-            // Pre-process all images to convert them to buffers synchronously
             const processedRenderData = JSON.parse(JSON.stringify(renderData));
             const imageCache = new Map();
 
@@ -3352,7 +3051,6 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
                 for (const [key, value] of Object.entries(obj)) {
                     if (value && typeof value === 'string' && (value.startsWith('http') || value.startsWith('data:image'))) {
                         if (!imageCache.has(value)) {
-                            // Convert image to buffer synchronously (this should already be done by prepareRenderData)
                             imageCache.set(value, value);
                         }
                     } else if (value && typeof value === 'object' && !Array.isArray(value)) {
@@ -3394,6 +3092,15 @@ const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) 
                     }
                 },
                 getSize: (img, tag, name) => {
+                    // Find placeholder by name to get its image dimensions
+                    const placeholder = selectedTemplate?.placeholders?.find(p => p.name === name);
+                    if (placeholder?.type === 'image') {
+                        const width = parseImageDimension(placeholder.image_width);
+                        const height = parseImageDimension(placeholder.image_height);
+                        return [width || 300, height || 200];
+                    }
+                    
+                    // Fallback to legacy imageStyles for backward compatibility
                     const styleKeys = [name, name?.split('_').slice(2).join('_')];
                     let s = null;
 

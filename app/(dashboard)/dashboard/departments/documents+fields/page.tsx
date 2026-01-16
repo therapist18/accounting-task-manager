@@ -35,7 +35,7 @@ export default function DocumentsFields() {
   const [documentAllocations, setDocumentAllocations] = useState<Record<string, any>>({})
   const [clientFieldAllocations, setClientFieldAllocations] = useState<Record<string, any>>({})
   const [activeTab, setActiveTab] = useState<string>("")
-  const [documentTab, setDocumentTab] = useState<"company" | "individual">("company")
+  const [documentTab, setDocumentTab] = useState<"company" | "individual" | "application">("company")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set())
@@ -531,7 +531,7 @@ const handleSaveAllChanges = useCallback(async () => {
             <Tabs
               value={documentTab}
               onValueChange={value => {
-                setDocumentTab(value as "company" | "individual");
+                setDocumentTab(value as "company" | "individual" | "application");
                 setSearchQuery(""); // Reset search when changing tabs
               }}
               className="w-full"
@@ -540,6 +540,7 @@ const handleSaveAllChanges = useCallback(async () => {
                 <TabsList>
                   <TabsTrigger value="company">Company Documents</TabsTrigger>
                   <TabsTrigger value="individual">Individual Documents</TabsTrigger>
+                  <TabsTrigger value="application">Application Documents</TabsTrigger>
                 </TabsList>
               </div>
               <div className="relative w-64">

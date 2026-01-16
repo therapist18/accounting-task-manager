@@ -17,26 +17,52 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command"
 import supabase from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
-import { saveClassRequirements, saveSubUploadRequirements } from "./database"
-import type { Department, Requirement, RequirementForm } from "./database"
 import { DepartmentSidebar } from "@/app/(dashboard)/dashboard/departments/main-shared-components/department-sidebar"
 import { EditRequirementDialog } from "./components/EditRequirementDialog"
 import { AddRequirementsDialog } from "./components/AddRequirementsDialog"
 
-interface UploadRequirementsProps {
-  departments: Department[]
+interface Department {
+  id: string | number
+  name: string
+  description?: string
+  tm_subdepartments?: Subdepartment[]
+}
+
+interface Subdepartment {
+  id: string | number
+  name: string
+  description?: string
+  classes?: Class[]
+  upload_requirements?: ApiRequirement[]
+}
+
+interface Class {
+  id: string | number
+  name: string
+  description?: string
+  requirements?: ApiRequirement[]
+  subClasses?: Subclass[]
+}
+
+interface Subclass {
+  id: string | number
+  name: string
+  description?: string
+  requirements?: ApiRequirement[]
 }
 
 interface EditingContext {
   type: 'subdepartment' | 'class' | 'subclass'
-  departmentId: string
-  subdepartmentId: string
+  departmentId: string | number
+  subdepartmentId: string | number
   subdepartmentName?: string
-  classId?: string
+  classId?: string | number
   className?: string
-  subclassId?: string
+  subclassId?: string | number
   subclassName?: string
 }
 
@@ -52,922 +78,365 @@ interface ApiRequirement {
   hasWebForm?: boolean
   webFormName?: string
   automationId?: string
-
-  // New fields for complex requirements
-  applicantType?: 'individual' | 'company' | 'both'
+  applicantType?: string
+  applicantTypes?: string[]
   requiredDocumentCount?: number
-  documentTypes?: string[] // Array of document type IDs
-  billingEntity?: 'applicant' | 'company' | 'either'
-  conditions?: {
-    when: string // e.g., "billing_entity === 'company'"
-    showRequirement: boolean
-  }[]
-  instructions?: string // Special instructions for users
+  billingEntity?: string
+  instructions?: string
+  requirement_context?: any
+  web_automation?: any
 }
 
 interface RequirementTableEntry extends ApiRequirement {
   tempId?: string
 }
 
-// Function to generate sequential requirement IDs
-const generateRequirementId = (index: number, existingRequirements: ApiRequirement[] = []): string => {
-  if (existingRequirements.length === 0) {
-    return index.toString();
-  }
-
-  // Find the highest existing ID
-  const maxId = existingRequirements.reduce((max, req) => {
-    const id = parseInt(req.id || '0', 10);
-    return isNaN(id) ? max : Math.max(max, id);
-  }, -1);
-
-  return (maxId + 1 + index).toString();
-}
-
-export default function UploadRequirements({ departments: initialDepartments }: UploadRequirementsProps) {
-const [departments, setDepartments] = useState<Department[]>(initialDepartments || [])
+export default function UploadRequirements({ departments: initialDepartments }: { departments: Department[] }) {
+  const [departments, setDepartments] = useState<Department[]>(initialDepartments || [])
   const [activeDept, setActiveDept] = useState<string>('')
   const [activeSubdept, setActiveSubdept] = useState<Record<string, string>>({})
   const [activeClass, setActiveClass] = useState<Record<string, string>>({})
   const [activeSubclass, setActiveSubclass] = useState<Record<string, string>>({})
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({})
-  const [showDefaultDisplayOnly, setShowDefaultDisplayOnly] = useState(true);
-  const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
-  const [deleteContext, setDeleteContext] = useState<{ type: string, index: number } | null>(null)
-  const [editingContext, setEditingContext] = useState<EditingContext | null>(null)
-  const [newRequirements, setNewRequirements] = useState<{
-    name: string,
-    description: string,
-    type: 'standard' | 'conditional' | 'optional',
-    isRequired: boolean,
-    isVisible: boolean
-  }[]>([{
-    name: '',
-    description: '',
-    type: 'standard',
-    isRequired: true,
-    isVisible: true
-  }])
-  const [bulkInput, setBulkInput] = useState('')
+  const [showDefaultDisplayOnly, setShowDefaultDisplayOnly] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [editingIndex, setEditingIndex] = useState<number | null>(null)
-  const [editForm, setEditForm] = useState({
-    name: '',
-    description: '',
-    type: 'standard' as 'standard' | 'conditional' | 'optional',
-    isRequired: true,
-    isVisible: true
-  })
-  const [isReady, setIsReady] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editingRequirement, setEditingRequirement] = useState<ApiRequirement | null>(null)
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [addContext, setAddContext] = useState<EditingContext | null>(null);
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
+  const [addContext, setAddContext] = useState<EditingContext | null>(null)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [deleteContext, setDeleteContext] = useState<{ type: string, index: number, requirementId?: string } | null>(null)
+  const [editingContext, setEditingContext] = useState<EditingContext | null>(null)
+  const [kycDocuments, setKycDocuments] = useState<any[]>([])
 
-  // Add sorting state at component level
-  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
-
+  // Fetch KYC documents for display
   useEffect(() => {
-    if (!departments || departments.length === 0 || isReady) return
-
-    const initialDept = departments[0]?.id || ''
-    setActiveDept(initialDept)
-
-    const initialSubdept = departments[0]?.tm_subdepartments?.[0]
-    if (initialSubdept) {
-      const subdeptId = initialSubdept.id.toString()
-      setActiveSubdept(prev => ({ ...prev, [initialDept]: subdeptId }))
-
-      const initialClass = initialSubdept.classes?.[0]
-      if (initialClass) {
-        const subdeptKey = `${initialDept}-${subdeptId}`
-        // Store class ID instead of name
-        setActiveClass(prev => ({ ...prev, [subdeptKey]: initialClass.id.toString() }))
-
-        const initialSubclass = initialClass.subClasses?.[0]
-        if (initialSubclass) {
-          const classKey = `${subdeptKey}-${initialClass.id}`
-          setActiveSubclass(prev => ({ ...prev, [classKey]: initialSubclass.id.toString() }))
-        }
+    const fetchKycDocuments = async () => {
+      try {
+        const { data } = await supabase.from('acc_portal_kyc').select('id, name, display_name').order('name')
+        setKycDocuments(data || [])
+      } catch (error) {
+        console.error('Error fetching KYC documents:', error)
       }
     }
+    fetchKycDocuments()
+  }, [])
 
-    setIsReady(true)
-  }, [departments, isReady])
-
-useEffect(() => {
-  if (initialDepartments) {
-    setDepartments(initialDepartments);
+  // Helper function to get document names
+  const getDocumentNames = (documentIds: string[] | string | undefined) => {
+    if (!documentIds) return []
+    const ids = Array.isArray(documentIds) ? documentIds : [documentIds]
+    return ids.map(id => {
+      const doc = kycDocuments.find(d => d.id === id)
+      return doc?.display_name || doc?.name || `Document ${id}`
+    })
   }
-}, [initialDepartments])
 
-  const toggleExpanded = (key: string) => {
-    setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }))
-  }
-
-  const openRequirementsDialog = (context: EditingContext) => {
-    // Find the department and subdepartment
-    const dept = departments.find(d => d.id === context.departmentId);
-
-    // Convert subdepartmentId to number for comparison if needed
-    const subdeptId = typeof context.subdepartmentId === 'string'
-      ? parseInt(context.subdepartmentId, 10)
-      : context.subdepartmentId;
-
-    const subdept = dept?.tm_subdepartments?.find(s =>
-      s.id === subdeptId || s.id.toString() === context.subdepartmentId.toString()
-    );
-
-    // Get class and subclass names if they exist
-    let className = '';
-    let subclassName = '';
-
-    if (context.classId && subdept) {
-      const classItem = subdept.classes?.find(c =>
-        c.id.toString() === context.classId?.toString() ||
-        c.id === context.classId
-      );
-
-      if (classItem) {
-        className = classItem.name;
-
-        if (context.subclassId) {
-          const subclassItem = classItem.subClasses?.find(sc =>
-            sc.id.toString() === context.subclassId?.toString() ||
-            sc.id === context.subclassId
-          );
-
-          if (subclassItem) {
-            subclassName = subclassItem.name;
-          }
-        }
+  // Initialization logic to select first items if nothing is active
+  useEffect(() => {
+    if (departments.length > 0 && !activeDept) {
+      const firstDept = departments[0]
+      setActiveDept(String(firstDept.id))
+      
+      if (firstDept.tm_subdepartments && firstDept.tm_subdepartments.length > 0) {
+        const firstSub = firstDept.tm_subdepartments[0]
+        setActiveSubdept({ [String(firstDept.id)]: String(firstSub.id) })
       }
     }
+  }, [departments, activeDept])
 
-    // Create enhanced context with names
-    const enhancedContext = {
-      ...context,
-      subdepartmentName: subdept?.name || '',
-      className,
-      subclassName
-    };
-
-    setAddContext(enhancedContext)
-    setBulkInput('')
-    setNewRequirements([{
-      name: '',
-      description: '',
-      type: 'standard',
-      isRequired: true,
-      isVisible: true
-    }])
-    setIsAddDialogOpen(true)
-  }
-
-  const handleCloseDialog = () => {
-    setIsDialogOpen(false)
-    setEditingContext(null)
-    setNewRequirements([{
-      name: '',
-      description: '',
-      type: 'standard',
-      isRequired: true,
-      isVisible: true
-    }])
-  }
-
-  // Add this function to handle adding new requirements
-  const handleAddRequirements = async (requirements: Omit<ApiRequirement, 'id' | 'order'>[]) => {
-    if (!addContext) return;
-
-    try {
-      setIsSubmitting(true);
-
-      // Get current requirements
-      const currentRequirements = getCurrentRequirementsForContext(addContext) || [];
-
-      // Add new requirements with generated IDs
-      const newRequirementsWithIds = requirements.map((req, index) => ({
-        ...req,
-        id: generateRequirementId(index, currentRequirements),
-        order: currentRequirements.length + index
-      }));
-
-      // Combine with existing requirements
-      const updatedRequirements = [...currentRequirements, ...newRequirementsWithIds];
-
-      // Save to database
-      await saveRequirementsForContext(addContext, updatedRequirements);
-
-      // Refresh the data
-      await refreshDepartments();
-
-      // Close the dialog
-      setIsAddDialogOpen(false);
-
-      // Show success message
-      toast({
-        title: "Success",
-        description: "Requirements added successfully",
-        variant: "default"
-      });
-
-    } catch (error) {
-      console.error('Error adding requirements:', error);
-      toast({
-        title: "Error",
-        description: "Failed to add requirements. Please try again.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleDeleteClick = (type: 'subdepartment' | 'class' | 'subclass', index: number) => {
-    setDeleteContext({ type, index })
-    // Set the current context for deletion
-    const context = {
-      type,
-      departmentId: activeDept,
-      subdepartmentId: activeSubdept[activeDept],
-      classId: type === 'class' || type === 'subclass' ? activeClass[`${activeDept}-${activeSubdept[activeDept]}`] : undefined,
-      subclassId: type === 'subclass' ? activeSubclass[`${activeDept}-${activeSubdept[activeDept]}-${activeClass[`${activeDept}-${activeSubdept[activeDept]}`]}`] : undefined
-    };
-    setEditingContext(context);
-    setIsDeleteDialogOpen(true);
-  }
-
-  const handleDeleteConfirm = async () => {
-    if (!deleteContext || !editingContext) return
-
-    try {
-      setIsSubmitting(true)
-      const { type, index } = deleteContext
-
-      // Get current requirements first
-      const currentRequirements = getCurrentRequirementsForContext(editingContext)
-      if (!currentRequirements || currentRequirements.length === 0) return
-
-      const updatedRequirements = currentRequirements.filter((_, i) => i !== index)
-
-      // Save updated requirements
-      await saveRequirementsForContext(editingContext, updatedRequirements)
-      await refreshDepartments()
-
-      toast({
-        title: "Success",
-        description: "Requirement deleted successfully",
-        variant: "default"
-      })
-
-      setIsDeleteDialogOpen(false)
-      setDeleteContext(null)
-
-    } catch (error) {
-      console.error('Error deleting requirement')
-      toast({
-        title: "Error",
-        description: "Failed to delete requirement. Please try again.",
-        variant: "destructive"
-      })
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  const getCurrentRequirementsForContext = (context: EditingContext): ApiRequirement[] | null => {
-    console.log('[getCurrentRequirementsForContext] Getting requirements for context:', JSON.stringify(context, null, 2));
-
-    try {
-      // Find the department
-      const dept = departments.find(d =>
-        String(d.id) === String(context.departmentId)
-      );
-
-      if (!dept) {
-        console.error('[getCurrentRequirementsForContext] Department not found:', context.departmentId);
-        return null;
-      }
-
-      // Find the subdepartment
-      const subdept = dept.tm_subdepartments?.find(s =>
-        String(s.id) === String(context.subdepartmentId)
-      );
-
-      if (!subdept) {
-        console.error('[getCurrentRequirementsForContext] Subdepartment not found:', context.subdepartmentId);
-        return null;
-      }
-
-      // Handle based on context type
-      switch (context.type) {
-        case 'subdepartment':
-          console.log('[getCurrentRequirementsForContext] Found subdepartment requirements:', subdept.upload_requirements || []);
-          return subdept.upload_requirements || [];
-
-        case 'class':
-          if (!context.classId) {
-            console.error('[getCurrentRequirementsForContext] Missing classId in context');
-            return null;
-          }
-
-          const targetClass = subdept.classes?.find(c =>
-            String(c.id) === String(context.classId)
-          );
-
-          if (!targetClass) {
-            console.error('[getCurrentRequirementsForContext] Class not found:', context.classId);
-            return null;
-          }
-
-          console.log('[getCurrentRequirementsForContext] Found class requirements:', targetClass.requirements || []);
-          return targetClass.requirements || [];
-
-        case 'subclass':
-          if (!context.classId || !context.subclassId) {
-            console.error('[getCurrentRequirementsForContext] Missing classId or subclassId in context');
-            return null;
-          }
-
-          const parentClass = subdept.classes?.find(c =>
-            String(c.id) === String(context.classId)
-          );
-
-          if (!parentClass) {
-            console.error('[getCurrentRequirementsForContext] Parent class not found:', context.classId);
-            return null;
-          }
-
-          const targetSubclass = parentClass.subClasses?.find(sc =>
-            String(sc.id) === String(context.subclassId)
-          );
-
-          if (!targetSubclass) {
-            console.error('[getCurrentRequirementsForContext] Subclass not found:', context.subclassId);
-            return null;
-          }
-
-          console.log('[getCurrentRequirementsForContext] Found subclass requirements:', targetSubclass.requirements || []);
-          return targetSubclass.requirements || [];
-
-        default:
-          console.error('[getCurrentRequirementsForContext] Unknown context type:', context.type);
-          return null;
-      }
-    } catch (error) {
-      console.error('[getCurrentRequirementsForContext] Error getting requirements:', error);
-      return null;
-    }
-  }
-
-  const saveRequirementsForContext = async (context: EditingContext, requirements: ApiRequirement[]) => {
-  try {
-    // 1. Construct the job_level object based on context
-    const jobLevel = {
-      department_id: parseInt(context.departmentId),
-      subdepartment_id: parseInt(context.subdepartmentId),
-      class_id: context.classId ? context.classId : null,
-      subclass_id: context.subclassId ? context.subclassId : null,
-      level: context.subclassId ? 4 : context.classId ? 3 : 2 // 2:Subdept, 3:Class, 4:Subclass
-    };
-
-    console.log('[saveRequirementsForContext] Target Job Level:', jobLevel);
-
-    // 2. Build query to find existing record using job_level keys
-    let query = supabase
-      .from('tm_class_requirements')
-      .select('*')
-      .eq('job_level->department_id', jobLevel.department_id)
-      .eq('job_level->subdepartment_id', jobLevel.subdepartment_id)
-      .eq('job_level->class_id', jobLevel.class_id);
-
-    if (jobLevel.subclass_id) {
-      query = query.eq('job_level->subclass_id', jobLevel.subclass_id);
-    } else {
-      query = query.is('job_level->subclass_id', null);
-    }
-
-    const { data: existingRecord, error: fetchError } = await query.maybeSingle();
-
-    if (fetchError) throw fetchError;
-
-    // 3. Prepare the Clean Requirements (logic remains similar)
-    const cleanRequirementsToSave = requirements.map(req => {
-      const { requirement_context, web_automation, ...cleanReq } = req;
+  const mapRequirementsData = (record: any) => {
+    if (!record || !record.requirements) return []
+    
+    return record.requirements.map((r: any) => {
+      const contextItem = record.requirement_context?.find((ctx: any) => String(ctx.requirementId) === String(r.id))
+      const automationItem = record.web_automation?.find((auto: any) => String(auto.requirementId) === String(r.id))
+      const ctx = contextItem?.context || {}
+      
       return {
-        ...cleanReq,
-        id: req.id?.toString() || Date.now().toString(),
-        name: req.name || '',
-        description: req.description || '',
-        type: req.type || 'standard',
-        order: req.order || 0,
-        isVisible: req.isVisible !== false,
-        isRequired: req.isRequired !== false,
-        kycDocumentId: req.kycDocumentId || undefined,
-        applicantType: req.applicantType || 'individual',
-        requiredDocumentCount: req.requiredDocumentCount || 1,
-        billingEntity: req.billingEntity || 'applicant',
-        instructions: req.instructions || ''
-      };
-    });
-
-    const requirementContexts = requirements.map(req => ({
-      requirementId: req.id?.toString() || cleanRequirementsToSave.find(c => c.name === req.name)?.id,
-      context: req.requirement_context || {
-        applicantType: req.applicantType || 'individual',
-        requiredDocumentCount: req.requiredDocumentCount || 1,
-        billingEntity: req.billingEntity || 'applicant',
-        instructions: req.instructions || '',
-        type: req.type || 'standard'
+        ...r,
+        applicantTypes: ctx.applicantTypes || (r.applicantType ? [r.applicantType] : []),
+        requiredDocumentCount: ctx.requiredDocumentCount || r.requiredDocumentCount || 1,
+        billingEntity: ctx.billingEntity || r.billingEntity || 'applicant',
+        instructions: ctx.instructions || r.instructions || '',
+        requirement_context: ctx,
+        web_automation: automationItem?.automation || null
       }
-    }));
-
-    const webAutomations = requirements
-      .filter(req => req.web_automation)
-      .map(req => ({
-        requirementId: req.id?.toString() || cleanRequirementsToSave.find(c => c.name === req.name)?.id,
-        automation: req.web_automation
-      }));
-
-    const recordData = {
-      requirements: cleanRequirementsToSave,
-      requirement_context: requirementContexts,
-      web_automation: webAutomations.length > 0 ? webAutomations : null,
-      job_level: jobLevel, // Save the new structure
-      updated_at: new Date().toISOString()
-    };
-
-    if (existingRecord) {
-      const { error: updateError } = await supabase
-        .from('tm_class_requirements')
-        .update(recordData)
-        .eq('id', existingRecord.id);
-
-      if (updateError) throw updateError;
-    } else {
-      const { error: insertError } = await supabase
-        .from('tm_class_requirements')
-        .insert({
-          ...recordData,
-          created_at: new Date().toISOString()
-        });
-
-      if (insertError) throw insertError;
-    }
-
-    return true;
-  } catch (error) {
-    console.error('[saveRequirementsForContext] Error:', error);
-    throw error;
+    })
   }
-}
 
-const refreshDepartments = async () => {
-  try {
-    const { data: departmentsData, error } = await supabase
-      .from('tm_departments')
-      .select('*, tm_subdepartments(*)')
-      .order('order', { ascending: true });
+  const refreshDepartments = async () => {
+    try {
+      const { data: departmentsData, error: deptError } = await supabase
+        .from('tm_departments')
+        .select('*, tm_subdepartments(*)')
+        .order('order', { ascending: true })
 
-    if (error) throw error;
+      if (deptError) throw deptError
 
-    const data = departmentsData || [];
-    const { data: allReqRecords, error: reqError } = await supabase
-      .from('tm_class_requirements')
-      .select('*');
+      const { data: allReqRecords, error: reqError } = await supabase
+        .from('tm_class_requirements')
+        .select('*')
 
-    if (reqError) throw reqError;
+      if (reqError) throw reqError
 
-    const processedDepartments = data.map(dept => {
-      const subdepartments = (dept.tm_subdepartments || []).map(subdept => {
-        
-        // Helper to find requirement record by job_level
-        const findRecord = (cId: string | null, scId: string | null) => {
-          return allReqRecords?.find(r => 
-            r.job_level?.department_id === dept.id &&
-            r.job_level?.subdepartment_id === subdept.id &&
-            String(r.job_level?.class_id) === String(cId || 'null') && // Handle null vs undefined
-            String(r.job_level?.subclass_id) === String(scId || 'null')
-          ) || allReqRecords?.find(r => // Fallback for legacy records or exact null match
-             r.job_level?.department_id === dept.id &&
-             r.job_level?.subdepartment_id === subdept.id &&
-             r.job_level?.class_id == cId &&
-             r.job_level?.subclass_id == scId
-          );
-        };
+      const processedDepartments = (departmentsData || []).map(dept => {
+        const subdepartments = (dept.tm_subdepartments || []).map(subdept => {
+          
+          const findRecord = (cId: string | null, scId: string | null) => {
+            return allReqRecords?.find(r => {
+              const job = r.job_level || {}
+              return String(job.department_id) === String(dept.id) &&
+                     String(job.subdepartment_id) === String(subdept.id) &&
+                     String(job.class_id || 'null') === String(cId || 'null') &&
+                     String(job.subclass_id || 'null') === String(scId || 'null')
+            })
+          }
 
-        const classes = (subdept.classes || []).map(cls => {
-          // Find record for this class (level 3)
-          const classRec = findRecord(cls.id.toString(), null);
+          // Build the class/subclass tree while preserving existing data fields
+          const classes = (subdept.classes || []).map(cls => {
+            const classRec = findRecord(String(cls.id), null)
+            const subClasses = (cls.subClasses || []).map(subCls => {
+              const subClsRec = findRecord(String(cls.id), String(subCls.id))
+              return { 
+                ...subCls, 
+                requirements: mapRequirementsData(subClsRec) 
+              }
+            })
+            return { 
+              ...cls, 
+              requirements: mapRequirementsData(classRec), 
+              subClasses 
+            }
+          })
 
-          const subClasses = (cls.subClasses || []).map(subCls => {
-            // Find record for this subclass (level 4)
-            const subClsRec = findRecord(cls.id.toString(), subCls.id.toString());
-            
-            return {
-              ...subCls,
-              requirements: mapRequirementsData(subClsRec)
-            };
-          });
+          const subDeptRec = findRecord(null, null)
 
           return {
-            ...cls,
-            requirements: mapRequirementsData(classRec),
-            subClasses
-          };
-        });
+            ...subdept,
+            classes,
+            upload_requirements: mapRequirementsData(subDeptRec)
+          }
+        })
+        return { 
+          ...dept, 
+          subdepartments, // Alias for some sidebar versions
+          tm_subdepartments: subdepartments 
+        }
+      })
 
-        // Find record for subdepartment (level 2)
-        const subDeptRec = findRecord(null, null);
-
-        return {
-          ...subdept,
-          classes,
-          upload_requirements: mapRequirementsData(subDeptRec)
-        };
-      });
-
-      return { ...dept, subdepartments: subdepartments, tm_subdepartments: subdepartments };
-    });
-
-     setDepartments(processedDepartments || []);
-  } catch (error) {
-    console.error('Error refreshing departments:', error);
-    setDepartments([]); 
+      setDepartments(processedDepartments)
+    } catch (error) {
+      console.error('Error refreshing data tree:', error)
+      setDepartments([])
+    }
   }
-};
-
-// Helper to map the JSON structure back to the component state
-const mapRequirementsData = (record: any) => {
-  if (!record || !record.requirements) return [];
-  
-  return record.requirements.map((r: any) => {
-    const contextData = record.requirement_context?.find((ctx: any) => ctx.requirementId === r.id)?.context;
-    const automationData = record.web_automation?.find((auto: any) => auto.requirementId === r.id)?.automation;
-
-    return {
-      ...r,
-      requirement_context: contextData || null,
-      web_automation: automationData || null
-    };
-  });
-};
 
   useEffect(() => {
     refreshDepartments()
   }, [])
 
-  const addNewRequirement = () => {
-    setNewRequirements([...newRequirements, {
-      name: '',
-      description: '',
-      type: 'standard',
-      isRequired: true,
-      isVisible: true
-    }])
+  const handleDeptClick = (deptId: string) => {
+    setActiveDept(String(deptId))
   }
 
-  const removeNewRequirement = (index: number) => {
-    if (newRequirements.length > 1) {
-      setNewRequirements(newRequirements.filter((_, i) => i !== index))
-    }
+  const handleSubdeptClick = (deptId: string, subdeptId: string) => {
+    setActiveSubdept(prev => ({ ...prev, [String(deptId)]: String(subdeptId) }))
+    setActiveDept(String(deptId))
   }
 
-  const handleNewRequirementChange = (index: number, field: string, value: any) => {
-    const updated = [...newRequirements]
-    updated[index] = { ...updated[index], [field]: value }
-    setNewRequirements(updated)
+  const handleClassClick = (deptId: string, subdeptId: string, classId: string) => {
+    const key = `${String(deptId)}-${String(subdeptId)}`
+    setActiveClass(prev => ({ ...prev, [key]: String(classId) }))
+    setActiveSubdept(prev => ({ ...prev, [String(deptId)]: String(subdeptId) }))
+    setActiveDept(String(deptId))
   }
 
-  const handleBulkInput = (text: string) => {
-    setBulkInput(text)
-
-    if (!text.trim()) {
-      // If text is empty, reset to single empty requirement
-      setNewRequirements([{
-        name: '',
-        description: '',
-        type: 'standard',
-        isRequired: true,
-        isVisible: true
-      }])
-      return
-    }
-
-    // Split by new lines and filter out empty lines
-    const lines = text.split('\n').filter(line => line.trim() !== '')
-
-    // Map each line to a requirement object
-    const requirements = lines.map(line => ({
-      name: line.trim(),
-      description: '',
-      type: 'standard' as const,
-      isRequired: true,
-      isVisible: true
-    }))
-
-    setNewRequirements(requirements)
+  const handleSubclassClick = (deptId: string, subdeptId: string, classId: string, subclassId: string) => {
+    const activeClassKey = `${String(deptId)}-${String(subdeptId)}`
+    const activeSubclassKey = `${activeClassKey}-${String(classId)}`
+    setActiveSubclass(prev => ({ ...prev, [activeSubclassKey]: String(subclassId) }))
+    setActiveClass(prev => ({ ...prev, [activeClassKey]: String(classId) }))
+    setActiveSubdept(prev => ({ ...prev, [String(deptId)]: String(subdeptId) }))
+    setActiveDept(String(deptId))
   }
 
-  // Move sorting logic to component level
-  const handleSort = (key: string) => {
-    let direction: 'asc' | 'desc' = 'asc';
-    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
-      direction = 'desc';
-    }
-    setSortConfig({ key, direction });
-  };
+  const renderMainContent = () => {
+    const currentDept = departments.find(d => String(d.id) === String(activeDept))
+    
+    if (!currentDept) return <div className="p-10 text-center text-gray-400">Select a department from the sidebar to begin.</div>
 
-  const getSortIcon = (columnKey: string) => {
-    if (sortConfig?.key !== columnKey) {
-      return <ChevronDown className="h-4 w-4 opacity-50" />;
-    }
-    return sortConfig.direction === 'asc' ? (
-      <ChevronDown className="h-4 w-4 rotate-180" />
-    ) : (
-      <ChevronDown className="h-4 w-4" />
-    );
-  };
+    const currentSubdeptId = activeSubdept[String(currentDept.id)]
+    const currentSubdept = currentDept.tm_subdepartments?.find(s => String(s.id) === String(currentSubdeptId))
 
-  // Create a function to sort requirements
-  const getSortedRequirements = (requirements: RequirementTableEntry[] | null | undefined) => {
-    const safeRequirements = requirements || [];
-
-    if (!sortConfig) return safeRequirements;
-
-    return [...safeRequirements].sort((a, b) => {
-      let aValue = a[sortConfig.key as keyof RequirementTableEntry];
-      let bValue = b[sortConfig.key as keyof RequirementTableEntry];
-
-      // Handle different data types
-      if (typeof aValue === 'string' && typeof bValue === 'string') {
-        aValue = aValue.toLowerCase();
-        bValue = bValue.toLowerCase();
-      }
-
-      if (aValue < bValue) {
-        return sortConfig.direction === 'asc' ? -1 : 1;
-      }
-      if (aValue > bValue) {
-        return sortConfig.direction === 'asc' ? 1 : -1;
-      }
-      return 0;
-    });
-  };
-
-  // Move helper functions outside of renderRequirements
-  const getTypeDisplay = (req: RequirementTableEntry) => {
-    const context = req.requirement_context || {};
-    const baseType = req.type || 'standard';
-
-    if (baseType === 'company') {
+    if (!currentSubdept) {
       return (
-        <div className="flex items-center gap-1">
-          <Badge variant="outline" className="text-xs bg-purple-100 text-purple-800">
-            Company
-          </Badge>
-          {context.billingEntity && context.billingEntity !== 'company' && (
-            <Badge variant="outline" className="text-xs">
-              {context.billingEntity}
-            </Badge>
-          )}
+        <div className="p-8">
+          <h2 className="text-2xl font-bold mb-2">{currentDept.name}</h2>
+          <p className="text-muted-foreground italic">Select a subdepartment from the sidebar to view requirements.</p>
         </div>
-      );
+      )
     }
 
-    if (baseType === 'multi-document') {
-      return (
-        <div className="flex items-center gap-1">
-          <Badge variant="outline" className="text-xs bg-orange-100 text-orange-800">
-            Multi ({context.requiredDocumentCount || 1})
-          </Badge>
-        </div>
-      );
-    }
+    const activeClassKey = `${String(currentDept.id)}-${String(currentSubdept.id)}`
+    const currentClassId = activeClass[activeClassKey]
+    const currentClass = currentSubdept.classes?.find(c => String(c.id) === String(currentClassId))
+
+    const activeSubclassKey = `${activeClassKey}-${String(currentClassId)}`
+    const currentSubclassId = activeSubclass[activeSubclassKey]
+    const currentSubclass = currentClass?.subClasses?.find(sc => String(sc.id) === String(currentSubclassId))
+
+    const targetContext: EditingContext = currentSubclass 
+      ? { type: 'subclass', departmentId: currentDept.id, subdepartmentId: currentSubdept.id, classId: currentClass.id, subclassId: currentSubclass.id, subdepartmentName: currentSubdept.name, className: currentClass.name, subclassName: currentSubclass.name }
+      : currentClass
+      ? { type: 'class', departmentId: currentDept.id, subdepartmentId: currentSubdept.id, classId: currentClass.id, subdepartmentName: currentSubdept.name, className: currentClass.name }
+      : { type: 'subdepartment', departmentId: currentDept.id, subdepartmentId: currentSubdept.id, subdepartmentName: currentSubdept.name }
+    
+    const reqsToDisplay = currentSubclass ? currentSubclass.requirements : currentClass ? currentClass.requirements : currentSubdept.upload_requirements
 
     return (
-      <Badge variant="outline" className="text-xs capitalize">
-        {baseType}
-      </Badge>
-    );
-  };
-
-  const getAutomationDisplay = (req: RequirementTableEntry) => {
-    const webAutomation = req.web_automation;
-
-    if (webAutomation && webAutomation.automationId) {
-      return (
-        <div className="flex items-center gap-1">
-          <Zap className="h-4 w-4 text-blue-600" />
-          <span className="text-xs text-blue-600">
-            {webAutomation.automationName || 'Active'}
-          </span>
+      <div className="space-y-6">
+        <div className="flex items-center justify-between border-b pb-4">
+          <div>
+            <h2 className="text-xl font-bold flex items-center gap-2">
+               {currentSubclass ? <Layers className="h-5 w-5 text-orange-500" /> : currentClass ? <Layers className="h-5 w-5 text-purple-500" /> : <FileText className="h-5 w-5 text-green-500" />}
+               {currentSubclass ? currentSubclass.name : currentClass ? currentClass.name : currentSubdept.name}
+            </h2>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
+               <span>{currentDept.name}</span>
+               <span>&rsaquo;</span>
+               <span>{currentSubdept.name}</span>
+               {currentClass && (
+                 <>
+                   <span>&rsaquo;</span>
+                   <span>{currentClass.name}</span>
+                 </>
+               )}
+               {currentSubclass && (
+                 <>
+                   <span>&rsaquo;</span>
+                   <span>{currentSubclass.name}</span>
+                 </>
+               )}
+            </div>
+          </div>
+          <Button onClick={() => { setAddContext(targetContext); setIsAddDialogOpen(true); }}>
+            <Plus className="h-4 w-4 mr-2" /> Add Requirements
+          </Button>
         </div>
-      );
-    }
 
-    if (req.hasWebForm) {
-      return (
-        <div className="flex items-center gap-1">
-          <Zap className="h-4 w-4 text-yellow-600" />
-          <span className="text-xs text-yellow-600">Form Only</span>
-        </div>
-      );
-    }
-
-    return (
-      <div className="flex items-center gap-1">
-        <Zap className="h-4 w-4 text-gray-400" />
-        <span className="text-xs text-gray-400">None</span>
+        {renderRequirements(reqsToDisplay, targetContext)}
       </div>
-    );
-  };
+    )
+  }
+
+  // --- UI DISPLAY HELPERS ---
+
+  const getTypeDisplay = (req: RequirementTableEntry) => {
+    const baseType = req.type || 'standard'
+    if (baseType === 'company') return <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">Company</Badge>
+    if (baseType === 'multi-document') return <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">Multi ({req.requiredDocumentCount})</Badge>
+    return <Badge variant="outline" className="capitalize">{baseType}</Badge>
+  }
 
   const getContextDisplay = (req: RequirementTableEntry) => {
-    const context = req.requirement_context || {};
-    const items = [];
+    const types = req.applicantTypes || []
+    if (types.length === 0) return <span className="text-xs text-gray-400">-</span>
+    return (
+      <div className="flex flex-wrap gap-1">
+        {types.map(t => <Badge key={t} variant="secondary" className="text-[10px] h-4 px-1 capitalize">{t}</Badge>)}
+      </div>
+    )
+  }
 
-    if (context.applicantType && context.applicantType !== 'individual') {
-      items.push(
-        <Badge key="applicant" variant="outline" className="text-xs">
-          {context.applicantType === 'company' ? 'Company Only' :
-            context.applicantType === 'both' ? 'Both' : 'Individual'}
-        </Badge>
-      );
+  const getAutomationDisplay = (req: RequirementTableEntry) => {
+    if (req.web_automation?.automationId) {
+      return (
+        <div className="flex items-center gap-1 text-blue-600">
+          <Zap className="h-3.5 w-3.5 fill-current" />
+          <span className="text-[11px] font-medium">{req.web_automation.automationName}</span>
+        </div>
+      )
     }
+    return <span className="text-gray-400 text-[11px]">None</span>
+  }
 
-    if (context.instructions) {
-      items.push(
-        <Badge key="instructions" variant="outline" className="text-xs bg-yellow-50 text-yellow-700">
-          Has Instructions
-        </Badge>
-      );
-    }
+  const getDocumentsDisplay = (req: RequirementTableEntry) => {
+    const documentIds = req.kyc_document_ids || (req.kyc_document_id ? [req.kyc_document_id] : [])
+    const documentCount = documentIds.length
+    const documentNames = getDocumentNames(documentIds)
 
-    return items.length > 0 ? (
-      <div className="flex flex-wrap gap-1">{items}</div>
-    ) : (
-      <span className="text-xs text-gray-400">Standard</span>
-    );
-  };
-
-  const handleMove = (index: number, direction: 'up' | 'down') => {
-    // Implementation for moving requirements up/down
-    console.log(`Moving requirement at index ${index} ${direction}`);
-  };
-
-  const renderRequirements = (requirements: RequirementTableEntry[] | null | undefined, context: EditingContext) => {
-    const sortedRequirements = getSortedRequirements(requirements);
-
-    const handleEditClick = (index: number) => {
-      const requirement = sortedRequirements[index]
-      setEditingRequirement(requirement)
-      setEditingContext(context)
-      setIsEditDialogOpen(true)
+    if (documentCount === 0) {
+      return <span className="text-gray-400 text-[11px]">No documents</span>
     }
 
     return (
-      <div className="relative border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm flex-1 flex flex-col h-full">
-        <div className="relative overflow-auto h-[calc(100vh-240px)] border rounded-lg shadow-lg">
-          <Table className="w-full overflow-auto">
-            {/* Sticky Headers */}
-            <TableHeader className="sticky top-0 z-50">
-              {/* Stage Names Row */}
-              <TableRow className="bg-blue-800">
-                <TableHead className="sticky left-0 bg-blue-600 border-r-2 border-blue-300 font-bold z-50 text-white">
-                  #
-                </TableHead>
-                <TableHead
-                  className="sticky left-16 bg-blue-600 border-r-2 border-blue-300 font-bold z-50 text-white"
-                  onClick={() => handleSort('name')}
-                >
-                  <div className="flex items-center justify-between">
-                    <span>Requirement</span>
-                    {getSortIcon('name')}
-                  </div>
-                </TableHead>
-                <TableHead
-                  className="sticky left-80 bg-blue-600 border-r-2 border-blue-300 font-bold z-50 text-white"
-                  onClick={() => handleSort('description')}
-                >
-                  <div className="flex items-center justify-between">
-                    <span>Description</span>
-                    {getSortIcon('description')}
-                  </div>
-                </TableHead>
-                <TableHead
-                  className="sticky left-144 bg-blue-600 border-r-2 border-blue-300 font-bold z-50 text-white"
-                  onClick={() => handleSort('type')}
-                >
-                  <div className="flex items-center justify-between">
-                    <span>Type</span>
-                    {getSortIcon('type')}
-                  </div>
-                </TableHead>
-                <TableHead className="w-32 text-white bg-blue-600 border-r">
-                  Context
-                </TableHead>
-                <TableHead className="w-24 text-white bg-blue-600 border-r">
-                  Document
-                </TableHead>
-                <TableHead className="w-32 text-white bg-blue-600 border-r">
-                  Automation
-                </TableHead>
-                <TableHead className="w-48 text-white bg-blue-600">
-                  Actions
-                </TableHead>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="ghost" size="sm" className="h-auto p-1 text-xs">
+            <Badge variant="secondary" className="cursor-pointer hover:bg-slate-200">
+              {documentCount} document{documentCount !== 1 ? 's' : ''}
+            </Badge>
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-64 p-0" align="start">
+          <Command>
+            <CommandList>
+              <CommandGroup heading="Linked Documents">
+                {documentNames.map((name, index) => (
+                  <CommandItem key={index} className="flex items-center gap-2 py-2">
+                    <FileText className="h-4 w-4 text-blue-600" />
+                    <span className="text-sm">{name}</span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+    )
+  }
+
+  const renderRequirements = (requirements: RequirementTableEntry[] | null | undefined, context: EditingContext) => {
+    const safeReqs = requirements || []
+    return (
+      <div className="border rounded-lg overflow-hidden bg-white shadow-sm">
+        <div className="overflow-auto max-h-[calc(100vh-300px)]">
+          <Table>
+            <TableHeader className="bg-blue-500 sticky top-0 z-10">
+              <TableRow>
+                <TableHead className="w-12 text-center text-white border-r">#</TableHead>
+                <TableHead className="min-w-[200px] text-white border-r">Requirement</TableHead>
+                <TableHead className="text-white border-r">Type</TableHead>
+                <TableHead className="text-white border-r">Applies To</TableHead>
+                <TableHead className="text-white border-r">Documents</TableHead>
+                <TableHead className="text-white border-r">Automation</TableHead>
+                <TableHead className="text-right text-white border-r">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortedRequirements.length > 0 ? (
-                sortedRequirements.map((req, idx) => (
-                  <TableRow key={req.id || req.tempId || idx} className="hover:bg-muted/30 transition-colors">
-                    <TableCell className="sticky left-0 bg-white border-2 border-gray-300 text-center font-mono text-sm z-30 font-semibold">
-                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs">
-                        {idx + 1}
-                      </span>
+              {safeReqs.length > 0 ? (
+                safeReqs.map((req, idx) => (
+                  <TableRow key={req.id || idx}>
+                    <TableCell className="text-center font-mono text-xs text-muted-foreground border-r">{idx + 1}</TableCell>
+                    <TableCell>
+                      <div className="font-medium">{req.name}</div>
+                      {req.description && <div className="text-xs text-muted-foreground line-clamp-1">{req.description}</div>}
                     </TableCell>
-                    <TableCell className="border-r flex-1 whitespace-nowrap">
-                      <div className="space-y-1 font-medium">{req.name}</div>
-                    </TableCell>
-                    <TableCell className="border-r flex-1 whitespace-nowrap">
-                      <div className="space-y-1">
-                        <span className={!req.description ? 'text-gray-400 italic' : ''}>
-                          {req.description || 'No description'}
-                        </span>
-                        {req.requirement_context?.instructions && (
-                          <div className="text-xs text-blue-600 bg-blue-50 p-1 rounded truncate max-w-xs" title={req.requirement_context.instructions}>
-                            💡 {req.requirement_context.instructions}
-                          </div>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="border-r w-24">
-                      <div className="flex items-center justify-center">
-                        {getTypeDisplay(req)}
-                      </div>
-                    </TableCell>
-                    <TableCell className="border-r w-32">
-                      <div className="flex items-center justify-center">
-                        {getContextDisplay(req)}
-                      </div>
-                    </TableCell>
-                    <TableCell className="border-r w-24">
-                      <div className="flex items-center justify-center">
-                        {req.kycDocumentId ? (
-                          <div className="flex items-center gap-1">
-                            <FileText className="h-4 w-4 text-green-600" />
-                            <span className="text-xs text-green-600">Linked</span>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-1">
-                            <FileText className="h-4 w-4 text-gray-400" />
-                            <span className="text-xs text-gray-400">None</span>
-                          </div>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="border-r w-32">
-                      <div className="flex items-center justify-center">
-                        {getAutomationDisplay(req)}
-                      </div>
-                    </TableCell>
-                    <TableCell className="w-48">
-                      <div className="flex items-center space-x-1 justify-end">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0 text-blue-600"
-                          onClick={() => handleEditClick(idx)}
-                        >
+                    <TableCell>{getTypeDisplay(req)}</TableCell>
+                    <TableCell>{getContextDisplay(req)}</TableCell>
+                    <TableCell>{getDocumentsDisplay(req)}</TableCell>
+                    <TableCell>{getAutomationDisplay(req)}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600" onClick={() => { setEditingRequirement(req); setEditingContext(context); setIsEditDialogOpen(true); }}>
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={() => handleMove(idx, 'up')}
-                          disabled={idx === 0}
-                        >
-                          <ArrowUp className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={() => handleMove(idx, 'down')}
-                          disabled={idx === sortedRequirements.length - 1}
-                        >
-                          <ArrowDown className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0 text-red-500"
-                          onClick={() => handleDeleteClick(context.type, idx)}
-                        >
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => { 
+                          setEditingContext(context); 
+                          setDeleteContext({ type: context.type, index: idx, requirementId: req.id }); 
+                          setIsDeleteDialogOpen(true); 
+                        }}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
@@ -976,12 +445,8 @@ const mapRequirementsData = (record: any) => {
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8 text-gray-500">
-                    <div className="flex flex-col items-center space-y-2">
-                      <FileText className="h-8 w-8 text-gray-400" />
-                      <p>No requirements added yet</p>
-                      <p className="text-xs text-gray-400">Click the button above to add requirements</p>
-                    </div>
+                  <TableCell colSpan={7} className="text-center py-12 text-muted-foreground italic">
+                     No specific requirements found for this level.
                   </TableCell>
                 </TableRow>
               )}
@@ -992,324 +457,159 @@ const mapRequirementsData = (record: any) => {
     )
   }
 
-  const handleSaveRequirement = async (updatedRequirement: ApiRequirement) => {
-    console.log('[handleSaveRequirement] Starting with requirement:', JSON.stringify(updatedRequirement, null, 2));
-    console.log('[handleSaveRequirement] Current editing context:', editingContext);
+ const handleAddRequirements = async (payload: any) => {
+  try {
+    setIsSubmitting(true);
 
-    if (!editingContext) {
-      console.error('[handleSaveRequirement] No editing context available');
-      toast({
-        title: "Error",
-        description: "No editing context available. Please refresh the page and try again.",
-        variant: "destructive"
-      });
-      return;
-    }
+    // 1. Check for existing record with this job_level
+    const { data: existing, error: fetchError } = await supabase
+      .from('tm_class_requirements')
+      .select('*')
+      .eq('job_level', JSON.stringify(payload.job_level))
+      .maybeSingle();
+    
+    if (fetchError) throw fetchError;
 
-    try {
-      // First, refresh the departments to ensure we have the latest data
-      console.log('[handleSaveRequirement] Refreshing departments to get latest data...');
-      await refreshDepartments();
-
-      // Get current requirements for the context
-      const currentRequirements = getCurrentRequirementsForContext(editingContext) || [];
-      console.log('[handleSaveRequirement] Current requirements:', JSON.stringify(currentRequirements, null, 2));
-
-      // If we still have no requirements, try to create a new one
-      if (currentRequirements.length === 0) {
-        console.log('[handleSaveRequirement] No existing requirements found, creating new one...');
-        const newRequirements = [{
-          ...updatedRequirement,
-          id: updatedRequirement.id || Date.now().toString(),
-          order: 0
-        }];
-
-        console.log('[handleSaveRequirement] Creating new requirements:', JSON.stringify(newRequirements, null, 2));
-        const saveResult = await saveRequirementsForContext(editingContext, newRequirements);
-        console.log('[handleSaveRequirement] saveRequirementsForContext result:', saveResult);
-
-        await refreshDepartments();
-
-        // Reset the dialog state
-        setIsEditDialogOpen(false);
-        setEditingRequirement(null);
-
-        toast({
-          title: "Success",
-          description: "Requirement created successfully",
-          variant: "default"
+    // 2. Update or Insert with legacy structure
+    if (existing) {
+      const { error: updateError } = await supabase
+        .from('tm_class_requirements')
+        .update({
+          requirements: payload.requirements,
+          updated_at: payload.updated_at
+        })
+        .eq('id', existing.id);
+      if (updateError) throw updateError;
+    } else {
+      const { error: insertError } = await supabase
+        .from('tm_class_requirements')
+        .insert({ 
+          ...payload, 
+          created_at: new Date().toISOString() 
         });
-
-        return;
-      }
-
-      // Try to find the requirement to update
-      let requirementIndex = -1;
-
-      // First try to find by ID if it exists
-      if (updatedRequirement.id) {
-        requirementIndex = currentRequirements.findIndex(req =>
-          String(req.id) === String(updatedRequirement.id)
-        );
-      }
-
-      // If not found by ID, try to find by name as fallback
-      if (requirementIndex === -1) {
-        requirementIndex = currentRequirements.findIndex(req =>
-          req.name === updatedRequirement.name
-        );
-      }
-
-      console.log('[handleSaveRequirement] Found requirement at index:', requirementIndex);
-
-      let updatedRequirements = [...currentRequirements];
-
-      // If requirement not found, add it as a new one
-      if (requirementIndex === -1) {
-        console.log('[handleSaveRequirement] Requirement not found, adding as new');
-        updatedRequirements = [
-          ...currentRequirements,
-          {
-            ...updatedRequirement,
-            id: updatedRequirement.id || Date.now().toString(),
-            order: currentRequirements.length
-          }
-        ];
-      } else {
-        // Update existing requirement
-        console.log('[handleSaveRequirement] Updating existing requirement');
-        updatedRequirements[requirementIndex] = {
-          ...updatedRequirements[requirementIndex],
-          ...updatedRequirement,
-          // Preserve the original ID if the updated one is undefined
-          id: updatedRequirement.id || updatedRequirements[requirementIndex].id
-        };
-      }
-
-      console.log('[handleSaveRequirement] Updated requirements array:', JSON.stringify(updatedRequirements, null, 2));
-
-      console.log('[handleSaveRequirement] Calling saveRequirementsForContext...');
-      const saveResult = await saveRequirementsForContext(editingContext, updatedRequirements);
-      console.log('[handleSaveRequirement] saveRequirementsForContext result:', saveResult);
-
-      console.log('[handleSaveRequirement] Refreshing departments...');
-      await refreshDepartments();
-
-      // Reset the dialog state
-      setIsEditDialogOpen(false);
-      setEditingRequirement(null);
-
-      toast({
-        title: "Success",
-        description: "Requirement saved successfully",
-        variant: "default"
-      });
-
-      console.log('[handleSaveRequirement] Update completed successfully');
-    } catch (error) {
-      console.error('[handleSaveRequirement] Error updating requirement:', error);
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to save requirement. Please try again.",
-        variant: "destructive"
-      });
-    }
-  }
-
-  const handleDeptClick = (deptId: string) => {
-    setActiveDept(deptId);
-  };
-
-  const handleSubdeptClick = (deptId: string, subdeptId: string) => {
-    setActiveSubdept(prev => ({ ...prev, [deptId]: subdeptId }))
-    if (activeDept !== deptId) setActiveDept(deptId)
-  };
-
-  const handleClassClick = (deptId: string, subdeptId: string, classId: string) => {
-    const activeClassKey = `${deptId}-${subdeptId}`;
-    setActiveClass(prev => ({ ...prev, [activeClassKey]: classId }))
-    setActiveSubdept(prev => ({ ...prev, [deptId]: subdeptId }));
-    if (activeDept !== deptId) setActiveDept(deptId)
-  };
-
-  const handleSubclassClick = (deptId: string, subdeptId: string, classId: string, subclassId: string) => {
-    const activeClassKey = `${deptId}-${subdeptId}`;
-    const activeSubclassKey = `${activeClassKey}-${classId}`;
-
-    setActiveSubclass(prev => ({ ...prev, [activeSubclassKey]: subclassId }))
-
-    setActiveClass(prev => ({ ...prev, [activeClassKey]: classId }))
-
-    setActiveSubdept(prev => ({ ...prev, [deptId]: subdeptId }));
-
-    if (activeDept !== deptId) setActiveDept(deptId)
-  };
-
-  const renderMainContent = () => {
-    const currentDept = departments.find(d => d.id === activeDept)
-    if (!currentDept) {
-      return (
-        <div className="flex items-center justify-center h-full text-gray-500">
-          <div className="text-center">
-            <Layers className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-            <p className="text-lg font-medium">Select a department</p>
-            <p className="text-sm">Choose a department from the sidebar to view its structure</p>
-          </div>
-        </div>
-      )
+      if (insertError) throw insertError;
     }
 
-    const currentSubdeptId = activeSubdept[currentDept.id]
-    const currentSubdept = currentDept.tm_subdepartments?.find(s => s.id.toString() === currentSubdeptId)
-
-    if (!currentSubdept) {
-      return (
-        <div className="space-y-6">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{currentDept.name}</h2>
-            {currentDept.description && (
-              <p className="text-gray-600 dark:text-gray-400">{currentDept.description}</p>
-            )}
-          </div>
-          <div className="flex items-center justify-center h-64 text-gray-500">
-            <div className="text-center">
-              <FileText className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-              <p className="text-lg font-medium">Select a subdepartment</p>
-              <p className="text-sm">Choose a subdepartment to view and manage requirements</p>
-            </div>
-          </div>
-        </div>
-      )
-    }
-
-    const activeClassKey = `${currentDept.id}-${currentSubdept.id}`
-    const currentClassId = activeClass[activeClassKey]
-    const currentClass = currentSubdept.classes?.find(c => c.id.toString() === currentClassId)
-
-    const activeSubclassKey = `${activeClassKey}-${currentClassId}`
-    const currentSubclassId = activeSubclass[activeSubclassKey]
-    const currentSubclass = currentClass?.subClasses?.find(sc => sc.id.toString() === currentSubclassId)
-
-    return (
-      <div className="space-y-4">
-        {/* Header */}
-        <div className="border-b pb-4">
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{currentDept.name}</h2>
-          <h3 className="text-lg text-gray-600 dark:text-gray-400">
-            {currentSubdept.name} - <span className="text-sm text-gray-500">{currentSubdept.description}</span>
-          </h3>
-        </div>
-
-        {/* Content based on current selection */}
-        {currentSubclass ? (
-          // Show subclass requirements
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h4 className="text-lg font-medium flex items-center space-x-2">
-                <Layers className="h-5 w-5 text-orange-600" />
-                <span>
-                  Sub-class Requirements: {currentSubclass.name} -
-                  <span className="text-sm text-gray-500">{currentSubclass.description}</span>
-                </span>
-              </h4>
-              <Button
-                onClick={() => openRequirementsDialog({
-                  type: 'subclass',
-                  departmentId: currentDept.id,
-                  subdepartmentId: currentSubdept.id,
-                  classId: currentClass?.id.toString(),
-                  subclassId: currentSubclass.id.toString()
-                })}
-                size="sm"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add Requirements
-              </Button>
-            </div>
-            {currentSubclass.requirements && renderRequirements(currentSubclass.requirements, {
-              type: 'subclass',
-              departmentId: currentDept.id,
-              subdepartmentId: currentSubdept.id,
-              classId: currentClass?.id.toString(),
-              subclassId: currentSubclass.id.toString()
-            })}
-          </div>
-        ) : currentClass ? (
-          // Show class requirements
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h4 className="text-lg font-medium flex items-center space-x-2">
-                <Layers className="h-5 w-5 text-purple-600" />
-                <span>Class Requirements: {currentClass.name} - <span className="text-sm text-gray-500">{currentClass.description}</span></span>
-              </h4>
-              <Button
-                onClick={() => openRequirementsDialog({
-                  type: 'class',
-                  departmentId: currentDept.id,
-                  subdepartmentId: currentSubdept.id,
-                  classId: currentClass.id.toString()
-                })}
-                size="sm"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add Requirements
-              </Button>
-            </div>
-            {renderRequirements(currentClass.requirements, {
-              type: 'class',
-              departmentId: currentDept.id,
-              subdepartmentId: currentSubdept.id,
-              classId: currentClass.id.toString()
-            })}
-          </div>
-        ) : (
-          // Show subdepartment requirements
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h4 className="text-lg font-medium flex items-center space-x-2">
-                <FileText className="h-5 w-5 text-green-600" />
-                <span>Subdepartment Requirements</span>
-              </h4>
-              <Button
-                onClick={() => openRequirementsDialog({
-                  type: 'subdepartment',
-                  departmentId: currentDept.id,
-                  subdepartmentId: currentSubdept.id
-                })}
-                size="sm"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add Requirements
-              </Button>
-            </div>
-            {renderRequirements(currentSubdept.upload_requirements, {
-              type: 'subdepartment',
-              departmentId: currentDept.id,
-              subdepartmentId: currentSubdept.id
-            })}
-          </div>
-        )}
-      </div>
-    )
+    await refreshDepartments();
+    toast({ title: "Success", description: "Requirements updated successfully" });
+  } catch (error) {
+    console.error(error);
+    toast({ title: "Error", description: "Failed to save data", variant: "destructive" });
+  } finally {
+    setIsSubmitting(false);
   }
+};
 
-  if (!departments || departments.length === 0) {
-    return (
-      <div className="flex items-center justify-center p-8">
-        <div className="text-center">
-          <Layers className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-          <p className="text-lg font-medium text-gray-600">No departments found</p>
-          <p className="text-sm text-gray-500">Create departments first to manage requirements</p>
-        </div>
-      </div>
-    )
+const handleSaveRequirement = async (updatedRequirement: any) => {
+  if (!editingContext) return;
+  
+  try {
+    setIsSubmitting(true);
+
+    // 1. Find the existing record for this job level
+    const { data: existing, error: fetchError } = await supabase
+      .from('tm_class_requirements')
+      .select('*')
+      .eq('job_level', JSON.stringify({
+        department_id: Number(editingContext.departmentId),
+        subdepartment_id: Number(editingContext.subdepartmentId),
+        class_id: editingContext.classId ? Number(editingContext.classId) : null,
+        subclass_id: editingContext.subclassId ? Number(editingContext.subclassId) : null,
+        level: editingContext.type === 'subdepartment' ? 2 : editingContext.type === 'class' ? 3 : 4
+      }))
+      .maybeSingle();
+    
+    if (fetchError) throw fetchError;
+    if (!existing) throw new Error('No existing record found for this job level');
+
+    // 2. Update the specific requirement in the array
+    const updatedRequirements = existing.requirements.map((req: any) => 
+      req.id === updatedRequirement.id ? updatedRequirement : req
+    );
+
+    // 3. Save the updated requirements array
+    const { error: updateError } = await supabase
+      .from('tm_class_requirements')
+      .update({
+        requirements: updatedRequirements,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', existing.id);
+    
+    if (updateError) throw updateError;
+
+    await refreshDepartments();
+    setIsEditDialogOpen(false);
+    toast({ title: "Success", description: "Requirement updated successfully" });
+  } catch (error) {
+    console.error(error);
+    toast({ title: "Error", description: "Failed to update requirement", variant: "destructive" });
+  } finally {
+    setIsSubmitting(false);
   }
+};
+
+const handleDeleteRequirement = async (requirementId: string) => {
+  if (!editingContext) return;
+  
+  try {
+    setIsSubmitting(true);
+
+    // 1. Find the existing record for this job level
+    const { data: existing, error: fetchError } = await supabase
+      .from('tm_class_requirements')
+      .select('*')
+      .eq('job_level', JSON.stringify({
+        department_id: Number(editingContext.departmentId),
+        subdepartment_id: Number(editingContext.subdepartmentId),
+        class_id: editingContext.classId ? Number(editingContext.classId) : null,
+        subclass_id: editingContext.subclassId ? Number(editingContext.subclassId) : null,
+        level: editingContext.type === 'subdepartment' ? 2 : editingContext.type === 'class' ? 3 : 4
+      }))
+      .maybeSingle();
+    
+    if (fetchError) throw fetchError;
+    if (!existing) throw new Error('No existing record found for this job level');
+
+    // 2. Remove the requirement from the array
+    const updatedRequirements = existing.requirements.filter((req: any) => req.id !== requirementId);
+
+    // 3. Reorder the remaining requirements
+    const reorderedRequirements = updatedRequirements.map((req: any, index: number) => ({
+      ...req,
+      order: index
+    }));
+
+    // 4. Save the updated requirements array
+    const { error: updateError } = await supabase
+      .from('tm_class_requirements')
+      .update({
+        requirements: reorderedRequirements,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', existing.id);
+    
+    if (updateError) throw updateError;
+
+    await refreshDepartments();
+    setIsDeleteDialogOpen(false);
+    setDeleteContext(null);
+    toast({ title: "Success", description: "Requirement deleted successfully" });
+  } catch (error) {
+    console.error(error);
+    toast({ title: "Error", description: "Failed to delete requirement", variant: "destructive" });
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
   return (
-    <div className="space-y-4">
-      <h2 className="text-2xl font-bold">GOVT Upload Processing Requirements</h2>
-      <p className="text-sm text-gray-500">Manage GOVT upload processing requirements for each department, subdepartment, class, and subclass</p>
-      <div className="flex h-[calc(100vh-70px)] border rounded-lg overflow-hidden">
+    <div className="flex flex-col h-full bg-slate-50/50">
+      <div className="p-6 border-b bg-white shadow-sm">
+        <h1 className="text-2xl font-bold">Upload Processing Requirements</h1>
+        <p className="text-sm text-muted-foreground">Manage documentation required per job class.</p>
+      </div>
+      <div className="flex flex-1 overflow-hidden">
         <DepartmentSidebar
           departments={departments}
           activeDept={activeDept}
@@ -1321,15 +621,19 @@ const mapRequirementsData = (record: any) => {
           onSubdeptClick={handleSubdeptClick}
           onClassClick={handleClassClick}
           onSubclassClick={handleSubclassClick}
-          onToggleExpand={toggleExpanded}
+          onToggleExpand={(k) => setExpandedItems(p => ({ ...p, [k]: !p[k] }))}
           showDefaultDisplayOnly={showDefaultDisplayOnly}
           onToggleDefaultDisplay={() => setShowDefaultDisplayOnly(!showDefaultDisplayOnly)}
         />
-        <div className="flex-1 p-4 bg-white dark:bg-gray-900">
-          {renderMainContent()}
+        <div className="flex-1 overflow-y-auto p-6 bg-white border-l shadow-inner">
+          <div className="mx-auto">
+            {renderMainContent()}
+          </div>
         </div>
       </div>
-
+      <AddRequirementsDialog isOpen={isAddDialogOpen} onOpenChange={setIsAddDialogOpen} onSubmit={handleAddRequirements} isSubmitting={isSubmitting} context={addContext} />
+      <EditRequirementDialog isOpen={isEditDialogOpen} onOpenChange={setIsEditDialogOpen} requirement={editingRequirement} onSave={handleSaveRequirement} isSubmitting={isSubmitting} context={editingContext} />
+      
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <DialogContent>
@@ -1345,7 +649,7 @@ const mapRequirementsData = (record: any) => {
             </Button>
             <Button
               variant="destructive"
-              onClick={handleDeleteConfirm}
+              onClick={() => deleteContext?.requirementId && handleDeleteRequirement(deleteContext.requirementId)}
               disabled={isSubmitting}
             >
               {isSubmitting ? 'Deleting...' : 'Delete'}
@@ -1353,25 +657,6 @@ const mapRequirementsData = (record: any) => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Add Requirements Dialog */}
-      <AddRequirementsDialog
-        isOpen={isAddDialogOpen}
-        onOpenChange={setIsAddDialogOpen}
-        onSubmit={handleAddRequirements}
-        isSubmitting={isSubmitting}
-        context={addContext}
-      />
-
-      {/* Edit Requirement Dialog */}
-      <EditRequirementDialog
-        isOpen={isEditDialogOpen}
-        onOpenChange={setIsEditDialogOpen}
-        requirement={editingRequirement}
-        onSave={handleSaveRequirement}
-        isSubmitting={isSubmitting}
-        context={editingContext}
-      />
     </div>
   )
 }

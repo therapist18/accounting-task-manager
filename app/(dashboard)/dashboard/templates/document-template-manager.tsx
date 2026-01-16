@@ -25,7 +25,7 @@ import PizZip from "pizzip";
 import InspectModule from 'docxtemplater/js/inspect-module';
 import { renderAsync } from "docx-preview";
 
-type EntityType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependent' | 'employee';
+type EntityType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependent' | 'employee' | 'understudy';
 const cn = (...classes: any[]) => classes.filter(Boolean).join(' ');
 interface DocumentTemplate extends BaseDocumentTemplate {
   content?: string;
@@ -84,6 +84,7 @@ const ENTITY_TYPES: { value: EntityType; label: string }[] = [
   { value: 'company', label: 'Company' }, { value: 'principal', label: 'Principal' },
   { value: 'director', label: 'Director' }, { value: 'shareholder', label: 'Shareholder' },
   { value: 'dependent', label: 'Dependent' }, { value: 'employee', label: 'Employee' },
+  { value: 'understudy', label: 'Understudy' },
 ];
 
 const DEPENDANT_RELATIONSHIPS = [
@@ -143,6 +144,9 @@ type Placeholder = {
     linking_variable: string; // e.g., 'company_id', 'director_id', 'individual_id'
     document_id_field: string; // e.g., 'kyc_document_id', 'document_id'
   };
+  // NEW: Image size properties
+  image_width?: string;
+  image_height?: string;
   is_ai_generated?: boolean;
   ai_prompt?: string;
 };
@@ -316,7 +320,9 @@ export default function DocumentTemplateManager({
       table: 'acc_portal_kyc_uploads',
       linking_variable: 'company_id',
       document_id_field: 'kyc_document_id'
-    }
+    },
+    image_width: '',
+    image_height: ''
   });
   const [directorType, setDirectorType] = useState<'all' | 'primary'>('all');
   const [dependantRelationship, setDependantRelationship] = useState<string[]>([]);
@@ -630,20 +636,20 @@ export default function DocumentTemplateManager({
         let footerContent = '';
 
         console.log('[SCANNER] Available files in zip:', Object.keys(zip.files));
-        
+
         // Word documents can have multiple headers/footers with numbers (header1.xml, header2.xml, etc.)
         const headerFiles = Object.keys(zip.files).filter(file => file.startsWith('word/header') && file.endsWith('.xml'));
         const footerFiles = Object.keys(zip.files).filter(file => file.startsWith('word/footer') && file.endsWith('.xml'));
-        
+
         console.log('[SCANNER] Found header files:', headerFiles);
         console.log('[SCANNER] Found footer files:', footerFiles);
-        
+
         // Combine all header files
         if (headerFiles.length > 0) {
           headerContent = headerFiles.map(file => zip.files[file].asText()).join('\n');
           console.log('[SCANNER] Header content found (first 200 chars):', headerContent.substring(0, 200));
         }
-        
+
         // Combine all footer files
         if (footerFiles.length > 0) {
           footerContent = footerFiles.map(file => zip.files[file].asText()).join('\n');
@@ -1021,8 +1027,8 @@ export default function DocumentTemplateManager({
               </div>
             ) : p.type === 'boolean' && p.boolean_conditions?.length > 0 ? (
               <div className="flex flex-wrap gap-1">
-                {p.boolean_conditions.slice(0, 3).map((cond, idx) => (
-                  <Badge key={idx} variant="outline" className="text-[9px] bg-purple-50 text-purple-700">
+                {p.boolean_conditions.slice(0, 3).map((cond) => (
+                  <Badge key={`${p.id}-${cond.tag}`} variant="outline" className="text-[9px] bg-purple-50 text-purple-700">
                     {cond.label}
                   </Badge>
                 ))}
@@ -1045,18 +1051,23 @@ export default function DocumentTemplateManager({
             )}
           </TableCell>
 
-<TableCell className="border-r">
-  <div className="flex items-center gap-1">
-    <Badge variant="outline" className="capitalize text-[10px]">
-      {p.type}
-    </Badge>
-    {p.is_ai_generated && (
-      <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-[8px] h-4">
-        AI
-      </Badge>
-    )}
-  </div>
-</TableCell>
+          <TableCell className="border-r">
+            <div className="flex items-center gap-1">
+              <Badge variant="outline" className="capitalize text-[10px]">
+                {p.type}
+              </Badge>
+              {p.is_ai_generated && (
+                <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-[8px] h-4">
+                  AI
+                </Badge>
+              )}
+              {p.type === 'image' && (p.image_width || p.image_height) && (
+                <Badge variant="secondary" className="text-[8px] bg-green-100 text-green-700">
+                  {p.image_width || 'auto'} × {p.image_height || 'auto'}
+                </Badge>
+              )}
+            </div>
+          </TableCell>
           <TableCell className="text-right">
             <div className="flex justify-end gap-1">
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => editPlaceholder(originalIndex)}>
@@ -1286,6 +1297,7 @@ export default function DocumentTemplateManager({
 
     const placeholderToSave = {
       ...newPlaceholder,
+      id: newPlaceholder.id || `placeholder_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       is_ai_generated: newPlaceholder.is_ai_generated || false,
       ai_prompt: newPlaceholder.ai_prompt || '',
       options: processedOptions,
@@ -1337,7 +1349,9 @@ export default function DocumentTemplateManager({
       conditions: [],
       boolean_conditions: [],
       boolean_type: 'single',
-      array_direction: 'vertical'
+      array_direction: 'vertical',
+      image_width: '',
+      image_height: ''
     });
 
     setDirectorType('all');
@@ -1361,7 +1375,7 @@ export default function DocumentTemplateManager({
       boolean_conditions: placeholder.boolean_conditions || [],
       boolean_type: placeholder.boolean_type || 'single',
       is_ai_generated: placeholder.is_ai_generated || false, // Add this
-        ai_prompt: placeholder.ai_prompt || '',    
+      ai_prompt: placeholder.ai_prompt || '',
     });
 
     // Set director type if applicable
@@ -1546,7 +1560,7 @@ export default function DocumentTemplateManager({
   const handleManualRescan = async () => {
     if (!currentTemplate) return;
 
-try {
+    try {
       setIsProcessing(true);
 
       // Use enhanced extractPlaceholders function that includes header/footer support
@@ -2070,15 +2084,18 @@ try {
                     </div>
                   )}
 
-                  {(newPlaceholder.conditions || []).map((cond, idx) => (
-                    <div key={idx} className="relative p-4 rounded-lg border bg-card shadow-sm space-y-3">
+                  {(newPlaceholder.conditions || []).map((cond) => (
+                    <div key={`${cond.tag}-${cond.master_field_id || 'no-master'}`} className="relative p-4 rounded-lg border bg-card shadow-sm space-y-3">
                       <Button
                         variant="ghost"
                         size="icon"
                         className="absolute -right-2 -top-2 h-6 w-6 rounded-full bg-destructive text-white hover:bg-destructive/90"
                         onClick={() => {
                           const updated = [...(newPlaceholder.conditions || [])];
-                          updated.splice(idx, 1);
+                          const condIndex = updated.findIndex(c => c.tag === cond.tag);
+                          if (condIndex > -1) {
+                            updated.splice(condIndex, 1);
+                          }
                           setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
                         }}
                       >
@@ -2195,15 +2212,18 @@ try {
                 </Button>
 
                 <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
-                  {(newPlaceholder.boolean_conditions || []).map((cond, idx) => (
-                    <div key={idx} className="relative p-4 rounded-lg border bg-card shadow-sm space-y-3">
+                  {(newPlaceholder.boolean_conditions || []).map((cond) => (
+                    <div key={`${cond.tag}-${cond.master_field_id || 'no-master'}`} className="relative p-4 rounded-lg border bg-card shadow-sm space-y-3">
                       <Button
                         variant="ghost"
                         size="icon"
                         className="absolute -right-2 -top-2 h-6 w-6 rounded-full bg-white border shadow-sm text-red-500 hover:bg-red-50"
                         onClick={() => {
                           const updated = [...(newPlaceholder.boolean_conditions || [])];
-                          updated.splice(idx, 1);
+                          const condIndex = updated.findIndex(c => c.tag === cond.tag);
+                          if (condIndex > -1) {
+                            updated.splice(condIndex, 1);
+                          }
                           setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
                         }}
                       >
@@ -2664,6 +2684,64 @@ try {
               </div>
             )}
 
+            {newPlaceholder.type === 'image' && (
+              <div className="space-y-4 p-4 rounded-lg bg-green-50 border border-green-200 shadow-sm">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <View className="h-5 w-5 text-green-600" />
+                    <h4 className="font-medium text-green-800">Image Size Configuration</h4>
+                  </div>
+                  <p className="text-xs text-green-700 pl-7">
+                    Specify the dimensions for the image placeholder. Leave empty for auto-size.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="image-width" className="text-sm font-medium text-green-800">
+                      Width
+                    </Label>
+                    <Input
+                      id="image-width"
+                      placeholder="e.g., 200px, 50%, 10cm"
+                      value={newPlaceholder.image_width || ''}
+                      onChange={(e) => setNewPlaceholder({ ...newPlaceholder, image_width: e.target.value })}
+                      className="bg-white border-green-200"
+                    />
+                    <p className="text-xs text-green-600">
+                      Enter width with unit (px, %, cm, in)
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="image-height" className="text-sm font-medium text-green-800">
+                      Height
+                    </Label>
+                    <Input
+                      id="image-height"
+                      placeholder="e.g., 150px, auto, 5cm"
+                      value={newPlaceholder.image_height || ''}
+                      onChange={(e) => setNewPlaceholder({ ...newPlaceholder, image_height: e.target.value })}
+                      className="bg-white border-green-200"
+                    />
+                    <p className="text-xs text-green-600">
+                      Enter height with unit (px, %, cm, in) or "auto"
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-white rounded border border-green-200">
+                  <p className="text-xs text-green-800">
+                    <strong>Examples:</strong><br />
+                    • Fixed size: <code>200px</code> × <code>150px</code><br />
+                    • Responsive: <code>100%</code> × <code>auto</code><br />
+                    • Print: <code>5cm</code> × <code>3cm</code><br />
+                    • Mixed: <code>300px</code> × <code>auto</code>
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Debug logging */}
             <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
               Debug: entity_type = {JSON.stringify(newPlaceholder.entity_type)}
@@ -2796,44 +2874,44 @@ try {
               />
             </div>
             <div className="flex items-center space-x-2 pt-2"><Checkbox id="required" checked={newPlaceholder.required} onCheckedChange={(c) => setNewPlaceholder({ ...newPlaceholder, required: !!c })} /><Label htmlFor="required">Required field</Label></div>
-        <div className="space-y-4 border-t pt-4 mt-2">
-  <div className="flex items-center space-x-2">
-    <Checkbox 
-      id="is_ai_generated" 
-      checked={newPlaceholder.is_ai_generated} 
-      onCheckedChange={(c) => setNewPlaceholder({ ...newPlaceholder, is_ai_generated: !!c })} 
-    />
-    <Label htmlFor="is_ai_generated" className="text-purple-700 font-semibold flex items-center gap-2">
-      <Sparkles className="h-4 w-4" /> AI Refinement Enabled
-    </Label>
-  </div>
+            <div className="space-y-4 border-t pt-4 mt-2">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="is_ai_generated"
+                  checked={newPlaceholder.is_ai_generated}
+                  onCheckedChange={(c) => setNewPlaceholder({ ...newPlaceholder, is_ai_generated: !!c })}
+                />
+                <Label htmlFor="is_ai_generated" className="text-purple-700 font-semibold flex items-center gap-2">
+                  <Sparkles className="h-4 w-4" /> AI Refinement Enabled
+                </Label>
+              </div>
 
-  {newPlaceholder.is_ai_generated && (
-    <div className="space-y-2 p-3 bg-purple-50 border border-purple-200 rounded-md animate-in fade-in slide-in-from-top-1">
-      <Label className="text-[11px] text-purple-800 uppercase font-bold">
-        AI Refinement Prompt
-      </Label>
-      <Textarea
-        placeholder="e.g. Write a professional role description for {applicant_full_name} who is a {applicant_position} at {company_name}. Tone: Formal."
-        value={newPlaceholder.ai_prompt}
-        onChange={(e) => setNewPlaceholder({ ...newPlaceholder, ai_prompt: e.target.value })}
-        rows={4}
-        className="bg-white border-purple-200 focus-visible:ring-purple-400"
-      />
-      <div className="flex flex-col gap-1">
-        <p className="text-[10px] text-purple-600 italic">
-          <strong>Tip:</strong> Use curly braces to reference other fields as context.
-        </p>
-        <div className="flex flex-wrap gap-1 mt-1">
-          <span className="text-[9px] bg-purple-100 px-1.5 py-0.5 rounded text-purple-700 font-mono">{"{applicant_full_name}"}</span>
-          <span className="text-[9px] bg-purple-100 px-1.5 py-0.5 rounded text-purple-700 font-mono">{"{company_name}"}</span>
-          <span className="text-[9px] bg-purple-100 px-1.5 py-0.5 rounded text-purple-700 font-mono">{"{applicant_position}"}</span>
-        </div>
-      </div>
-    </div>
-  )}
-</div>
-  </div>
+              {newPlaceholder.is_ai_generated && (
+                <div className="space-y-2 p-3 bg-purple-50 border border-purple-200 rounded-md animate-in fade-in slide-in-from-top-1">
+                  <Label className="text-[11px] text-purple-800 uppercase font-bold">
+                    AI Refinement Prompt
+                  </Label>
+                  <Textarea
+                    placeholder="e.g. Write a professional role description for {applicant_full_name} who is a {applicant_position} at {company_name}. Tone: Formal."
+                    value={newPlaceholder.ai_prompt}
+                    onChange={(e) => setNewPlaceholder({ ...newPlaceholder, ai_prompt: e.target.value })}
+                    rows={4}
+                    className="bg-white border-purple-200 focus-visible:ring-purple-400"
+                  />
+                  <div className="flex flex-col gap-1">
+                    <p className="text-[10px] text-purple-600 italic">
+                      <strong>Tip:</strong> Use curly braces to reference other fields as context.
+                    </p>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      <span className="text-[9px] bg-purple-100 px-1.5 py-0.5 rounded text-purple-700 font-mono">{"{applicant_full_name}"}</span>
+                      <span className="text-[9px] bg-purple-100 px-1.5 py-0.5 rounded text-purple-700 font-mono">{"{company_name}"}</span>
+                      <span className="text-[9px] bg-purple-100 px-1.5 py-0.5 rounded text-purple-700 font-mono">{"{applicant_position}"}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
           <DialogFooter><Button variant="outline" onClick={() => setIsPlaceholderFormOpen(false)}>Cancel</Button><Button onClick={savePlaceholder} disabled={!newPlaceholder.name.trim()}>{isEditingPlaceholder !== null ? 'Update' : 'Add'} Placeholder</Button></DialogFooter>
         </DialogContent>
       </Dialog>
