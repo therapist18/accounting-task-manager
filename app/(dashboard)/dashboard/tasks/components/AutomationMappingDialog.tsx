@@ -6,9 +6,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { 
-  Loader2, Zap, User, Database, FileText, Eye, 
-  Settings, Link, Webhook, ChevronRight, AlertCircle, 
+import {
+  Loader2, Zap, User, Database, FileText, Eye,
+  Settings, Link, Webhook, ChevronRight, AlertCircle,
   CheckCircle2, Info, ArrowRight, Edit3, X, Save
 } from 'lucide-react';
 import {
@@ -231,37 +231,28 @@ export const AutomationMappingDialog = ({
           console.log('❌ No requirement found for job level:', jl);
           return;
         }
-
-        // --- FIXED LOGIC START ---
-        // 1. Collect all potential Automation IDs from both global config and individual requirements
-        const individualRequirements = requirement.requirements?.filter((req: any) => 
+        const individualRequirements = requirement.requirements?.filter((req: any) =>
           req.automationId || req.automation_id || req.web_automation?.automationId
         ) || [];
 
         const globalAutoIds = requirement.web_automation?.map((auto: any) => auto.automationId).filter(Boolean) || [];
         const indivAutoIds = individualRequirements.map((req: any) => req.automationId || req.automation_id || req.web_automation?.automationId).filter(Boolean);
-        
+
         const allAutomationIds = [...new Set([...globalAutoIds, ...indivAutoIds])];
-        
-        console.log('🤖 All Automation IDs found:', allAutomationIds);
 
         let finalWebDataItems: any[] = [];
         let fetchedAutos: any[] = [];
 
         if (allAutomationIds.length > 0) {
-          // Fetch automation definitions including webdata
           const { data: autos } = await supabase.from('tm_automations').select('*').in('id', allAutomationIds);
           fetchedAutos = autos || [];
-          console.log('✅ Fetched automations:', fetchedAutos);
-
-          // 2. Build Unified References
           const globalRefs = requirement.web_automation || [];
           const indivRefs = individualRequirements.map((req: any) => ({
-             automationId: req.automationId || req.automation_id || req.web_automation?.automationId,
-             documentName: req.name, // Use requirement name as sidebar label
-             documentId: req.id,
-             // Inherit config
-             ...(req.web_automation || {})
+            automationId: req.automationId || req.automation_id || req.web_automation?.automationId,
+            documentName: req.name, // Use requirement name as sidebar label
+            documentId: req.id,
+            // Inherit config
+            ...(req.web_automation || {})
           }));
 
           const allRefs = [...globalRefs, ...indivRefs];
@@ -292,17 +283,17 @@ export const AutomationMappingDialog = ({
           documentId: item.documentId,
           automation: item.automation
         }));
-        
+
         console.log('📝 Generated mappings:', mappings);
         setEntityAutomationMappings(mappings);
-        
+
         // Auto-select first mapping if none selected
         if (mappings.length > 0) {
-            // Check if current selected ID exists in new mappings, if not select first
-            const exists = mappings.some(m => m.automationId === selectedAutomationId);
-            if (!selectedAutomationId || !exists) {
-                setSelectedAutomationId(mappings[0].automationId);
-            }
+          // Check if current selected ID exists in new mappings, if not select first
+          const exists = mappings.some(m => m.automationId === selectedAutomationId);
+          if (!selectedAutomationId || !exists) {
+            setSelectedAutomationId(mappings[0].automationId);
+          }
         } else {
           setSelectedAutomationId('');
         }
@@ -345,11 +336,11 @@ export const AutomationMappingDialog = ({
       const queryField = table === 'acc_portal_directors_documents' ? 'director_id' : 'id';
       const { data: existing } = await supabase.from(table).select('*').eq(queryField, currentIndividualId).maybeSingle();
       const updated = updateJsonValue(existing || {}, path, editValue);
-      
-      const { error } = await supabase.from(table).upsert({ 
-        [queryField]: currentIndividualId, 
+
+      const { error } = await supabase.from(table).upsert({
+        [queryField]: currentIndividualId,
         ...updated,
-        updated_at: new Date().toISOString() 
+        updated_at: new Date().toISOString()
       });
 
       if (error) throw error;
@@ -365,8 +356,8 @@ export const AutomationMappingDialog = ({
 
   const handleRunAutomation = async () => {
     if (!selectedAutomationId || !currentIndividualId) {
-        toast({ title: "Validation Error", description: "Missing automation selection or Individual ID", variant: "destructive" });
-        return;
+      toast({ title: "Validation Error", description: "Missing automation selection or Individual ID", variant: "destructive" });
+      return;
     }
 
     setIsAutomationRunning(true);
@@ -380,7 +371,7 @@ export const AutomationMappingDialog = ({
       // 1. Gather mapped formData
       const formData: Record<string, any> = {};
       const activeWeb = webData.find(w => w.automationId === selectedAutomationId);
-      
+
       activeWeb?.fields?.forEach(f => {
         // Skip document type fields in form data mapping, they are handled separately or via URLs
         if (f.fieldType === 'document') return;
@@ -391,10 +382,10 @@ export const AutomationMappingDialog = ({
           const val = getSourceValue(field.sources[0].table, field.sources[0].path);
           return val === 'Missing' ? null : val;
         }).filter(Boolean);
-        
+
         // Default to variableName mapping
         if (values.length > 0) {
-            formData[f.variableName] = values.join(' ');
+          formData[f.variableName] = values.join(' ');
         }
       });
 
@@ -421,10 +412,10 @@ export const AutomationMappingDialog = ({
       });
 
       if (!res.ok) {
-          const errorData = await res.json().catch(() => ({}));
-          throw new Error(errorData.message || "Trigger failed: Server returned " + res.status);
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || "Trigger failed: Server returned " + res.status);
       }
-      
+
       toast({ title: 'Success', description: 'Automation process initiated successfully' });
     } catch (e) {
       console.error("❌ Automation Error:", e);
@@ -447,7 +438,7 @@ export const AutomationMappingDialog = ({
   // --- RENDER HELPERS ---
   const renderFieldsTable = () => {
     if (!activeWebEntry?.fields || activeWebEntry.fields.length === 0) return <div className="p-12 text-center text-slate-400">No fields configured.</div>;
-    
+
     // Filter out document fields from the main table
     const dataFields = activeWebEntry.fields.filter((f: any) => f.fieldType !== 'document');
 
@@ -475,18 +466,12 @@ export const AutomationMappingDialog = ({
                 <TableRow key={fIdx} className="group">
                   <TableCell className="align-top">
                     <div className="font-semibold text-slate-900">{field.efnsDisplayName || field.name}</div>
-                    <code className="text-[10px] bg-slate-100 px-1 py-0.5 rounded text-blue-600 font-mono">{field.variableName}</code>
-                    <div className="mt-1 flex gap-1">
-                      <Badge variant="outline" className="text-[9px] uppercase">{field.fieldType}</Badge>
-                      {field.isRequired && <Badge className="bg-red-50 text-red-600 border-red-100 text-[9px]">Required</Badge>}
-                    </div>
                   </TableCell>
                   <TableCell className="align-top">
                     <div className="space-y-1.5">
                       {sources.map((s, sIdx) => (
                         <div key={sIdx} className="flex flex-col text-[11px] border-l-2 border-blue-200 pl-2 py-0.5">
                           <span className="font-medium text-slate-600 uppercase tracking-tight">{s.label}</span>
-                          <span className="text-slate-400 font-mono truncate">{s.table}.{s.path}</span>
                         </div>
                       ))}
                       {sources.length === 0 && <span className="text-xs text-slate-400 italic">No master field linked</span>}
@@ -502,9 +487,9 @@ export const AutomationMappingDialog = ({
                           <div key={sIdx} className="relative">
                             {isEditing ? (
                               <div className="flex items-center gap-1 animate-in fade-in slide-in-from-top-1 duration-200">
-                                <Input 
-                                  autoFocus 
-                                  value={editValue} 
+                                <Input
+                                  autoFocus
+                                  value={editValue}
                                   onChange={e => setEditValue(e.target.value)}
                                   onKeyDown={e => e.key === 'Enter' && saveEdit()}
                                   className="h-8 text-sm"
@@ -555,15 +540,15 @@ export const AutomationMappingDialog = ({
   const renderDocumentsSection = () => {
     // Collect required documents from webdata where fieldType is 'document'
     const requiredDocs = activeWebEntry?.fields?.filter((f: any) => f.fieldType === 'document') || [];
-    
+
     // Also include generic 'kycDocsUpload' property if it exists from legacy configuration
     const legacyDocs = activeWebEntry?.kycDocsUpload || [];
 
     // Combine them, preferring the new field structure
     const allReqs = [...requiredDocs, ...legacyDocs.map((d: any) => ({
-         kycDocumentId: d.kycDocumentId,
-         efnsDisplayName: d.documentName || d.entityType,
-         variableName: d.kycDocumentId
+      kycDocumentId: d.kycDocumentId,
+      efnsDisplayName: d.documentName || d.entityType,
+      variableName: d.kycDocumentId
     }))];
 
     // Deduplicate by ID
@@ -609,12 +594,12 @@ export const AutomationMappingDialog = ({
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-[95vw] w-[1400px] h-[90vh] flex flex-col p-0 overflow-hidden border-none shadow-2xl">
-        
+
         {/* HEADER BAR */}
         <div className="p-5 border-b bg-white flex items-center justify-between shadow-sm z-20">
           <div className="flex items-center gap-5">
             <div className="h-12 w-12 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-200">
-              <Zap className="h-6 w-6 fill-white"/>
+              <Zap className="h-6 w-6 fill-white" />
             </div>
             <div>
               <DialogTitle className="text-2xl font-black text-slate-900 tracking-tight">Automation Lab</DialogTitle>
@@ -625,23 +610,23 @@ export const AutomationMappingDialog = ({
               </div>
             </div>
           </div>
-          
+
           <div className="flex items-center gap-3 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
-             <div className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-xl border border-slate-200 shadow-sm">
-                <User className="h-4 w-4 text-blue-500" />
-                <input 
-                  value={currentIndividualId} 
-                  onChange={(e) => setCurrentIndividualId(e.target.value)}
-                  placeholder="ID Number..."
-                  className="w-32 outline-none text-sm font-bold text-slate-700"
-                />
-             </div>
-             {isLoading && <Loader2 className="h-5 w-5 animate-spin text-blue-600 mx-2"/>}
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-xl border border-slate-200 shadow-sm">
+              <User className="h-4 w-4 text-blue-500" />
+              <input
+                value={currentIndividualId}
+                onChange={(e) => setCurrentIndividualId(e.target.value)}
+                placeholder="ID Number..."
+                className="w-32 outline-none text-sm font-bold text-slate-700"
+              />
+            </div>
+            {isLoading && <Loader2 className="h-5 w-5 animate-spin text-blue-600 mx-2" />}
           </div>
         </div>
 
         <div className="flex-1 flex overflow-hidden bg-slate-50/50">
-          
+
           {/* SIDEBAR */}
           <div className="w-80 border-r bg-white flex flex-col z-10">
             <div className="p-5 pb-3">
@@ -655,8 +640,8 @@ export const AutomationMappingDialog = ({
                     onClick={() => setSelectedAutomationId(mapping.automationId)}
                     className={cn(
                       "w-full text-left p-4 rounded-2xl border-2 transition-all group relative",
-                      selectedAutomationId === mapping.automationId 
-                        ? "bg-blue-50/50 border-blue-600 shadow-sm" 
+                      selectedAutomationId === mapping.automationId
+                        ? "bg-blue-50/50 border-blue-600 shadow-sm"
                         : "hover:bg-slate-50 border-transparent"
                     )}
                   >
@@ -717,10 +702,10 @@ export const AutomationMappingDialog = ({
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <div className="flex flex-col items-end">
-                             <span className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">Status</span>
-                             <div className="flex items-center gap-1.5 text-green-600 font-bold text-sm">
-                               <CheckCircle2 className="h-4 w-4" /> Endpoint Active
-                             </div>
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">Status</span>
+                            <div className="flex items-center gap-1.5 text-green-600 font-bold text-sm">
+                              <CheckCircle2 className="h-4 w-4" /> Endpoint Active
+                            </div>
                           </div>
                         </TooltipTrigger>
                         <TooltipContent className="bg-slate-900 text-white border-none p-3">
@@ -745,7 +730,7 @@ export const AutomationMappingDialog = ({
                       </div>
                       {renderFieldsTable()}
                     </TabsContent>
-                    
+
                     <TabsContent value="documents" className="m-0 focus-visible:ring-0">
                       <div className="mb-6">
                         <h2 className="text-xl font-bold text-slate-900">Required Assets</h2>
@@ -763,16 +748,16 @@ export const AutomationMappingDialog = ({
         {/* FOOTER ACTIONS */}
         <div className="p-6 border-t bg-white flex justify-between items-center z-20 shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.1)]">
           <Button variant="ghost" className="font-bold text-slate-500 hover:bg-slate-50" onClick={onClose}>Discard Changes</Button>
-          
+
           <div className="flex items-center justify-between">
-          <Button
-            onClick={handleRunAutomation}
-            disabled={isAutomationRunning}
-            className="bg-blue-600 hover:bg-blue-700 text-white h-12 px-10 rounded-xl font-bold shadow-lg shadow-blue-200 flex items-center gap-3 transition-all hover:scale-[1.02] active:scale-[0.98]"
-          >
-            {isAutomationRunning ? <Loader2 className="h-5 w-5 animate-spin" /> : <Zap className="h-5 w-5 fill-white" />}
-            <span>{isAutomationRunning ? 'Executing...' : 'Execute Workflow'}</span>
-          </Button>
+            <Button
+              onClick={handleRunAutomation}
+              disabled={isAutomationRunning}
+              className="bg-blue-600 hover:bg-blue-700 text-white h-12 px-10 rounded-xl font-bold shadow-lg shadow-blue-200 flex items-center gap-3 transition-all hover:scale-[1.02] active:scale-[0.98]"
+            >
+              {isAutomationRunning ? <Loader2 className="h-5 w-5 animate-spin" /> : <Zap className="h-5 w-5 fill-white" />}
+              <span>{isAutomationRunning ? 'Executing...' : 'Execute Workflow'}</span>
+            </Button>
           </div>
         </div>
       </DialogContent>
