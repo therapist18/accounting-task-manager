@@ -6,13 +6,14 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
-import { Briefcase, FileText, Loader2, Search, Upload, Eye } from "lucide-react"
+import { Briefcase, FileText, Loader2, Search, Upload, Eye, Zap, FileType, Wand2 } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import RequirementsTableCombined from "./RequirementsTableCombined"
 import { FileUploadComponent } from "../tasks/components/FileUploadComponent"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
+import { AutomationMappingDialog } from "../tasks/components/AutomationMappingDialog"
 
 // --- MODIFICATION: Placeholder for the Letter Template Dialog ---
 const LetterTemplateDialog = ({ open, onOpenChange, letterData, individualNames }) => {
@@ -102,6 +103,10 @@ export function RequirementsTable({
   // --- MODIFICATION: State for the new letter dialog ---
   const [isLetterDialogOpen, setIsLetterDialogOpen] = useState(false);
   const [selectedLetterData, setSelectedLetterData] = useState(null);
+
+  // --- State for automation dialog ---
+  const [isAutomationDialogOpen, setIsAutomationDialogOpen] = useState(false);
+  const [selectedAutomationData, setSelectedAutomationData] = useState(null);
 
   const parseSelectionId = useCallback((selectionId: string) => {
     const cleanId = selectionId.replace(/_\d+_\d+$/, '');
@@ -567,6 +572,12 @@ const organizedRequirements = useMemo(() => {
     setSelectedLetterData({ task, document: item, columnType, applicantId });
     setIsLetterDialogOpen(true);
   }, []);
+
+  // --- Handler for automation dialog ---
+  const handleAutomationAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number) => {
+    setSelectedAutomationData({ task, document: item, columnType, applicantId });
+    setIsAutomationDialogOpen(true);
+  }, []);
 const getDocumentStatusForColumn = useCallback((task: any, reqItem: any, columnType: ApplicantType, applicantId?: number): 
 DocumentStatus => {
   const baseStatus = { documents: [], count: 0 };
@@ -617,24 +628,50 @@ DocumentStatus => {
       if (status.documents.length === 0) return;
 
       try {
-        const documentPreviews = await Promise.all(status.documents.map(async (doc) => {
+        const documentPreviews = (await Promise.all(status.documents.map(async (doc) => {
+          // Skip documents without valid file_path
+          if (!doc.file_path) {
+            console.warn('Document missing file_path:', doc.id);
+            return null;
+          }
+
           const { data, error } = await supabase.storage
             .from('kyc-documents')
             .createSignedUrl(doc.file_path, 3600);
 
           if (error) throw error;
 
+          // Fetch fields from acc_portal_kyc table using the document's KYC relationship
+          let fields = [];
+          if (doc.document_id) {
+            try {
+              const { data: kycData, error: kycError } = await supabase
+                .from('acc_portal_kyc')
+                .select('fields')
+                .eq('id', doc.document_id)
+                .single();
+              
+              if (!kycError && kycData) {
+                fields = kycData.fields || [];
+              } else if (kycError) {
+                console.warn('Failed to fetch KYC fields for document:', doc.id, kycError);
+              }
+            } catch (err) {
+              console.warn('Error fetching KYC fields:', err);
+            }
+          }
+
           return {
             id: doc.id,
             fileUrl: data.signedUrl,
             // Map extracted_details from your JSON
             extractedData: doc.extracted_details || {},
-            // Use fields from the KYC definition (item)
-            fields: item.fields || [],
+            // Use fields from the KYC table
+            fields: fields,
             name: doc.acc_portal_kyc?.display_name || item.display_name,
             uploadedAt: doc.created_at
           };
-        }));
+        }))).filter(Boolean); // Filter out null entries
 
         setPreviewDocument({
           documents: documentPreviews,
@@ -653,10 +690,53 @@ DocumentStatus => {
 
     return (
       <div className="flex items-center justify-center gap-1 h-full">
-        {isLetter && (
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-blue-600 hover:bg-blue-50" onClick={() => handleGenerateLetterAction(task, item, columnType, applicantId)} title={`Generate ${item.display_name}`}><FileText className="h-4 w-4" /></Button>
+        {/* Web automation - clickable Zap icon for automation documents */}
+        {item.web_automation?.automationId && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0 text-blue-600 hover:bg-blue-50"
+            onClick={() => handleAutomationAction(task, item, columnType, applicantId)}
+            title={`Run Automation: ${item.web_automation.automationName}`}
+          >
+            <Zap className="h-4 w-4" />
+          </Button>
         )}
-        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-amber-600 hover:bg-amber-50" onClick={() => handleUploadAction(task, item, columnType, applicantId)} title={`Upload ${item.display_name}`}><Upload className="h-4 w-4" /></Button>
+
+        {/* Generate template button for letters with templates */}
+        {isLetter && item.hasTemplate && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+            onClick={() => handleGenerateLetterAction(task, item, columnType, applicantId)}
+            title={`Generate ${item.display_name}`}
+          >
+            <Wand2 className="h-3 w-3 mr-1" />
+            <span className="text-[10px] font-bold uppercase">Generate</span>
+          </Button>
+        )}
+        
+        {/* Regular generate letter button for letters without templates */}
+        {isLetter && !item.hasTemplate && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+            onClick={() => handleGenerateLetterAction(task, item, columnType, applicantId)}
+            title={`Generate ${item.display_name}`}
+          >
+            <Wand2 className="h-3 w-3 mr-1" />
+            <span className="text-[10px] font-bold uppercase">Generate</span>
+          </Button>
+        )}
+        
+        {/* Upload button - hide for automation documents */}
+        {!item.web_automation?.automationId && (
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-amber-600 hover:bg-amber-50" onClick={() => handleUploadAction(task, item, columnType, applicantId)} title={`Upload ${item.display_name}`}><Upload className="h-4 w-4" /></Button>
+        )}
+        
+        {/* View button for existing documents */}
         {status.type === 'view' && (
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-green-600 hover:bg-green-100" onClick={handleViewClick} title={`View ${status.count} document(s)`}><Eye className="h-4 w-4" /></Button>
@@ -665,7 +745,7 @@ DocumentStatus => {
         )}
       </div>
     );
-  }, [getDocumentStatusForColumn, handleUploadAction, handleGenerateLetterAction, documents]);
+  }, [getDocumentStatusForColumn, handleUploadAction, handleGenerateLetterAction, handleAutomationAction, documents]);
 
   const renderClientFieldData = useCallback(() => <div className="text-center"><span className="text-gray-400 text-xs">-</span></div>, []);
   const renderReferencesData = useCallback(() => <div className="text-center p-2"><span className="text-gray-400 text-xs">N/A</span></div>, []);
@@ -785,6 +865,19 @@ DocumentStatus => {
         letterData={selectedLetterData}
         individualNames={individualNames}
       />
+
+      {/* Automation Dialog */}
+      {selectedAutomationData && (
+        <AutomationMappingDialog
+          isOpen={isAutomationDialogOpen}
+          onClose={() => setIsAutomationDialogOpen(false)}
+          classId={selectedAutomationData.task?.class_id || ''}
+          requirementId={selectedAutomationData.document?.id || ''}
+          taskId={selectedAutomationData.task?.id}
+          individualId={selectedAutomationData.applicantId?.toString()}
+          task={selectedAutomationData.task}
+        />
+      )}
     </div>
   );
 }

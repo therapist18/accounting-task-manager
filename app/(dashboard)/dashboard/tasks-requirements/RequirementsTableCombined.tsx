@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { AlertTriangle, Briefcase, Users, Plus, Minus, UserCheck, Loader2, Download, FileText, FileUp, Trash2, RefreshCw, Wand2, Save, ChevronDown, ChevronRight, Users2, User, Building2 } from "lucide-react"
+import { AlertTriangle, Briefcase, Users, Plus, Minus, UserCheck, Loader2, Download, FileText, FileUp, Trash2, RefreshCw, Wand2, Save, ChevronDown, ChevronRight, Users2, User, Building2, Zap, FileType } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import * as XLSX from 'xlsx'
@@ -924,6 +924,19 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     XLSX.writeFile(workbook, "Requirements_Data_Export.xlsx");
   };
 
+  const handleGenerateTemplate = async (reqItem: any, task: any, columnType: string, columnId?: number) => {
+    // Create a docItem structure compatible with handleOpenTemplateGenerator
+    const docItem = {
+      document: {
+        id: reqItem.kyc_document_ids?.[0] || reqItem.id,
+        display_name: reqItem.documentDefinition?.display_name || reqItem.name,
+        name: reqItem.documentDefinition?.name || reqItem.name
+      }
+    };
+    
+    await handleOpenTemplateGenerator(docItem, task, columnType, columnId);
+  };
+
 const getDocumentDataForPreview = useCallback((task: any, reqItem: any, columnType: string, entityId?: number) => {
     if (!reqItem) return null;
     
@@ -997,6 +1010,23 @@ const getDocumentDataForPreview = useCallback((task: any, reqItem: any, columnTy
                       Multiple documents of this type
                     </span>
                   )}
+                  
+                  {/* Template and Automation Indicators */}
+                  <div className="flex items-center gap-2 mt-1">
+                    {reqItem.hasTemplate && (
+                      <div className="flex items-center gap-1 text-orange-600" title="Has Template">
+                        <FileType className="h-3 w-3 fill-current" />
+                        <span className="text-[9px] font-medium">Template</span>
+                      </div>
+                    )}
+                    
+                    {reqItem.web_automation?.automationId && (
+                      <div className="flex items-center gap-1 text-blue-600" title={`Web Form: ${reqItem.web_automation.automationName}`}>
+                        <Zap className="h-3 w-3 fill-current" />
+                        <span className="text-[9px] font-medium truncate max-w-[100px]">{reqItem.web_automation.automationName}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </TableCell>
 
@@ -1010,15 +1040,25 @@ const getDocumentDataForPreview = useCallback((task: any, reqItem: any, columnTy
     <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-2">
       {!isApplicable ? (
         <span className="text-[10px] text-gray-300 font-medium italic">N/A</span>
-      ) : docData ? (
-        /* DOCUMENT FOUND: Show View/Eye Icon */
-        <div className="flex items-center justify-center gap-1">
-           {renderDocumentStatus(col.task, reqItem, col.type, col.id)}
-        </div>
       ) : (
-        /* NO DOCUMENT: Show Upload/Generate */
         <div className="flex items-center justify-center gap-1">
-           {renderDocumentStatus(col.task, reqItem, col.type, col.id)}
+          {/* Generate template button for requirements with templates */}
+          {reqItem.hasTemplate && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+              onClick={() => handleGenerateTemplate(reqItem, col.task, col.type, col.id)}
+              title={`Generate ${reqItem.documentDefinition?.display_name || reqItem.name} Template`}
+              disabled={isPreparingTemplate}
+            >
+              {isPreparingTemplate ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3 mr-1" />}
+              <span className="text-[10px] font-bold uppercase">Generate</span>
+            </Button>
+          )}
+          
+          {/* Existing document status (upload/view buttons) */}
+          {renderDocumentStatus(col.task, reqItem, col.type, col.id)}
         </div>
       )}
     </TableCell>
@@ -1128,14 +1168,14 @@ const getDocumentDataForPreview = useCallback((task: any, reqItem: any, columnTy
                 <div className="flex items-center justify-between">
                   <div>
                     <DialogTitle className="text-xl">
-                      {previewingDocuments.document_display_name}
+                      {previewingDocuments?.document_display_name || 'Document Preview'}
                     </DialogTitle>
                     <p className="text-sm text-muted-foreground">
-                      Target: {previewingDocuments.person_full_name}
+                      Target: {previewingDocuments?.person_full_name || 'Unknown'}
                     </p>
                   </div>
                   <div className="text-sm font-medium bg-blue-50 text-blue-700 px-3 py-1 rounded-full border border-blue-100">
-                    {previewingDocuments.documents.length} File(s)
+                    {previewingDocuments?.documents?.length || 0} File(s)
                   </div>
                 </div>
                 <DialogDescription className="sr-only">
@@ -1145,7 +1185,7 @@ const getDocumentDataForPreview = useCallback((task: any, reqItem: any, columnTy
 
               <div className="flex-1 overflow-y-auto p-6">
                 <div className="space-y-10 max-w-[1600px] mx-auto">
-                  {previewingDocuments.documents.map((doc, index) => {
+                  {previewingDocuments?.documents?.map((doc, index) => {
                     const docId = doc.id || `doc-${index}`;
 
                     return (
@@ -1157,7 +1197,7 @@ const getDocumentDataForPreview = useCallback((task: any, reqItem: any, columnTy
                               <FileText className="h-5 w-5 text-blue-600" />
                             </div>
                             <div className="flex flex-col">
-                              <p className="text-sm font-bold text-slate-800 line-clamp-1">{doc.file_name}</p>
+                              <p className="text-sm font-bold text-slate-800 line-clamp-1">{doc.file_name || 'Document'}</p>
                               <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">ID: {docId}</p>
                             </div>
                           </div>
@@ -1187,14 +1227,14 @@ const getDocumentDataForPreview = useCallback((task: any, reqItem: any, columnTy
                           <ExtractionPreview
                             key={docId}
                             documentId={docId}
-                            documentName={previewingDocuments.document_display_name}
+                            documentName={previewingDocuments?.document_display_name || 'Document'}
                             // Pass the details object
                             extractedData={doc.edited_details || doc.extracted_details || {}}
                             // Pass the schema array
-                            fields={previewingDocuments.document_fields}
+                            fields={previewingDocuments?.document_fields || []}
                             // Construct the full URL
                             fileUrl={getFileUrl(doc.file_path)}
-                            fileName={doc.file_name}
+                            fileName={doc.file_name || 'document.pdf'}
                             expanded={true}
                             showSaveButton={false}
                             // Pass down handlers to the internal DocumentActions

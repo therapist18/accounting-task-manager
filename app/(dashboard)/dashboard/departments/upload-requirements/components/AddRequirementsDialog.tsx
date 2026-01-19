@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { FileText, Plus, Zap, Check, ChevronsUpDown, Search, Trash2, Eraser, Building2, User, Layout, FileType } from "lucide-react"
+import { FileText, Plus, Zap, Check, ChevronsUpDown, Search, Trash2, Eraser, Building2, User, Layout, FileType, Loader2 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command"
@@ -49,7 +49,8 @@ const DEFAULT_REQUIREMENT: RequirementForm = {
   requiredDocumentCount: 1,
   instructions: '',
   category: 'processing',
-  isStageDocument: false // Added stage document default
+  isStageDocument: false, // Added stage document default
+  hasTemplate: false // Added has template default
 }
 
 interface AddRequirementsDialogProps {
@@ -96,7 +97,10 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
   const [loading, setLoading] = useState(false)
     const [bulkInput, setBulkInput] = useState('')
   const [selectedGeneralConfigs, setSelectedGeneralConfigs] = useState<Record<string, GeneralDocConfig>>({})
-
+const [templatesMap, setTemplatesMap] = useState<Record<string, any[]>>({})
+  const [loadingTemplates, setLoadingTemplates] = useState<Record<string, boolean>>({})
+  const [automationTypes, setAutomationTypes] = useState<any[]>([])
+  
   useEffect(() => {
     if (isOpen) {
       fetchInitialData()
@@ -104,19 +108,57 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
     }
   }, [isOpen])
 
-  const fetchInitialData = async () => {
+const fetchInitialData = async () => {
     try {
       setLoading(true)
-      const [kycRes, deptRes] = await Promise.all([
+      const [kycRes, deptRes, autoRes] = await Promise.all([
         supabase.from('acc_portal_kyc').select('*').order('name'),
-        supabase.from('tm_departments').select('*')
+        supabase.from('tm_departments').select('*'),
+        // --- FETCHING AUTOMATIONS ---
+        supabase.from('tm_automations').select('*').eq('is_active', true).order('name')
       ])
       setKycDocuments(kycRes.data || [])
       setDepartments(deptRes.data || [])
+      setAutomationTypes(autoRes.data || [])
     } finally {
       setLoading(false)
     }
   }
+
+   const fetchTemplates = async (key: string, docIds: string[]) => {
+    if (docIds.length === 0) {
+      setTemplatesMap(prev => ({ ...prev, [key]: [] }));
+      return;
+    }
+
+    setLoadingTemplates(prev => ({ ...prev, [key]: true }));
+    try {
+      const { data, error } = await supabase
+        .from('acc_portal_templates')
+        .select('*')
+        .in('document_id', docIds)
+        .or('banks_associated.is.null,banks_associated.eq.[]')
+        .order('file_name', { ascending: true });
+
+      if (error) throw error;
+      setTemplatesMap(prev => ({ ...prev, [key]: data || [] }));
+    } catch (error) {
+      console.error("Error fetching templates:", error);
+    } finally {
+      setLoadingTemplates(prev => ({ ...prev, [key]: false }));
+    }
+  }
+
+  // Effect to watch changes in individual requirements (Processing/Issuance)
+  useEffect(() => {
+    if (activeSection !== 'general') {
+      newRequirements.forEach((req, idx) => {
+        if (req.hasTemplate && req.kycDocumentIds.length > 0) {
+          fetchTemplates(`req-${idx}`, req.kycDocumentIds);
+        }
+      });
+    }
+  }, [newRequirements, activeSection]);
 
   // Helper to find automation in the department stages JSON
   const findAutomation = (kycId: string) => {
@@ -167,6 +209,32 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
         }
       }));
     }
+  }
+
+  const TemplatePreviewList = ({ templates, loading }: { templates: any[], loading: boolean }) => {
+    if (loading) return <div className="flex items-center gap-2 text-[10px] text-muted-foreground p-2"><Loader2 className="h-3 w-3 animate-spin" /> Fetching...</div>;
+    if (!templates || templates.length === 0) return <div className="text-[10px] text-slate-400 italic p-2">No generic templates found</div>;
+    
+    return (
+      <div className="space-y-1 p-2">
+        {templates.map(t => (
+          <div key={t.id} className="flex items-center justify-between bg-white border rounded px-2 py-1 group shadow-sm">
+            <span className="text-[10px] font-medium truncate max-w-[150px]">{t.file_name}</span>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" className="h-5 px-1.5 text-[9px]">Preview</Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 max-h-60 overflow-y-auto">
+                <div className="space-y-2">
+                  <h4 className="font-bold text-xs border-b pb-1">{t.file_name}</h4>
+                  <div className="text-[10px] text-slate-600 leading-relaxed" dangerouslySetInnerHTML={{ __html: t.content?.substring(0, 500) + '...' }} />
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
+        ))}
+      </div>
+    );
   }
 
   const updateGeneralMode = (kycId: string, mode: SubmissionMode) => {
@@ -223,26 +291,40 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
       
       const startIdCount = existingRecord?.requirements?.length || 0;
       
-      const processedNewReqs = validReqs.map((req, index) => ({
-        id: (Date.now() + index).toString(),
-        name: req.name.trim(),
-        description: req.description || '',
-        type: req.type,
-        isRequired: req.isRequired,
-        is_mandatory: req.isRequired,
-        isVisible: req.isVisible,
-        applicantTypes: req.applicantTypes,
-        instructions: req.instructions || '',
-        requiredDocumentCount: req.requiredDocumentCount,
-        kyc_document_ids: req.kycDocumentIds,
-        category: 'processing', // Force to 'processing' for Upload Processing Requirements section
-        isStageDocument: req.isStageDocument || false, // Added stage document flag
-        order: startIdCount + index
-        // Explicitly exclude old fields: kyc_document_id, applicantType
-      }));
+    const processedNewReqs = validReqs.map((req, index) => {
+        // --- CONSTRUCT WEB AUTOMATION OBJECT ---
+        let web_automation = null
+        if (req.hasWebForm && req.automationId) {
+          const auto = automationTypes.find(a => String(a.id) === String(req.automationId))
+          web_automation = {
+            automationId: req.automationId,
+            automationName: auto?.name,
+            webFormName: req.webFormName,
+            webhookUrl: auto?.webhook_url
+          }
+        }
 
+        return {
+          id: (Date.now() + index).toString(),
+          name: req.name.trim(),
+          description: req.description || '',
+          type: req.type,
+          isRequired: req.isRequired,
+          is_mandatory: req.isRequired,
+          isVisible: req.isVisible,
+          applicantTypes: req.applicantTypes,
+          instructions: req.instructions || '',
+          requiredDocumentCount: req.requiredDocumentCount,
+          kyc_document_ids: req.kycDocumentIds,
+          category: activeSection,
+          isStageDocument: req.isStageDocument || false,
+          hasTemplate: req.hasTemplate || false,
+          web_automation, // --- ADDED TO PAYLOAD ---
+          order: startIdCount + index
+        }
+      });
       const finalRequirements = existingRecord 
-        ? [...existingRecord.requirements.map(req => {
+        ? [...(existingRecord.requirements || []).map(req => {
             // Clean up existing requirements by removing old fields
             const { kyc_document_id, applicantType, ...cleanReq } = req;
             return cleanReq;
@@ -289,7 +371,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
           <DialogTitle>Add Requirements</DialogTitle>
         </DialogHeader>
 
-        <div className="flex-1 overflow-hidden flex flex-col px-6 space-y-4">
+        <div className="flex-1 overflow-auto flex flex-col px-6 space-y-4">
           {/* Section Switcher */}
           <div className="bg-slate-100 p-1 rounded-lg flex gap-1">
             {['general', 'processing', 'issuance'].map((sec) => (
@@ -397,6 +479,19 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                             </div>
                           </RadioGroup>
                           
+                    {config.mode === 'template' && (
+                            <div className="bg-orange-50/50 rounded border border-orange-100 mt-2">
+                                <div className="px-2 py-1 border-b border-orange-100 flex items-center gap-1">
+                                    <FileType className="h-3 w-3 text-orange-600" />
+                                    <span className="text-[9px] font-bold text-orange-700 uppercase">Available Templates</span>
+                                </div>
+                                <TemplatePreviewList 
+                                    templates={templatesMap[config.kycId] || []} 
+                                    loading={loadingTemplates[config.kycId]} 
+                                />
+                            </div>
+                          )}
+                          
                           {/* Stage Document Checkbox */}
                           <div className="flex items-center space-x-2 pt-2 border-t">
                             <Checkbox 
@@ -494,18 +589,13 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4 border-t pt-4">
+               <div className="grid grid-cols-2 gap-4 border-t pt-4">
                     <div className="space-y-2">
-                      <Label className="text-xs">Requirement Type</Label>
-                      <Select value={req.type} onValueChange={v => updateReq(idx, { type: v })}>
-                        <SelectTrigger className="bg-white h-8"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="standard">Standard</SelectItem>
-                          <SelectItem value="conditional">Conditional</SelectItem>
-                          <SelectItem value="optional">Optional</SelectItem>
-                          <SelectItem value="multi-document">Multi-Document</SelectItem>
-                        </SelectContent>
-                      </Select>
+                        <Label className="text-xs">Requirement Type</Label>
+                        <Select value={req.type} onValueChange={v => updateReq(idx, { type: v })}>
+                            <SelectTrigger className="bg-white h-8"><SelectValue /></SelectTrigger>
+                            <SelectContent><SelectItem value="standard">Standard</SelectItem><SelectItem value="multi-document">Multi-Doc</SelectItem></SelectContent>
+                        </Select>
                     </div>
                     <div className="space-y-2">
                         <Label className="text-xs">Doc Mapping</Label>
@@ -521,9 +611,9 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                                     <CommandList className="max-h-[200px]">
                                         {kycDocuments.map(doc => (
                                             <CommandItem key={doc.id} onSelect={() => {
-                                                const current = req.kycDocumentIds
-                                                const updated = current.includes(String(doc.id)) ? current.filter(id => id !== String(doc.id)) : [...current, String(doc.id)]
-                                                updateReq(idx, { kycDocumentIds: updated })
+                                                const current = req.kycDocumentIds;
+                                                const updated = current.includes(String(doc.id)) ? current.filter(id => id !== String(doc.id)) : [...current, String(doc.id)];
+                                                updateReq(idx, { kycDocumentIds: updated });
                                             }}>
                                                 <Check className={cn("mr-2 h-3 w-3", req.kycDocumentIds.includes(String(doc.id)) ? "opacity-100" : "opacity-0")} />
                                                 {doc.display_name || doc.name}
@@ -535,17 +625,67 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                         </Popover>
                     </div>
                   </div>
+ <div className="border-t pt-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <Label className="flex items-center gap-2 text-purple-600 font-semibold italic">
+                          <Zap className="h-3 w-3" /> Web Form Automation
+                        </Label>
+                        <Checkbox 
+                          id={`web-form-${idx}`} 
+                          checked={req.hasWebForm} 
+                          onCheckedChange={(c) => updateReq(idx, { hasWebForm: c })} 
+                        />
+                      </div>
+                      
+                      {req.hasWebForm && (
+                        <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-1">
+                          <div className="space-y-1">
+                            <Label className="text-[10px]">Form Display Name</Label>
+                            <Input 
+                              placeholder="e.g. Personal Details Form" 
+                              className="h-8 text-xs" 
+                              value={req.webFormName} 
+                              onChange={e => updateReq(idx, { webFormName: e.target.value })}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[10px]">Select Automation</Label>
+                            <Select value={req.automationId} onValueChange={v => updateReq(idx, { automationId: v })}>
+                              <SelectTrigger className="h-8 text-xs bg-white">
+                                <SelectValue placeholder="Select..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {automationTypes.map(a => (
+                                  <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  {/* IN-CARD TEMPLATE PREVIEW */}
+                  {req.hasTemplate && req.kycDocumentIds.length > 0 && (
+                    <div className="bg-slate-50 border rounded-lg overflow-hidden">
+                        <div className="px-3 py-1.5 border-b bg-white text-[10px] font-bold text-blue-600 flex items-center gap-2">
+                            <FileType className="h-3 w-3" /> LINKED LETTER TEMPLATES
+                        </div>
+                        <TemplatePreviewList 
+                            templates={templatesMap[`req-${idx}`] || []} 
+                            loading={loadingTemplates[`req-${idx}`]} 
+                        />
+                    </div>
+                  )}
 
-                  {/* Stage Document Checkbox */}
-                  <div className="flex items-center space-x-2 border-t pt-4">
-                    <Checkbox 
-                      id={`stage-req-${idx}`}
-                      checked={req.isStageDocument || false}
-                      onCheckedChange={(checked) => updateReq(idx, { isStageDocument: checked })}
-                    />
-                    <Label htmlFor={`stage-req-${idx}`} className="text-xs font-medium cursor-pointer">
-                      Mark as Stage Document
-                    </Label>
+                  <div className="flex items-center space-x-6 border-t pt-4">
+                    <div className="flex items-center space-x-2">
+                        <Checkbox id={`stage-req-${idx}`} checked={req.isStageDocument} onCheckedChange={(c) => updateReq(idx, { isStageDocument: c })} />
+                        <Label htmlFor={`stage-req-${idx}`} className="text-xs font-medium cursor-pointer">Stage Doc</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                        <Checkbox id={`template-req-${idx}`} checked={req.hasTemplate} onCheckedChange={(c) => updateReq(idx, { hasTemplate: c })} />
+                        <Label htmlFor={`template-req-${idx}`} className="text-xs font-medium cursor-pointer text-orange-600 font-bold">Has Template</Label>
+                    </div>
                   </div>
                 </div>
               ))}

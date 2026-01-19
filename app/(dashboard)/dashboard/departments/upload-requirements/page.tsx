@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useEffect, useState, useMemo } from "react"
 import { cn } from "@/lib/utils"
-import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff, Zap } from "lucide-react"
+import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff, Zap, FileType } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -162,7 +162,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         billingEntity: ctx.billingEntity || r.billingEntity || 'applicant',
         instructions: ctx.instructions || r.instructions || '',
         requirement_context: ctx,
-        web_automation: automationItem?.automation || null
+         web_automation: r.web_automation || automationItem?.automation || null
       }
     })
   }
@@ -436,15 +436,37 @@ const renderMainContent = () => {
   }
 
   const getAutomationDisplay = (req: RequirementTableEntry) => {
+    const indicators = []
+
+    // Web automation indicator
     if (req.web_automation?.automationId) {
-      return (
-        <div className="flex items-center gap-1 text-blue-600">
+      indicators.push(
+        <div key="web-automation" className="flex items-center gap-1 text-blue-600">
           <Zap className="h-3.5 w-3.5 fill-current" />
           <span className="text-[11px] font-medium">{req.web_automation.automationName}</span>
         </div>
       )
     }
-    return <span className="text-gray-400 text-[11px]">None</span>
+
+    // Template indicator
+    if (req.hasTemplate) {
+      indicators.push(
+        <div key="template" className="flex items-center gap-1 text-orange-600">
+          <FileType className="h-3.5 w-3.5 fill-current" />
+          <span className="text-[11px] font-medium">Template</span>
+        </div>
+      )
+    }
+
+    if (indicators.length === 0) {
+      return <span className="text-gray-400 text-[11px]">None</span>
+    }
+
+    return (
+      <div className="flex flex-col gap-1">
+        {indicators}
+      </div>
+    )
   }
 
   const getDocumentsDisplay = (req: RequirementTableEntry) => {

@@ -33,10 +33,11 @@ interface Field {
 }
 
 interface ExtractionPreviewProps {
-  documentName: string;
-  extractedData: Record<string, any>;
-  fields: Field[];
-  onDataChange: (fieldName: string, value: any) => void;
+  // Single document mode props
+  documentName?: string;
+  extractedData?: Record<string, any>;
+  fields?: Field[];
+  onDataChange?: (fieldName: string, value: any) => void;
   onVerify?: () => void;
   onRemoveFile?: () => void;
   onDelete?: (doc?: any) => Promise<void> | void;
@@ -62,6 +63,20 @@ interface ExtractionPreviewProps {
   onDownloadSuccess?: () => void;
   onDownloadError?: (error: Error) => void;
   documentId?: string;
+  
+  // Multiple documents mode props
+  documents?: Array<{
+    id: string;
+    fileUrl: string;
+    extractedData: Record<string, any>;
+    fields: Field[];
+    name: string;
+    uploadedAt: string;
+  }>;
+  initialIndex?: number;
+  onDocumentChange?: (index: number) => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 // --- HELPER COMPONENTS ---
@@ -87,7 +102,26 @@ const ValueCell = ({ children }) => (
 // ---------------------------------------
 
 const DocumentPreview = ({ fileUrl, fileName, documentName }) => {
-  const isPDF = fileName?.toLowerCase().endsWith('.pdf') || fileUrl?.toLowerCase().endsWith('.pdf');
+  // Enhanced file type detection for PDF and various image formats
+  const getFileType = (url?: string, name?: string) => {
+    const fileExtension = (url || name || '').toLowerCase();
+    
+    if (fileExtension.includes('.pdf')) return 'pdf';
+    if (fileExtension.includes('.jpg') || fileExtension.includes('.jpeg')) return 'image';
+    if (fileExtension.includes('.png')) return 'image';
+    if (fileExtension.includes('.gif')) return 'image';
+    if (fileExtension.includes('.bmp')) return 'image';
+    if (fileExtension.includes('.webp')) return 'image';
+    if (fileExtension.includes('.svg')) return 'image';
+    if (fileExtension.includes('.tiff') || fileExtension.includes('.tif')) return 'image';
+    
+    return 'unknown';
+  };
+
+  const fileType = getFileType(fileUrl, fileName);
+  const isPDF = fileType === 'pdf';
+  const isImage = fileType === 'image';
+  const isUnsupported = fileType === 'unknown';
 
   // State for image transformations
   const [zoom, setZoom] = useState(1);
@@ -121,9 +155,9 @@ const DocumentPreview = ({ fileUrl, fileName, documentName }) => {
         {displayUrl ? (
           isPDF ? (
             <PDFViewer url={displayUrl} />
-          ) : (
+          ) : isImage ? (
             <>
-              {/* Toolbar */}
+              {/* Toolbar for images */}
               <div className="absolute top-2 right-2 z-10 bg-black/60 backdrop-blur-sm rounded-lg p-1 flex items-center space-x-1 border border-white/10 shadow-lg">
                 <Button variant="ghost" size="icon" onClick={handleZoomIn} className="h-7 w-7 text-white hover:bg-white/20" title="Zoom In">
                   <ZoomIn size={16} />
@@ -160,10 +194,21 @@ const DocumentPreview = ({ fileUrl, fileName, documentName }) => {
                     fill
                     className="object-contain"
                     priority
+                    onError={(e) => {
+                      console.error('Image failed to load:', e);
+                      // Fallback for broken images
+                      e.currentTarget.style.display = 'none';
+                    }}
                   />
                 </div>
               </div>
             </>
+          ) : (
+            <div className="flex items-center justify-center h-full flex-col gap-2">
+              <FileText className="h-12 w-12 text-gray-300" />
+              <span className="text-gray-400 text-sm">Unsupported file type</span>
+              <span className="text-gray-500 text-xs">({fileName || 'Unknown format'})</span>
+            </div>
           )
         ) : (
           <div className="flex items-center justify-center h-full flex-col gap-2">
@@ -178,6 +223,7 @@ const DocumentPreview = ({ fileUrl, fileName, documentName }) => {
 
 
 export const ExtractionPreview = ({
+  // Single document mode props
   documentName,
   extractedData,
   fields = [],
@@ -202,19 +248,46 @@ export const ExtractionPreview = ({
   onDownloadError,
   onSave,
   documentId,
+  
+  // Multiple documents mode props
+  documents,
+  initialIndex = 0,
+  onDocumentChange,
+  open,
+  onOpenChange,
 }: ExtractionPreviewProps) => {
-  console.log('🔍 ExtractionPreview - Props:', {
-    documentName,
-    hasFileUrl: !!fileUrl,
-    hasFields: fields?.length > 0,
-    expanded,
-    showSaveButton,
-    documentId
-  });
-
-  const [isOpen, setIsOpen] = useState(() => {
-    console.log('🔍 ExtractionPreview - Initial isOpen state:', expanded);
+  // Determine if we're in multiple documents mode
+  const isMultiDocumentMode = !!documents && documents.length > 0;
+  
+  // State for current document index in multi-document mode
+  const [currentIndex, setCurrentIndex] = useState(initialIndex);
+  
+  // Get current document data
+  const currentDoc = isMultiDocumentMode ? documents[currentIndex] : null;
+  
+  // Use current document data if in multi-document mode, otherwise use single document props
+  const currentDocumentName = isMultiDocumentMode ? currentDoc?.name : documentName;
+  const currentFileUrl = isMultiDocumentMode ? currentDoc?.fileUrl : fileUrl;
+  const currentFileName = isMultiDocumentMode ? currentDoc?.name : fileName;
+  const currentExtractedData = isMultiDocumentMode ? currentDoc?.extractedData : extractedData;
+  const currentFields = isMultiDocumentMode ? currentDoc?.fields : fields;
+  const currentDocumentId = isMultiDocumentMode ? currentDoc?.id : documentId;
+  
+  // Use open/onOpenChange for multi-document mode, otherwise use internal state
+  const [internalIsOpen, setInternalIsOpen] = useState(() => {
     return expanded;
+  });
+  const isOpen = isMultiDocumentMode ? (open !== undefined ? open : internalIsOpen) : internalIsOpen;
+  const setIsOpen = isMultiDocumentMode ? (onOpenChange || (() => {})) : setInternalIsOpen;
+  
+  console.log('🔍 ExtractionPreview - Props:', {
+    documentName: currentDocumentName,
+    hasFileUrl: !!currentFileUrl,
+    hasFields: currentFields?.length > 0,
+    isMultiDocumentMode,
+    totalDocuments: isMultiDocumentMode ? documents.length : 1,
+    currentIndex: isMultiDocumentMode ? currentIndex : 0,
+    documentId: currentDocumentId
   });
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -227,7 +300,7 @@ export const ExtractionPreview = ({
 
  const formattedData = useMemo(() => {
   const result: Record<string, any> = {};
-  const safeFields = fields || []; // Fallback
+  const safeFields = currentFields || []; // Use currentFields instead of fields
   
   safeFields.forEach(field => {
       if (!field?.name) return;
@@ -243,12 +316,12 @@ export const ExtractionPreview = ({
         return path.split('.').reduce((o, p) => o?.[p], obj);
       };
 
-      let value = extractedData[snakeCase] ||
-        extractedData[field?.id] ||
-        (field?.name ? extractedData[field.name] : '') ||
-        (field?.name ? extractedData[field.name.toLowerCase()] : '') ||
-        (field?.name ? getNestedValue(extractedData, field.name) : '') ||
-        getNestedValue(extractedData, snakeCase) ||
+      let value = currentExtractedData[snakeCase] || // Use currentExtractedData
+        currentExtractedData[field?.id] ||
+        (field?.name ? currentExtractedData[field.name] : '') ||
+        (field?.name ? currentExtractedData[field.name.toLowerCase()] : '') ||
+        (field?.name ? getNestedValue(currentExtractedData, field.name) : '') ||
+        getNestedValue(currentExtractedData, snakeCase) ||
         '';
 
       if (field?.name && (field.name.toLowerCase() === 'sex' || field.name.toLowerCase() === 'gender')) {
@@ -270,16 +343,16 @@ export const ExtractionPreview = ({
       result[field.name] = value;
     });
     return result;
-  }, [extractedData, fields]);
+  }, [currentExtractedData, currentFields]); // Use current values in dependencies
 
   useEffect(() => {
-  // Only sync if the source data reference has actually changed 
+  // Only sync if source data reference has actually changed 
   // (e.g., parent fetched new data from DB)
-  if (extractedData !== lastSyncedData.current) {
+  if (currentExtractedData !== lastSyncedData.current) {
     setLocalData(formattedData);
-    lastSyncedData.current = extractedData;
+    lastSyncedData.current = currentExtractedData;
   }
-}, [formattedData, extractedData]);
+}, [formattedData, currentExtractedData]); // Use currentExtractedData
 
   const handleFieldChange = (field: string, value: any) => {
     setLocalData(prev => ({
@@ -297,12 +370,12 @@ export const ExtractionPreview = ({
 
       // Create document data with proper ID handling
       const documentData = {
-        file_path: fileUrl,
-        file_name: fileName,
-        document_name: documentName,
-        extracted_details: extractedData,
+        file_path: currentFileUrl, // Use current values
+        file_name: currentFileName,
+        document_name: currentDocumentName,
+        extracted_details: currentExtractedData,
         document_type: type,
-        id: docData?.id || file?.id || documentId,
+        id: docData?.id || file?.id || currentDocumentId, // Use currentDocumentId
         ...(docData || {}),
         ...(file || {})
       };
@@ -501,188 +574,218 @@ const handleSave = async () => {
   }
 };
 
-  const renderField = (field: Field, index: number) => {
-    const value = localData[field.name];
-    const isEven = index % 2 === 0;
+const renderField = (field: Field, index: number) => {
+  const value = localData[field.name];
+  const isEven = index % 2 === 0;
 
-    if (Array.isArray(value)) {
-      return (
-        <RowWrapper key={field.id} className="items-start" isEven={isEven}>
-          <LabelCell>{field?.name?.replace(/_/g, ' ') || 'Unnamed Field'}</LabelCell>
-          <div className="w-full sm:flex-1 p-2">
-            <div className="space-y-3">
-              {value.length === 0 && <span className="text-sm text-gray-400 italic">No entries found</span>}
-              {value.map((item, i) => (
-                <div key={i} className="p-3 border rounded-md bg-white shadow-sm text-sm">
-                  {Object.entries(item).map(([key, val]) => (
-                    <div key={key} className="grid grid-cols-3 gap-2 mb-1 border-b last:border-b-0 pb-1 last:pb-0 border-gray-100">
-                      <span className="font-medium text-gray-500 capitalize text-xs">{key.replace(/_/g, ' ')}:</span>
-                      <span className="col-span-2 text-gray-900 break-words">{String(val || '-')}</span>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </div>
-        </RowWrapper>
-      );
-    }
-
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      return (
-        <RowWrapper key={field.id} className="items-start" isEven={isEven}>
-          <LabelCell>{field?.name?.replace(/_/g, ' ') || 'Unnamed Field'}</LabelCell>
-          <div className="w-full sm:flex-1 p-2">
-            <div className="p-3 border rounded-md bg-white shadow-sm">
-              {Object.entries(value).map(([key, val]) => (
-                <div key={key} className="grid grid-cols-3 gap-2 text-sm mb-1 border-b last:border-b-0 pb-1 last:pb-0 border-gray-100">
-                  <span className="font-medium text-gray-500 capitalize text-xs">{key.replace(/_/g, ' ')}:</span>
-                  <span className="col-span-2 text-gray-900 break-words">{String(val || '-')}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </RowWrapper>
-      );
-    }
-
+  if (Array.isArray(value)) {
     return (
-      <RowWrapper key={field.id} isEven={isEven}>
+      <RowWrapper key={field.id} className="items-start" isEven={isEven}>
         <LabelCell>{field?.name?.replace(/_/g, ' ') || 'Unnamed Field'}</LabelCell>
-        <ValueCell>
-          <Input
-            value={value || ''}
-            onChange={(e) => handleFieldChange(field.name, e.target.value)}
-            className="border-transparent focus:border-blue-500 hover:border-gray-200 focus:ring-1 focus:ring-blue-500 bg-transparent shadow-none h-8 text-sm transition-all px-2"
-            readOnly={!onDataChange}
-            placeholder="-"
-          />
-        </ValueCell>
+        <div className="w-full sm:flex-1 p-2">
+          <div className="space-y-3">
+            {value.length === 0 && <span className="text-sm text-gray-400 italic">No entries found</span>}
+            {value.map((item, i) => (
+              <div key={i} className="p-3 border rounded-md bg-white shadow-sm text-sm">
+                {Object.entries(item).map(([key, val]) => (
+                  <div key={key} className="grid grid-cols-3 gap-2 mb-1 border-b last:border-b-0 pb-1 last:pb-0 border-gray-100">
+                    <span className="font-medium text-gray-500 capitalize text-xs">{key.replace(/_/g, ' ')}:</span>
+                    <span className="col-span-2 text-gray-900 break-words">{String(val || '-')}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
       </RowWrapper>
     );
-  };
+  }
 
-  const content = (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
-      {/* Document Preview - Fixed Height */}
-      <div className="lg:col-span-2 h-[75vh]">
-        <DocumentPreview
-          fileUrl={fileUrl}
-          fileName={fileName}
-          documentName={documentName}
-        />
-      </div>
-
-      {/* Extracted Data - Fixed Height with Overflow */}
-      <div className="lg:col-span-1 h-[75vh] shadow-sm rounded-lg flex flex-col">
-        <div className={`h-full flex flex-col rounded-lg border ${getStylesByType?.(type || 'principal')?.getBgColor() || 'bg-white'} ${getStylesByType?.(type || 'principal')?.getBorderColor() || 'border-gray-200'} overflow-hidden`}>
-          {/* Header Section */}
-          <div className="p-4 border-b border-gray-200 bg-white flex-shrink-0">
-            <div className="flex justify-between items-center">
-              <h3 className="text-lg font-bold text-gray-800">Extracted Details</h3>
-              <div className="flex items-center space-x-2">
-                <DocumentActions
-                  document={{
-                    ...localData,
-                    fileUrl,
-                    fileName,
-                    documentName,
-                    type,
-                    file,
-                    document_display_name: documentName,
-                    document_id: type,
-                    extracted_details: {
-                      ...extractedData,
-                      ...localData
-                    },
-                    id: file?.id || documentId,
-                    file_path: fileUrl
-                  }}
-                  documentTypes={documentTypes || []}
-                  supabase={supabase}
-                  onSave={onSave ? handleSave : undefined}
-                  onDelete={onDelete ? handleDelete : undefined}
-                  // Pass the enhanced local handler
-                  onRetry={handleRetryExtraction}
-                  onDownloadSuccess={() => toast.success('Download started')}
-                  onDownloadError={(error) => toast.error(error.message || 'Download failed')}
-                  className="ml-auto"
-                  showLabels={true}
-                  showDeleteConfirmation={true}
-                  deleteConfirmationTitle="Delete Document"
-                  deleteConfirmationDescription="Are you sure you want to delete this document? This will remove it from storage and update the task stages."
-                />
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return (
+      <RowWrapper key={field.id} className="items-start" isEven={isEven}>
+        <LabelCell>{field?.name?.replace(/_/g, ' ') || 'Unnamed Field'}</LabelCell>
+        <div className="w-full sm:flex-1 p-2">
+          <div className="p-3 border rounded-md bg-white shadow-sm">
+            {Object.entries(value).map(([key, val]) => (
+              <div key={key} className="grid grid-cols-3 gap-2 text-sm mb-1 border-b last:border-b-0 pb-1 last:pb-0 border-gray-100">
+                <span className="font-medium text-gray-500 capitalize text-xs">{key.replace(/_/g, ' ')}:</span>
+                <span className="col-span-2 text-gray-900 break-words">{String(val || '-')}</span>
               </div>
-            </div>
-
-            {extractionStatus === 'failed' && (
-              <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-xs">
-                <AlertTriangle className="inline-block w-4 h-4 mr-2 -mt-1" />
-                Extraction failed. Please verify manually.
-              </div>
-            )}
+            ))}
           </div>
-
-          {/* 2. Table Column Headers (Fixed) */}
-          <div className="flex bg-gray-100 border-b border-gray-200 text-xs font-bold text-gray-500 uppercase tracking-wider flex-shrink-0">
-            <div className="w-full sm:w-[160px] p-3 border-r border-gray-200">Field</div>
-            <div className="flex-1 p-3">Value</div>
-          </div>
-
-          {/* 3. Scrollable List Area (Takes remaining height) */}
-          <div className="flex-1 overflow-y-auto bg-white scrollbar-thin scrollbar-thumb-gray-200 scrollbar-track-transparent">
-            <div className="flex flex-col">
-              {fields
-                .sort((a, b) => {
-                  const order = ['name', 'company_name', 'date', 'reference_number', 'file_number'];
-                  const aName = a?.name?.toLowerCase?.() || '';
-                  const bName = b?.name?.toLowerCase?.() || '';
-                  const aIndex = order.indexOf(aName);
-                  const bIndex = order.indexOf(bName);
-                  return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
-                })
-                .map((field, index) => renderField(field, index))}
-            </div>
-
-            {/* Comment Section (Scrolls with content) */}
-            {extractedData?.comment && (
-              <div className="p-4 border-t border-gray-200 bg-yellow-50/30">
-                <h4 className="text-xs font-bold text-gray-500 mb-2 uppercase">Upload Comment</h4>
-                <div className="p-3 bg-white border border-gray-200 rounded-md text-sm text-gray-700 italic">
-                  "{extractedData.comment}"
-                </div>
-              </div>
-            )}
-
-            {/* Bottom Padding */}
-            <div className="h-4"></div>
-          </div>
-
         </div>
-      </div>
-    </div>
-  );
-
-  if (expanded) {
-    return content;
+      </RowWrapper>
+    );
   }
 
   return (
-    <>
-      <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent className="max-w-[98vw] max-h-[98vh] h-[95vh] p-0 overflow-hidden flex flex-col bg-gray-50">
-          <DialogHeader className="p-4 border-b bg-white shrink-0">
-            <DialogTitle>
-              Document Details: {documentName || 'Untitled Document'} {extractedData?.name || extractedData?.fullName || extractedData?.clientName || 'Unknown Individual'}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 overflow-auto p-4 flex items-start justify-center">
-            <div className="w-full max-w-[1800px]">
-              {content}
+    <RowWrapper key={field.id} className="items-start" isEven={isEven}>
+      <LabelCell>{field?.name?.replace(/_/g, ' ') || 'Unnamed Field'}</LabelCell>
+      <div className="w-full sm:flex-1 p-2">
+        <span className="text-gray-900 break-words">{String(value || '-')}</span>
+      </div>
+    </RowWrapper>
+  );
+};
+
+const content = (
+  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
+    {/* Document Preview - Fixed Height */}
+    <div className="lg:col-span-2 h-[75vh]">
+      <DocumentPreview
+        fileUrl={currentFileUrl}
+        fileName={currentFileName}
+        documentName={currentDocumentName}
+      />
+    </div>
+
+    {/* Extracted Data - Fixed Height with Overflow */}
+    <div className="lg:col-span-1 h-[75vh] shadow-sm rounded-lg flex flex-col">
+      <div className={`h-full flex flex-col rounded-lg border ${getStylesByType?.(type || 'principal')?.getBgColor() || 'bg-white'} ${getStylesByType?.(type || 'principal')?.getBorderColor() || 'border-gray-200'} overflow-hidden`}>
+        {/* Header Section */}
+        <div className="p-4 border-b border-gray-200 bg-white flex-shrink-0">
+          <div className="flex justify-between items-center">
+            <h3 className="text-lg font-bold text-gray-800">Extracted Details</h3>
+            <div className="flex items-center space-x-2">
+              <DocumentActions
+                document={{
+                  ...localData,
+                  fileUrl: currentFileUrl,
+                  fileName: currentFileName,
+                  documentName: currentDocumentName,
+                  type,
+                  file,
+                  document_display_name: currentDocumentName,
+                  document_id: type,
+                  extracted_details: {
+                    ...currentExtractedData,
+                    ...localData
+                  },
+                  id: file?.id || currentDocumentId,
+                  file_path: currentFileUrl
+                }}
+                documentTypes={documentTypes || []}
+                supabase={supabase}
+                onSave={onSave ? handleSave : undefined}
+                onDelete={onDelete ? handleDelete : undefined}
+                onRetry={handleRetryExtraction}
+                onDownloadSuccess={() => toast.success('Download started')}
+                onDownloadError={(error) => toast.error(error.message || 'Download failed')}
+                className="ml-auto"
+                showLabels={true}
+                showDeleteConfirmation={true}
+                deleteConfirmationTitle="Delete Document"
+                deleteConfirmationDescription="Are you sure you want to delete this document? This will remove it from storage and update task stages."
+              />
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
+
+          {extractionStatus === 'failed' && (
+            <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-xs">
+              <AlertTriangle className="inline-block w-4 h-4 mr-2 -mt-1" />
+              Extraction failed. Please verify manually.
+            </div>
+          )}
+        </div>
+
+        {/* 2. Table Column Headers (Fixed) */}
+        <div className="flex bg-gray-100 border-b border-gray-200 text-xs font-bold text-gray-500 uppercase tracking-wider flex-shrink-0">
+          <div className="w-full sm:w-[160px] p-3 border-r border-gray-200">Field</div>
+          <div className="flex-1 p-3">Value</div>
+        </div>
+
+        {/* 3. Scrollable List Area (Takes remaining height) */}
+        <div className="flex-1 overflow-y-auto bg-white scrollbar-thin scrollbar-thumb-gray-200 scrollbar-track-transparent">
+          <div className="flex flex-col">
+            {currentFields
+              .sort((a, b) => {
+                const order = ['name', 'company_name', 'date', 'reference_number', 'file_number'];
+                const aName = a?.name?.toLowerCase?.() || '';
+                const bName = b?.name?.toLowerCase?.() || '';
+                const aIndex = order.indexOf(aName);
+                const bIndex = order.indexOf(bName);
+                return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
+              })
+              .map((field, index) => renderField(field, index))}
+          </div>
+
+          {/* Comment Section (Scrolls with content) */}
+          {currentExtractedData?.comment && (
+            <div className="p-4 border-t border-gray-200 bg-yellow-50/30">
+              <h4 className="text-xs font-bold text-gray-500 mb-2 uppercase">Upload Comment</h4>
+              <div className="p-3 bg-white border border-gray-200 rounded-md text-sm text-gray-700 italic">
+                "{currentExtractedData.comment}"
+              </div>
+            </div>
+          )}
+
+          {/* Bottom Padding */}
+          <div className="h-4"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+if (expanded) {
+  return content;
+}
+
+return (
+  <Dialog open={isOpen} onOpenChange={setIsOpen}>
+    <DialogContent className="max-w-[98vw] max-h-[98vh] h-[95vh] p-0 overflow-hidden flex flex-col bg-gray-50">
+      <DialogHeader className="p-4 border-b bg-white shrink-0">
+        {/* Document Navigation for Multi-Document Mode */}
+        {isMultiDocumentMode && documents.length > 1 && (
+          <div className="flex items-center justify-between mb-3 pb-3 border-b">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const newIndex = Math.max(0, currentIndex - 1);
+                  setCurrentIndex(newIndex);
+                  onDocumentChange?.(newIndex);
+                }}
+                disabled={currentIndex === 0}
+                className="h-8"
+              >
+                Previous
+              </Button>
+              <span className="text-sm font-medium">
+                Document {currentIndex + 1} of {documents.length}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const newIndex = Math.min(documents.length - 1, currentIndex + 1);
+                  setCurrentIndex(newIndex);
+                  onDocumentChange?.(newIndex);
+                }}
+                disabled={currentIndex === documents.length - 1}
+                className="h-8"
+              >
+                Next
+              </Button>
+            </div>
+            <div className="text-xs text-gray-500">
+              {currentDoc?.uploadedAt && new Date(currentDoc.uploadedAt).toLocaleDateString()}
+            </div>
+          </div>
+        )}
+        
+        <DialogTitle>
+          Document Details: {currentDocumentName || 'Untitled Document'} {currentExtractedData?.name || currentExtractedData?.fullName || currentExtractedData?.clientName || 'Unknown Individual'}
+        </DialogTitle>
+      </DialogHeader>
+      <div className="flex-1 overflow-auto p-4 flex items-start justify-center">
+        <div className="w-full max-w-[1800px]">
+          {content}
+        </div>
+      </div>
+    </DialogContent>
+  </Dialog>
+);
 };

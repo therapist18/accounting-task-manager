@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command"
 import { Badge } from "@/components/ui/badge"
-import { FileText, Zap, Webhook, Users, Check, ChevronsUpDown, Search, Eraser, Trash2 } from "lucide-react"
+import { FileText, Zap, Webhook, Users, Check, ChevronsUpDown, Search, Eraser, Trash2, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "@/hooks/use-toast"
 import supabase from "@/lib/supabase/client"
@@ -62,36 +62,100 @@ export function EditRequirementDialog({
     requiredDocumentCount: 1,
     instructions: '',
     isStageDocument: false, // Added stage document field
-    category: 'general' // Added category field
+    category: 'general', // Added category field
+    hasTemplate: false // Added has template field
   })
-  
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
   const [automationTypes, setAutomationTypes] = useState<any[]>([])
   const [loadingKycDocs, setLoadingKycDocs] = useState(false)
 
+  // --- EditRequirementDialog.tsx ---
+
+useEffect(() => {
+  if (requirement && isOpen) {
+    console.log('📦 [EditRequirementDialog] Incoming Requirement:', requirement);
+    
+    // 1. Resolve automation data source
+    // In your logs, web_automation was null, but we'll check root as well
+    const webAuto = requirement.web_automation || {};
+    
+    // 2. Greedy search for ID and Name
+    const automationId = 
+      webAuto.automationId || 
+      webAuto.automation_id || 
+      requirement.automationId || 
+      requirement.automation_id || 
+      '';
+
+    const webFormName = 
+      webAuto.webFormName || 
+      webAuto.web_form_name || 
+      requirement.webFormName || 
+      requirement.web_form_name || 
+      '';
+
+    // 3. Set the visibility flag
+    const hasWebForm = !!automationId || requirement.hasWebForm === true;
+
+    setFormData({
+      ...requirement,
+      name: requirement.name || '',
+      description: requirement.description || '',
+      type: requirement.type || 'standard',
+      isVisible: requirement.isVisible !== false,
+      isRequired: requirement.isRequired !== false,
+      kycDocumentIds: requirement.kyc_document_ids || (requirement.kyc_document_id ? [requirement.kyc_document_id] : []),
+      
+      // --- Automation Population ---
+      hasWebForm: hasWebForm,
+      webFormName: webFormName,
+      automationId: automationId ? String(automationId) : '',
+      
+      applicantTypes: requirement.applicantTypes || (requirement.applicantType ? [requirement.applicantType] : ['principal']),
+      requiredDocumentCount: requirement.requiredDocumentCount || 1,
+      instructions: requirement.instructions || '',
+      isStageDocument: requirement.isStageDocument || false,
+      category: requirement.category || 'general',
+      hasTemplate: requirement.hasTemplate || false
+    });
+
+    fetchKycDocuments();
+    fetchAutomationTypes();
+  }
+}, [requirement, isOpen]);
+
   useEffect(() => {
-    if (requirement && isOpen) {
-      setFormData({
-        ...requirement,
-        name: requirement.name || '',
-        description: requirement.description || '',
-        type: requirement.type || 'standard',
-        isVisible: requirement.isVisible !== false,
-        isRequired: requirement.isRequired !== false,
-        kycDocumentIds: requirement.kyc_document_ids || (requirement.kyc_document_id ? [requirement.kyc_document_id] : []), // Backward compatibility
-        hasWebForm: !!requirement.web_automation?.automationId || requirement.hasWebForm,
-        webFormName: requirement.web_automation?.webFormName || requirement.webFormName || '',
-        automationId: requirement.web_automation?.automationId || requirement.automationId || '',
-        applicantTypes: requirement.applicantTypes || (requirement.applicantType ? [requirement.applicantType] : ['principal']), // Backward compatibility
-        requiredDocumentCount: requirement.requiredDocumentCount || 1,
-        instructions: requirement.instructions || '',
-        isStageDocument: requirement.isStageDocument || false, // Added stage document field
-        category: requirement.category || 'general' // Added category field
-      })
-      fetchKycDocuments()
-      fetchAutomationTypes()
+    const fetchTemplates = async () => {
+      const docIds = formData.kycDocumentIds || [];
+      if (docIds.length === 0 || !formData.hasTemplate) {
+        setTemplates([]);
+        return;
+      }
+
+      setLoadingTemplates(true);
+      try {
+        const { data, error } = await supabase
+          .from('acc_portal_templates')
+          .select('*')
+          .in('document_id', docIds)
+          .or('banks_associated.is.null,banks_associated.eq.[]')
+          .order('file_name', { ascending: true });
+
+        if (error) throw error;
+        setTemplates(data || []);
+      } catch (error) {
+        console.error("Error fetching templates:", error);
+      } finally {
+        setLoadingTemplates(false);
+      }
+    };
+
+    if (isOpen) {
+      fetchTemplates();
     }
-  }, [requirement, isOpen])
+  }, [formData.kycDocumentIds, formData.hasTemplate, isOpen]);
 
   const fetchKycDocuments = async () => {
     try {
@@ -103,10 +167,25 @@ export function EditRequirementDialog({
     }
   }
 
-  const fetchAutomationTypes = async () => {
-    const { data } = await supabase.from('tm_automations').select('*').eq('is_active', true).order('name')
-    setAutomationTypes(data || [])
+const fetchAutomationTypes = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('tm_automations')
+      .select('*')
+      .eq('is_active', true)
+      .order('name');
+      
+    if (error) throw error;
+    
+    if (data) {
+      setAutomationTypes(data);
+      // Force the form to re-evaluate the Select component's displayed value
+      setFormData(prev => ({ ...prev })); 
+    }
+  } catch (err) {
+    console.error("Error fetching automations:", err);
   }
+};
 
   const updateField = (field: string, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -128,7 +207,7 @@ export function EditRequirementDialog({
   const getSelectedDocumentNames = () => {
     const selectedIds = formData.kycDocumentIds || []
     if (selectedIds.length === 0) return []
-    
+
     return selectedIds.map(id => {
       const doc = kycDocuments.find(d => d.id.toString() === id)
       return doc?.display_name || doc?.name || `Document ${id}`
@@ -137,45 +216,47 @@ export function EditRequirementDialog({
 
   const handleSubmit = async () => {
     if (!formData.name.trim()) return
-    
+
     setIsSubmitting(true)
     try {
       let web_automation = null
       if (formData.hasWebForm && formData.automationId) {
         const auto = automationTypes.find(a => String(a.id) === String(formData.automationId))
+        console.log('💾 [EditRequirementDialog] Found Automation for Save:', auto);
+        
         web_automation = {
           automationId: formData.automationId,
-          automationName: auto?.name,
+          automationName: auto?.name || '',
           webFormName: formData.webFormName,
-          webhookUrl: auto?.webhook_url
+          webhookUrl: auto?.webhook_url || ''
         }
       }
 
-      // Create updated requirement with only new JSON column structure
       const updatedRequirement = {
+        ...requirement, // Preserve other fields like 'order'
         id: formData.id,
         name: formData.name.trim(),
         description: formData.description || '',
         type: formData.type,
-        order: formData.order || 0,
         isVisible: formData.isVisible,
         isRequired: formData.isRequired,
         is_mandatory: formData.isRequired,
-        // New JSON columns only
         applicantTypes: formData.applicantTypes || ['principal'],
         kyc_document_ids: formData.kycDocumentIds || [],
         requiredDocumentCount: formData.requiredDocumentCount || 1,
         instructions: formData.instructions || '',
-        isStageDocument: formData.isStageDocument || false, // Added stage document field
-        category: 'processing', // Force to 'processing' for Upload Processing Requirements section
-        web_automation,
+        isStageDocument: formData.isStageDocument || false,
+        category: formData.category || 'processing', 
+        hasTemplate: formData.hasTemplate || false,
+           web_automation: web_automation, 
         updated_at: new Date().toISOString()
-        // Legacy fields removed: applicantType, kyc_document_id
       }
 
+      console.log('📤 [EditRequirementDialog] Saving Updated Requirement:', updatedRequirement);
       await onSave(updatedRequirement)
       onOpenChange(false)
     } catch (error) {
+      console.error('❌ [EditRequirementDialog] Save Error:', error);
       toast({ title: 'Error', description: 'Failed to save', variant: 'destructive' })
     } finally {
       setIsSubmitting(false)
@@ -254,7 +335,7 @@ export function EditRequirementDialog({
           </div>
 
           <div className="space-y-3 bg-slate-50 p-4 rounded-lg border">
-            <Label className="flex items-center gap-2 text-primary font-semibold"><FileText className="h-4 w-4"/> Document Mapping</Label>
+            <Label className="flex items-center gap-2 text-primary font-semibold"><FileText className="h-4 w-4" /> Document Mapping</Label>
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="outline" className="w-full justify-between bg-white">
@@ -286,7 +367,7 @@ export function EditRequirementDialog({
                     </CommandGroup>
                     <CommandSeparator />
                     <CommandGroup>
-                       <CommandItem onSelect={() => updateField('kycDocumentIds', [])} className="justify-center text-destructive font-medium cursor-pointer">
+                      <CommandItem onSelect={() => updateField('kycDocumentIds', [])} className="justify-center text-destructive font-medium cursor-pointer">
                         <Eraser className="mr-2 h-4 w-4" /> Clear Links
                       </CommandItem>
                     </CommandGroup>
@@ -298,7 +379,7 @@ export function EditRequirementDialog({
 
           {/* Stage Document Checkbox */}
           <div className="flex items-center space-x-2">
-            <Checkbox 
+            <Checkbox
               id="stage-document"
               checked={formData.isStageDocument || false}
               onCheckedChange={(checked) => updateField('isStageDocument', checked)}
@@ -308,9 +389,71 @@ export function EditRequirementDialog({
             </Label>
           </div>
 
+          {/* Has Template Checkbox */}
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="has-template"
+              checked={formData.hasTemplate || false}
+              onCheckedChange={(checked) => updateField('hasTemplate', checked)}
+            />
+            <Label htmlFor="has-template" className="text-sm font-medium cursor-pointer">
+              Has Template
+            </Label>
+          </div>
+
+          {formData.hasTemplate && (
+            <div className="border-t pt-4 space-y-3">
+              <Label className="flex items-center gap-2 text-blue-600 font-semibold">
+                <FileText className="h-4 w-4" /> Linked Letter Templates
+              </Label>
+
+              <div className="bg-slate-50 rounded-lg border p-3">
+                {loadingTemplates ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground p-2">
+                    <Loader2 className="h-3 w-3 animate-spin" /> Fetching templates...
+                  </div>
+                ) : templates.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-2">
+                    {templates.map((template) => (
+                      <div key={template.id} className="flex items-center justify-between bg-white p-2 rounded border shadow-sm group">
+                        <div className="flex flex-col overflow-hidden">
+                          <span className="text-sm font-medium truncate">{template.file_name}</span>
+                          <span className="text-[10px] text-muted-foreground truncate opacity-70">
+                            {template.subject || "No subject defined"}
+                          </span>
+                        </div>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-7 text-[10px]">Preview</Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-80 max-h-60 overflow-y-auto">
+                            <div className="space-y-2">
+                              <h4 className="font-medium text-xs border-b pb-1">Content Preview</h4>
+                              <div
+                                className="text-[10px] text-slate-600 leading-relaxed"
+                                dangerouslySetInnerHTML={{
+                                  __html: template.content?.substring(0, 500) + (template.content?.length > 500 ? '...' : '')
+                                }}
+                              />
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-4 bg-white rounded border border-dashed">
+                    <FileText className="h-8 w-8 text-slate-300 mx-auto mb-1" />
+                    <p className="text-xs text-slate-500">No generic templates found for the selected documents.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="border-t pt-4">
             <div className="flex items-center justify-between mb-4">
-              <Label className="flex items-center gap-2"><Zap className="h-4 w-4"/> Web Form Automation</Label>
+              <Label className="flex items-center gap-2"><Zap className="h-4 w-4" /> Web Form Automation</Label>
               <Switch checked={formData.hasWebForm} onCheckedChange={v => updateField('hasWebForm', v)} />
             </div>
             {formData.hasWebForm && (
