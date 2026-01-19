@@ -227,33 +227,96 @@ export const AutomationMappingDialog = ({
         else query = query.is('job_level->>subclass_id', null);
 
         const { data: requirement } = await query.maybeSingle();
-        if (!requirement) return;
-
-        const webItems = requirement.webData || [];
-        setWebData(webItems);
-
-        // Fetch Automations
-        const autoIds = [...new Set(webItems.map(i => i.automationId).filter(Boolean))];
-        if (autoIds.length > 0) {
-          const { data: autos } = await supabase.from('tm_automations').select('*').in('id', autoIds);
-          const mappings = webItems.map((item, idx) => ({
-            entityKey: `wd-${idx}`,
-            entityName: item.documentName || `Form ${idx + 1}`,
-            entityType: 'webdata',
-            automationId: item.automationId,
-            documentId: item.documentId,
-            automation: autos?.find(a => a.id === item.automationId)
-          })).filter(m => m.automationId);
-          setEntityAutomationMappings(mappings);
-          if (mappings.length > 0) setSelectedAutomationId(mappings[0].automationId);
+        if (!requirement) {
+          console.log('❌ No requirement found for job level:', jl);
+          return;
         }
 
-        // Fetch Fields
-        const fieldIds = webItems.flatMap(i => i.fields?.flatMap(f => f.masterFieldIds || []) || []).filter(Boolean);
+        // --- FIXED LOGIC START ---
+        // 1. Collect all potential Automation IDs from both global config and individual requirements
+        const individualRequirements = requirement.requirements?.filter((req: any) => 
+          req.automationId || req.automation_id || req.web_automation?.automationId
+        ) || [];
+
+        const globalAutoIds = requirement.web_automation?.map((auto: any) => auto.automationId).filter(Boolean) || [];
+        const indivAutoIds = individualRequirements.map((req: any) => req.automationId || req.automation_id || req.web_automation?.automationId).filter(Boolean);
+        
+        const allAutomationIds = [...new Set([...globalAutoIds, ...indivAutoIds])];
+        
+        console.log('🤖 All Automation IDs found:', allAutomationIds);
+
+        let finalWebDataItems: any[] = [];
+        let fetchedAutos: any[] = [];
+
+        if (allAutomationIds.length > 0) {
+          // Fetch automation definitions including webdata
+          const { data: autos } = await supabase.from('tm_automations').select('*').in('id', allAutomationIds);
+          fetchedAutos = autos || [];
+          console.log('✅ Fetched automations:', fetchedAutos);
+
+          // 2. Build Unified References
+          const globalRefs = requirement.web_automation || [];
+          const indivRefs = individualRequirements.map((req: any) => ({
+             automationId: req.automationId || req.automation_id || req.web_automation?.automationId,
+             documentName: req.name, // Use requirement name as sidebar label
+             documentId: req.id,
+             // Inherit config
+             ...(req.web_automation || {})
+          }));
+
+          const allRefs = [...globalRefs, ...indivRefs];
+
+          // 3. Map References to Data Objects
+          finalWebDataItems = allRefs.map((ref: any) => {
+            const autoDef = fetchedAutos.find(a => a.id === ref.automationId);
+            return {
+              ...ref,
+              fields: autoDef?.webdata || [],
+              automationName: autoDef?.name, // Fallback name
+              automation: autoDef
+            };
+          }).filter(item => item.automationId); // Ensure valid ID
+
+          setWebData(finalWebDataItems);
+        } else {
+          console.log('ℹ️ No automation IDs found for this requirement');
+          setWebData([]);
+        }
+
+        // 4. Generate Sidebar Mappings
+        const mappings = finalWebDataItems.map((item, idx) => ({
+          entityKey: `wd-${idx}`,
+          entityName: item.documentName || item.automationName || `Flow ${idx + 1}`,
+          entityType: 'webdata',
+          automationId: item.automationId,
+          documentId: item.documentId,
+          automation: item.automation
+        }));
+        
+        console.log('📝 Generated mappings:', mappings);
+        setEntityAutomationMappings(mappings);
+        
+        // Auto-select first mapping if none selected
+        if (mappings.length > 0) {
+            // Check if current selected ID exists in new mappings, if not select first
+            const exists = mappings.some(m => m.automationId === selectedAutomationId);
+            if (!selectedAutomationId || !exists) {
+                setSelectedAutomationId(mappings[0].automationId);
+            }
+        } else {
+          setSelectedAutomationId('');
+        }
+
+        // 5. Fetch Job Fields
+        const fieldIds = finalWebDataItems.flatMap(i => i.fields?.flatMap((f: any) => f.masterFieldIds || []) || []).filter(Boolean);
         if (fieldIds.length > 0) {
           const { data: fields } = await supabase.from('tm_job_fields').select('*').in('id', fieldIds);
           setJobFields(fields?.reduce((acc, f) => ({ ...acc, [f.id.toString()]: f }), {}) || {});
         }
+        // --- FIXED LOGIC END ---
+
+      } catch (error) {
+        console.error('Error in fetchData:', error);
       } finally {
         setIsLoading(false);
       }
@@ -319,6 +382,9 @@ export const AutomationMappingDialog = ({
       const activeWeb = webData.find(w => w.automationId === selectedAutomationId);
       
       activeWeb?.fields?.forEach(f => {
+        // Skip document type fields in form data mapping, they are handled separately or via URLs
+        if (f.fieldType === 'document') return;
+
         const values = (f.masterFieldIds || []).map(mid => {
           const field = jobFields[mid];
           if (!field?.sources?.[0]) return null;
@@ -380,7 +446,12 @@ export const AutomationMappingDialog = ({
 
   // --- RENDER HELPERS ---
   const renderFieldsTable = () => {
-    if (!activeWebEntry?.fields) return <div className="p-12 text-center text-slate-400">No fields configured.</div>;
+    if (!activeWebEntry?.fields || activeWebEntry.fields.length === 0) return <div className="p-12 text-center text-slate-400">No fields configured.</div>;
+    
+    // Filter out document fields from the main table
+    const dataFields = activeWebEntry.fields.filter((f: any) => f.fieldType !== 'document');
+
+    if (dataFields.length === 0) return <div className="p-12 text-center text-slate-400">No data fields configured (only documents).</div>;
 
     return (
       <div className="border rounded-xl bg-white shadow-sm overflow-hidden">
@@ -393,7 +464,7 @@ export const AutomationMappingDialog = ({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {activeWebEntry.fields.map((field, fIdx) => {
+            {dataFields.map((field, fIdx) => {
               const masterIds = field.masterFieldIds || [];
               const sources = masterIds.map(id => {
                 const f = jobFields[id];
@@ -482,10 +553,27 @@ export const AutomationMappingDialog = ({
   };
 
   const renderDocumentsSection = () => {
-    const required = activeWebEntry?.kycDocsUpload || [];
+    // Collect required documents from webdata where fieldType is 'document'
+    const requiredDocs = activeWebEntry?.fields?.filter((f: any) => f.fieldType === 'document') || [];
+    
+    // Also include generic 'kycDocsUpload' property if it exists from legacy configuration
+    const legacyDocs = activeWebEntry?.kycDocsUpload || [];
+
+    // Combine them, preferring the new field structure
+    const allReqs = [...requiredDocs, ...legacyDocs.map((d: any) => ({
+         kycDocumentId: d.kycDocumentId,
+         efnsDisplayName: d.documentName || d.entityType,
+         variableName: d.kycDocumentId
+    }))];
+
+    // Deduplicate by ID
+    const uniqueReqs = Array.from(new Map(allReqs.map(item => [item.kycDocumentId, item])).values());
+
+    if (uniqueReqs.length === 0) return <div className="p-12 text-center text-slate-400">No document assets configured.</div>;
+
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {required.map((req, idx) => {
+        {uniqueReqs.map((req, idx) => {
           const found = documentFiles.find(d => d.document_id === req.kycDocumentId);
           return (
             <Card key={idx} className={cn("overflow-hidden border-2 transition-all", found ? "border-green-100 shadow-sm" : "border-amber-100 shadow-none bg-amber-50/20")}>
@@ -495,8 +583,9 @@ export const AutomationMappingDialog = ({
                     <FileText className="h-5 w-5" />
                   </div>
                   <div>
-                    <h4 className="font-bold text-slate-900 leading-tight">{req.documentName || req.entityType}</h4>
-                    <p className="text-[10px] text-slate-400 font-mono">{req.kycDocumentId}</p>
+                    <h4 className="font-bold text-slate-900 leading-tight">{req.efnsDisplayName || req.name || 'Document'}</h4>
+                    <p className="text-[10px] text-slate-400 font-mono">ID: {req.kycDocumentId}</p>
+                    {req.variableName && <p className="text-[10px] text-blue-400 font-mono">Var: {req.variableName}</p>}
                   </div>
                 </div>
                 {found ? (
@@ -651,7 +740,7 @@ export const AutomationMappingDialog = ({
                           <p className="text-sm text-slate-500">Mapping master database fields to the target automation schema.</p>
                         </div>
                         <Badge variant="outline" className="px-4 py-1 text-blue-600 border-blue-100 bg-blue-50/50">
-                          {activeWebEntry?.fields?.length || 0} Total Fields
+                          {activeWebEntry?.fields?.filter((f: any) => f.fieldType !== 'document').length || 0} Data Fields
                         </Badge>
                       </div>
                       {renderFieldsTable()}
@@ -675,29 +764,15 @@ export const AutomationMappingDialog = ({
         <div className="p-6 border-t bg-white flex justify-between items-center z-20 shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.1)]">
           <Button variant="ghost" className="font-bold text-slate-500 hover:bg-slate-50" onClick={onClose}>Discard Changes</Button>
           
-          <div className="flex items-center gap-4">
-            <div className="hidden md:flex flex-col items-end mr-2">
-              <span className="text-[10px] font-bold text-slate-400 uppercase">Selected Protocol</span>
-              <span className="text-sm font-bold text-slate-700">{selectedMapping?.automation?.name || 'None'}</span>
-            </div>
-            
-            <Button
-              onClick={handleRunAutomation}
-              disabled={isAutomationRunning || !selectedAutomationId || !currentIndividualId}
-              className="bg-blue-600 hover:bg-blue-700 text-white h-12 px-10 rounded-xl font-bold shadow-lg shadow-blue-200 flex items-center gap-3 transition-all hover:scale-[1.02] active:scale-[0.98]"
-            >
-              {isAutomationRunning ? (
-                <>
-                  <Loader2 className="h-5 w-5 animate-spin"/>
-                  <span>Processing...</span>
-                </>
-              ) : (
-                <>
-                  <Zap className="h-5 w-5 fill-white"/>
-                  <span>Execute Workflow</span>
-                </>
-              )}
-            </Button>
+          <div className="flex items-center justify-between">
+          <Button
+            onClick={handleRunAutomation}
+            disabled={isAutomationRunning}
+            className="bg-blue-600 hover:bg-blue-700 text-white h-12 px-10 rounded-xl font-bold shadow-lg shadow-blue-200 flex items-center gap-3 transition-all hover:scale-[1.02] active:scale-[0.98]"
+          >
+            {isAutomationRunning ? <Loader2 className="h-5 w-5 animate-spin" /> : <Zap className="h-5 w-5 fill-white" />}
+            <span>{isAutomationRunning ? 'Executing...' : 'Execute Workflow'}</span>
+          </Button>
           </div>
         </div>
       </DialogContent>

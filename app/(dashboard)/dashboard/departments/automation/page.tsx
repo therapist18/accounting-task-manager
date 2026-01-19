@@ -6,9 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 import { supabase } from "@/lib/supabase/client"
 import { AutomationDialog } from "./components/AutomationDialog"
-import { Loader2, Edit, Trash2, Download, Plus } from "lucide-react"
+import { Loader2, Edit, Trash2, Download, Plus, Search } from "lucide-react"
 import { format } from "date-fns"
 import { toast } from "@/hooks/use-toast"
 
@@ -16,12 +17,23 @@ export default function AutomationPage() {
   const [isAutomationDialogOpen, setIsAutomationDialogOpen] = useState(false)
   const [currentAutomation, setCurrentAutomation] = useState<any>(null)
   const [automations, setAutomations] = useState<any[]>([])
+  const [filteredAutomations, setFilteredAutomations] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
 
   useEffect(() => {
     fetchAutomations()
   }, [])
+
+  useEffect(() => {
+    const filtered = automations.filter(automation => 
+      automation.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      automation.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      automation.category?.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+    setFilteredAutomations(filtered)
+  }, [searchTerm, automations])
 
   const fetchAutomations = async () => {
     try {
@@ -33,6 +45,7 @@ export default function AutomationPage() {
       
       if (error) throw error
       setAutomations(data || [])
+      setFilteredAutomations(data || [])
     } catch (error) {
       console.error('Error fetching automations:', error)
       toast({
@@ -82,6 +95,11 @@ export default function AutomationPage() {
       }
       
       await fetchAutomations()
+      setFilteredAutomations(automations.filter(automation => 
+        automation.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        automation.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        automation.category?.toLowerCase().includes(searchTerm.toLowerCase())
+      ))
       setIsAutomationDialogOpen(false)
       setCurrentAutomation(null)
     } catch (error) {
@@ -119,6 +137,11 @@ export default function AutomationPage() {
       })
       
       await fetchAutomations()
+      setFilteredAutomations(automations.filter(automation => 
+        automation.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        automation.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        automation.category?.toLowerCase().includes(searchTerm.toLowerCase())
+      ))
     } catch (error) {
       console.error('Error deleting automation:', error)
       toast({
@@ -217,18 +240,31 @@ export default function AutomationPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Automation Rules</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle>Automation Rules</CardTitle>
+            <div className="relative w-64">
+              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search automations..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-8"
+              />
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           {loading ? (
             <div className="flex justify-center py-8">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             </div>
-          ) : automations.length === 0 ? (
+          ) : filteredAutomations.length === 0 ? (
             <div className="text-center py-12 space-y-2">
-              <p className="text-muted-foreground">No automations found</p>
+              <p className="text-muted-foreground">
+                {searchTerm ? 'No automations found matching your search' : 'No automations found'}
+              </p>
               <p className="text-sm text-muted-foreground">
-                Get started by creating your first automation
+                {searchTerm ? 'Try adjusting your search terms' : 'Get started by creating your first automation'}
               </p>
               <Button 
                 className="mt-4"
@@ -252,7 +288,7 @@ export default function AutomationPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {automations.map((automation, index) => (
+                  {filteredAutomations.map((automation, index) => (
                     <TableRow key={automation.id}>
                       <TableCell className="font-medium border-r">
                         {index + 1}

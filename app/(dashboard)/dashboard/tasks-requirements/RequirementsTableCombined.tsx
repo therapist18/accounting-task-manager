@@ -69,7 +69,7 @@ const getFileUrl = (filePath: string) => {
   return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
 };
 
-export default function RequirementsTableCombined({ loading, error, filteredGroupedTasks, organizedRequirements, classRequirements, expandedDocuments, toggleDocumentExpansion, renderDocumentStatus, renderClientFieldData, renderReferencesData, hasReferencesColumn, individualNames, companyData, getCurrentRequirements, fuzzyMatch, kycDocuments, documentTypes, mainTab, handleUploadSubmit, handleDeleteDocument, handleRetryExtraction, handleSaveEditedDocument, documentTemplates , allIndividualDocuments, allCompanyDocuments,}: any) {
+export default function RequirementsTableCombined({ loading, error, filteredGroupedTasks, organizedRequirements, classRequirements, expandedDocuments, toggleDocumentExpansion, renderDocumentStatus, renderClientFieldData, renderReferencesData, hasReferencesColumn, individualNames, companyData, getCurrentRequirements, fuzzyMatch, kycDocuments, documentTypes, mainTab, handleUploadSubmit, handleDeleteDocument, handleRetryExtraction, handleSaveEditedDocument, documentTemplates, allIndividualDocuments, allCompanyDocuments, }: any) {
   const [isStageDialogOpen, setIsStageDialogOpen] = useState(false);
   const [selectedStageTask, setSelectedStageTask] = useState<{ task: any, stage: any } | null>(null);
   const [expandedSections, setExpandedSections] = useState({
@@ -933,28 +933,28 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         name: reqItem.documentDefinition?.name || reqItem.name
       }
     };
-    
+
     await handleOpenTemplateGenerator(docItem, task, columnType, columnId);
   };
 
-const getDocumentDataForPreview = useCallback((task: any, reqItem: any, columnType: string, entityId?: number) => {
+  const getDocumentDataForPreview = useCallback((task: any, reqItem: any, columnType: string, entityId?: number) => {
     if (!reqItem) return null;
-    
+
     const kycDocIds = reqItem.kyc_document_ids || (reqItem.kyc_document_id ? [reqItem.kyc_document_id] : []);
     if (kycDocIds.length === 0) return null;
-    
+
     if (columnType === 'company') {
       const companyId = task.participants_details?.find(p => p.type === 'company')?.id || task.company_id;
       const companyDocs = allCompanyDocuments[companyId] || [];
       return companyDocs.find(doc => kycDocIds.includes(doc.kyc_document_id));
     } else {
       const individualId = entityId || task.applicant_details?.id || task.individual_id;
-      
+
       const indDocs = allIndividualDocuments[individualId] || [];
-      
+
       return indDocs.find(doc => kycDocIds.includes(doc.document_id));
     }
-}, [allCompanyDocuments, allIndividualDocuments]);
+  }, [allCompanyDocuments, allIndividualDocuments]);
 
 
   const getDocumentStatusText = useCallback((task: any, docItem: any, columnType: string, entityId?: number) => {
@@ -962,7 +962,7 @@ const getDocumentDataForPreview = useCallback((task: any, reqItem: any, columnTy
       kyc_document_ids: [docItem.id],
       kyc_document_id: docItem.id
     };
-    
+
     const docData = getDocumentDataForPreview(task, reqItem, columnType, entityId);
     return docData ? 'Uploaded' : 'Missing';
   }, [getDocumentDataForPreview]);
@@ -1010,7 +1010,7 @@ const getDocumentDataForPreview = useCallback((task: any, reqItem: any, columnTy
                       Multiple documents of this type
                     </span>
                   )}
-                  
+
                   {/* Template and Automation Indicators */}
                   <div className="flex items-center gap-2 mt-1">
                     {reqItem.hasTemplate && (
@@ -1019,7 +1019,7 @@ const getDocumentDataForPreview = useCallback((task: any, reqItem: any, columnTy
                         <span className="text-[9px] font-medium">Template</span>
                       </div>
                     )}
-                    
+
                     {reqItem.web_automation?.automationId && (
                       <div className="flex items-center gap-1 text-blue-600" title={`Web Form: ${reqItem.web_automation.automationName}`}>
                         <Zap className="h-3 w-3 fill-current" />
@@ -1030,40 +1030,40 @@ const getDocumentDataForPreview = useCallback((task: any, reqItem: any, columnTy
                 </div>
               </TableCell>
 
-           {columnDefinitions.map((col, colIdx) => {
-  const isApplicable = checkApplicability(col.type, reqItem);
-  
-  // Parent now provides getDocumentDataForPreview which checks the pre-filtered state
-  const docData = isApplicable ? getDocumentDataForPreview(col.task, reqItem, col.type, col.id) : null;
+              {columnDefinitions.map((col, colIdx) => {
+                const isApplicable = checkApplicability(col.type, reqItem);
 
-  return (
-    <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-2">
-      {!isApplicable ? (
-        <span className="text-[10px] text-gray-300 font-medium italic">N/A</span>
-      ) : (
-        <div className="flex items-center justify-center gap-1">
-          {/* Generate template button for requirements with templates */}
-          {reqItem.hasTemplate && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
-              onClick={() => handleGenerateTemplate(reqItem, col.task, col.type, col.id)}
-              title={`Generate ${reqItem.documentDefinition?.display_name || reqItem.name} Template`}
-              disabled={isPreparingTemplate}
-            >
-              {isPreparingTemplate ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3 mr-1" />}
-              <span className="text-[10px] font-bold uppercase">Generate</span>
-            </Button>
-          )}
-          
-          {/* Existing document status (upload/view buttons) */}
-          {renderDocumentStatus(col.task, reqItem, col.type, col.id)}
-        </div>
-      )}
-    </TableCell>
-  );
-})}
+                // Parent now provides getDocumentDataForPreview which checks the pre-filtered state
+                const docData = isApplicable ? getDocumentDataForPreview(col.task, reqItem, col.type, col.id) : null;
+
+                return (
+                  <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-2">
+                    {!isApplicable ? (
+                      <span className="text-[10px] text-gray-300 font-medium italic">N/A</span>
+                    ) : (
+                      <div className="flex items-center justify-center gap-1">
+                        {/* Generate template button for requirements with templates */}
+                        {reqItem.hasTemplate && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                            onClick={() => handleGenerateTemplate(reqItem, col.task, col.type, col.id)}
+                            title={`Generate ${reqItem.documentDefinition?.display_name || reqItem.name} Template`}
+                            disabled={isPreparingTemplate}
+                          >
+                            {isPreparingTemplate ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3 mr-1" />}
+                            <span className="text-[10px] font-bold uppercase">Generate</span>
+                          </Button>
+                        )}
+
+                        {/* Existing document status (upload/view buttons) */}
+                        {renderDocumentStatus(col.task, reqItem, col.type, col.id)}
+                      </div>
+                    )}
+                  </TableCell>
+                );
+              })}
             </TableRow>
 
             {/* Expanded Field Data Rows */}
