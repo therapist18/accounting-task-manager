@@ -69,7 +69,7 @@ const getFileUrl = (filePath: string) => {
   return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
 };
 
-export default function RequirementsTableCombined({ loading, error, filteredGroupedTasks, organizedRequirements, classRequirements, expandedDocuments, toggleDocumentExpansion, renderDocumentStatus, getDocumentDataForPreview, getDocumentStatusText, renderClientFieldData, renderReferencesData, hasReferencesColumn, individualNames, companyData, getCurrentRequirements, fuzzyMatch, kycDocuments, documentTypes, mainTab, handleUploadSubmit, handleDeleteDocument, handleRetryExtraction, handleSaveEditedDocument, documentTemplates }: any) {
+export default function RequirementsTableCombined({ loading, error, filteredGroupedTasks, organizedRequirements, classRequirements, expandedDocuments, toggleDocumentExpansion, renderDocumentStatus, renderClientFieldData, renderReferencesData, hasReferencesColumn, individualNames, companyData, getCurrentRequirements, fuzzyMatch, kycDocuments, documentTypes, mainTab, handleUploadSubmit, handleDeleteDocument, handleRetryExtraction, handleSaveEditedDocument, documentTemplates , allIndividualDocuments, allCompanyDocuments,}: any) {
   const [isStageDialogOpen, setIsStageDialogOpen] = useState(false);
   const [selectedStageTask, setSelectedStageTask] = useState<{ task: any, stage: any } | null>(null);
   const [expandedSections, setExpandedSections] = useState({
@@ -81,193 +81,122 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   const [selectedDocForUpload, setSelectedDocForUpload] = useState<any>(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [previewingDocuments, setPreviewingDocuments] = useState<any>(null);
-
-  // State for the unified template generation dialog
   const [showTemplateGenerator, setShowTemplateGenerator] = useState(false);
   const [selectedLetterInfo, setSelectedLetterInfo] = useState(null);
-
   const [isPreparingTemplate, setIsPreparingTemplate] = useState(false);
   const [masterFields, setMasterFields] = useState<Map<number, any>>(new Map());
   const hasFetchedMasterFields = useRef(false);
-  
-  // Missing state variables for document storage
-  const [allIndividualDocuments, setAllIndividualDocuments] = useState<Record<string, any[]>>({});
-  const [allCompanyDocuments, setAllCompanyDocuments] = useState<Record<string, any[]>>({});
-  
+
   // RequirementsTableCombined.tsx - Around line 105
   const classDocsAndFields = useMemo(() => { return classRequirements?.[0]?.documents_and_fields || []; }, [classRequirements]);
 
-  // Helper to check if a specific document is required for a specific column type
-  const checkApplicability = (colType: string, docConfig: any) => {
-    if (!docConfig) return false;
+  const checkApplicability = (colType: string, requirement: any) => {
+    if (!requirement) return false;
 
-    switch (colType) {
-      case 'company':
-        return !!docConfig.Company;
-      case 'director':
-        return !!docConfig.Directors;
-      case 'principal':
-        // Principal usually maps to Individual, Principal, or Directors flag in individual tasks
-        return !!(docConfig.Principal || docConfig.Individual || docConfig.Directors || docConfig.Employees);
-      case 'dependant':
-        return !!(docConfig.Dependants || docConfig.Dependant); // Handle both spellings
-      case 'understudy':
-        return !!docConfig.Understudy;
-      case 'shareholder':
-        return !!docConfig.Shareholders;
-      default:
-        return false;
-    }
+    // Normalizing colType to match your JSON (e.g., 'director' in table vs 'principal' in JSON)
+    const typeMap: Record<string, string> = {
+      'principal': 'principal',
+      'director': 'principal', // Usually directors are treated as principal requirements in these flows
+      'company': 'company',
+      'dependant': 'dependant',
+      'understudy': 'understudy'
+    };
+
+    const targetType = typeMap[colType] || colType;
+
+    // Check the applicantTypes array or single applicantType string
+    const allowedTypes = requirement.applicantTypes || (requirement.applicantType ? [requirement.applicantType] : []);
+
+    return allowedTypes.includes(targetType);
   };
 
   const columnDefinitions = useMemo(() => {
     const cols = [];
-
     if (!filteredGroupedTasks) return cols;
 
     filteredGroupedTasks.forEach((group, groupIndex) => {
       const task = group.tasks?.[0];
       if (!task) return;
 
-      const applicantDetails = task.applicant_details || {};
       const participants = task.participants_details || [];
+      const applicant = task.applicant_details || {};
 
-      // Determine if this is a company or individual applicant
-      const isCompanyApplicant = applicantDetails.type === 'company';
-
-      // Get company details - either from applicant_details (if company) or from participants (if individual)
-      let companyDetails = isCompanyApplicant
-        ? {
-          id: applicantDetails.id,
-          name: applicantDetails.name,
-          type: 'company'
-        }
-        : participants.find(p => p.type === 'company');
-
-      const companyName = companyDetails?.name ||
-        task.company_name ||
-        companyData[task.company_id]?.company_name ||
-        'Company';
-
-      // 1. Company Column
-      cols.push({
-        type: 'company',
-        id: companyDetails?.id || task.company_id,
-        label: companyName,
-        subLabel: 'Entity',
-        task,
-        groupIndex,
-        isFirstInGroup: true
-      });
-
-      // 2. Individual Target Columns
-      if (isCompanyApplicant) {
-        // For company applicants, show directors from participants
-        const directors = participants.filter(p => {
-          if (p.type !== 'individual') return false;
-          const roles = Array.isArray(p.role) ? p.role : [p.role];
-          return roles.some(r => ['director', 'shareholder'].includes(r?.toLowerCase()));
-        });
-
-        directors.forEach(director => {
-          let role = 'Director';
-          if (director.role) {
-            if (Array.isArray(director.role)) {
-              role = director.role.includes('director') ? 'Director' :
-                director.role.includes('shareholder') ? 'Shareholder' :
-                  director.role[0]?.charAt(0).toUpperCase() + director.role[0]?.slice(1).toLowerCase() || 'Director';
-            } else {
-              role = director.role.toLowerCase() === 'director' ? 'Director' :
-                director.role.toLowerCase() === 'shareholder' ? 'Shareholder' :
-                  director.role.charAt(0).toUpperCase() + director.role.slice(1).toLowerCase();
-            }
-          }
-
-          cols.push({
-            type: 'director',
-            id: director.id,
-            label: director.name || `Director ${director.id}`,
-            subLabel: role,
-            task,
-            groupIndex,
-            role: director.role // Include the raw role data for reference
-          });
-        });
-      } else {
-        // For individual applicants, get role from applicant_details
-        const applicantRole = applicantDetails.role || 'individual';
-        const roleLabel = typeof applicantRole === 'string'
-          ? applicantRole.charAt(0).toUpperCase() + applicantRole.slice(1).toLowerCase()
-          : 'Individual';
-
-        // Use the role as the type for the column (e.g., 'director' instead of 'individual')
+      // 1. FIND COMPANY
+      const companyPart = participants.find(p => p.type === 'company');
+      if (companyPart) {
         cols.push({
-          type: applicantRole.toLowerCase(),
-          id: applicantDetails.id,
-          label: applicantDetails.name || 'Applicant',
-          subLabel: roleLabel,
+          type: 'company',
+          id: companyPart.id,
+          label: companyPart.name,
+          subLabel: 'Entity',
           task,
-          groupIndex,
-          role: applicantRole // Include the raw role data for reference
-        });
-
-        // Add any dependants if they exist
-        const dependants = participants.filter(p => {
-          if (p.type !== 'individual') return false;
-          const roles = Array.isArray(p.role) ? p.role : [p.role];
-          return roles.some(r => ['dependant', 'dependent'].includes(r?.toLowerCase()));
-        });
-
-        dependants.forEach(dependant => {
-          let role = 'Dependant';
-          if (dependant.relationship) {
-            role = typeof dependant.relationship === 'string'
-              ? dependant.relationship.charAt(0).toUpperCase() + dependant.relationship.slice(1).toLowerCase()
-              : 'Dependant';
-          } else if (dependant.role) {
-            const roles = Array.isArray(dependant.role) ? dependant.role : [dependant.role];
-            const mainRole = roles.find(r => r && typeof r === 'string' && !['dependant', 'dependent'].includes(r.toLowerCase()));
-            role = mainRole
-              ? mainRole.charAt(0).toUpperCase() + mainRole.slice(1).toLowerCase()
-              : 'Dependant';
-          }
-
-          cols.push({
-            type: 'dependant',
-            id: dependant.id,
-            label: dependant.name || `Dependant ${dependant.id}`,
-            subLabel: role,
-            task,
-            groupIndex,
-            role: dependant.role, // Include the raw role data for reference
-            relationship: dependant.relationship // Include relationship if available
-          });
+          groupIndex
         });
       }
 
-      // 3. Understudy Column - Check if any task in group is class D and has understudy
-      if (group.tasks.some(t => t.class_id === CLASS_D_ID)) {
-        const understudy = participants.find(p =>
-          p.id === task.understudy_id ||
-          (Array.isArray(p.role) ? p.role.includes('understudy') : p.role === 'understudy')
-        );
+      // 2. FIND PRINCIPAL (Applicant)
+      if (applicant && applicant.type === 'individual') {
+        cols.push({
+          type: 'principal',
+          id: applicant.id,
+          label: applicant.name,
+          subLabel: applicant.role?.toUpperCase() || 'PRINCIPAL',
+          task,
+          groupIndex
+        });
+      }
 
-        if (understudy) {
-          cols.push({
-            type: 'understudy',
-            id: understudy.id,
-            label: understudy.name || 'Understudy',
-            subLabel: 'Understudy',
-            task,
-            groupIndex,
-            role: understudy.role // Include the raw role data for reference
-          });
-        }
+      // 3. FIND DIRECTORS / SHAREHOLDERS
+      const directors = participants.filter(p =>
+        p.type === 'individual' &&
+        (p.role === 'director' || p.role === 'shareholder' || (Array.isArray(p.role) && p.role.includes('director')))
+      );
+      directors.forEach(d => {
+        cols.push({
+          type: 'director',
+          id: d.id,
+          label: d.name,
+          subLabel: 'Director',
+          task,
+          groupIndex
+        });
+      });
+
+      // 4. FIND DEPENDANTS
+      const dependants = participants.filter(p =>
+        p.type === 'individual' &&
+        (p.role === 'dependant' || p.relationship)
+      );
+      dependants.forEach(dep => {
+        cols.push({
+          type: 'dependant',
+          id: dep.id,
+          label: dep.name,
+          subLabel: dep.relationship || 'Dependant',
+          task,
+          groupIndex,
+          relationship: dep.relationship
+        });
+      });
+
+      // 5. FIND UNDERSTUDY (Looking at root "understudy" field)
+      if (task.understudy) {
+        const understudyId = task.understudy;
+        // Try to find name in participants, otherwise use individualNames map
+        const uPart = participants.find(p => p.id === understudyId);
+        cols.push({
+          type: 'understudy',
+          id: understudyId,
+          label: uPart?.name || individualNames[understudyId] || 'Understudy',
+          subLabel: 'Understudy',
+          task,
+          groupIndex
+        });
       }
     });
 
     return cols;
-  }, [filteredGroupedTasks, companyData]);
+  }, [filteredGroupedTasks, individualNames]);
 
   const companySpans = useMemo(() => {
     const spans = [];
@@ -466,76 +395,76 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             }
           });
 
-        if (placeholder.type === 'document_checklist' && placeholder.linked_document_ids) {
-  // Get data source configuration with defaults
-  const dataSource = placeholder.checklist_data_source || {
-    table: 'acc_portal_kyc_uploads',
-    linking_variable: 'company_id',
-    document_id_field: 'kyc_document_id'
-  };
-  
-  const tableName = dataSource.table;
-  
-  console.log('[Query Builder] Document checklist detected:', {
-    placeholder: placeholder.name,
-    dataSource,
-    linkedDocs: placeholder.linked_document_ids
-  });
-  
-  // Initialize table queries if not exists
-  if (!queriesToRun.has(tableName)) {
-    queriesToRun.set(tableName, { docIds: new Set(), links: new Map() });
-  }
-  
-  const tableQueries = queriesToRun.get(tableName);
-  
-  // Add document IDs
-  placeholder.linked_document_ids.forEach(docId => {
-    tableQueries.docIds.add(docId);
-  });
-  
-  // Determine entity type and ID
-  const entityType = Array.isArray(placeholder.entity_type) 
-    ? placeholder.entity_type[0] 
-    : placeholder.entity_type || 'company';
-  
-  const entityId = entityIdMap[entityType] || entityIdMap.company;
-  
-  if (entityId) {
-    // Use the configured linking variable
-    const linkVar = dataSource.linking_variable;
-    
-    if (!tableQueries.links.has(linkVar)) {
-      tableQueries.links.set(linkVar, new Set());
-    }
-    
-    // Handle both single IDs and arrays
-    if (Array.isArray(entityId)) {
-      entityId.forEach(id => {
-        const idValue = id && typeof id === 'object' 
-          ? (id.id || id.director_id || id.individual_id || id.company_id) 
-          : id;
-        if (idValue) tableQueries.links.get(linkVar).add(idValue);
-      });
-    } else {
-      const idValue = entityId && typeof entityId === 'object' 
-        ? (entityId.id || entityId.director_id || entityId.individual_id || entityId.company_id) 
-        : entityId;
-      if (idValue) tableQueries.links.get(linkVar).add(idValue);
-    }
-    
-    console.log('[Query Builder] Added queries:', {
-      table: tableName,
-      linkVar,
-      docIds: [...tableQueries.docIds],
-      entityIds: [...tableQueries.links.get(linkVar)]
-    });
-  }
-}
+          if (placeholder.type === 'document_checklist' && placeholder.linked_document_ids) {
+            // Get data source configuration with defaults
+            const dataSource = placeholder.checklist_data_source || {
+              table: 'acc_portal_kyc_uploads',
+              linking_variable: 'company_id',
+              document_id_field: 'kyc_document_id'
+            };
+
+            const tableName = dataSource.table;
+
+            console.log('[Query Builder] Document checklist detected:', {
+              placeholder: placeholder.name,
+              dataSource,
+              linkedDocs: placeholder.linked_document_ids
+            });
+
+            // Initialize table queries if not exists
+            if (!queriesToRun.has(tableName)) {
+              queriesToRun.set(tableName, { docIds: new Set(), links: new Map() });
+            }
+
+            const tableQueries = queriesToRun.get(tableName);
+
+            // Add document IDs
+            placeholder.linked_document_ids.forEach(docId => {
+              tableQueries.docIds.add(docId);
+            });
+
+            // Determine entity type and ID
+            const entityType = Array.isArray(placeholder.entity_type)
+              ? placeholder.entity_type[0]
+              : placeholder.entity_type || 'company';
+
+            const entityId = entityIdMap[entityType] || entityIdMap.company;
+
+            if (entityId) {
+              // Use the configured linking variable
+              const linkVar = dataSource.linking_variable;
+
+              if (!tableQueries.links.has(linkVar)) {
+                tableQueries.links.set(linkVar, new Set());
+              }
+
+              // Handle both single IDs and arrays
+              if (Array.isArray(entityId)) {
+                entityId.forEach(id => {
+                  const idValue = id && typeof id === 'object'
+                    ? (id.id || id.director_id || id.individual_id || id.company_id)
+                    : id;
+                  if (idValue) tableQueries.links.get(linkVar).add(idValue);
+                });
+              } else {
+                const idValue = entityId && typeof entityId === 'object'
+                  ? (entityId.id || entityId.director_id || entityId.individual_id || entityId.company_id)
+                  : entityId;
+                if (idValue) tableQueries.links.get(linkVar).add(idValue);
+              }
+
+              console.log('[Query Builder] Added queries:', {
+                table: tableName,
+                linkVar,
+                docIds: [...tableQueries.docIds],
+                entityIds: [...tableQueries.links.get(linkVar)]
+              });
+            }
+          }
         });
       });
 
-     console.log("✅ Step 3: Analyzed templates. Required data sources:",
+      console.log("✅ Step 3: Analyzed templates. Required data sources:",
         Object.fromEntries(Array.from(queriesToRun.entries()).map(([table, { docIds, links }]) =>
           [table, { docIds: [...docIds], links: Object.fromEntries(Array.from(links.entries()).map(([lv, ids]) => [lv, [...ids]])) }]
         ))
@@ -544,68 +473,68 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       console.log("⏳ Step 4: Fetching data from Supabase...");
       const sourceDataCache: Record<string, Record<number, any>> = { 'tm_tasks': { [task.id]: task } };
 
-       for (const [table, { docIds, links }] of queriesToRun.entries()) {
+      for (const [table, { docIds, links }] of queriesToRun.entries()) {
         const records = new Map();
         console.log(`  - Querying table '${table}'...`);
-        
-     // CORRECTED CODE
-// Handle dynamic document tables (acc_portal_kyc_uploads, acc_portal_directors_documents, etc.)
-if (table === 'acc_portal_kyc_uploads' || table === 'acc_portal_directors_documents') {
-  // Filter valid UUIDs
-  const validDocIds = [...docIds].filter(id =>
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
-  );
 
-  if (validDocIds.length > 0) {
-    console.log(`[Query Execution] Fetching from ${table}:`, validDocIds);
-    
-    // ✅ FIX: Determine the correct document ID field for this table
-    const docIdField = table === 'acc_portal_kyc_uploads' ? 'kyc_document_id' : 'document_id';
-    
-    console.log(`[Query Execution] Using document ID field: ${docIdField}`);
-    
-    // ✅ FIX: Use single .in() with correct field
-    let query = supabase
-      .from(table)
-      .select('*')
-      .in(docIdField, validDocIds);
-    
-    const { data, error } = await query;
-    
-    if (error) {
-      console.error(`[Query Execution] Error fetching from ${table}:`, error);
-    } else {
-      console.log(`[Query Execution] Found ${data?.length || 0} records in ${table}`);
-      (data || []).forEach(rec => records.set(rec.id, rec));
-    }
-  }
-  
-  // Continue with linking variables...
-  for (const [linkVar, entityIdsSet] of links.entries()) {
-    const entityIds = Array.from(entityIdsSet).map(id => {
-      if (id && typeof id === 'object') {
-        return id.id || id.director_id || id.individual_id || id.company_id;
-      }
-      return id;
-    }).filter(id => id != null && id !== '');
+        // CORRECTED CODE
+        // Handle dynamic document tables (acc_portal_kyc_uploads, acc_portal_directors_documents, etc.)
+        if (table === 'acc_portal_kyc_uploads' || table === 'acc_portal_directors_documents') {
+          // Filter valid UUIDs
+          const validDocIds = [...docIds].filter(id =>
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+          );
 
-    if (entityIds.length > 0) {
-      console.log(`[Query Execution] Fetching from ${table} by ${linkVar}:`, entityIds);
-      
-      const { data, error } = await supabase
-        .from(table)
-        .select('*')
-        .in(linkVar, entityIds);
+          if (validDocIds.length > 0) {
+            console.log(`[Query Execution] Fetching from ${table}:`, validDocIds);
 
-      if (error) {
-        console.error(`[Query Execution] Error fetching by ${linkVar}:`, error);
-      } else {
-        console.log(`[Query Execution] Found ${data?.length || 0} additional records`);
-        (data || []).forEach(rec => records.set(rec.id, rec));
-      }
-    }
-  }
-}
+            // ✅ FIX: Determine the correct document ID field for this table
+            const docIdField = table === 'acc_portal_kyc_uploads' ? 'kyc_document_id' : 'document_id';
+
+            console.log(`[Query Execution] Using document ID field: ${docIdField}`);
+
+            // ✅ FIX: Use single .in() with correct field
+            let query = supabase
+              .from(table)
+              .select('*')
+              .in(docIdField, validDocIds);
+
+            const { data, error } = await query;
+
+            if (error) {
+              console.error(`[Query Execution] Error fetching from ${table}:`, error);
+            } else {
+              console.log(`[Query Execution] Found ${data?.length || 0} records in ${table}`);
+              (data || []).forEach(rec => records.set(rec.id, rec));
+            }
+          }
+
+          // Continue with linking variables...
+          for (const [linkVar, entityIdsSet] of links.entries()) {
+            const entityIds = Array.from(entityIdsSet).map(id => {
+              if (id && typeof id === 'object') {
+                return id.id || id.director_id || id.individual_id || id.company_id;
+              }
+              return id;
+            }).filter(id => id != null && id !== '');
+
+            if (entityIds.length > 0) {
+              console.log(`[Query Execution] Fetching from ${table} by ${linkVar}:`, entityIds);
+
+              const { data, error } = await supabase
+                .from(table)
+                .select('*')
+                .in(linkVar, entityIds);
+
+              if (error) {
+                console.error(`[Query Execution] Error fetching by ${linkVar}:`, error);
+              } else {
+                console.log(`[Query Execution] Found ${data?.length || 0} additional records`);
+                (data || []).forEach(rec => records.set(rec.id, rec));
+              }
+            }
+          }
+        }
         else {
           if (docIds.size > 0) {
             console.log(`    - by document_id:`, [...docIds]);
@@ -765,58 +694,63 @@ if (table === 'acc_portal_kyc_uploads' || table === 'acc_portal_directors_docume
     handleUploadSubmit(uploadData);
   };
 
-  // Function to get relationship data
-  // Update around line 715
+  // --- RequirementsTableCombined.tsx ---
+
   const getRelationshipData = useCallback(() => {
-    if (columnDefinitions.length === 0) return null;
+    if (columnDefinitions.length === 0) return [];
 
-    const groups = new Map();
-    columnDefinitions.forEach(col => {
-      if (!groups.has(col.groupIndex)) {
-        groups.set(col.groupIndex, []);
-      }
-      groups.get(col.groupIndex).push(col);
-    });
+    // Group columns by their task group
+    const groupedColumns = columnDefinitions.reduce((groups, col) => {
+      if (!groups[col.groupIndex]) groups[col.groupIndex] = [];
+      groups[col.groupIndex].push(col);
+      return groups;
+    }, {} as Record<number, any[]>);
 
-    return Array.from(groups.entries()).map(([groupIndex, columns]) => {
-      const companyCol = columns.find(col => col.type === 'company');
-      if (!companyCol) return null;
+    return Object.values(groupedColumns).map(columns => {
+      const task = columns[0]?.task;
+      const participants = task?.participants_details || [];
+      const applicant = task?.applicant_details || {};
+
+      // Company from participants
+      const companyParticipant = participants.find(p => p.type === 'company');
 
       return {
         company: {
-          name: companyCol.label,
-          id: companyCol.id
+          id: companyParticipant?.id || task?.company_id,
+          name: companyParticipant?.name || task?.company_name || 'Company',
+          type: 'company'
         },
-        directors: columns
-          .filter(col => col.type === 'director')
+        principal: {
+          id: applicant.id || task?.individual_id,
+          name: applicant.name || individualNames[applicant.id],
+          role: applicant.role
+        },
+        directors: participants
+          .filter(p => p.type === 'individual' && (p.role === 'director' || p.role === 'shareholder'))
           .map(d => ({
-            name: d.label,
-            role: d.subLabel,
-            id: d.id
-          })),
-        principal: columns
-          .filter(col => col.type === 'principal')
-          .map(p => ({
-            name: p.label,
-            id: p.id
-          }))[0],
-        dependants: columns
-          .filter(col => col.type === 'dependant')
-          .map(d => ({
-            name: d.label,
             id: d.id,
-            relationship: d.relationship // ADDED: Capture relationship type
+            name: d.name,
+            role: d.role
           })),
-        understudy: columns
-          .filter(col => col.type === 'understudy')
-          .map(u => ({
-            name: u.label,
-            id: u.id
-          }))[0]
+        dependants: participants
+          .filter(p => p.type === 'individual' && (p.role === 'dependant' || p.relationship))
+          .map(dep => ({
+            id: dep.id,
+            name: dep.name,
+            relationship: dep.relationship || 'dependant'
+          })),
+        understudy: (() => {
+          const uId = task?.understudy || task?.understudy_id;
+          if (!uId) return null;
+          const uPart = participants.find(p => p.id === uId);
+          return {
+            id: uId,
+            name: uPart?.name || individualNames[uId] || 'Understudy'
+          };
+        })()
       };
     }).filter(Boolean);
-  }, [columnDefinitions]);
-
+  }, [columnDefinitions, individualNames]);
   const relationshipData = useMemo(() => getRelationshipData(), [getRelationshipData]);
 
   // Debug effect for relationship data
@@ -969,12 +903,13 @@ if (table === 'acc_portal_kyc_uploads' || table === 'acc_portal_directors_docume
     const processDocuments = (docType: string, documents: any[]) => {
       worksheetData.push([`${docType} Documents`, ...Array(headers.length - 1).fill("")]);
       documents
-        .sort((a, b) => (a.document.custom_order || 999) - (b.document.custom_order || 999))
-        .forEach((docItem, index) => {
-          const row = [`${index + 1}.`, docItem.document.display_name];
+        .sort((a, b) => (a.order || 999) - (b.order || 999))
+        .forEach((reqItem, index) => {
+          const docDef = reqItem.documentDefinition;
+          const row = [`${index + 1}.`, docDef?.display_name || docDef?.name || reqItem.name];
           entityColumns.forEach(col => {
             const task = filteredGroupedTasks[col.groupIndex]?.tasks[0];
-            row.push(task ? getDocumentStatusText(task, docItem.document, col.name, col.id) : "N/A");
+            row.push(task ? getDocumentStatusText(task, docDef, col.type, col.id) : "N/A");
           });
           worksheetData.push(row);
         });
@@ -989,106 +924,124 @@ if (table === 'acc_portal_kyc_uploads' || table === 'acc_portal_directors_docume
     XLSX.writeFile(workbook, "Requirements_Data_Export.xlsx");
   };
 
-  const renderDocumentSection = (documents: any[], sectionName: string) => {
-    return documents
-      .filter(docItem => !!docItem?.document?.id)
-      .sort((a, b) => (a.document.custom_order || 999) - (b.document.custom_order || 999))
-      .map((docItem, docIndex) => {
-        const documentId = docItem.document.id;
-        const isExpanded = expandedDocuments.has(documentId);
+const getDocumentDataForPreview = useCallback((task: any, reqItem: any, columnType: string, entityId?: number) => {
+    if (!reqItem) return null;
+    
+    const kycDocIds = reqItem.kyc_document_ids || (reqItem.kyc_document_id ? [reqItem.kyc_document_id] : []);
+    if (kycDocIds.length === 0) return null;
+    
+    if (columnType === 'company') {
+      const companyId = task.participants_details?.find(p => p.type === 'company')?.id || task.company_id;
+      const companyDocs = allCompanyDocuments[companyId] || [];
+      return companyDocs.find(doc => kycDocIds.includes(doc.kyc_document_id));
+    } else {
+      const individualId = entityId || task.applicant_details?.id || task.individual_id;
+      
+      const indDocs = allIndividualDocuments[individualId] || [];
+      
+      return indDocs.find(doc => kycDocIds.includes(doc.document_id));
+    }
+}, [allCompanyDocuments, allIndividualDocuments]);
 
-        // Find the requirement config for this specific document ID
-        const requirementConfig = classDocsAndFields.find(d => d.id === documentId);
 
-        const whitelistedFieldIds = new Set(requirementConfig?.fields?.map(f => f.id) || []);
-        const fieldsToRender = (docItem.document.fields || []).filter(f => whitelistedFieldIds.has(f.id));
+  const getDocumentStatusText = useCallback((task: any, docItem: any, columnType: string, entityId?: number) => {
+    const reqItem = {
+      kyc_document_ids: [docItem.id],
+      kyc_document_id: docItem.id
+    };
+    
+    const docData = getDocumentDataForPreview(task, reqItem, columnType, entityId);
+    return docData ? 'Uploaded' : 'Missing';
+  }, [getDocumentDataForPreview]);
+
+  const renderDocumentSection = (requirementsList: any[], sectionName: string) => {
+    return requirementsList
+      .sort((a, b) => (a.order || 0) - (b.order || 0))
+      .map((reqItem, reqIndex) => {
+        // Use uniqueId for tracking expansion (combines requirement ID with document ID)
+        const requirementId = reqItem.uniqueId || reqItem.id;
+        const isExpanded = expandedDocuments.has(requirementId);
+
+        // The KYC definition (metadata, fields) attached in RequirementsTable.tsx
+        const docDef = reqItem.documentDefinition;
+        const fieldsToRender = docDef?.fields || [];
 
         return (
-          <React.Fragment key={`${sectionName}-${documentId}`}>
+          <React.Fragment key={`${sectionName}-${requirementId}`}>
             <TableRow className="group bg-white hover:bg-gray-50">
-              <TableCell className="sticky left-0 bg-white group-hover:bg-gray-50 border-r z-10 text-center">{docIndex + 1}</TableCell>
+              <TableCell className="sticky left-0 bg-white group-hover:bg-gray-50 border-r z-10 text-center">
+                {reqIndex + 1}
+              </TableCell>
               <TableCell className="sticky left-16 bg-white group-hover:bg-gray-50 border-r z-10">
-                <div className="flex items-center gap-2">
-                  <span className="truncate max-w-[250px] font-medium text-slate-700">
-                    {docItem.document.display_name}
-                  </span>
-                  {fieldsToRender.length > 0 && (
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => toggleDocumentExpansion(documentId)}>
-                      {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                    </Button>
+                <div className="flex flex-col">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate max-w-[250px] font-medium text-slate-700">
+                      {docDef?.display_name || reqItem.name}
+                      {reqItem.isMultiDocument && (
+                        <span className="text-xs text-blue-600 ml-2">
+                          ({reqItem.documentCount} docs)
+                        </span>
+                      )}
+                    </span>
+                    {fieldsToRender.length > 0 && (
+                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => toggleDocumentExpansion(requirementId)}>
+                        {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                      </Button>
+                    )}
+                  </div>
+                  {reqItem.isRequired && (
+                    <span className="text-[9px] text-red-500 font-bold uppercase">Required</span>
+                  )}
+                  {reqItem.isMultiDocument && (
+                    <span className="text-[9px] text-blue-500 font-medium">
+                      Multiple documents of this type
+                    </span>
                   )}
                 </div>
               </TableCell>
 
-         {columnDefinitions.map((col, colIdx) => {
-  // Determine applicability based on the Supabase requirement flags
-  const isApplicable = checkApplicability(col.type, requirementConfig);
-  const docData = isApplicable ? getDocumentDataForPreview(col.task, docItem.document, col.type, col.id) : null;
-  const existingDraft = isApplicable ? checkForDraft(docItem.document, col.task, col.type, col.id) : null;
+           {columnDefinitions.map((col, colIdx) => {
+  const isApplicable = checkApplicability(col.type, reqItem);
+  
+  // Parent now provides getDocumentDataForPreview which checks the pre-filtered state
+  const docData = isApplicable ? getDocumentDataForPreview(col.task, reqItem, col.type, col.id) : null;
 
   return (
-    <TableCell key={`${documentId}-col-${colIdx}`} className="text-center border p-2">
+    <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-2">
       {!isApplicable ? (
         <span className="text-[10px] text-gray-300 font-medium italic">N/A</span>
       ) : docData ? (
-        <div
-          className="cursor-pointer hover:opacity-70 transition-opacity"
-          onClick={() => {
-            const docsArray = Array.isArray(docData) ? docData : [docData];
-            handleViewDocuments(docsArray, docItem.document, col);
-          }}
-        >
-          {renderDocumentStatus(col.task, docItem.document, col.type, col.id)}
+        /* DOCUMENT FOUND: Show View/Eye Icon */
+        <div className="flex items-center justify-center gap-1">
+           {renderDocumentStatus(col.task, reqItem, col.type, col.id)}
         </div>
-      ) : existingDraft ? (
-        // DRAFT EXISTS - Show "Continue Editing" button
-        <div className="flex flex-col items-center gap-1">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-amber-600 hover:text-amber-800 hover:bg-amber-50 border-amber-200"
-            onClick={() => handleOpenTemplateGenerator(docItem, col.task, col.type, col.id)}
-            disabled={isPreparingTemplate}
-          >
-            {isPreparingTemplate ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3 mr-1" />}
-            <span className="text-[10px] font-bold uppercase">Continue Draft</span>
-          </Button>
-          <span className="text-[8px] text-amber-600 italic">
-            Saved {new Date(existingDraft.created_at).toLocaleDateString()}
-          </span>
-        </div>
-      ) : (sectionName === 'templates' || sectionName === 'letters' || docItem.document?.category === 'letters') ? (
-        // NO DRAFT - Show "Generate" button
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
-          onClick={() => handleOpenTemplateGenerator(docItem, col.task, col.type, col.id)}
-          disabled={isPreparingTemplate}
-        >
-          {isPreparingTemplate ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3 mr-1" />}
-          <span className="text-[10px] font-bold uppercase">Generate</span>
-        </Button>
       ) : (
-        // Renders the standard Upload icon via your renderDocumentStatus helper
-        renderDocumentStatus(col.task, docItem.document, col.type, col.id)
+        /* NO DOCUMENT: Show Upload/Generate */
+        <div className="flex items-center justify-center gap-1">
+           {renderDocumentStatus(col.task, reqItem, col.type, col.id)}
+        </div>
       )}
     </TableCell>
   );
 })}
             </TableRow>
 
-            {/* Field Rows */}
+            {/* Expanded Field Data Rows */}
             {isExpanded && fieldsToRender.map((field, fIdx) => (
-              <TableRow key={`${documentId}-field-${field.id}`} className="bg-slate-50/50">
-                <TableCell className="sticky left-0 bg-slate-50 border-r text-center text-[10px] text-gray-400">{docIndex + 1}.{fIdx + 1}</TableCell>
-                <TableCell className="sticky left-16 bg-slate-50 border-r pl-8 text-[11px] text-slate-500 italic">{field.name}</TableCell>
+              <TableRow key={`${requirementId}-field-${field.id}`} className="bg-slate-50/50">
+                <TableCell className="sticky left-0 bg-slate-50 border-r text-center text-[10px] text-gray-400">
+                  {reqIndex + 1}.{fIdx + 1}
+                </TableCell>
+                <TableCell className="sticky left-16 bg-slate-50 border-r pl-8 text-[11px] text-slate-500 italic">
+                  {field.name}
+                </TableCell>
                 {columnDefinitions.map((col, colIdx) => {
-                  const isApplicable = checkApplicability(col.type, requirementConfig);
-                  const docData = isApplicable ? getDocumentDataForPreview(col.task, docItem.document, col.type, col.id) : null;
+                  const isApplicable = checkApplicability(col.type, reqItem);
+                  // Use the single document ID for field extraction
+                  const docData = isApplicable ? getDocumentDataForPreview(col.task, reqItem, col.type, col.id) : null;
                   return (
                     <TableCell key={`${field.id}-val-${colIdx}`} className="text-center border p-1 text-[11px] text-slate-600">
-                      {!isApplicable ? '-' : (docData?.extracted_details?.[field.name] || docData?.extracted_details?.[field.id] || '-')}
+                      {isApplicable ? (docData?.extracted_details?.[field.name] || '-') : '-'}
                     </TableCell>
                   );
                 })}
@@ -1099,35 +1052,34 @@ if (table === 'acc_portal_kyc_uploads' || table === 'acc_portal_directors_docume
       });
   };
 
-  // Helper function to check for existing drafts
-const checkForDraft = useCallback((docItem: any, task: any, colType: string, colId?: number): any => {
-  const requiredDocId = docItem.id;
-  
-  if (colType === 'company') {
-    if (task.company_id && allCompanyDocuments[task.company_id]) {
-      const draft = allCompanyDocuments[task.company_id].find(
-        doc => (doc.kyc_document_id === requiredDocId || doc.document_id === requiredDocId) && 
-               doc.status === 'draft'
-      );
-      return draft;
-    }
-  } else {
-    let individualId: number | null = null;
-    if (colType === 'principal') individualId = task.principal_member || task.individual_id;
-    else if (colType === 'understudy') individualId = task.understudy_member;
-    else if (colType === 'dependant' || colType === 'reference' || colType === 'director') individualId = colId;
+  const checkForDraft = useCallback((docItem: any, task: any, colType: string, colId?: number): any => {
+    const requiredDocId = docItem.id;
 
-    if (individualId && allIndividualDocuments[individualId]) {
-      const draft = allIndividualDocuments[individualId].find(
-        doc => (doc.document_id === requiredDocId || doc.kyc_document_id === requiredDocId) && 
-               doc.status === 'draft'
-      );
-      return draft;
+    if (colType === 'company') {
+      if (task.company_id && allCompanyDocuments[task.company_id]) {
+        const draft = allCompanyDocuments[task.company_id].find(
+          doc => (doc.kyc_document_id === requiredDocId || doc.document_id === requiredDocId) &&
+            doc.status === 'draft'
+        );
+        return draft;
+      }
+    } else {
+      let individualId: number | null = null;
+      if (colType === 'principal') individualId = task.principal_member || task.individual_id;
+      else if (colType === 'understudy') individualId = task.understudy_member;
+      else if (colType === 'dependant' || colType === 'reference' || colType === 'director') individualId = colId;
+
+      if (individualId && allIndividualDocuments[individualId]) {
+        const draft = allIndividualDocuments[individualId].find(
+          doc => (doc.document_id === requiredDocId || doc.kyc_document_id === requiredDocId) &&
+            doc.status === 'draft'
+        );
+        return draft;
+      }
     }
-  }
-  
-  return null;
-}, [allCompanyDocuments, allIndividualDocuments]);
+
+    return null;
+  }, [allCompanyDocuments, allIndividualDocuments]);
 
   return (
     <div className="space-y-4">

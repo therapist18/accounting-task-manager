@@ -130,7 +130,7 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
         officer:officer_id (id, name, email),
         task_manager:task_manager_id (id, name, email)
       `)
-      .order('created_at', { ascending: false });
+      .order('id', { ascending: true });
 
     if (departmentId) {
       // Filter using job_level->>department_id

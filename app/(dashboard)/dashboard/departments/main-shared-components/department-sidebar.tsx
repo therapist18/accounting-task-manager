@@ -16,6 +16,7 @@ type SubClass = {
   name: string;
   description?: string | null;
   default_display?: boolean;
+  order?: number;
 }
 
 type Class = {
@@ -24,6 +25,7 @@ type Class = {
   description?: string | null;
   default_display?: boolean;
   subClasses?: SubClass[];
+  order?: number;
 }
 
 type SubDepartment = {
@@ -32,6 +34,7 @@ type SubDepartment = {
   description?: string | null;
   default_display?: boolean;
   classes?: Class[];
+  order?: number;
 }
 
 type Department = {
@@ -40,6 +43,7 @@ type Department = {
   description?: string;
   default_display?: boolean;
   subdepartments?: SubDepartment[];
+  order?: number;
 }
 
 interface DepartmentSidebarProps {
@@ -258,9 +262,26 @@ export function DepartmentSidebar({
   const filteredDepartments = React.useMemo(() => {
     let depts = departments
     
+    // Apply ordering to all levels first
+    depts = depts.map(dept => ({
+      ...dept,
+      subdepartments: (dept.subdepartments || [])
+        .sort((a, b) => (a.order || 0) - (b.order || 0))
+        .map(subdept => ({
+          ...subdept,
+          classes: (subdept.classes || [])
+            .sort((a, b) => (a.order || 0) - (b.order || 0))
+            .map(cls => ({
+              ...cls,
+              subClasses: (cls.subClasses || [])
+                .sort((a, b) => (a.order || 0) - (b.order || 0))
+            }))
+        }))
+    }))
+    
     // Apply default display filter first
     if (showDefaultDisplayOnly) {
-      depts = departments.map(dept => ({
+      depts = depts.map(dept => ({
         ...dept,
         subdepartments: (dept.subdepartments || [])
           .filter(subdept => shouldShowItem(subdept, showDefaultDisplayOnly))

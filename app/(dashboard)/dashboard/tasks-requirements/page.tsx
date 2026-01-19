@@ -325,7 +325,7 @@ export default function TasksPage() {
               </CardContent>
             </Card>
           ) : (selectedClass || selectedSubclass) ? (
-            <Tabs defaultValue="wip" className="space-y-4">
+            <Tabs defaultValue="enquiries" className="space-y-4">
               <TabsList>
                 <TabsTrigger value="enquiries">
                   Enquiries

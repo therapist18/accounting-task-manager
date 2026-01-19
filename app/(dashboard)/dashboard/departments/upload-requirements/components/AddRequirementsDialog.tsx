@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { FileText, Plus, Zap, Check, ChevronsUpDown, Search, Trash2, Eraser, Building2, User } from "lucide-react"
+import { FileText, Plus, Zap, Check, ChevronsUpDown, Search, Trash2, Eraser, Building2, User, Layout, FileType } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command"
@@ -17,9 +17,12 @@ import supabase from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+
 
 export type ApplicantType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependent' | 'employee' | 'understudy';
 export type RequirementCategory = 'general' | 'processing' | 'issuance';
+export type SubmissionMode = 'standard' | 'template' | 'webform';
 
 export interface RequirementForm {
   name: string
@@ -32,6 +35,7 @@ export interface RequirementForm {
   requiredDocumentCount: number
   instructions: string
   category: RequirementCategory // Added category
+  isStageDocument: boolean // Added stage document flag
 }
 
 const DEFAULT_REQUIREMENT: RequirementForm = {
@@ -44,7 +48,8 @@ const DEFAULT_REQUIREMENT: RequirementForm = {
   applicantTypes: ['principal'],
   requiredDocumentCount: 1,
   instructions: '',
-  category: 'processing'
+  category: 'processing',
+  isStageDocument: false // Added stage document default
 }
 
 interface AddRequirementsDialogProps {
@@ -74,58 +79,124 @@ const APPLICANT_OPTIONS = [
   { label: 'Understudy', value: 'understudy' },
 ]
 
-export function AddRequirementsDialog({
-  isOpen,
-  onOpenChange,
-  onSubmit,
-  isSubmitting,
-  context
-}: AddRequirementsDialogProps) {
+interface GeneralDocConfig {
+  kycId: string;
+  name: string;
+  mode: SubmissionMode;
+  automationId?: string;
+  hasTemplate: boolean;
+  isStageDocument: boolean; // Added stage document flag
+}
+
+export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmitting, context }: AddRequirementsDialogProps) {
   const [activeSection, setActiveSection] = useState<RequirementCategory>('processing')
   const [newRequirements, setNewRequirements] = useState<RequirementForm[]>([{ ...DEFAULT_REQUIREMENT }])
-  const [bulkInput, setBulkInput] = useState('')
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
-  const [loadingKycDocs, setLoadingKycDocs] = useState(false)
-  
-  // State for General Requirements multi-select
-  const [selectedGeneralDocs, setSelectedGeneralDocs] = useState<string[]>([])
+  const [departments, setDepartments] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+    const [bulkInput, setBulkInput] = useState('')
+  const [selectedGeneralConfigs, setSelectedGeneralConfigs] = useState<Record<string, GeneralDocConfig>>({})
 
   useEffect(() => {
     if (isOpen) {
-      fetchKycDocuments()
-      setSelectedGeneralDocs([])
-      setNewRequirements([{ ...DEFAULT_REQUIREMENT, category: activeSection }])
+      fetchInitialData()
+      setSelectedGeneralConfigs({})
     }
-  }, [isOpen, activeSection])
+  }, [isOpen])
 
-  const fetchKycDocuments = async () => {
+  const fetchInitialData = async () => {
     try {
-      setLoadingKycDocs(true)
-      // Assuming 'category' or similar column exists to distinguish company vs individual
-      const { data, error } = await supabase.from('acc_portal_kyc').select('*').order('name')
-      if (error) throw error
-      setKycDocuments(data || [])
+      setLoading(true)
+      const [kycRes, deptRes] = await Promise.all([
+        supabase.from('acc_portal_kyc').select('*').order('name'),
+        supabase.from('tm_departments').select('*')
+      ])
+      setKycDocuments(kycRes.data || [])
+      setDepartments(deptRes.data || [])
     } finally {
-      setLoadingKycDocs(false)
+      setLoading(false)
     }
   }
 
-  // Filter KYC docs for the General section
-  const companyDocs = useMemo(() => kycDocuments.filter(d => d.category === 'company-docs'), [kycDocuments])
-  const individualDocs = useMemo(() => kycDocuments.filter(d => d.category === 'application-docs' || d.category === 'directors-docs'), [kycDocuments])
+  // Helper to find automation in the department stages JSON
+  const findAutomation = (kycId: string) => {
+    if (!context || !departments.length) return null;
+    const dept = departments.find(d => Number(d.id) === Number(context.departmentId));
+    if (!dept?.stages) return null;
+
+    for (const stage of dept.stages) {
+      if (!stage.documents) continue;
+      for (const doc of stage.documents) {
+        if (doc.kycId === kycId && doc.hasAutomation && doc.targetEntities) {
+          // Match against current job level
+          const match = doc.targetEntities.find(entity => 
+            Number(entity.job_level?.department_id) === Number(context.departmentId) &&
+            Number(entity.job_level?.subdepartment_id) === Number(context.subdepartmentId) &&
+            String(entity.job_level?.class_id) === String(context.classId || 'null')
+          );
+          if (match) return { automationId: match.automationId, name: doc.name };
+        }
+      }
+    }
+    return null;
+  }
+
+  const handleToggleGeneralDoc = (doc: any) => {
+    const kycId = String(doc.id);
+    if (selectedGeneralConfigs[kycId]) {
+      const newConfigs = { ...selectedGeneralConfigs };
+      delete newConfigs[kycId];
+      setSelectedGeneralConfigs(newConfigs);
+    } else {
+      // Auto-detect Mode
+      const automation = findAutomation(kycId);
+      let mode: SubmissionMode = 'standard';
+      
+      if (doc.has_template) mode = 'template';
+      else if (automation) mode = 'webform';
+
+      setSelectedGeneralConfigs(prev => ({
+        ...prev,
+        [kycId]: {
+          kycId,
+          name: doc.display_name || doc.name,
+          mode,
+          hasTemplate: !!doc.has_template,
+          automationId: automation?.automationId,
+          isStageDocument: false // Default to false for new selections
+        }
+      }));
+    }
+  }
+
+  const updateGeneralMode = (kycId: string, mode: SubmissionMode) => {
+    setSelectedGeneralConfigs(prev => ({
+      ...prev,
+      [kycId]: { ...prev[kycId], mode }
+    }));
+  }
+
+  const toggleStageDocument = (kycId: string) => {
+    setSelectedGeneralConfigs(prev => ({
+      ...prev,
+      [kycId]: { ...prev[kycId], isStageDocument: !prev[kycId]?.isStageDocument }
+    }));
+  }
 
   const handleSubmit = async () => {
     let validReqs = []
 
     if (activeSection === 'general') {
       // Convert selected KYC docs into requirement objects
-      validReqs = selectedGeneralDocs.map(docId => {
-        const doc = kycDocuments.find(d => String(d.id) === String(docId))
+      validReqs = Object.keys(selectedGeneralConfigs).map(kycId => {
+        const doc = kycDocuments.find(d => String(d.id) === String(kycId))
+        const config = selectedGeneralConfigs[kycId]
         return {
           ...DEFAULT_REQUIREMENT,
           name: doc?.display_name || doc?.name || 'Requirement',
-          kycDocumentIds: [String(docId)],
-          category: 'general'
+          kycDocumentIds: [String(kycId)],
+          category: 'general',
+          isStageDocument: config?.isStageDocument || false
         }
       })
     } else {
@@ -164,12 +235,18 @@ export function AddRequirementsDialog({
         instructions: req.instructions || '',
         requiredDocumentCount: req.requiredDocumentCount,
         kyc_document_ids: req.kycDocumentIds,
-        category: activeSection, // Critical for UI filtering
+        category: 'processing', // Force to 'processing' for Upload Processing Requirements section
+        isStageDocument: req.isStageDocument || false, // Added stage document flag
         order: startIdCount + index
+        // Explicitly exclude old fields: kyc_document_id, applicantType
       }));
 
       const finalRequirements = existingRecord 
-        ? [...existingRecord.requirements, ...processedNewReqs]
+        ? [...existingRecord.requirements.map(req => {
+            // Clean up existing requirements by removing old fields
+            const { kyc_document_id, applicantType, ...cleanReq } = req;
+            return cleanReq;
+          }), ...processedNewReqs]
         : processedNewReqs;
 
       const payload = {
@@ -192,125 +269,160 @@ export function AddRequirementsDialog({
   const handleClose = () => {
     onOpenChange(false)
     setNewRequirements([{ ...DEFAULT_REQUIREMENT }])
-    setSelectedGeneralDocs([])
+    setSelectedGeneralConfigs({})
     setBulkInput('')
   }
+  // Grouped KYC Docs
+  const companyDocs = useMemo(() => kycDocuments.filter(d => d.category === 'company-docs'), [kycDocuments])
+  const individualDocs = useMemo(() => kycDocuments.filter(d => d.category === 'application-docs' || d.category === 'directors-docs'), [kycDocuments])
 
-  const updateReq = (idx: number, fields: Partial<RequirementForm>) => {
+    const updateReq = (idx: number, fields: Partial<RequirementForm>) => {
     const updated = [...newRequirements]
     updated[idx] = { ...updated[idx], ...fields }
     setNewRequirements(updated)
   }
-
-  const toggleGeneralDoc = (docId: string) => {
-    setSelectedGeneralDocs(prev => 
-      prev.includes(docId) ? prev.filter(id => id !== docId) : [...prev, docId]
-    )
-  }
-
-  if (!context) return null
-
+  
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl max-h-[95vh] flex flex-col p-0 overflow-hidden">
+      <DialogContent className="max-w-6xl max-h-[95vh] flex flex-col p-0">
         <DialogHeader className="p-6 pb-2">
-          <DialogTitle>Add New Requirements</DialogTitle>
-          <DialogDescription>
-            Target: <span className="font-bold text-primary">{context.subdepartmentName}</span> {context.className && `> ${context.className}`}
-          </DialogDescription>
+          <DialogTitle>Add Requirements</DialogTitle>
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto px-6 space-y-6">
-          {/* Main Section Selection */}
-          <div className="bg-slate-100 p-1 rounded-lg flex items-center gap-1">
-            <Button 
-              variant={activeSection === 'general' ? 'default' : 'ghost'} 
-              className="flex-1 h-9 text-xs" 
-              onClick={() => setActiveSection('general')}
-            >
-              1. General Requirements
-            </Button>
-            <Button 
-              variant={activeSection === 'processing' ? 'default' : 'ghost'} 
-              className="flex-1 h-9 text-xs" 
-              onClick={() => setActiveSection('processing')}
-            >
-              2. Processing Requirements
-            </Button>
-            <Button 
-              variant={activeSection === 'issuance' ? 'default' : 'ghost'} 
-              className="flex-1 h-9 text-xs" 
-              onClick={() => setActiveSection('issuance')}
-            >
-              3. Issuance Requirements
-            </Button>
+        <div className="flex-1 overflow-hidden flex flex-col px-6 space-y-4">
+          {/* Section Switcher */}
+          <div className="bg-slate-100 p-1 rounded-lg flex gap-1">
+            {['general', 'processing', 'issuance'].map((sec) => (
+              <Button 
+                key={sec}
+                variant={activeSection === sec ? 'default' : 'ghost'} 
+                className="flex-1 h-8 text-xs capitalize"
+                onClick={() => setActiveSection(sec as RequirementCategory)}
+              >
+                {sec}
+              </Button>
+            ))}
           </div>
 
           {activeSection === 'general' ? (
-            /* SPECIAL MULTI-SELECT UI FOR GENERAL REQUIREMENTS */
-            <div className="space-y-4 border rounded-xl p-6 bg-slate-50/50">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-semibold flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-blue-600" /> Select Document Types
-                  </h3>
-                  <p className="text-xs text-muted-foreground">Select existing document types from the KYC portal to add as general requirements.</p>
-                </div>
-                <Badge variant="outline" className="bg-white">{selectedGeneralDocs.length} selected</Badge>
+            <div className="flex gap-6 h-full overflow-hidden pb-6">
+              {/* Left: Selection Area */}
+              <div className="w-1/2 flex flex-col border rounded-xl overflow-hidden bg-white">
+                <div className="p-3 border-b bg-slate-50 font-semibold text-sm">Select Documents</div>
+                <Tabs defaultValue="company" className="flex-1 flex flex-col overflow-hidden">
+                  <TabsList className="mx-3 mt-3">
+                    <TabsTrigger value="company" className="flex-1 text-xs">Company Docs</TabsTrigger>
+                    <TabsTrigger value="individual" className="flex-1 text-xs">Individual Docs</TabsTrigger>
+                  </TabsList>
+                  <ScrollArea className="flex-1 p-3">
+                    <div className="space-y-2">
+                      {(activeSection === 'general' ? (activeSection === 'general' ? (companyDocs.concat(individualDocs)) : []) : []).map(doc => {
+                         // Logic check: if doc is in companyDocs or individualDocs based on tab
+                         return null; // Placeholder for logic inside TabsContent below
+                      })}
+                      
+                      <TabsContent value="company" className="mt-0 space-y-1">
+                        {companyDocs.map(doc => (
+                          <div key={doc.id} className={cn("flex items-center gap-3 p-2 rounded-md border transition-all", selectedGeneralConfigs[doc.id] ? "bg-blue-50 border-blue-200" : "hover:bg-slate-50")}>
+                            <Checkbox checked={!!selectedGeneralConfigs[doc.id]} onCheckedChange={() => handleToggleGeneralDoc(doc)} id={doc.id}/>
+                            <label htmlFor={doc.id} className="text-xs font-medium flex-1 cursor-pointer">{doc.display_name || doc.name}</label>
+                            {doc.has_template && <FileType className="h-3 w-3 text-orange-500" title="Has Template" />}
+                          </div>
+                        ))}
+                      </TabsContent>
+                      <TabsContent value="individual" className="mt-0 space-y-1">
+                        {individualDocs.map(doc => (
+                          <div key={doc.id} className={cn("flex items-center gap-3 p-2 rounded-md border transition-all", selectedGeneralConfigs[doc.id] ? "bg-blue-50 border-blue-200" : "hover:bg-slate-50")}>
+                            <Checkbox checked={!!selectedGeneralConfigs[doc.id]} onCheckedChange={() => handleToggleGeneralDoc(doc)} id={doc.id}/>
+                            <label htmlFor={doc.id} className="text-xs font-medium flex-1 cursor-pointer">{doc.display_name || doc.name}</label>
+                            {doc.has_template && <FileType className="h-3 w-3 text-orange-500" title="Has Template" />}
+                          </div>
+                        ))}
+                      </TabsContent>
+                    </div>
+                  </ScrollArea>
+                </Tabs>
               </div>
 
-              <Tabs defaultValue="company" className="w-full">
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="company" className="flex items-center gap-2">
-                    <Building2 className="h-3.5 w-3.5" /> Company Docs
-                  </TabsTrigger>
-                  <TabsTrigger value="individual" className="flex items-center gap-2">
-                    <User className="h-3.5 w-3.5" /> Individual Docs
-                  </TabsTrigger>
-                </TabsList>
-                
-                <TabsContent value="company" className="mt-4">
-                  <ScrollArea className="h-[300px] border rounded-md bg-white p-4">
-                    <div className="grid grid-cols-2 gap-3">
-                      {companyDocs.map(doc => (
-                        <div key={doc.id} className="flex items-center space-x-2 border p-2 rounded hover:bg-slate-50 transition-colors">
-                          <Checkbox 
-                            id={`doc-${doc.id}`} 
-                            checked={selectedGeneralDocs.includes(String(doc.id))}
-                            onCheckedChange={() => toggleGeneralDoc(String(doc.id))}
-                          />
-                          <label htmlFor={`doc-${doc.id}`} className="text-xs font-medium leading-none cursor-pointer truncate">
-                            {doc.display_name || doc.name}
-                          </label>
-                        </div>
-                      ))}
+              {/* Right: Configuration Area */}
+              <div className="w-1/2 flex flex-col border rounded-xl overflow-hidden bg-white">
+                <div className="p-3 border-b bg-slate-50 font-semibold text-sm flex justify-between">
+                  <span>Configure Selection</span>
+                  <Badge variant="secondary">{Object.keys(selectedGeneralConfigs).length} items</Badge>
+                </div>
+                <ScrollArea className="flex-1 p-4 bg-slate-50/30">
+                  {Object.keys(selectedGeneralConfigs).length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-muted-foreground opacity-50 pt-20">
+                      <FileText className="h-12 w-12 mb-2" />
+                      <p className="text-sm">Select documents on the left to configure</p>
                     </div>
-                  </ScrollArea>
-                </TabsContent>
+                  ) : (
+                    <div className="space-y-4">
+                      {Object.values(selectedGeneralConfigs).map(config => (
+                        <div key={config.kycId} className="bg-white border rounded-lg p-3 shadow-sm space-y-3">
+                          <div className="flex justify-between items-start">
+                            <span className="text-xs font-bold text-slate-700">{config.name}</span>
+                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleToggleGeneralDoc({id: config.kycId})}>
+                              <Trash2 className="h-3 w-3 text-destructive" />
+                            </Button>
+                          </div>
+                          
+                          <RadioGroup 
+                            value={config.mode} 
+                            onValueChange={(v) => updateGeneralMode(config.kycId, v)}
+                            className="grid grid-cols-3 gap-2"
+                          >
+                            <div>
+                              <RadioGroupItem value="standard" id={`std-${config.kycId}`} className="sr-only" />
+                              <Label htmlFor={`std-${config.kycId}`} className={cn("flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-2 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-blue-600", config.mode === 'standard' && "border-blue-600 bg-blue-50")}>
+                                <User className="mb-1 h-4 w-4" />
+                                <span className="text-[10px]">Normal</span>
+                              </Label>
+                            </div>
 
-                <TabsContent value="individual" className="mt-4">
-                  <ScrollArea className="h-[300px] border rounded-md bg-white p-4">
-                    <div className="grid grid-cols-2 gap-3">
-                      {individualDocs.map(doc => (
-                        <div key={doc.id} className="flex items-center space-x-2 border p-2 rounded hover:bg-slate-50 transition-colors">
-                          <Checkbox 
-                            id={`doc-${doc.id}`} 
-                            checked={selectedGeneralDocs.includes(String(doc.id))}
-                            onCheckedChange={() => toggleGeneralDoc(String(doc.id))}
-                          />
-                          <label htmlFor={`doc-${doc.id}`} className="text-xs font-medium leading-none cursor-pointer truncate">
-                            {doc.display_name || doc.name}
-                          </label>
+                            <div className={cn(!config.hasTemplate && "opacity-40 grayscale pointer-events-none")}>
+                              <RadioGroupItem value="template" id={`tmp-${config.kycId}`} className="sr-only" />
+                              <Label htmlFor={`tmp-${config.kycId}`} className={cn("flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-2 hover:bg-accent hover:text-accent-foreground [&:has([data-state=checked])]:border-orange-600", config.mode === 'template' && "border-orange-600 bg-orange-50")}>
+                                <FileType className="mb-1 h-4 w-4" />
+                                <span className="text-[10px]">Template</span>
+                              </Label>
+                            </div>
+
+                            <div className={cn(!config.automationId && "opacity-40 grayscale pointer-events-none")}>
+                              <RadioGroupItem value="webform" id={`web-${config.kycId}`} className="sr-only" />
+                              <Label htmlFor={`web-${config.kycId}`} className={cn("flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-2 hover:bg-accent hover:text-accent-foreground [&:has([data-state=checked])]:border-purple-600", config.mode === 'webform' && "border-purple-600 bg-purple-50")}>
+                                <Zap className="mb-1 h-4 w-4" />
+                                <span className="text-[10px]">Web Form</span>
+                              </Label>
+                            </div>
+                          </RadioGroup>
+                          
+                          {/* Stage Document Checkbox */}
+                          <div className="flex items-center space-x-2 pt-2 border-t">
+                            <Checkbox 
+                              id={`stage-${config.kycId}`}
+                              checked={config.isStageDocument || false}
+                              onCheckedChange={() => toggleStageDocument(config.kycId)}
+                            />
+                            <Label htmlFor={`stage-${config.kycId}`} className="text-xs font-medium cursor-pointer">
+                              Mark as Stage Document
+                            </Label>
+                          </div>
+                          
+                          {config.mode === 'webform' && config.automationId && (
+                            <div className="text-[10px] text-purple-600 bg-purple-50 p-1.5 rounded flex items-center gap-1">
+                              <Check className="h-3 w-3" /> Linked to Auto ID: {config.automationId.slice(0,8)}...
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
-                  </ScrollArea>
-                </TabsContent>
-              </Tabs>
+                  )}
+                </ScrollArea>
+              </div>
             </div>
           ) : (
-            /* STANDARD FORM UI FOR PROCESSING/ISSUANCE */
-            <div className="space-y-6">
+           <div className="space-y-6">
               <div className="space-y-2">
                 <Label className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Bulk Add (One per line)</Label>
                 <Textarea
@@ -423,6 +535,18 @@ export function AddRequirementsDialog({
                         </Popover>
                     </div>
                   </div>
+
+                  {/* Stage Document Checkbox */}
+                  <div className="flex items-center space-x-2 border-t pt-4">
+                    <Checkbox 
+                      id={`stage-req-${idx}`}
+                      checked={req.isStageDocument || false}
+                      onCheckedChange={(checked) => updateReq(idx, { isStageDocument: checked })}
+                    />
+                    <Label htmlFor={`stage-req-${idx}`} className="text-xs font-medium cursor-pointer">
+                      Mark as Stage Document
+                    </Label>
+                  </div>
                 </div>
               ))}
 
@@ -436,15 +560,10 @@ export function AddRequirementsDialog({
             </div>
           )}
         </div>
-
+        
         <DialogFooter className="p-6 bg-slate-50 border-t">
-          <Button variant="outline" onClick={handleClose}>Cancel</Button>
-          <Button 
-            onClick={handleSubmit} 
-            disabled={isSubmitting || (activeSection === 'general' ? selectedGeneralDocs.length === 0 : !newRequirements.some(r => r.name.trim()))}
-          >
-            {isSubmitting ? "Saving..." : `Save to ${activeSection === 'general' ? 'General' : activeSection === 'processing' ? 'Processing' : 'Issuance'}`}
-          </Button>
+           <Button variant="outline" onClick={handleClose}>Cancel</Button>
+           <Button onClick={handleSubmit} disabled={isSubmitting}>Save Requirements</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

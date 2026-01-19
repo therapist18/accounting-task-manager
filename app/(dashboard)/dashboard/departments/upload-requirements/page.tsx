@@ -3,7 +3,7 @@
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useEffect, useState, useMemo } from "react"
@@ -74,18 +74,18 @@ interface ApiRequirement {
   order: number
   isVisible: boolean
   isRequired: boolean
-  kycDocumentId?: string
+  kyc_document_ids?: string[]  // New JSON array field
   hasWebForm?: boolean
   webFormName?: string
   automationId?: string
-  applicantType?: string
-  applicantTypes?: string[]
+  applicantTypes?: string[]    // New JSON array field
   requiredDocumentCount?: number
   billingEntity?: string
   instructions?: string
   requirement_context?: any
   web_automation?: any
   category?: 'general' | 'processing' | 'issuance'
+  // Old fields removed: kycDocumentId, applicantType
 }
 
 interface RequirementTableEntry extends ApiRequirement {
@@ -124,10 +124,9 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   }, [])
 
   // Helper function to get document names
-  const getDocumentNames = (documentIds: string[] | string | undefined) => {
-    if (!documentIds) return []
-    const ids = Array.isArray(documentIds) ? documentIds : [documentIds]
-    return ids.map(id => {
+  const getDocumentNames = (documentIds: string[] | undefined) => {
+    if (!documentIds || !Array.isArray(documentIds)) return []
+    return documentIds.map(id => {
       const doc = kycDocuments.find(d => d.id === id)
       return doc?.display_name || doc?.name || `Document ${id}`
     })
@@ -156,7 +155,9 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       
       return {
         ...r,
-        applicantTypes: ctx.applicantTypes || (r.applicantType ? [r.applicantType] : []),
+        // Prioritize new JSON columns, fall back to old fields for backward compatibility
+        applicantTypes: r.applicantTypes || ctx.applicantTypes || (r.applicantType ? [r.applicantType] : []),
+        kyc_document_ids: r.kyc_document_ids || (r.kycDocumentId ? [r.kycDocumentId] : []),
         requiredDocumentCount: ctx.requiredDocumentCount || r.requiredDocumentCount || 1,
         billingEntity: ctx.billingEntity || r.billingEntity || 'applicant',
         instructions: ctx.instructions || r.instructions || '',
@@ -447,7 +448,7 @@ const renderMainContent = () => {
   }
 
   const getDocumentsDisplay = (req: RequirementTableEntry) => {
-    const documentIds = req.kyc_document_ids || (req.kyc_document_id ? [req.kyc_document_id] : [])
+    const documentIds = req.kyc_document_ids || []
     const documentCount = documentIds.length
     const documentNames = getDocumentNames(documentIds)
 
@@ -629,59 +630,78 @@ const handleDeleteRequirement = async (requirementId: string) => {
 };
 
   return (
-    <div className="flex flex-col h-full bg-slate-50/50">
-      <div className="p-6 border-b bg-white shadow-sm">
-        <h1 className="text-2xl font-bold">Upload Processing Requirements</h1>
-        <p className="text-sm text-muted-foreground">Manage documentation required per job class.</p>
-      </div>
-      <div className="flex flex-1 overflow-hidden">
-        <DepartmentSidebar
-          departments={departments}
-          activeDept={activeDept}
-          activeSubdept={activeSubdept}
-          activeClass={activeClass}
-          activeSubclass={activeSubclass}
-          expandedItems={expandedItems}
-          onDeptClick={handleDeptClick}
-          onSubdeptClick={handleSubdeptClick}
-          onClassClick={handleClassClick}
-          onSubclassClick={handleSubclassClick}
-          onToggleExpand={(k) => setExpandedItems(p => ({ ...p, [k]: !p[k] }))}
-          showDefaultDisplayOnly={showDefaultDisplayOnly}
-          onToggleDefaultDisplay={() => setShowDefaultDisplayOnly(!showDefaultDisplayOnly)}
-        />
-        <div className="flex-1 overflow-y-auto p-6 bg-white border-l shadow-inner">
-          <div className="mx-auto">
-            {renderMainContent()}
-          </div>
+    <div className="flex h-screen bg-slate-50/50">
+      <DepartmentSidebar
+        departments={departments}
+        activeDept={activeDept}
+        activeSubdept={activeSubdept}
+        activeClass={activeClass}
+        activeSubclass={activeSubclass}
+        onDeptClick={handleDeptClick}
+        onSubdeptClick={handleSubdeptClick}
+        onClassClick={handleClassClick}
+        onSubclassClick={handleSubclassClick}
+        expandedItems={expandedItems}
+        onToggleExpand={(key) => setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }))}
+      />
+
+      <main className="flex-1 overflow-hidden">
+        <div className="h-full overflow-auto p-4 space-y-4">
+          <header className="flex items-center justify-between">
+            <div>
+              <h2 className="text-3xl font-bold tracking-tight">Upload Processing Requirements</h2>
+              <p className="text-muted-foreground">
+                {departments.find(d => String(d.id) === activeDept)?.name} 
+                {activeSubdept[activeDept] && ` > ${departments.find(d => String(d.id) === activeDept)?.tm_subdepartments?.find(s => String(s.id) === activeSubdept[activeDept])?.name}`}
+                {activeClass[activeSubdept[activeDept]] && ` > ${departments.find(d => String(d.id) === activeDept)?.tm_subdepartments?.find(s => String(s.id) === activeSubdept[activeDept])?.classes?.find(c => String(c.id) === activeClass[activeSubdept[activeDept]])?.name}`}
+                {activeSubclass[activeClass[activeSubdept[activeDept]]] && ` > ${departments.find(d => String(d.id) === activeDept)?.tm_subdepartments?.find(s => String(s.id) === activeSubdept[activeDept])?.classes?.find(c => String(c.id) === activeClass[activeSubdept[activeDept]])?.subClasses?.find(sc => String(sc.id) === activeSubclass[activeClass[activeSubdept[activeDept]]])?.name}`}
+              </p>
+            </div>
+          </header>
+
+          {!activeDept ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Upload Processing Requirements</CardTitle>
+                <CardDescription>Select a department from the sidebar to get started</CardDescription>
+              </CardHeader>
+              <CardContent className="p-4 text-center py-8">
+                <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <p className="text-muted-foreground">Choose a department to manage upload requirements.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            renderMainContent()
+          )}
+
+          <AddRequirementsDialog isOpen={isAddDialogOpen} onOpenChange={setIsAddDialogOpen} onSubmit={handleAddRequirements} isSubmitting={isSubmitting} context={addContext} />
+          <EditRequirementDialog isOpen={isEditDialogOpen} onOpenChange={setIsEditDialogOpen} requirement={editingRequirement} onSave={handleSaveRequirement} isSubmitting={isSubmitting} context={editingContext} />
+          
+          {/* Delete Confirmation Dialog */}
+          <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Delete Requirement</DialogTitle>
+                <DialogDescription>
+                  Are you sure you want to delete this requirement? This action cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => deleteContext?.requirementId && handleDeleteRequirement(deleteContext.requirementId)}
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? 'Deleting...' : 'Delete'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
-      </div>
-      <AddRequirementsDialog isOpen={isAddDialogOpen} onOpenChange={setIsAddDialogOpen} onSubmit={handleAddRequirements} isSubmitting={isSubmitting} context={addContext} />
-      <EditRequirementDialog isOpen={isEditDialogOpen} onOpenChange={setIsEditDialogOpen} requirement={editingRequirement} onSave={handleSaveRequirement} isSubmitting={isSubmitting} context={editingContext} />
-      
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete Requirement</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete this requirement? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => deleteContext?.requirementId && handleDeleteRequirement(deleteContext.requirementId)}
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? 'Deleting...' : 'Delete'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      </main>
     </div>
   )
 }

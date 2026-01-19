@@ -15,6 +15,7 @@ import { FileText, Zap, Webhook, Users, Check, ChevronsUpDown, Search, Eraser, T
 import { cn } from "@/lib/utils"
 import { toast } from "@/hooks/use-toast"
 import supabase from "@/lib/supabase/client"
+import { Checkbox } from '@/components/ui/checkbox'
 
 export type ApplicantType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependent' | 'employee' | 'understudy';
 
@@ -59,7 +60,9 @@ export function EditRequirementDialog({
     automationId: '',
     applicantTypes: ['principal'],
     requiredDocumentCount: 1,
-    instructions: ''
+    instructions: '',
+    isStageDocument: false, // Added stage document field
+    category: 'general' // Added category field
   })
   
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
@@ -75,13 +78,15 @@ export function EditRequirementDialog({
         type: requirement.type || 'standard',
         isVisible: requirement.isVisible !== false,
         isRequired: requirement.isRequired !== false,
-        kycDocumentIds: requirement.kyc_document_ids || (requirement.kyc_document_id ? [requirement.kyc_document_id] : []),
+        kycDocumentIds: requirement.kyc_document_ids || (requirement.kyc_document_id ? [requirement.kyc_document_id] : []), // Backward compatibility
         hasWebForm: !!requirement.web_automation?.automationId || requirement.hasWebForm,
         webFormName: requirement.web_automation?.webFormName || requirement.webFormName || '',
         automationId: requirement.web_automation?.automationId || requirement.automationId || '',
-        applicantTypes: requirement.applicantTypes || (requirement.applicantType ? [requirement.applicantType] : ['principal']),
+        applicantTypes: requirement.applicantTypes || (requirement.applicantType ? [requirement.applicantType] : ['principal']), // Backward compatibility
         requiredDocumentCount: requirement.requiredDocumentCount || 1,
-        instructions: requirement.instructions || ''
+        instructions: requirement.instructions || '',
+        isStageDocument: requirement.isStageDocument || false, // Added stage document field
+        category: requirement.category || 'general' // Added category field
       })
       fetchKycDocuments()
       fetchAutomationTypes()
@@ -119,6 +124,17 @@ export function EditRequirementDialog({
     updateField('kycDocumentIds', updated)
   }
 
+  // Helper function to get selected document names
+  const getSelectedDocumentNames = () => {
+    const selectedIds = formData.kycDocumentIds || []
+    if (selectedIds.length === 0) return []
+    
+    return selectedIds.map(id => {
+      const doc = kycDocuments.find(d => d.id.toString() === id)
+      return doc?.display_name || doc?.name || `Document ${id}`
+    })
+  }
+
   const handleSubmit = async () => {
     if (!formData.name.trim()) return
     
@@ -135,7 +151,7 @@ export function EditRequirementDialog({
         }
       }
 
-      // Create updated requirement with legacy field structure
+      // Create updated requirement with only new JSON column structure
       const updatedRequirement = {
         id: formData.id,
         name: formData.name.trim(),
@@ -145,16 +161,16 @@ export function EditRequirementDialog({
         isVisible: formData.isVisible,
         isRequired: formData.isRequired,
         is_mandatory: formData.isRequired,
-        // Legacy fields
-        applicantType: (formData.applicantTypes || [])[0] || 'principal',
-        kyc_document_id: (formData.kycDocumentIds || [])[0] || null,
-        requiredDocumentCount: formData.requiredDocumentCount || 1,
-        instructions: formData.instructions || '',
-        // New fields for compatibility
+        // New JSON columns only
         applicantTypes: formData.applicantTypes || ['principal'],
         kyc_document_ids: formData.kycDocumentIds || [],
+        requiredDocumentCount: formData.requiredDocumentCount || 1,
+        instructions: formData.instructions || '',
+        isStageDocument: formData.isStageDocument || false, // Added stage document field
+        category: 'processing', // Force to 'processing' for Upload Processing Requirements section
         web_automation,
         updated_at: new Date().toISOString()
+        // Legacy fields removed: applicantType, kyc_document_id
       }
 
       await onSave(updatedRequirement)
@@ -243,7 +259,15 @@ export function EditRequirementDialog({
               <PopoverTrigger asChild>
                 <Button variant="outline" className="w-full justify-between bg-white">
                   <div className="flex gap-1 truncate">
-                    {(formData.kycDocumentIds || []).length > 0 ? `${formData.kycDocumentIds.length} docs selected` : "Select documents..."}
+                    {(formData.kycDocumentIds || []).length > 0 ? (
+                      <div className="flex gap-1 truncate">
+                        {getSelectedDocumentNames().map((name, index) => (
+                          <Badge key={index} variant="secondary" className="text-[10px] truncate max-w-[150px]">
+                            {name}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : "Select documents..."}
                   </div>
                   <Search className="h-4 w-4 opacity-50" />
                 </Button>
@@ -270,6 +294,18 @@ export function EditRequirementDialog({
                 </Command>
               </PopoverContent>
             </Popover>
+          </div>
+
+          {/* Stage Document Checkbox */}
+          <div className="flex items-center space-x-2">
+            <Checkbox 
+              id="stage-document"
+              checked={formData.isStageDocument || false}
+              onCheckedChange={(checked) => updateField('isStageDocument', checked)}
+            />
+            <Label htmlFor="stage-document" className="text-sm font-medium cursor-pointer">
+              Mark as Stage Document
+            </Label>
           </div>
 
           <div className="border-t pt-4">

@@ -597,21 +597,15 @@ export async function fetchDepartments(): Promise<Department[]> {
 
     if (deptError) throw deptError
 
-    // Process and order the data
+    // Process the data without ordering (handled in DepartmentSidebar)
     const processedData = (departmentsData || []).map((dept: any) => {
-      const subdepartments = (dept.tm_subdepartments || [])
-        .sort((a, b) => (a.order || 0) - (b.order || 0))
-        .map((subdept: any) => {
-          // Process classes with ordering and default display
-          const classes = (subdept.classes || [])
-            .sort((a, b) => (a.order || 0) - (b.order || 0))
-            .map((cls: any) => ({
-              ...cls,
-              subdepartmentId: subdept.id,
-              default_display: cls.default_display || false,
-              subClasses: (cls.subClasses || [])
-                .sort((a, b) => (a.order || 0) - (b.order || 0))
-                .map((subCls: any) => ({
+      const subdepartments = (dept.tm_subdepartments || []).map((subdept: any) => {
+        // Process classes without ordering (handled in DepartmentSidebar)
+        const classes = (subdept.classes || []).map((cls: any) => ({
+          ...cls,
+          subdepartmentId: subdept.id,
+          default_display: cls.default_display || false,
+          subClasses: (cls.subClasses || []).map((subCls: any) => ({
                   ...subCls,
                   default_display: subCls.default_display || false
                 }))

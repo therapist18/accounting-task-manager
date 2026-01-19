@@ -72,7 +72,7 @@ export function RequirementsTable({
   tasks,
   loading,
   error,
-  activeTab = "work-in-progress",
+  activeTab = "enquiry",
 }: RequirementsTableProps) {
   const [documents, setDocuments] = useState<any[]>([])
   const [documentsLoading, setDocumentsLoading] = useState(true)
@@ -139,125 +139,139 @@ export function RequirementsTable({
     return Array.from(ids);
   }, [filteredTasks]);
 
-  const fetchAllIndividualData = useCallback(async (tasksToFetch: any[]) => {
-    console.log('🔄 [fetchAllIndividualData] Starting optimized fetch...');
-
-    // 1. COLLECT ALL UNIQUE IDs IN ONE PASS
-    const uniqueIds = new Set<number>();
-    const directorMap = new Map<number, any>();
-
-    tasksToFetch.forEach(task => {
-      // Get all individual IDs from participants_details
-      if (Array.isArray(task.participants_details)) {
-        task.participants_details.forEach(participant => {
-          if (participant.id && participant.type === 'individual') {
-            uniqueIds.add(participant.id);
-          }
-        });
-      }
-
-      // Get references
-      if (Array.isArray(task.references)) {
-        task.references.forEach(ref => ref.id && uniqueIds.add(ref.id));
-      }
-
-      // Store director details
-      if (Array.isArray(task.directors_details)) {
-        task.directors_details.forEach(director => {
-          if (director?.id) {
-            uniqueIds.add(director.id);
-            directorMap.set(director.id, {
-              full_name: director.full_name,
-              role: director.role,
-              is_primary: director.is_primary,
-              roles: director.roles || []
-            });
-          }
+  const getRequiredKycIds = useCallback(() => {
+    const ids = new Set<string>();
+    Object.values(taskClassRequirements).forEach(classReq => {
+      if (classReq?.requirements) {
+        classReq.requirements.forEach(req => {
+          // Handle both old and new field structures
+          if (req.kyc_document_id) ids.add(req.kyc_document_id);
+          if (req.kyc_document_ids) req.kyc_document_ids.forEach(id => ids.add(id));
         });
       }
     });
+    return Array.from(ids);
+  }, [taskClassRequirements]);
 
-    const validIds = Array.from(uniqueIds).filter(id => id != null);
-    if (validIds.length === 0) {
-      console.log('⏭️ No individual IDs to fetch');
-      return;
+const fetchAllIndividualData = useCallback(async (tasksToFetch: any[], requiredKycIds: string[]) => {
+  const uniqueIds = new Set<number>();
+  const individualTypeMap = new Map<number, string>();
+
+  tasksToFetch.forEach(task => {
+    // 1. Principal
+    if (task.applicant_details?.id) {
+      uniqueIds.add(task.applicant_details.id);
+      individualTypeMap.set(task.applicant_details.id, 'principal');
     }
-
-    console.log(`📋 Fetching data for ${validIds.length} individuals`);
-
-    try {
-      // 2. PARALLEL FETCH - Both queries run simultaneously
-      const [individualsRes, documentsRes] = await Promise.all([
-        supabase
-          .from('registry_individuals')
-          .select('id, full_name')
-          .in('id', validIds),
-
-        supabase
-          .from('acc_portal_directors_documents')
-          .select('*, acc_portal_kyc (id, name, display_name)')
-          .in('director_id', validIds)
-          .order('created_at', { ascending: false })
-      ]);
-
-      // 3. ERROR HANDLING
-      if (individualsRes.error) throw individualsRes.error;
-      if (documentsRes.error) throw documentsRes.error;
-
-      console.log(`✅ Fetched ${individualsRes.data?.length || 0} individuals and ${documentsRes.data?.length || 0} documents`);
-
-      // 4. BUILD NAMES MAP (Single Pass)
-      const namesMap: Record<number, string> = {};
-
-      individualsRes.data?.forEach(ind => {
-        namesMap[ind.id] = ind.full_name;
-      });
-
-      // Override with director details if available
-      directorMap.forEach((details, id) => {
-        if (details?.full_name) {
-          namesMap[id] = details.full_name;
+    
+    // 2. Participants (Dependants & Understudy)
+    if (Array.isArray(task.participants_details)) {
+      task.participants_details.forEach(p => {
+        if (p.id) {
+          uniqueIds.add(p.id);
+          // Map roles: 'dependant', 'understudy', 'director'
+          individualTypeMap.set(p.id, p.role || 'individual');
         }
       });
-
-      // 5. BUILD DOCUMENTS MAP (Single Pass)
-      const documentsByDirector: Record<string, any[]> = {};
-
-      documentsRes.data?.forEach(doc => {
-        const directorId = doc.director_id;
-        if (!directorId) return;
-
-        if (!documentsByDirector[directorId]) {
-          documentsByDirector[directorId] = [];
-        }
-
-        // Enrich document with director details
-        const enrichedDoc = {
-          ...doc,
-          director_details: directorMap.get(directorId) || null,
-        };
-
-        documentsByDirector[directorId].push(enrichedDoc);
-      });
-
-      // 6. SINGLE STATE UPDATE
-      setIndividualNames(prev => ({ ...prev, ...namesMap }));
-      setAllIndividualDocuments(prev => ({ ...prev, ...documentsByDirector }));
-
-      console.log('✅ [fetchAllIndividualData] Complete!');
-
-    } catch (err) {
-      console.error('❌ Error fetching individual data:', err);
-      toast({
-        title: "Error fetching individual data",
-        description: err.message,
-        variant: "destructive"
-      });
     }
-  }, []);
+    
+    // 3. Fallback Understudy from root
+    if (task.understudy) {
+      uniqueIds.add(task.understudy);
+      if (!individualTypeMap.has(task.understudy)) individualTypeMap.set(task.understudy, 'understudy');
+    }
+  });
 
-  const fetchCompanyData = useCallback(async (tasksToFetch: any[]) => {
-    const companyIds = [...new Set(tasksToFetch.map(t => t.company_id).filter(Boolean))];
+  const validIds = Array.from(uniqueIds).filter(Boolean);
+  if (validIds.length === 0 || requiredKycIds.length === 0) return;
+
+  try {
+    const { data: documentsRes, error } = await supabase
+      .from('acc_portal_directors_documents')
+      .select('*, acc_portal_kyc (id, name, display_name)')
+      .in('director_id', validIds)
+      .in('document_id', requiredKycIds)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    // Filter documents based on applicability
+    const filteredDocuments = documentsRes?.filter(doc => {
+      const individualType = individualTypeMap.get(doc.director_id);
+      const docApplicantTypes = doc.acc_portal_kyc?.applicant_types;
+      
+      // If document metadata doesn't restrict types, or we don't know the person's type, allow it
+      if (!docApplicantTypes || !Array.isArray(docApplicantTypes) || docApplicantTypes.length === 0) return true;
+      
+      // Strict match
+      return docApplicantTypes.includes(individualType);
+    });
+
+    const documentsByDirector = filteredDocuments?.reduce((acc, doc) => {
+      if (!acc[doc.director_id]) acc[doc.director_id] = [];
+      acc[doc.director_id].push(doc);
+      return acc;
+    }, {});
+
+    setAllIndividualDocuments(prev => ({ ...prev, ...documentsByDirector }));
+  } catch (err) { console.error('Error Individual Fetch:', err); }
+}, []);
+
+const fetchAllCompanyDocuments = useCallback(async (tasksToFetch: any[], requiredKycIds: string[]) => {
+  const companyIds = [...new Set(tasksToFetch.flatMap(t => {
+    // Look for the actual company ID in participants
+    const companyPart = t.participants_details?.find(p => p.type === 'company');
+    return [t.company_id, companyPart?.id].filter(Boolean);
+  }))];
+
+  if (companyIds.length === 0 || requiredKycIds.length === 0) return;
+
+  try {
+    // acc_portal_kyc_uploads table structure:
+    // - company_id: links to company
+    // - kyc_document_id: links to requirement (NOT document_id)
+    // - acc_portal_kyc: document type info with applicant_types for applicability
+    const { data, error } = await supabase
+      .from('acc_portal_kyc_uploads')
+      .select('*, acc_portal_kyc (id, name, display_name)')
+      .in('company_id', companyIds)
+      .in('kyc_document_id', requiredKycIds) // Correct field for company documents
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    
+  const docsByCompany = data?.reduce((acc, doc) => {
+  if (!acc[doc.company_id]) acc[doc.company_id] = [];
+  acc[doc.company_id].push(doc);
+  return acc;
+}, {});
+    
+    setAllCompanyDocuments(prev => ({ ...prev, ...docsByCompany }));
+  } catch (err) { console.error('Error Company Fetch:', err); }
+}, []);
+
+    const fetchCompanyData = useCallback(async (tasksToFetch: any[]) => {
+    console.log('🔍 [fetchCompanyData] Input tasks:', tasksToFetch.map(t => ({ id: t.id, company_id: t.company_id, company_name: t.company_name })));
+    
+    // Extract company IDs from multiple possible locations
+    const companyIds = [...new Set(tasksToFetch.flatMap(t => {
+      const ids = [];
+      if (t.company_id) ids.push(t.company_id);
+      
+      // Check applicant_details for company
+      if (t.applicant_details?.type === 'company' && t.applicant_details?.id) {
+        ids.push(t.applicant_details.id);
+      }
+      
+      // Check participants_details for company
+      if (Array.isArray(t.participants_details)) {
+        const companyParticipant = t.participants_details.find(p => p.type === 'company');
+        if (companyParticipant?.id) ids.push(companyParticipant.id);
+      }
+      
+      return ids;
+    }).filter(Boolean))];
+    
     if (companyIds.length === 0) {
       console.log('⏭️ No company IDs to fetch');
       return;
@@ -287,79 +301,76 @@ export function RequirementsTable({
     }
   }, []);
 
-  const fetchAllCompanyDocuments = useCallback(async (tasksToFetch: any[]) => {
-    const companyIds = [...new Set(tasksToFetch.map(t => t.company_id).filter(Boolean))];
-    if (companyIds.length === 0) {
-      console.log('⏭️ No company IDs to fetch documents for');
-      return;
-    }
+  // Update the loading effect to wait for requirements first
+  useEffect(() => {
+    const loadData = async () => {
+      if (!filteredTasks.length) return;
+      
+      // 1. Fetch Class Requirements first to get the KYC IDs
+      const reqMap = {};
+      for (const task of filteredTasks) {
+        const { data } = await supabase.from('tm_class_requirements')
+          .select('*')
+          .eq('job_level->>class_id', task.class_id)
+          .maybeSingle();
+        if (data) reqMap[task.id] = data;
+      }
+      setTaskClassRequirements(reqMap);
 
-    console.log(`📋 Fetching documents for ${companyIds.length} companies`);
+      // 2. Extract required IDs
+      const requiredKycIds = [];
+      Object.values(reqMap).forEach(cr => cr.requirements?.forEach(r => {
+        // Handle both old and new field structures
+        if(r.kyc_document_id) requiredKycIds.push(r.kyc_document_id);
+        if(r.kyc_document_ids) requiredKycIds.push(...r.kyc_document_ids);
+      }));
 
-    try {
-      const { data, error } = await supabase
-        .from('acc_portal_kyc_uploads')
-        .select('*, acc_portal_kyc (id, name, display_name)')
-        .in('company_id', companyIds)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      console.log(`✅ Fetched ${data?.length || 0} company documents`);
-
-      // Single pass reduce - group by company_id
-      const documentsByCompany = data?.reduce((acc, doc) => {
-        const companyId = doc.company_id;
-        if (!companyId) return acc;
-
-        if (!acc[companyId]) {
-          acc[companyId] = [];
-        }
-        acc[companyId].push(doc);
-        return acc;
-      }, {} as Record<string, any[]>);
-
-      setAllCompanyDocuments(documentsByCompany || {});
-
-    } catch (err) {
-      console.error('❌ Error fetching company documents:', err);
-    }
-  }, []);
+      // 3. Parallel fetch with filters
+      setDocumentsLoading(true);
+      await Promise.all([
+        fetchAllIndividualData(filteredTasks, requiredKycIds),
+        fetchCompanyData(filteredTasks),
+        fetchAllCompanyDocuments(filteredTasks, requiredKycIds)
+      ]);
+      setDocumentsLoading(false);
+    };
+    loadData();
+  }, [filteredTasks]);
 
   const hasReferencesColumn = useMemo(() => filteredTasks.some(task => REFERENCE_SUBDEPARTMENT_IDS.includes(task.subdepartment?.id) || REFERENCE_SUBDEPARTMENT_IDS.includes(task.subdepartment?.parent_id)), [filteredTasks]);
 
-  useEffect(() => {
-    if (!filteredTasks.length) {
-      setDocumentsLoading(false);
-      return;
-    }
+  // useEffect(() => {
+  //   if (!filteredTasks.length) {
+  //     setDocumentsLoading(false);
+  //     return;
+  //   }
 
-    const loadAllData = async () => {
-      setDocumentsLoading(true);
-      console.log('🚀 [loadAllData] Starting parallel data fetch for', filteredTasks.length, 'tasks');
+  //   const loadAllData = async () => {
+  //     setDocumentsLoading(true);
+  //     console.log('🚀 [loadAllData] Starting parallel data fetch for', filteredTasks.length, 'tasks');
 
-      const startTime = performance.now();
+  //     const startTime = performance.now();
 
-      try {
-        // PARALLEL EXECUTION - All 3 fetches run simultaneously
-        await Promise.all([
-          fetchAllIndividualData(filteredTasks),
-          fetchCompanyData(filteredTasks),
-          fetchAllCompanyDocuments(filteredTasks)
-        ]);
+  //     try {
+  //       // PARALLEL EXECUTION - All 3 fetches run simultaneously
+  //       await Promise.all([
+  //         fetchAllIndividualData(filteredTasks),
+  //         fetchCompanyData(filteredTasks),
+  //         fetchAllCompanyDocuments(filteredTasks)
+  //       ]);
 
-        const endTime = performance.now();
-        console.log(`✅ [loadAllData] Complete in ${Math.round(endTime - startTime)}ms`);
+  //       const endTime = performance.now();
+  //       console.log(`✅ [loadAllData] Complete in ${Math.round(endTime - startTime)}ms`);
 
-      } catch (error) {
-        console.error('❌ [loadAllData] Error:', error);
-      } finally {
-        setDocumentsLoading(false);
-      }
-    };
+  //     } catch (error) {
+  //       console.error('❌ [loadAllData] Error:', error);
+  //     } finally {
+  //       setDocumentsLoading(false);
+  //     }
+  //   };
 
-    loadAllData();
-  }, [filteredTasks, fetchAllIndividualData, fetchCompanyData, fetchAllCompanyDocuments]);
+  //   loadAllData();
+  // }, [filteredTasks, fetchAllIndividualData, fetchCompanyData, fetchAllCompanyDocuments]);
 
   useEffect(() => {
     let isMounted = true;
@@ -463,50 +474,89 @@ export function RequirementsTable({
     }
   }, [searchedGroupedTasks, selectedApplicant]);
 
-  // --- MODIFICATION: Separate "Letters" from other document types ---
-  const organizedRequirements = useMemo(() => {
-    const documentsMap = new Map<string, { document: any; fields: any[]; category: 'company' | 'individual' | 'template' }>();
-    const allTasks = filteredGroupedTasks.flatMap(g => g.tasks);
+const organizedRequirements = useMemo(() => {
+  const allTasks = filteredGroupedTasks.flatMap(g => g.tasks);
+  const requirementRows: any[] = [];
 
-    allTasks.forEach(task => {
-      const classReqs = taskClassRequirements[task.id];
-      if (!classReqs?.documents_and_fields) return;
+  allTasks.forEach(task => {
+    const classReqs = taskClassRequirements[task.id];
+    // Check for the new 'requirements' array instead of 'documents_and_fields'
+    if (!classReqs?.requirements || !Array.isArray(classReqs.requirements)) return;
 
-      classReqs.documents_and_fields.forEach((item: any) => {
-        const parsed = parseSelectionId(item.id);
-        const docId = parsed.documentId;
+    classReqs.requirements.forEach((req: any) => {
+      // Handle both kyc_document_id (singular) and kyc_document_ids (array)
+      const kycDocIds = req.kyc_document_ids || (req.kyc_document_id ? [req.kyc_document_id] : []);
+      
+      if (kycDocIds.length === 0) return;
+      
+      // Group documents by their type name to avoid duplicates
+      const documentGroups = new Map<string, string[]>(); // displayName -> array of document IDs
+      
+      kycDocIds.forEach((docId: string) => {
         const docDef = documents.find(d => d.id === docId);
-
-        if (docDef && !documentsMap.has(docId)) {
-          const itemWithSettings = { ...item, ...docDef, selectionId: item.id };
-
-          // Determine category - prioritize template status
-          let category: 'company' | 'individual' | 'template' = 'individual';
-          if (docDef.has_template === true || docDef.has_template === 'true') {
-            category = 'template';
-          } else if (docDef.category === 'company-docs') {
-            category = 'company';
-          }
-
-          documentsMap.set(docId, {
-            document: itemWithSettings,
-            fields: [],
-            category
-          });
+        const documentName = docDef?.display_name || docDef?.name || req.name;
+        
+        if (!documentGroups.has(documentName)) {
+          documentGroups.set(documentName, []);
         }
+        documentGroups.get(documentName)!.push(docId);
+      });
+      
+      // Create one row per unique document type
+      documentGroups.forEach((docIds: string[], documentName: string) => {
+        // Use the first document ID for display and matching
+        const firstDocId = docIds[0];
+        const docDef = documents.find(d => d.id === firstDocId);
+        
+        // Create a unique identifier for this document type group
+        const uniqueId = `${req.id}-${documentName.replace(/\s+/g, '-')}`;
+        
+        // Avoid duplicate requirement rows if the same document type already exists
+        if (requirementRows.find(r => r.documentTypeName === documentName)) return;
+        
+        requirementRows.push({
+          ...req, // The requirement object from your JSON
+          documentDefinition: docDef, // The KYC metadata (fields, etc)
+          kyc_document_ids: docIds, // Store all document IDs of this type
+          kyc_document_id: firstDocId, // Also store first ID for backward compatibility
+          uniqueId: uniqueId, // Unique identifier for this document type group
+          documentTypeName: documentName, // Store the document type name for deduplication
+          documentCount: docIds.length, // Number of documents of this type
+          isMultiDocument: docIds.length > 1, // Flag to indicate multiple documents of same type
+          // Determine category for sectioning based on applicantTypes and document category
+          category: (() => {
+            // Check if this requirement applies to companies
+            const applicantTypes = req.applicantTypes || (req.applicantType ? [req.applicantType] : []);
+            if (applicantTypes.includes('company')) {
+              return 'company';
+            }
+            
+            // For non-company requirements, check document category
+            if (docDef?.category === 'company-docs') {
+              return 'company';
+            }
+            
+            // Check if it's a template
+            if (docDef?.has_template) {
+              return 'template';
+            }
+            
+            // Default to individual
+            return 'individual';
+          })()
+        });
       });
     });
+  });
 
-    const allDocs = Array.from(documentsMap.values());
-    return {
-      documents: {
-        company: allDocs.filter(i => i.category === 'company'),
-        individual: allDocs.filter(i => i.category === 'individual'),
-        templates: allDocs.filter(i => i.category === 'template'),
-      }
-    };
-  }, [filteredGroupedTasks, taskClassRequirements, documents, parseSelectionId]);
-
+  return {
+    documents: {
+      company: requirementRows.filter(r => r.category === 'company'),
+      individual: requirementRows.filter(r => r.category === 'individual'),
+      templates: requirementRows.filter(r => r.category === 'template'),
+    }
+  };
+}, [filteredGroupedTasks, taskClassRequirements, documents]);
   const handleSelectApplicant = (applicantName: string) => setSelectedApplicant(applicantName);
   const toggleDocumentExpansion = useCallback((docId: string) => setExpandedDocuments(prev => { const newSet = new Set(prev); newSet.has(docId) ? newSet.delete(docId) : newSet.add(docId); return newSet; }), []);
   const handleUploadAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number) => { setSelectedUploadData({ task, document: item, columnType, applicantId }); setUploadDialogOpen(true); }, []);
@@ -517,45 +567,47 @@ export function RequirementsTable({
     setSelectedLetterData({ task, document: item, columnType, applicantId });
     setIsLetterDialogOpen(true);
   }, []);
+const getDocumentStatusForColumn = useCallback((task: any, reqItem: any, columnType: ApplicantType, applicantId?: number): 
+DocumentStatus => {
+  const baseStatus = { documents: [], count: 0 };
+  // Handle multiple document IDs of the same type
+  const kycDocIds = reqItem.kyc_document_ids || (reqItem.kyc_document_id ? [reqItem.kyc_document_id] : []);
+  
+  if (kycDocIds.length === 0) return baseStatus;
 
-  const getDocumentStatusForColumn = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number): DocumentStatus => {
-    const isCompanyDocument = item.category === 'company-docs' || item.category === 'company';
-    const baseStatus = { documents: [], count: 0 };
-    const requiredDocId = item.id; // The ID of the KYC requirement
+  // Strict applicability check (matches column type to requirement definition)
+  const allowedTypes = reqItem.applicantTypes || (reqItem.applicantType ? [reqItem.applicantType] : []);
+  const normalizedColType = columnType === 'director' ? 'principal' : columnType;
+  if (!allowedTypes.includes(normalizedColType)) return { ...baseStatus, type: 'na' };
 
-    // 1. Cross-check: Don't show Individual docs in Company columns and vice versa
-    if ((columnType === 'company' && !isCompanyDocument) || (columnType !== 'company' && isCompanyDocument)) {
-      return { ...baseStatus, type: 'na' };
+  let foundDocuments: any[] = [];
+
+  if (columnType === 'company') {
+    // Match Pool: acc_portal_kyc_uploads (company_id)
+    const companyId = task.participants_details?.find(p => p.type === 'company')?.id || task.company_id;
+    if (companyId && allCompanyDocuments[companyId]) {
+      // Check if any of the kycDocIds match (for documents of same type)
+      foundDocuments = allCompanyDocuments[companyId].filter(doc => 
+        kycDocIds.includes(doc.kyc_document_id)
+      );
     }
+  } else {
+    // Match Pool: acc_portal_directors_documents (director_id)
+    let individualId = applicantId; // from column mapping
+    if (columnType === 'principal') individualId = task.applicant_details?.id || task.individual_id;
+    if (columnType === 'understudy') individualId = task.understudy;
 
-    let foundDocuments: any[] = [];
-
-    if (columnType === 'company') {
-      // Existing Company Logic
-      if (task.company_id && allCompanyDocuments[task.company_id]) {
-        foundDocuments = allCompanyDocuments[task.company_id].filter(
-          doc => doc.kyc_document_id === requiredDocId || doc.document_id === requiredDocId
-        );
-      }
-    } else {
-      // 2. Individual Matching Logic
-      let individualId: number | null = null;
-      if (columnType === 'principal') individualId = task.principal_member || task.individual_id;
-      else if (columnType === 'understudy') individualId = task.understudy_member;
-      else if (columnType === 'dependant' || columnType === 'reference' || columnType === 'director') individualId = applicantId;
-
-      if (individualId && allIndividualDocuments[individualId]) {
-        // Look through the list for this specific person
-        foundDocuments = allIndividualDocuments[individualId].filter(doc => {
-          // Match against the Requirement ID
-          return doc.document_id === requiredDocId || doc.kyc_document_id === requiredDocId;
-        });
-      }
+    if (individualId && allIndividualDocuments[individualId]) {
+      // Check if any of the kycDocIds match (for documents of same type)
+      foundDocuments = allIndividualDocuments[individualId].filter(doc => 
+        kycDocIds.includes(doc.document_id)
+      );
     }
+  }
 
-    const type = foundDocuments.length > 0 ? 'view' : 'upload';
-    return { ...baseStatus, documents: foundDocuments, count: foundDocuments.length, type };
-  }, [allCompanyDocuments, allIndividualDocuments]);
+  const type = foundDocuments.length > 0 ? 'view' : 'upload';
+  return { ...baseStatus, documents: foundDocuments, count: foundDocuments.length, type };
+}, [allCompanyDocuments, allIndividualDocuments]);
 
   const renderDocumentStatus = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number) => {
     const status = getDocumentStatusForColumn(task, item, columnType, applicantId);
@@ -619,24 +671,6 @@ export function RequirementsTable({
   const renderReferencesData = useCallback(() => <div className="text-center p-2"><span className="text-gray-400 text-xs">N/A</span></div>, []);
   const getCurrentRequirements = () => [];
   const fuzzyMatch = (str1, str2) => str1.toLowerCase() === str2.toLowerCase();
-
-  const getDocumentDataForPreview = useCallback((task: any, item: any, columnType: ApplicantType, referenceId?: number) => {
-    const status = getDocumentStatusForColumn(task, item, columnType, referenceId);
-    if (status.type === 'view' && status.documents.length > 0) {
-      // Return the first/latest document found
-      const doc = status.documents[0];
-
-      // Ensure extracted_details are mapped for the ExtractionPreview component
-      return {
-        ...doc,
-        // Handle potential variation in JSON keys
-        extracted_details: doc.extracted_details || {},
-        file_path: doc.file_path,
-        id: doc.id
-      };
-    }
-    return null;
-  }, [getDocumentStatusForColumn]);
 
   const currentClassRequirements = useMemo(() => {
     const firstTask = filteredGroupedTasks[0]?.tasks?.[0];
@@ -715,10 +749,11 @@ export function RequirementsTable({
             expandedDocuments={expandedDocuments}
             toggleDocumentExpansion={toggleDocumentExpansion}
             renderDocumentStatus={renderDocumentStatus}
-            getDocumentDataForPreview={getDocumentDataForPreview}
             renderClientFieldData={renderClientFieldData}
             renderReferencesData={renderReferencesData}
             hasReferencesColumn={hasReferencesColumn}
+            allIndividualDocuments={allIndividualDocuments}
+  allCompanyDocuments={allCompanyDocuments}
             individualNames={individualNames}
             companyData={companyData}
             getCurrentRequirements={getCurrentRequirements}
