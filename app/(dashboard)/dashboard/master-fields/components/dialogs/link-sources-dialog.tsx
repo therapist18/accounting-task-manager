@@ -7,17 +7,18 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { ScrollArea } from "@/components/ui/scroll-area" // Ensure this is installed in your UI library
 import { 
   Plus, 
   Trash2, 
   Database, 
   Check, 
   ChevronsUpDown, 
-  Settings2 
+  Settings2,
+  X
 } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
-import { MultiSelectDocumentTypes } from "../ui/multi-select-document-types"
 import { cn } from "@/lib/utils"
 import {
   Command,
@@ -63,7 +64,107 @@ interface DataSourceConfigurationProps {
   documentTypes: Array<{ value: string; label: string }>
 }
 
-// --- Local Searchable Select Component (Fixes Search Issue) ---
+// --- 1. Robust Multi-Select Component (Fixes Document Search & Scrolling) ---
+interface MultiSelectBoxProps {
+  options: Array<{ value: string; label: string }>
+  selectedValues: string[]
+  onChange: (values: string[]) => void
+  placeholder?: string
+}
+
+function MultiSelectBox({ options, selectedValues, onChange, placeholder = "Select items..." }: MultiSelectBoxProps) {
+  const [open, setOpen] = useState(false)
+
+  const handleSelect = (value: string) => {
+    if (selectedValues.includes(value)) {
+      onChange(selectedValues.filter((item) => item !== value))
+    } else {
+      onChange([...selectedValues, value])
+    }
+  }
+
+  const handleRemove = (value: string) => {
+    onChange(selectedValues.filter((item) => item !== value))
+  }
+
+  return (
+    <div className="space-y-2">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            role="combobox"
+            aria-expanded={open}
+            className="w-full justify-between bg-white h-auto min-h-[40px] py-2"
+          >
+            <span className="text-muted-foreground text-sm font-normal">
+                {selectedValues.length > 0 
+                    ? `${selectedValues.length} selected` 
+                    : placeholder}
+            </span>
+            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[350px] p-0" align="start">
+          <Command>
+            <CommandInput placeholder="Search documents..." />
+            <CommandList>
+                {/* ScrollArea added here for smooth vertical scrolling */}
+                <ScrollArea className="h-[200px]">
+                    <CommandEmpty>No documents found.</CommandEmpty>
+                    <CommandGroup>
+                        {options.map((option) => {
+                            const isSelected = selectedValues.includes(option.value)
+                            return (
+                                <CommandItem
+                                    key={option.value}
+                                    value={option.label} // Value must be label for search to work
+                                    onSelect={() => handleSelect(option.value)}
+                                >
+                                    <div className={cn(
+                                        "mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary",
+                                        isSelected ? "bg-primary text-primary-foreground" : "opacity-50 [&_svg]:invisible"
+                                    )}>
+                                        <Check className={cn("h-4 w-4")} />
+                                    </div>
+                                    <span>{option.label}</span>
+                                </CommandItem>
+                            )
+                        })}
+                    </CommandGroup>
+                </ScrollArea>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+
+      {/* Selected Items Tags - Uses flex-wrap to prevent horizontal scrolling issues */}
+      {selectedValues.length > 0 && (
+        <div className="flex flex-wrap gap-2 mt-2">
+          {selectedValues.map((val) => {
+            const label = options.find(o => o.value === val)?.label || val
+            return (
+              <Badge key={val} variant="secondary" className="flex items-center gap-1 pr-1 py-1">
+                <span className="truncate max-w-[200px]">{label}</span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-4 w-4 rounded-full hover:bg-slate-200"
+                  onClick={() => handleRemove(val)}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </Badge>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+// --- 2. Single Select Component with ScrollArea ---
 interface SearchableSelectProps {
   value: string | undefined
   onValueChange: (value: string) => void
@@ -94,9 +195,11 @@ function SearchableSelect({
           aria-expanded={open}
           className="w-full justify-between font-normal text-slate-900 bg-white"
         >
-          {value
-            ? options.find((framework) => framework.value === value)?.label || value
-            : <span className="text-muted-foreground">{loading ? "Loading..." : placeholder}</span>}
+          <span className="truncate">
+            {value
+                ? options.find((framework) => framework.value === value)?.label || value
+                : <span className="text-muted-foreground">{loading ? "Loading..." : placeholder}</span>}
+          </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -104,29 +207,30 @@ function SearchableSelect({
         <Command>
           <CommandInput placeholder={searchPlaceholder} />
           <CommandList>
-            <CommandEmpty>{loading ? "Loading..." : emptyMessage}</CommandEmpty>
-            <CommandGroup className="max-h-[200px] overflow-y-auto">
-              {options.map((framework) => (
-                <CommandItem
-                  key={framework.value}
-                  value={framework.label} // Search by label
-                  onSelect={(currentValue) => {
-                    // We need to map back to the value, not the label
-                    const selectedOption = options.find(o => o.label.toLowerCase() === currentValue.toLowerCase()) || options.find(o => o.value === currentValue);
-                    onValueChange(selectedOption ? selectedOption.value : currentValue)
-                    setOpen(false)
-                  }}
-                >
-                  <Check
-                    className={cn(
-                      "mr-2 h-4 w-4",
-                      value === framework.value ? "opacity-100" : "opacity-0"
-                    )}
-                  />
-                  {framework.label}
-                </CommandItem>
-              ))}
-            </CommandGroup>
+            <ScrollArea className="h-[200px]">
+                <CommandEmpty>{loading ? "Loading..." : emptyMessage}</CommandEmpty>
+                <CommandGroup>
+                {options.map((framework) => (
+                    <CommandItem
+                    key={framework.value}
+                    value={framework.label} 
+                    onSelect={(currentValue) => {
+                        const selectedOption = options.find(o => o.label.toLowerCase() === currentValue.toLowerCase()) || options.find(o => o.value === currentValue);
+                        onValueChange(selectedOption ? selectedOption.value : currentValue)
+                        setOpen(false)
+                    }}
+                    >
+                    <Check
+                        className={cn(
+                        "mr-2 h-4 w-4",
+                        value === framework.value ? "opacity-100" : "opacity-0"
+                        )}
+                    />
+                    {framework.label}
+                    </CommandItem>
+                ))}
+                </CommandGroup>
+            </ScrollArea>
           </CommandList>
         </Command>
       </PopoverContent>
@@ -157,15 +261,13 @@ export function DataSourceConfiguration({ sources, onChange, documentTypes }: Da
   const [tables, setTables] = useState<Array<{ name: string; label: string }>>([])
   const [loadingTables, setLoadingTables] = useState(false)
   
-  // Use reducer for internal field state to avoid triggering parent re-renders
   const [fieldState, dispatchField] = useReducer(fieldsReducer, {})
   
-  // Cache to avoid refetching
   const fieldCacheRef = useRef<Record<string, TableColumn[]>>({})
   const fetchInProgressRef = useRef<Record<string, boolean>>({})
   const isInitialMountRef = useRef(true)
   
-  // Fetch Tables (only once)
+  // Fetch Tables
   useEffect(() => {
     const fetchTables = async () => {
       try {
@@ -191,21 +293,16 @@ export function DataSourceConfiguration({ sources, onChange, documentTypes }: Da
     fetchTables()
   }, [])
 
-  // Stable callback that doesn't depend on sources
+  // Fetch Fields Logic
   const fetchFieldsForTable = useCallback(async (tableName: string, index: number) => {
     if (!tableName) return
-
-    // Check cache
     if (fieldCacheRef.current[tableName]) {
       dispatchField({ type: 'SET_FIELDS', index, fields: fieldCacheRef.current[tableName] })
       return
     }
 
-    // Prevent duplicate requests
     const fetchKey = `${tableName}-${index}`
-    if (fetchInProgressRef.current[fetchKey]) {
-      return
-    }
+    if (fetchInProgressRef.current[fetchKey]) return
 
     fetchInProgressRef.current[fetchKey] = true
     dispatchField({ type: 'SET_LOADING', index })
@@ -213,13 +310,8 @@ export function DataSourceConfiguration({ sources, onChange, documentTypes }: Da
     try {
       const { data, error } = await supabase.rpc("get_table_columns", { input_table_name: tableName })
       if (error) throw error
-      
-      // Cache the result
       fieldCacheRef.current[tableName] = data || []
-      
-      // Update internal state
       dispatchField({ type: 'SET_FIELDS', index, fields: data || [] })
-      
     } catch (error) {
       console.error(`Error fetching columns:`, error)
       toast({ title: "Error", description: "Failed to fetch table columns", variant: "destructive" })
@@ -229,18 +321,13 @@ export function DataSourceConfiguration({ sources, onChange, documentTypes }: Da
     }
   }, []) 
 
-  // Sync internal field state with parent sources when fields are loaded
+  // Sync internal state
   useEffect(() => {
     const needsUpdate = sources.some((source, index) => {
       const internalState = fieldState[index]
       if (!internalState) return false
-      
-      if (internalState.fields.length > 0 && (!source.fields || source.fields.length === 0)) {
-        return true
-      }
-      if (internalState.loading !== source.loadingFields) {
-        return true
-      }
+      if (internalState.fields.length > 0 && (!source.fields || source.fields.length === 0)) return true
+      if (internalState.loading !== source.loadingFields) return true
       return false
     })
 
@@ -258,7 +345,6 @@ export function DataSourceConfiguration({ sources, onChange, documentTypes }: Da
     }
   }, [fieldState, sources, onChange])
 
-  // Initial load
   useEffect(() => {
     if (!isInitialMountRef.current) return
     sources.forEach((source, index) => {
@@ -290,7 +376,6 @@ export function DataSourceConfiguration({ sources, onChange, documentTypes }: Da
     const newSources = [...sources]
     newSources[index] = { ...newSources[index], ...updates }
     
-    // If table changed, reset path and fetch fields
     if ("table" in updates && updates.table && updates.table !== sources[index]?.table) {
       newSources[index].path = ""
       onChange(newSources)
@@ -309,13 +394,8 @@ export function DataSourceConfiguration({ sources, onChange, documentTypes }: Da
   const generateJsonbPathOptions = (columnSpec: TableColumn) => {
     const columnName = columnSpec.column_name
     const props = columnSpec.jsonb_properties
-    
     const options = []
-    
-    // Option 1: The whole object
     options.push({ value: columnName, label: `${columnName} (Full Object)` })
-    
-    // Option 2: Detected properties
     if (props && Array.isArray(props)) {
         props.forEach(prop => {
             if (!prop.isArray) {
@@ -337,7 +417,6 @@ export function DataSourceConfiguration({ sources, onChange, documentTypes }: Da
         const selectedField = getSelectedFieldFromPath(source.path)
         const columnSpec = source.fields?.find(f => f.column_name === selectedField)
         const fieldIsJsonb = columnSpec?.is_jsonb
-        
         const isLoadingFields = fieldState[index]?.loading || source.loadingFields || false
 
         return (
@@ -384,15 +463,15 @@ export function DataSourceConfiguration({ sources, onChange, documentTypes }: Da
                 </div>
               </div>
 
+              {/* REPLACED MultiSelectDocumentTypes with local MultiSelectBox */}
               {source.source_type === "document" && (
                 <div className="space-y-1 bg-white p-2 rounded border border-slate-100">
                   <Label className="text-[10px] text-slate-500 uppercase font-bold mb-1 block">Required Documents</Label>
-                  <MultiSelectDocumentTypes
+                  <MultiSelectBox
                     options={documentTypes}
                     selectedValues={source.document_id || []}
-                    onSelect={(val) => updateSource(index, { document_id: [...(source.document_id || []), val] })}
-                    onRemove={(val) => updateSource(index, { document_id: (source.document_id || []).filter(id => id !== val) })}
-                    onClear={() => updateSource(index, { document_id: [] })}
+                    onChange={(newValues) => updateSource(index, { document_id: newValues })}
+                    placeholder="Search & Select Documents..."
                   />
                 </div>
               )}
@@ -444,7 +523,6 @@ export function DataSourceConfiguration({ sources, onChange, documentTypes }: Da
                 </div>
               )}
 
-              {/* JSONB Configuration - Updated for Manual Input */}
               {fieldIsJsonb && columnSpec && (
                 <div className="mt-2 p-2 bg-blue-50/50 rounded-md border border-blue-100">
                   <div className="flex items-center gap-2 mb-1">
@@ -462,7 +540,6 @@ export function DataSourceConfiguration({ sources, onChange, documentTypes }: Da
                         />
                     </div>
                     
-                    {/* Helper Dropdown for discovered keys */}
                     <Popover>
                         <PopoverTrigger asChild>
                             <Button variant="outline" size="icon" className="h-9 w-9 bg-white shrink-0" title="Select from detected keys">
@@ -473,21 +550,23 @@ export function DataSourceConfiguration({ sources, onChange, documentTypes }: Da
                              <Command>
                                 <CommandInput placeholder="Search detected keys..." />
                                 <CommandList>
-                                    <CommandEmpty>No specific keys detected.</CommandEmpty>
-                                    <CommandGroup heading="Detected Options">
-                                        {generateJsonbPathOptions(columnSpec).map((opt) => (
-                                            <CommandItem 
-                                                key={opt.value} 
-                                                value={opt.label}
-                                                onSelect={() => updateSource(index, { path: opt.value })}
-                                            >
-                                                <div className="flex flex-col">
-                                                    <span className="text-sm font-medium">{opt.label}</span>
-                                                    <span className="text-[10px] text-slate-400 font-mono">{opt.value}</span>
-                                                </div>
-                                            </CommandItem>
-                                        ))}
-                                    </CommandGroup>
+                                    <ScrollArea className="h-[200px]">
+                                        <CommandEmpty>No specific keys detected.</CommandEmpty>
+                                        <CommandGroup heading="Detected Options">
+                                            {generateJsonbPathOptions(columnSpec).map((opt) => (
+                                                <CommandItem 
+                                                    key={opt.value} 
+                                                    value={opt.label}
+                                                    onSelect={() => updateSource(index, { path: opt.value })}
+                                                >
+                                                    <div className="flex flex-col">
+                                                        <span className="text-sm font-medium">{opt.label}</span>
+                                                        <span className="text-[10px] text-slate-400 font-mono">{opt.value}</span>
+                                                    </div>
+                                                </CommandItem>
+                                            ))}
+                                        </CommandGroup>
+                                    </ScrollArea>
                                 </CommandList>
                              </Command>
                         </PopoverContent>

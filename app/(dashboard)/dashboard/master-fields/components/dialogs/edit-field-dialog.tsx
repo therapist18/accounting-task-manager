@@ -18,11 +18,26 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
+// Added imports for Searchable Dropdowns (Combobox)
+import { 
+  Command, 
+  CommandEmpty, 
+  CommandGroup, 
+  CommandInput, 
+  CommandItem,
+  CommandList 
+} from "@/components/ui/command"
+import { 
+  Popover, 
+  PopoverContent, 
+  PopoverTrigger 
+} from "@/components/ui/popover"
+import { cn } from "@/lib/utils"
+
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
 import type { JobField, JobFieldUpdate } from "../../types/database"
-import { MultiSelectDocumentTypes } from "../ui/multi-select-document-types"
-import { Calculator, FunctionSquare, Database, Settings2 } from "lucide-react"
+import { Calculator, FunctionSquare, Database, Settings2, Check, ChevronsUpDown } from "lucide-react"
 import { DataSourceConfiguration, SourceCardState } from "./link-sources-dialog"
 
 interface EditFieldDialogProps {
@@ -65,10 +80,13 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
   
   // Advanced Sources State
   const [sources, setSources] = useState<SourceCardState[]>([])
-
   const [optionsText, setOptionsText] = useState("")
   const [loading, setLoading] = useState(false)
   const [isDependent, setIsDependent] = useState(false)
+
+  // Combobox Open States
+  const [openParentCombo, setOpenParentCombo] = useState(false)
+  const [openFunctionCombo, setOpenFunctionCombo] = useState(false)
 
   // Filter available fields for dependency selection
   const dropdownFields = availableFields.filter(f => f.type === 'select' && f.id !== field?.id)
@@ -81,6 +99,7 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
         if (data) {
             setFormData(prev => ({ 
                 ...prev, 
+                // Ensure label is always a string for search to work
                 documentTypes: data.map((dt: any) => ({ value: dt.id, label: dt.display_name || `Doc ${dt.id}` })) 
             }))
         }
@@ -115,12 +134,11 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
         documentTypes: formData.documentTypes
       })
 
-      // Initialize Advanced Sources
       if (field.sources && field.sources.length > 0) {
           setSources(field.sources.map(s => ({
               ...s,
-              id: crypto.randomUUID(), // Temp ID for UI list
-              fields: [], // Will be lazy loaded by the component
+              id: crypto.randomUUID(),
+              fields: [],
               loadingFields: false
           })))
       } else {
@@ -151,32 +169,25 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
         type: formData.fieldType === 'dropdown' ? 'select' : (formData.type || field.type),
         is_required: formData.is_required ?? field.is_required,
         options,
-          updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString()
       }
 
-      // Prepare clean sources (remove UI props like 'fields' and 'loadingFields')
       const cleanSources = sources.map(({ id, fields, loadingFields, ...rest }) => rest)
 
       if (formData.is_computed) {
-               // Extract Document IDs from the configured sources
         const extractedDocIds = sources
             .filter(s => s.source_type === 'document' && s.document_id && s.document_id.length > 0)
             .flatMap(s => s.document_id || []);
             
         updateData.computed_config = {
-            document_ids: [...new Set(extractedDocIds)], // Save unique IDs
+            document_ids: [...new Set(extractedDocIds)],
             is_computed: formData.is_computed,
             computed_function: formData.computed_function,
         };
-        
-        // Save sources so the UI can restore them later
         updateData.sources = cleanSources; 
       } else {
-        // --- 2. Standard Field Mode ---
         updateData.computed_config = null;
-        
         if (formData.fieldType === 'dropdown' && isDependent && formData.dependentFieldId) {
-            // Dropdown Dependency Override
             updateData.sources = [{
                 source_type: 'field',
                 table: formData.dependentFieldId,
@@ -184,7 +195,6 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                 priority: 1
             }];
         } else {
-            // Standard Sources
             updateData.sources = cleanSources
         }
       }
@@ -265,14 +275,13 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                         <Database className="w-4 h-4 text-slate-500" />
                         <h3 className="font-semibold text-slate-800">Data & Logic</h3>
                     </div>
-                    {/* Computed Toggle */}
                     <div className="flex items-center gap-2">
                         <Label htmlFor="computed_toggle" className="text-xs text-slate-500">Smart/Computed Field?</Label>
                         <Switch id="computed_toggle" checked={formData.is_computed} onCheckedChange={(c) => setFormData({ ...formData, is_computed: c })} />
                     </div>
                 </div>
 
-                {/* A. Computed Configuration */}
+                {/* A. Computed Configuration - SEARCH ENABLED */}
                 {formData.is_computed && (
                     <div className="space-y-4 p-4 border border-purple-100 bg-purple-50/50 rounded-lg animate-in fade-in zoom-in-95 duration-200">
                         <div className="flex items-center gap-2 mb-2 text-purple-700 font-medium">
@@ -280,12 +289,52 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                         </div>
                         <div className="space-y-2">
                             <Label className="text-purple-900">Logic Function</Label>
-                            <Select value={formData.computed_function} onValueChange={(val) => setFormData({...formData, computed_function: val})}>
-                                <SelectTrigger className="bg-white"><SelectValue placeholder="Select logic..." /></SelectTrigger>
-                                <SelectContent>
-                                    {COMPUTED_FUNCTIONS.map(fn => (<SelectItem key={fn.value} value={fn.value}>{fn.label}</SelectItem>))}
-                                </SelectContent>
-                            </Select>
+                            
+                            {/* Replaced Select with Searchable Combobox */}
+                            <Popover open={openFunctionCombo} onOpenChange={setOpenFunctionCombo}>
+                                <PopoverTrigger asChild>
+                                    <Button
+                                        variant="outline"
+                                        role="combobox"
+                                        aria-expanded={openFunctionCombo}
+                                        className="w-full justify-between bg-white"
+                                    >
+                                        {formData.computed_function
+                                            ? COMPUTED_FUNCTIONS.find((f) => f.value === formData.computed_function)?.label
+                                            : "Select logic function..."}
+                                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                    </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
+                                    <Command>
+                                        <CommandInput placeholder="Search function..." />
+                                        <CommandList>
+                                            <CommandEmpty>No function found.</CommandEmpty>
+                                            <CommandGroup>
+                                                {COMPUTED_FUNCTIONS.map((fn) => (
+                                                    <CommandItem
+                                                        key={fn.value}
+                                                        value={fn.label} // Search by label
+                                                        onSelect={() => {
+                                                            setFormData({ ...formData, computed_function: fn.value })
+                                                            setOpenFunctionCombo(false)
+                                                        }}
+                                                    >
+                                                        <Check
+                                                            className={cn(
+                                                                "mr-2 h-4 w-4",
+                                                                formData.computed_function === fn.value ? "opacity-100" : "opacity-0"
+                                                            )}
+                                                        />
+                                                        {fn.label}
+                                                    </CommandItem>
+                                                ))}
+                                            </CommandGroup>
+                                        </CommandList>
+                                    </Command>
+                                </PopoverContent>
+                            </Popover>
+
                             <p className="text-xs text-purple-600 mt-1">
                                 Select the function. Use the <strong>Data Sources</strong> section below to define which documents/tables are used.
                             </p>
@@ -293,7 +342,7 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                     </div>
                 )}
 
-                {/* B. Dropdown Configuration */}
+                {/* B. Dropdown Configuration - SEARCH ENABLED for Parent Dropdown */}
                 {!formData.is_computed && formData.fieldType === 'dropdown' && (
                     <div className="space-y-4 p-4 bg-slate-50 rounded-lg border">
                         <div className="flex items-center space-x-2">
@@ -303,12 +352,52 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                         {isDependent ? (
                             <div className="space-y-2">
                                 <Label>Parent Dropdown</Label>
-                                <Select value={formData.dependentFieldId || ''} onValueChange={(value) => setFormData(prev => ({ ...prev, dependentFieldId: value }))}>
-                                    <SelectTrigger><SelectValue placeholder="Select parent field..." /></SelectTrigger>
-                                    <SelectContent>
-                                        {dropdownFields.map((f) => (<SelectItem key={f.id} value={f.id}>{f.label}</SelectItem>))}
-                                    </SelectContent>
-                                </Select>
+                                
+                                {/* Replaced Select with Searchable Combobox */}
+                                <Popover open={openParentCombo} onOpenChange={setOpenParentCombo}>
+                                    <PopoverTrigger asChild>
+                                        <Button
+                                            variant="outline"
+                                            role="combobox"
+                                            aria-expanded={openParentCombo}
+                                            className="w-full justify-between bg-white"
+                                        >
+                                            {formData.dependentFieldId
+                                                ? dropdownFields.find((f) => f.id === formData.dependentFieldId)?.label
+                                                : "Select parent field..."}
+                                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
+                                        <Command>
+                                            <CommandInput placeholder="Search parent field..." />
+                                            <CommandList>
+                                                <CommandEmpty>No field found.</CommandEmpty>
+                                                <CommandGroup>
+                                                    {dropdownFields.map((f) => (
+                                                        <CommandItem
+                                                            key={f.id}
+                                                            value={f.label} // Search by label
+                                                            onSelect={() => {
+                                                                setFormData(prev => ({ ...prev, dependentFieldId: f.id }))
+                                                                setOpenParentCombo(false)
+                                                            }}
+                                                        >
+                                                            <Check
+                                                                className={cn(
+                                                                    "mr-2 h-4 w-4",
+                                                                    formData.dependentFieldId === f.id ? "opacity-100" : "opacity-0"
+                                                                )}
+                                                            />
+                                                            {f.label}
+                                                        </CommandItem>
+                                                    ))}
+                                                </CommandGroup>
+                                            </CommandList>
+                                        </Command>
+                                    </PopoverContent>
+                                </Popover>
+                                
                             </div>
                         ) : (
                             <div className="space-y-2">
@@ -319,7 +408,7 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                     </div>
                 )}
 
-                {/* C. Data Sources Builder (Visible for Computed OR Standard) */}
+                {/* C. Data Sources Builder */}
                 {!(formData.fieldType === 'dropdown' && isDependent) && (
                     <div className="space-y-2">
                         <div className="flex items-center justify-between">
