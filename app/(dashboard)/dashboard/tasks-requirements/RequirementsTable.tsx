@@ -755,7 +755,7 @@ DocumentStatus => {
   const currentClassRequirements = useMemo(() => {
     const firstTask = filteredGroupedTasks[0]?.tasks?.[0];
     if (!firstTask) return [];
-    const requirements = taskClassRequirements[firstTask.id];
+    const requirements = taskClassRequirements[firstTask.id];   
     return requirements ? [requirements] : [];
   }, [filteredGroupedTasks, taskClassRequirements]);
 

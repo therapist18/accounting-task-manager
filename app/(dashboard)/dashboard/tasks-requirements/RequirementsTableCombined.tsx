@@ -77,6 +77,19 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     individual: true,
     letters: true,
   });
+  const [expandedDependants, setExpandedDependants] = useState<Set<number>>(new Set());
+
+  const toggleDependants = (groupIndex: number) => {
+    setExpandedDependants(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(groupIndex)) {
+        newSet.delete(groupIndex);
+      } else {
+        newSet.add(groupIndex);
+      }
+      return newSet;
+    });
+  };
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [selectedDocForUpload, setSelectedDocForUpload] = useState<any>(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
@@ -162,27 +175,39 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         });
       });
 
-      // 4. FIND DEPENDANTS
+      // 4. FIND DEPENDANTS (only show if expanded)
       const dependants = participants.filter(p =>
         p.type === 'individual' &&
         (p.role === 'dependant' || p.relationship)
       );
-      dependants.forEach(dep => {
-        cols.push({
-          type: 'dependant',
-          id: dep.id,
-          label: dep.name,
-          subLabel: dep.relationship || 'Dependant',
-          task,
-          groupIndex,
-          relationship: dep.relationship
+      if (expandedDependants.has(groupIndex)) {
+        dependants.forEach(dep => {
+          cols.push({
+            type: 'dependant',
+            id: dep.id,
+            label: dep.name,
+            subLabel: dep.relationship || 'Dependant',
+            task,
+            groupIndex,
+            relationship: dep.relationship
+          });
         });
-      });
+      }
 
-      // 5. FIND UNDERSTUDY (Looking at root "understudy" field)
-      if (task.understudy) {
+      // 5. FIND UNDERSTUDY (Looking in participants_details by role first)
+      const understudyParticipant = participants.find(p => p.type === 'individual' && p.role === 'understudy');
+      if (understudyParticipant) {
+        cols.push({
+          type: 'understudy',
+          id: understudyParticipant.id,
+          label: understudyParticipant.name,
+          subLabel: 'Understudy',
+          task,
+          groupIndex
+        });
+      } else if (task.understudy) {
+        // Fallback to root understudy field
         const understudyId = task.understudy;
-        // Try to find name in participants, otherwise use individualNames map
         const uPart = participants.find(p => p.id === understudyId);
         cols.push({
           type: 'understudy',
@@ -196,7 +221,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     });
 
     return cols;
-  }, [filteredGroupedTasks, individualNames]);
+  }, [filteredGroupedTasks, individualNames, expandedDependants]);
 
   const companySpans = useMemo(() => {
     const spans = [];
@@ -740,6 +765,16 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             relationship: dep.relationship || 'dependant'
           })),
         understudy: (() => {
+          // First try to find understudy in participants_details by role
+          const understudyParticipant = participants.find(p => p.type === 'individual' && p.role === 'understudy');
+          if (understudyParticipant) {
+            return {
+              id: understudyParticipant.id,
+              name: understudyParticipant.name
+            };
+          }
+          
+          // Fallback to root understudy field
           const uId = task?.understudy || task?.understudy_id;
           if (!uId) return null;
           const uPart = participants.find(p => p.id === uId);
@@ -981,11 +1016,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
         return (
           <React.Fragment key={`${sectionName}-${requirementId}`}>
-            <TableRow className="group bg-white hover:bg-gray-50">
-              <TableCell className="sticky left-0 bg-white group-hover:bg-gray-50 border-r z-10 text-center">
+            <TableRow className={`group hover:bg-gray-50 ${reqIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
+              <TableCell className={`sticky left-0 border-r z-10 text-center ${reqIndex % 2 === 0 ? 'bg-white group-hover:bg-gray-50' : 'bg-gray-50/30 group-hover:bg-gray-100'}`}>
                 {reqIndex + 1}
               </TableCell>
-              <TableCell className="sticky left-16 bg-white group-hover:bg-gray-50 border-r z-10">
+              <TableCell className={`sticky left-16 border-r z-10 ${reqIndex % 2 === 0 ? 'bg-white group-hover:bg-gray-50' : 'bg-gray-50/30 group-hover:bg-gray-100'}`}>
                 <div className="flex flex-col">
                   <div className="flex items-center gap-2">
                     <span className="truncate max-w-[250px] font-medium text-slate-700">
@@ -1002,9 +1037,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                       </Button>
                     )}
                   </div>
-                  {reqItem.isRequired && (
-                    <span className="text-[9px] text-red-500 font-bold uppercase">Required</span>
-                  )}
                   {reqItem.isMultiDocument && (
                     <span className="text-[9px] text-blue-500 font-medium">
                       Multiple documents of this type
@@ -1068,8 +1100,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
             {/* Expanded Field Data Rows */}
             {isExpanded && fieldsToRender.map((field, fIdx) => (
-              <TableRow key={`${requirementId}-field-${field.id}`} className="bg-slate-50/50">
-                <TableCell className="sticky left-0 bg-slate-50 border-r text-center text-[10px] text-gray-400">
+              <TableRow key={`${requirementId}-field-${field.id}`} className={`${reqIndex % 2 === 0 ? 'bg-slate-50/50' : 'bg-slate-100/50'}`}>
+                <TableCell className={`sticky left-0 border-r text-center text-[10px] text-gray-400 ${reqIndex % 2 === 0 ? 'bg-slate-50/50' : 'bg-slate-100/50'}`}>
                   {reqIndex + 1}.{fIdx + 1}
                 </TableCell>
                 <TableCell className="sticky left-16 bg-slate-50 border-r pl-8 text-[11px] text-slate-500 italic">
@@ -1296,7 +1328,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                         <span className="text-[11px] font-bold uppercase line-clamp-1 px-1">
                           {col.label}
                         </span>
-                        <div className="flex flex-col items-center gap-0.5">
+                        <div className="flex justify-between items-center gap-6">
                           <span className="text-[9px] bg-black/20 rounded px-1.5 py-0.5 font-medium tracking-wider">
                             {col.subLabel}
                           </span>
@@ -1305,6 +1337,37 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                               {Array.isArray(col.role) ? col.role.join(', ') : col.role}
                             </span>
                           )}
+                          {col.type === 'principal' && (() => {
+                            const dependants = filteredGroupedTasks[col.groupIndex]?.tasks?.[0]?.participants_details?.filter(p =>
+                              p.type === 'individual' && (p.role === 'dependant' || p.relationship)
+                            ) || [];
+                            if (dependants.length > 0) {
+                              const isExpanded = expandedDependants.has(col.groupIndex);
+                              return (
+                                <div className="flex items-center gap-1">
+                                  {!isExpanded && (
+                                    <span className="text-[10px] bg-amber-500 text-white rounded-full px-2.5 py-0.5 font-bold">
+                                      {dependants.length}
+                                    </span>
+                                  )}
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => toggleDependants(col.groupIndex)}
+                                    className="h-6 w-6 p-0 rounded-full bg-white/10 hover:bg-white/20 text-white border border-white/20"
+                                    title={`${isExpanded ? 'Hide' : 'Show'} ${dependants.length} dependant(s)`}
+                                  >
+                                    {isExpanded ? (
+                                      <ChevronDown className="h-3 w-3" />
+                                    ) : (
+                                      <ChevronRight className="h-3 w-3" />
+                                    )}
+                                  </Button>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
                       </div>
                     </TableHead>
@@ -1339,7 +1402,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                   <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('templates')}>
                     <TableCell colSpan={totalColumns} className="py-2 px-4 font-bold text-slate-700 border-t-2 border-white uppercase text-xs tracking-wider">
                       <div className="flex items-center gap-2">
-                        {expandedSections.templates ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />} Templates
+                        {expandedSections.templates ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />} Automations and Templates
                       </div>
                     </TableCell>
                   </TableRow>

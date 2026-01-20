@@ -21,6 +21,7 @@ import PizZip from "pizzip";
 import ImageModule from 'docxtemplater-image-module-free';
 import * as mammoth from "mammoth";
 import { Checkbox } from '@/components/ui/checkbox';
+import { EntityType, ENTITY_TYPES, DEPENDANT_RELATIONSHIPS } from "@/lib/constants/entity-types";
 
 const EDITOR_PREVIEW_STYLES = `
   prose prose-sm sm:prose-base dark:prose-invert max-w-full focus:outline-none 

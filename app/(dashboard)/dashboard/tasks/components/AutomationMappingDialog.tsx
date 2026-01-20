@@ -9,7 +9,8 @@ import { Label } from "@/components/ui/label"
 import {
   Loader2, Zap, User, Database, FileText, Eye,
   Settings, Link, Webhook, ChevronRight, AlertCircle,
-  CheckCircle2, Info, ArrowRight, Edit3, X, Save
+  CheckCircle2, Info, ArrowRight, Edit3, X, Save, Calculator,
+  FunctionSquare
 } from 'lucide-react';
 import {
   Table,
@@ -27,6 +28,7 @@ import supabase from '@/lib/supabase/client';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { processComputedFields } from '../utils/automationComputedFunctions';
 
 interface AutomationMappingDialogProps {
   isOpen: boolean;
@@ -138,6 +140,8 @@ export const AutomationMappingDialog = ({
   const [editValue, setEditValue] = useState('');
   const [activeTab, setActiveTab] = useState('fields');
   const [currentIndividualId, setCurrentIndividualId] = useState(individualId || task?.individual_id?.toString() || '');
+  const [computedFieldsPreview, setComputedFieldsPreview] = useState<Record<string, string>>({});
+  const [isComputing, setIsComputing] = useState(false);
 
   // --- HELPERS ---
   const buildFileUrl = (linkedDoc: any): string | null => {
@@ -249,24 +253,22 @@ export const AutomationMappingDialog = ({
           const globalRefs = requirement.web_automation || [];
           const indivRefs = individualRequirements.map((req: any) => ({
             automationId: req.automationId || req.automation_id || req.web_automation?.automationId,
-            documentName: req.name, // Use requirement name as sidebar label
+            documentName: req.name,
             documentId: req.id,
-            // Inherit config
             ...(req.web_automation || {})
           }));
 
           const allRefs = [...globalRefs, ...indivRefs];
 
-          // 3. Map References to Data Objects
           finalWebDataItems = allRefs.map((ref: any) => {
             const autoDef = fetchedAutos.find(a => a.id === ref.automationId);
             return {
               ...ref,
               fields: autoDef?.webdata || [],
-              automationName: autoDef?.name, // Fallback name
+              automationName: autoDef?.name,
               automation: autoDef
             };
-          }).filter(item => item.automationId); // Ensure valid ID
+          }).filter(item => item.automationId);
 
           setWebData(finalWebDataItems);
         } else {
@@ -274,7 +276,6 @@ export const AutomationMappingDialog = ({
           setWebData([]);
         }
 
-        // 4. Generate Sidebar Mappings
         const mappings = finalWebDataItems.map((item, idx) => ({
           entityKey: `wd-${idx}`,
           entityName: item.documentName || item.automationName || `Flow ${idx + 1}`,
@@ -284,12 +285,9 @@ export const AutomationMappingDialog = ({
           automation: item.automation
         }));
 
-        console.log('📝 Generated mappings:', mappings);
         setEntityAutomationMappings(mappings);
 
-        // Auto-select first mapping if none selected
         if (mappings.length > 0) {
-          // Check if current selected ID exists in new mappings, if not select first
           const exists = mappings.some(m => m.automationId === selectedAutomationId);
           if (!selectedAutomationId || !exists) {
             setSelectedAutomationId(mappings[0].automationId);
@@ -298,13 +296,11 @@ export const AutomationMappingDialog = ({
           setSelectedAutomationId('');
         }
 
-        // 5. Fetch Job Fields
         const fieldIds = finalWebDataItems.flatMap(i => i.fields?.flatMap((f: any) => f.masterFieldIds || []) || []).filter(Boolean);
         if (fieldIds.length > 0) {
           const { data: fields } = await supabase.from('tm_job_fields').select('*').in('id', fieldIds);
           setJobFields(fields?.reduce((acc, f) => ({ ...acc, [f.id.toString()]: f }), {}) || {});
         }
-        // --- FIXED LOGIC END ---
 
       } catch (error) {
         console.error('Error in fetchData:', error);
@@ -321,6 +317,41 @@ export const AutomationMappingDialog = ({
       fetchDocumentFiles(currentIndividualId);
     }
   }, [currentIndividualId, isOpen, jobFields]);
+
+  // --- AUTOMATIC COMPUTED FIELDS CALCULATION ---
+  useEffect(() => {
+    const runComputation = async () => {
+      if (!currentIndividualId || !selectedAutomationId) return;
+
+      const activeWeb = webData.find(w => w.automationId === selectedAutomationId);
+      const computedFields = activeWeb?.fields
+        ?.filter((f: any) => f.fieldType === 'computed')
+        ?.map((f: any) => ({
+          variableName: f.variableName,
+          computedFunction: f.computedFunction,
+          computedDocuments: f.computedDocuments || []
+        })) || [];
+
+      if (computedFields.length === 0) {
+        setComputedFieldsPreview({});
+        return;
+      }
+
+      setIsComputing(true);
+      try {
+        const results = await processComputedFields(currentIndividualId, computedFields);
+        setComputedFieldsPreview(results);
+      } catch (error) {
+        console.error('Error auto-computing fields:', error);
+      } finally {
+        setIsComputing(false);
+      }
+    };
+
+    const timer = setTimeout(runComputation, 500); // Debounce slightly
+    return () => clearTimeout(timer);
+  }, [currentIndividualId, selectedAutomationId, webData]);
+
 
   // --- ACTIONS ---
   const startEditing = (fieldId: string, sourceIdx: number, table: string, path: string, val: string) => {
@@ -368,13 +399,13 @@ export const AutomationMappingDialog = ({
       const automation = mapping.automation;
       const automationLogin = automation.login || {};
 
-      // 1. Gather mapped formData
+      // 1. Gather mapped formData for regular fields
       const formData: Record<string, any> = {};
       const activeWeb = webData.find(w => w.automationId === selectedAutomationId);
 
       activeWeb?.fields?.forEach(f => {
-        // Skip document type fields in form data mapping, they are handled separately or via URLs
-        if (f.fieldType === 'document') return;
+        // Skip document and computed fields - they're handled separately
+        if (f.fieldType === 'document' || f.fieldType === 'computed') return;
 
         const values = (f.masterFieldIds || []).map(mid => {
           const field = jobFields[mid];
@@ -383,13 +414,27 @@ export const AutomationMappingDialog = ({
           return val === 'Missing' ? null : val;
         }).filter(Boolean);
 
-        // Default to variableName mapping
         if (values.length > 0) {
           formData[f.variableName] = values.join(' ');
         }
       });
 
-      // 2. Construct the exact Payload Structure requested
+      // 2. Process computed fields (Re-run safely before submit)
+      const computedFields = activeWeb?.fields
+        ?.filter(f => f.fieldType === 'computed')
+        ?.map(f => ({
+          variableName: f.variableName,
+          computedFunction: f.computedFunction,
+          computedDocuments: f.computedDocuments || []
+        })) || [];
+
+      if (computedFields.length > 0) {
+        console.log('🔄 Verifying computed fields...', computedFields);
+        const computedResults = await processComputedFields(currentIndividualId, computedFields);
+        Object.assign(formData, computedResults);
+      }
+
+      // 3. Construct the final payload
       const payload = {
         url: automationLogin.url || "https://fns.immigration.go.ke/account/login.html",
         photoPath: getDocumentUrlWithFallback() || "",
@@ -439,119 +484,159 @@ export const AutomationMappingDialog = ({
   const renderFieldsTable = () => {
     if (!activeWebEntry?.fields || activeWebEntry.fields.length === 0) return <div className="p-12 text-center text-slate-400">No fields configured.</div>;
 
-    // Filter out document fields from the main table
-    const dataFields = activeWebEntry.fields.filter((f: any) => f.fieldType !== 'document');
-
-    if (dataFields.length === 0) return <div className="p-12 text-center text-slate-400">No data fields configured (only documents).</div>;
+    const regularFields = activeWebEntry.fields.filter((f: any) => f.fieldType !== 'document' && f.fieldType !== 'computed');
+    const computedFields = activeWebEntry.fields.filter((f: any) => f.fieldType === 'computed');
 
     return (
-      <div className="border rounded-xl bg-white shadow-sm overflow-hidden">
-        <Table>
-          <TableHeader className="bg-slate-50">
-            <TableRow>
-              <TableHead className="w-[300px]">WebData Field</TableHead>
-              <TableHead className="w-[300px]">Source Mapping</TableHead>
-              <TableHead>Current Value (Click to Edit)</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {dataFields.map((field, fIdx) => {
-              const masterIds = field.masterFieldIds || [];
-              const sources = masterIds.map(id => {
-                const f = jobFields[id];
-                return f?.sources?.[0] ? { label: f.label, ...f.sources[0] } : null;
-              }).filter(Boolean);
+      <div className="flex flex-col h-full space-y-8">
+        <div className="flex-1 border border-slate-300 shadow-md bg-white flex flex-col overflow-hidden rounded-md">
+            <ScrollArea className="flex-1 w-full h-full">
+              <Table className="w-full border-collapse">
+                <TableHeader className="bg-blue-600 sticky top-0 z-20 shadow-sm">
+                  <TableRow className="hover:bg-blue-600 border-b-0">
+                    <TableHead className="w-[40px] text-blue-100 text-xs border-r border-blue-500 text-center h-9">#</TableHead>
+                    <TableHead className="w-[300px] text-white font-semibold border-r border-blue-500 h-9">Automation Variable</TableHead>
+                    <TableHead className="w-[400px] text-white font-semibold border-r border-blue-500 h-9">Field Source</TableHead>
+                    <TableHead className="text-white font-semibold h-9">Value (Click to Edit)</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {/* --- REGULAR FIELDS --- */}
+                  {regularFields.map((field, fIdx) => {
+                    const masterIds = field.masterFieldIds || [];
+                    const sources = masterIds.map(mid => {
+                        const f = jobFields[mid];
+                        return f?.sources?.[0] ? { ...f.sources[0], label: f.label } : null;
+                    }).filter(Boolean);
+                    
+                    const mergedValue = sources.map(s => getSourceValue(s.table, s.path)).filter(v => v !== 'Missing').join(' ');
+                    const isEditing = editingCell?.fieldId === field.variableName;
+                    
+                    if (sources.length === 0) {
+                         return (
+                            <TableRow key={fIdx} className="h-9 hover:bg-slate-50">
+                                <TableCell className="text-center text-xs text-slate-400 bg-slate-50 border-r border-slate-200 border-b">{fIdx + 1}</TableCell>
+                                <TableCell className="border-r border-b border-slate-200 px-2 py-1 text-sm font-medium text-slate-700 bg-slate-50/30">{field.efnsDisplayName || field.name}</TableCell>
+                                <TableCell className="border-r border-b border-slate-200 px-2 py-1 text-xs text-slate-400 italic" colSpan={2}>No database mapping configured</TableCell>
+                            </TableRow>
+                         );
+                    }
 
-              return (
-                <TableRow key={fIdx} className="group">
-                  <TableCell className="align-top">
-                    <div className="font-semibold text-slate-900">{field.efnsDisplayName || field.name}</div>
-                  </TableCell>
-                  <TableCell className="align-top">
-                    <div className="space-y-1.5">
-                      {sources.map((s, sIdx) => (
-                        <div key={sIdx} className="flex flex-col text-[11px] border-l-2 border-blue-200 pl-2 py-0.5">
-                          <span className="font-medium text-slate-600 uppercase tracking-tight">{s.label}</span>
-                        </div>
-                      ))}
-                      {sources.length === 0 && <span className="text-xs text-slate-400 italic">No master field linked</span>}
-                    </div>
-                  </TableCell>
-                  <TableCell className="align-top">
-                    <div className="space-y-2">
-                      {sources.map((s, sIdx) => {
-                        const val = getSourceValue(s.table, s.path);
-                        const isEditing = editingCell?.fieldId === field.variableName && editingCell?.sourceIdx === sIdx;
-
-                        return (
-                          <div key={sIdx} className="relative">
-                            {isEditing ? (
-                              <div className="flex items-center gap-1 animate-in fade-in slide-in-from-top-1 duration-200">
-                                <Input
-                                  autoFocus
-                                  value={editValue}
-                                  onChange={e => setEditValue(e.target.value)}
-                                  onKeyDown={e => e.key === 'Enter' && saveEdit()}
-                                  className="h-8 text-sm"
-                                />
-                                <Button size="sm" className="h-8 w-8 p-0 bg-green-600 hover:bg-green-700" onClick={saveEdit}>
-                                  <Save className="h-3.5 w-3.5" />
-                                </Button>
-                                <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-slate-400" onClick={() => setEditingCell(null)}>
-                                  <X className="h-3.5 w-3.5" />
-                                </Button>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => startEditing(field.variableName, sIdx, s.table, s.path, val)}
-                                className={cn(
-                                  "w-full text-left p-2 rounded-lg border border-dashed transition-all group/btn",
-                                  val === 'Missing' ? "bg-red-50/30 border-red-200 hover:bg-red-50" : "bg-slate-50/50 border-slate-200 hover:border-blue-400 hover:bg-blue-50/30"
-                                )}
-                              >
-                                <div className="flex justify-between items-center">
-                                  <span className={cn("text-sm font-medium", val === 'Missing' ? "text-red-500 italic" : "text-slate-700")}>
-                                    {val}
-                                  </span>
-                                  <Edit3 className="h-3 w-3 text-slate-300 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
+                    return (
+                        <TableRow key={fIdx} className="h-9 group hover:bg-slate-50 transition-colors">
+                            <TableCell className="text-center text-xs text-slate-400 bg-slate-50 border-r border-b border-slate-300">{fIdx + 1}</TableCell>
+                            <TableCell className="border-r border-b border-slate-300 px-2 py-0 align-middle">
+                                <div className="text-sm font-semibold text-slate-800 truncate" title={field.variableName}>
+                                    {field.efnsDisplayName || field.variableName}
                                 </div>
-                              </button>
+                            </TableCell>
+                            <TableCell className="border-r border-b border-slate-300 px-2 py-0 align-middle bg-slate-50/20">
+                                <div className="flex flex-col gap-1">
+                                    {field.customFieldSource ? (
+                                        <div className="text-xs text-slate-600 truncate" title={field.customFieldSource}>
+                                            {field.customFieldSource}
+                                        </div>
+                                    ) : (
+                                        sources.map((source, idx) => (
+                                            <div key={idx} className="text-xs text-slate-600 truncate" title={`${source.table}.${source.path}`}>
+                                                {source.table.replace('acc_portal_', '').replace('tm_', '')}.{source.path} ({source.label})
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </TableCell>
+                            <TableCell className="border-b border-slate-300 p-0 relative h-9 align-middle">
+                                {isEditing ? (
+                                    <div className="w-full h-full flex">
+                                         <Input
+                                            autoFocus
+                                            value={editValue}
+                                            onChange={e => setEditValue(e.target.value)}
+                                            onKeyDown={e => e.key === 'Enter' && saveEdit()}
+                                            onBlur={saveEdit}
+                                            className="w-full h-full rounded-none border-none focus-visible:ring-0 px-2 text-sm bg-blue-50 text-slate-900"
+                                        />
+                                    </div>
+                                ) : (
+                                    <div 
+                                        onClick={() => startEditing(field.variableName, 0, sources[0]?.table, sources[0]?.path, mergedValue)}
+                                        className={cn(
+                                            "w-full h-full px-2 flex items-center cursor-text hover:bg-blue-50 transition-colors select-none text-sm",
+                                            mergedValue === '' ? "text-red-500 italic bg-red-50/30" : "text-slate-800"
+                                        )}
+                                    >
+                                        <span className="truncate">{mergedValue || 'Missing'}</span>
+                                        {mergedValue === '' && <AlertCircle className="h-3 w-3 ml-2 text-red-400 opacity-50" />}
+                                    </div>
+                                )}
+                            </TableCell>
+                        </TableRow>
+                    );
+                })}
+
+                  {/* --- SEPARATOR --- */}
+                  {computedFields.length > 0 && regularFields.length > 0 && (
+                     <TableRow className="bg-slate-100 border-b-2 border-slate-300">
+                        <TableCell colSpan={5} className="py-2 px-4">
+                            <div className="flex items-center gap-2 text-slate-500 font-bold text-xs uppercase tracking-widest">
+                                <Calculator className="h-4 w-4" /> Computed Automatically
+                            </div>
+                        </TableCell>
+                     </TableRow>
+                  )}
+
+                  {/* --- COMPUTED FIELDS --- */}
+                  {computedFields.map((field, fIdx) => (
+                    <TableRow key={`computed-${fIdx}`} className="h-9 hover:bg-purple-50/30 transition-colors">
+                        <TableCell className="text-center text-xs text-purple-400 bg-purple-50/30 border-r border-b border-slate-300">
+                           {regularFields.length + fIdx + 1}
+                        </TableCell>
+                        <TableCell className="border-r border-b border-slate-300 px-2 py-0 align-middle">
+                            <div className="text-sm font-semibold text-slate-800 truncate" title={field.variableName}>
+                                {field.efnsDisplayName || field.variableName}
+                            </div>
+                        </TableCell>
+                        <TableCell className="border-r border-b border-slate-300 px-2 py-0 align-middle bg-purple-50/10">
+                            <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-1.5 overflow-hidden">
+                                    <FunctionSquare className="h-3 w-3 text-purple-400 flex-shrink-0" />
+                                    <span className="text-xs text-purple-700 truncate" title={field.computedFunction}>
+                                        {field.computedFunction}
+                                    </span>
+                                </div>
+                            </div>
+                        </TableCell>
+                        <TableCell className="border-b border-slate-300 px-2 py-0 align-middle bg-slate-50/50">
+                            {isComputing ? (
+                                <div className="flex items-center gap-2 text-xs text-slate-400">
+                                    <Loader2 className="h-3 w-3 animate-spin" /> Calculating...
+                                </div>
+                            ) : computedFieldsPreview[field.variableName] ? (
+                                <span className="text-sm font-bold text-green-700 truncate block" title={computedFieldsPreview[field.variableName]}>
+                                    {computedFieldsPreview[field.variableName]}
+                                </span>
+                            ) : (
+                                <span className="text-xs text-slate-400 italic">Pending...</span>
                             )}
-                          </div>
-                        );
-                      })}
-                      {sources.length > 1 && (
-                        <div className="mt-2 p-2 rounded bg-purple-50 border border-purple-100 flex items-center gap-2">
-                          <Info className="h-3 w-3 text-purple-500" />
-                          <span className="text-[10px] text-purple-700 font-medium">Auto-merged result: <span className="underline italic">"{sources.map(s => getSourceValue(s.table, s.path)).filter(v => v !== 'Missing').join(' ')}"</span></span>
-                        </div>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
+                        </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+        </div>
       </div>
     );
   };
 
   const renderDocumentsSection = () => {
-    // Collect required documents from webdata where fieldType is 'document'
     const requiredDocs = activeWebEntry?.fields?.filter((f: any) => f.fieldType === 'document') || [];
-
-    // Also include generic 'kycDocsUpload' property if it exists from legacy configuration
     const legacyDocs = activeWebEntry?.kycDocsUpload || [];
-
-    // Combine them, preferring the new field structure
     const allReqs = [...requiredDocs, ...legacyDocs.map((d: any) => ({
       kycDocumentId: d.kycDocumentId,
       efnsDisplayName: d.documentName || d.entityType,
       variableName: d.kycDocumentId
     }))];
-
-    // Deduplicate by ID
     const uniqueReqs = Array.from(new Map(allReqs.map(item => [item.kycDocumentId, item])).values());
 
     if (uniqueReqs.length === 0) return <div className="p-12 text-center text-slate-400">No document assets configured.</div>;
@@ -569,8 +654,8 @@ export const AutomationMappingDialog = ({
                   </div>
                   <div>
                     <h4 className="font-bold text-slate-900 leading-tight">{req.efnsDisplayName || req.name || 'Document'}</h4>
-                    <p className="text-[10px] text-slate-400 font-mono">ID: {req.kycDocumentId}</p>
-                    {req.variableName && <p className="text-[10px] text-blue-400 font-mono">Var: {req.variableName}</p>}
+                    <p className="text-[10px] text-slate-400">ID: {req.kycDocumentId}</p>
+                    {req.variableName && <p className="text-[10px] text-blue-400">Var: {req.variableName}</p>}
                   </div>
                 </div>
                 {found ? (
@@ -594,8 +679,6 @@ export const AutomationMappingDialog = ({
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-[95vw] w-[1400px] h-[90vh] flex flex-col p-0 overflow-hidden border-none shadow-2xl">
-
-        {/* HEADER BAR */}
         <div className="p-5 border-b bg-white flex items-center justify-between shadow-sm z-20">
           <div className="flex items-center gap-5">
             <div className="h-12 w-12 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-200">
@@ -611,29 +694,7 @@ export const AutomationMappingDialog = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-3 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-xl border border-slate-200 shadow-sm">
-              <User className="h-4 w-4 text-blue-500" />
-              <input
-                value={currentIndividualId}
-                onChange={(e) => setCurrentIndividualId(e.target.value)}
-                placeholder="ID Number..."
-                className="w-32 outline-none text-sm font-bold text-slate-700"
-              />
-            </div>
-            {isLoading && <Loader2 className="h-5 w-5 animate-spin text-blue-600 mx-2" />}
-          </div>
-        </div>
-
-        <div className="flex-1 flex overflow-hidden bg-slate-50/50">
-
-          {/* SIDEBAR */}
-          <div className="w-80 border-r bg-white flex flex-col z-10">
-            <div className="p-5 pb-3">
-              <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest">Available Flows</h3>
-            </div>
-            <ScrollArea className="flex-1">
-              <div className="px-3 space-y-2 pb-5">
+<div className="px-3 space-y-2 pb-5">
                 {entityAutomationMappings.map((mapping) => (
                   <button
                     key={mapping.automationId}
@@ -656,7 +717,6 @@ export const AutomationMappingDialog = ({
                         <p className={cn("text-sm font-bold truncate", selectedAutomationId === mapping.automationId ? "text-blue-900" : "text-slate-700")}>
                           {mapping.automation?.name || "Unnamed Flow"}
                         </p>
-                        <p className="text-[10px] text-slate-400 font-medium truncate uppercase tracking-tighter mt-0.5">{mapping.entityName}</p>
                       </div>
                     </div>
                     {selectedAutomationId === mapping.automationId && (
@@ -673,10 +733,22 @@ export const AutomationMappingDialog = ({
                   </div>
                 )}
               </div>
-            </ScrollArea>
-          </div>
 
-          {/* MAIN CONTENT AREA */}
+          <div className="flex items-center gap-3 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-xl border border-slate-200 shadow-sm">
+              <User className="h-4 w-4 text-blue-500" />
+              <input
+                value={currentIndividualId}
+                onChange={(e) => setCurrentIndividualId(e.target.value)}
+                placeholder="ID Number..."
+                className="w-32 outline-none text-sm font-bold text-slate-700"
+              />
+            </div>
+            {isLoading && <Loader2 className="h-5 w-5 animate-spin text-blue-600 mx-2" />}
+          </div>
+        </div>
+
+        <div className="flex-1 flex overflow-hidden bg-slate-50/50">
           <div className="flex-1 flex flex-col overflow-hidden">
             {!selectedAutomationId ? (
               <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
@@ -685,7 +757,7 @@ export const AutomationMappingDialog = ({
               </div>
             ) : (
               <>
-                <div className="px-8 py-4 bg-white border-b flex items-center justify-between">
+                <div className="px-8 py-4 bg-white border-b flex items-center justify-between flex-shrink-0">
                   <Tabs value={activeTab} onValueChange={setActiveTab} className="w-fit">
                     <TabsList className="bg-slate-100/80 p-1 h-11 rounded-xl">
                       <TabsTrigger value="fields" className="rounded-lg px-6 data-[state=active]:shadow-sm">
@@ -709,29 +781,31 @@ export const AutomationMappingDialog = ({
                           </div>
                         </TooltipTrigger>
                         <TooltipContent className="bg-slate-900 text-white border-none p-3">
-                          <p className="text-xs font-mono">{selectedMapping?.automation?.webhook_url}</p>
+                          <p className="text-xs">{selectedMapping?.automation?.webhook_url}</p>
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-auto p-8">
-                  <Tabs value={activeTab} className="h-full">
-                    <TabsContent value="fields" className="m-0 focus-visible:ring-0">
-                      <div className="mb-6 flex items-center justify-between">
+                <div className="flex-1 overflow-hidden relative">
+                  <Tabs value={activeTab} className="h-full w-full">
+                    <TabsContent value="fields" className="h-full m-0 p-8 flex flex-col overflow-hidden data-[state=active]:flex">
+                      <div className="mb-4 flex items-center justify-between flex-shrink-0">
                         <div>
                           <h2 className="text-xl font-bold text-slate-900">Field Correspondence</h2>
                           <p className="text-sm text-slate-500">Mapping master database fields to the target automation schema.</p>
                         </div>
                         <Badge variant="outline" className="px-4 py-1 text-blue-600 border-blue-100 bg-blue-50/50">
-                          {activeWebEntry?.fields?.filter((f: any) => f.fieldType !== 'document').length || 0} Data Fields
+                          {activeWebEntry?.fields?.filter((f: any) => f.fieldType !== 'document').length || 0} Total Fields
                         </Badge>
                       </div>
-                      {renderFieldsTable()}
+                      <div className="flex-1 overflow-hidden">
+                        {renderFieldsTable()}
+                      </div>
                     </TabsContent>
 
-                    <TabsContent value="documents" className="m-0 focus-visible:ring-0">
+                    <TabsContent value="documents" className="h-full m-0 p-8 overflow-auto">
                       <div className="mb-6">
                         <h2 className="text-xl font-bold text-slate-900">Required Assets</h2>
                         <p className="text-sm text-slate-500">Documents that will be sent as part of the automation payload.</p>
@@ -745,7 +819,6 @@ export const AutomationMappingDialog = ({
           </div>
         </div>
 
-        {/* FOOTER ACTIONS */}
         <div className="p-6 border-t bg-white flex justify-between items-center z-20 shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.1)]">
           <Button variant="ghost" className="font-bold text-slate-500 hover:bg-slate-50" onClick={onClose}>Discard Changes</Button>
 

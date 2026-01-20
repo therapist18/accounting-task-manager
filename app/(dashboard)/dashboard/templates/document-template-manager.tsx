@@ -24,8 +24,8 @@ import Docxtemplater from "docxtemplater";
 import PizZip from "pizzip";
 import InspectModule from 'docxtemplater/js/inspect-module';
 import { renderAsync } from "docx-preview";
+import { EntityType, ENTITY_TYPES, DEPENDANT_RELATIONSHIPS } from "@/lib/constants/entity-types";
 
-type EntityType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependent' | 'employee' | 'understudy';
 const cn = (...classes: any[]) => classes.filter(Boolean).join(' ');
 interface DocumentTemplate extends BaseDocumentTemplate {
   content?: string;
@@ -78,24 +78,6 @@ const PLACEHOLDER_TYPES = [
   { value: 'boolean', label: 'Boolean/Checkbox' },
   { value: 'image', label: 'Image' },
   { value: 'document_checklist', label: 'Document Checklist' }, // NEW
-];
-
-const ENTITY_TYPES: { value: EntityType; label: string }[] = [
-  { value: 'company', label: 'Company' }, { value: 'principal', label: 'Principal' },
-  { value: 'director', label: 'Director' }, { value: 'shareholder', label: 'Shareholder' },
-  { value: 'dependent', label: 'Dependent' }, { value: 'employee', label: 'Employee' },
-  { value: 'understudy', label: 'Understudy' },
-];
-
-const DEPENDANT_RELATIONSHIPS = [
-  { value: 'father', label: 'Father' },
-  { value: 'mother', label: 'Mother' },
-  { value: 'daughter', label: 'Daughter' },
-  { value: 'son', label: 'Son' },
-  { value: 'husband', label: 'Husband' },
-  { value: 'wife', label: 'Wife' },
-  { value: 'mother_in_law', label: 'Mother-in-law' },
-  { value: 'father_in_law', label: 'Father-in-law' },
 ];
 
 // Update the Placeholder type to handle hierarchy
