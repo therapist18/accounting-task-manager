@@ -1,11 +1,11 @@
-export type EntityType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependent' | 'employee' | 'understudy';
+export type EntityType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependant' | 'employee' | 'understudy';
 
 export const ENTITY_TYPES: { value: EntityType; label: string }[] = [
   { value: 'company', label: 'Company' }, 
   { value: 'principal', label: 'Principal' },
   { value: 'director', label: 'Director' }, 
   { value: 'shareholder', label: 'Shareholder' },
-  { value: 'dependent', label: 'Dependent' }, 
+  { value: 'dependant', label: 'Dependant' }, 
   { value: 'employee', label: 'Employee' },
   { value: 'understudy', label: 'Understudy' },
 ];

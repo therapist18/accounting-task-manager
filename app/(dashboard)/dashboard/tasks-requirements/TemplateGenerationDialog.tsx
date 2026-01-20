@@ -333,7 +333,7 @@ const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourc
         return relationshipData?.principal || extractedData || personData;
     }
 
-    if (['dependant', 'dependent', 'spouse', 'child'].includes(normType)) {
+    if (['dependant', 'dependant', 'spouse', 'child'].includes(normType)) {
         if (placeholder.dependant_relationship?.[0]) {
             const targetRel = placeholder.dependant_relationship[0].toLowerCase();
             return relationshipData?.dependants?.find(d => d.relationship?.toLowerCase() === targetRel);
@@ -1804,7 +1804,7 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                 const primary = sourceArray.find(d => d.is_primary) || sourceArray[0];
                 sourceArray = primary ? [primary] : [];
             }
-        } else if (['dependant', 'dependent', 'spouse', 'child', 'father', 'mother', 'son', 'daughter'].includes(normalizedEntityType)) {
+        } else if (['dependant', 'dependant', 'spouse', 'child', 'father', 'mother', 'son', 'daughter'].includes(normalizedEntityType)) {
             sourceArray = relationshipData.dependants || [];
             console.log(`🔍 Found ${sourceArray.length} total dependants:`, sourceArray);
 

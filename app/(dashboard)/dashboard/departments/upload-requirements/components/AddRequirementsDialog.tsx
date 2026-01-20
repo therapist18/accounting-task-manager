@@ -108,6 +108,13 @@ const [templatesMap, setTemplatesMap] = useState<Record<string, any[]>>({})
     }
   }, [isOpen])
 
+  // Reset active section to 'general' if department is not 1 and current section is processing/issuance
+  useEffect(() => {
+    if (context?.departmentId !== 1 && (activeSection === 'processing' || activeSection === 'issuance')) {
+      setActiveSection('general');
+    }
+  }, [context?.departmentId, activeSection])
+
 const fetchInitialData = async () => {
     try {
       setLoading(true)
@@ -374,16 +381,22 @@ const fetchInitialData = async () => {
         <div className="flex-1 overflow-auto flex flex-col px-6 space-y-4">
           {/* Section Switcher */}
           <div className="bg-slate-100 p-1 rounded-lg flex gap-1">
-            {['general', 'processing', 'issuance'].map((sec) => (
-              <Button 
-                key={sec}
-                variant={activeSection === sec ? 'default' : 'ghost'} 
-                className="flex-1 h-8 text-xs capitalize"
-                onClick={() => setActiveSection(sec as RequirementCategory)}
-              >
-                {sec}
-              </Button>
-            ))}
+            {(() => {
+              const sections = ['general'];
+              if (context?.departmentId === 1) {
+                sections.push('processing', 'issuance');
+              }
+              return sections.map((sec) => (
+                <Button 
+                  key={sec}
+                  variant={activeSection === sec ? 'default' : 'ghost'} 
+                  className="flex-1 h-8 text-xs capitalize"
+                  onClick={() => setActiveSection(sec as RequirementCategory)}
+                >
+                  {sec}
+                </Button>
+              ));
+            })()}
           </div>
 
           {activeSection === 'general' ? (

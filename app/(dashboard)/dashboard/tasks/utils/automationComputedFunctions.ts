@@ -1,5 +1,4 @@
 // @ts-nocheck
-
 import supabase from "@/lib/supabase/client";
 
 /**
@@ -10,31 +9,22 @@ const parseDateString = (dateInput: string | Date | null | undefined): Date | nu
     if (dateInput instanceof Date && !isNaN(dateInput.getTime())) return dateInput;
     if (typeof dateInput !== 'string') return null;
 
-    // Attempt direct parsing first - handles ISO 8601
     let date = new Date(dateInput);
-    if (!isNaN(date.getTime())) {
-        return date;
-    }
+    if (!isNaN(date.getTime())) return date;
 
     const cleanedDateInput = dateInput.trim();
 
     const formatPatterns = [
-        // DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
         { regex: /^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/, parts: { day: 1, month: 2, year: 3 } },
-        // YYYY/MM/DD or YYYY-MM-DD or YYYY.MM.DD
         { regex: /^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$/, parts: { year: 1, month: 2, day: 3 } },
-        // Month DD, YYYY e.g., April 21, 2026
         { regex: /^(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s+(\d{4})$/i, parts: { monthName: 1, day: 2, year: 3 } },
-        // DD Month YYYY e.g., 21 April 2026
         { regex: /^(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})$/i, parts: { day: 1, monthName: 2, year: 3 } },
-        // Tue, 21 Apr 2026
-        { regex: /^\w{3},\s+(\d{1,2})\s+(\w{3})\s+(\d{4})$/i, parts: { day: 1, monthAbbr: 2, year: 3 } },
     ];
 
     const monthMap = {
         'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
         'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
-        'january': 1, 'february': 2, 'march': 3, 'april': 4, 'june': 6,
+        'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5, 'june': 6,
         'july': 7, 'august': 8, 'september': 9, 'october': 10, 'november': 11, 'december': 12
     };
 
@@ -49,13 +39,11 @@ const parseDateString = (dateInput: string | Date | null | undefined): Date | nu
                 month = parseInt(match[parts.month], 10);
             } else if (parts.monthName) {
                 month = monthMap[match[parts.monthName].toLowerCase()];
-            } else if (parts.monthAbbr) {
-                month = monthMap[match[parts.monthAbbr].toLowerCase()];
             }
 
             if (day && month && year) {
                 const parsedDate = new Date(Date.UTC(year, month - 1, day));
-                if (!isNaN(parsedDate.getTime()) && parsedDate.getUTCFullYear() === year && parsedDate.getUTCMonth() === month - 1 && parsedDate.getUTCDate() === day) {
+                if (!isNaN(parsedDate.getTime())) {
                     return parsedDate;
                 }
             }
@@ -65,402 +53,404 @@ const parseDateString = (dateInput: string | Date | null | undefined): Date | nu
     return null;
 };
 
+// --- HELPERS ---
+
 /**
- * Gets the expiry date from a document based on the document type's isEffectiveTo field
+ * Fetches uploaded documents and their corresponding type definitions from the DB.
  */
-const getExpiryDate = (
-    doc: { extracted_details?: Record<string, any> },
-    docType?: { fields?: Array<{ name: string; isEffectiveTo?: boolean }> } | null
-): Date | null => {
-    if (!docType || !doc.extracted_details) return null;
-    
-    try {
-        // Look for a field marked as the expiry date (isEffectiveTo: true)
-        const expiryDateField = docType.fields?.find(field => field.isEffectiveTo)?.name;
-        if (expiryDateField && doc.extracted_details[expiryDateField]) {
-            return parseDateString(doc.extracted_details[expiryDateField]);
-        }
-        return null;
-    } catch (error) {
-        console.error('Error getting expiry date:', error);
-        return null;
+async function fetchDocsAndTypes(individualId: string | number, documentIds: string[]) {
+    console.log(`[Computed] Fetching docs for Individual: ${individualId}, DocTypes: ${documentIds.join(', ')}`);
+
+    if (!individualId || !documentIds || documentIds.length === 0) {
+        console.warn("[Computed] Missing individualId or computedDocuments array.");
+        return { docs: [], types: [] };
     }
-};
 
-/**
- * Gets the issue/effective from date from a document based on the document type's isEffectiveFrom field
- */
-const getIssueDate = (
-    doc: { extracted_details?: Record<string, any> },
-    docType?: { fields?: Array<{ name: string; isEffectiveFrom?: boolean }> } | null
-): Date | null => {
-    if (!docType || !doc.extracted_details) return null;
-    
-    try {
-        const effectiveFromField = docType.fields?.find(field => field.isEffectiveFrom)?.name;
-        if (effectiveFromField && doc.extracted_details[effectiveFromField]) {
-            return parseDateString(doc.extracted_details[effectiveFromField]);
-        }
-        return null;
-    } catch (error) {
-        console.error('Error getting issue date:', error);
-        return null;
+    const { data: docTypes, error: typeError } = await supabase
+        .from('acc_portal_kyc')
+        .select('*')
+        .in('id', documentIds);
+
+    if (typeError) {
+        console.error("[Computed] Error fetching doc types:", typeError);
+        return { docs: [], types: [] };
     }
-};
 
-/**
- * Sorts documents by their effective date (newest first)
- * Uses the field marked with isEffectiveFrom in the document type configuration
- */
-const sortDocumentsByLatest = <T extends { extracted_details?: Record<string, any>, created_at?: string }>(
-    documents: T[],
-    docType?: { fields?: Array<{ name: string; isEffectiveFrom?: boolean }> } | null
-): T[] => {
-    if (!documents.length) return [];
+    const { data: uploadedDocs, error: docError } = await supabase
+        .from('acc_portal_directors_documents')
+        .select('*')
+        .eq('director_id', individualId)
+        .in('document_id', documentIds)
+        .neq('status', 'deleted');
 
-    return [...documents].sort((a, b) => {
-        const getDate = (doc: T): Date => {
-            // Try to get date from the effective date field if configured
-            const date = getIssueDate(doc, docType);
-            if (date) return date;
-            
-            // Fall back to created_at if no effective date is found
-            return doc.created_at ? new Date(doc.created_at) : new Date(0);
-        };
-
-        return getDate(b).getTime() - getDate(a).getTime();
-    });
-};
-
-/**
- * COMPUTED FUNCTION 1: determineImmigrationStatus()
- * 
- * Determines the current immigration status of an individual by:
- * 1. Fetching all documents of the types specified in computedDocuments
- * 2. Filtering for valid (non-expired) documents
- * 3. Returning the most recent valid document's type name
- * 
- * @param individualId - The ID of the individual
- * @param computedDocuments - Array of document type IDs to check (from automation config)
- * @returns The display name of the current valid immigration status, or "No Valid Status"
- */
-export async function determineImmigrationStatus(
-    individualId: number | string,
-    computedDocuments: string[]
-): Promise<string> {
-    try {
-        if (!individualId || !computedDocuments || computedDocuments.length === 0) {
-            console.error('Missing required parameters for determineImmigrationStatus');
-            return "No Valid Status";
-        }
-
-        console.log('🔍 Determining immigration status for individual:', individualId);
-        console.log('📋 Document types to check:', computedDocuments);
-
-        // 1. Fetch document type configurations
-        const { data: docTypes, error: docTypesError } = await supabase
-            .from('acc_portal_kyc')
-            .select('*')
-            .in('id', computedDocuments);
-
-        if (docTypesError) {
-            console.error('Error fetching document types:', docTypesError);
-            return "Error Fetching Types";
-        }
-
-        if (!docTypes || docTypes.length === 0) {
-            console.warn('No document types found for IDs:', computedDocuments);
-            return "No Valid Status";
-        }
-
-        // 2. Fetch all uploaded documents for this individual matching these types
-        const { data: uploadedDocs, error: docsError } = await supabase
-            .from('acc_portal_directors_documents')
-            .select('*')
-            .eq('director_id', individualId)
-            .in('document_id', computedDocuments)
-            .neq('status', 'deleted');
-
-        if (docsError) {
-            console.error('Error fetching uploaded documents:', docsError);
-            return "Error Fetching Docs";
-        }
-
-        if (!uploadedDocs || uploadedDocs.length === 0) {
-            console.log('No uploaded documents found for individual');
-            return "No Valid Status";
-        }
-
-        console.log(`📄 Found ${uploadedDocs.length} uploaded documents`);
-
-        // 3. Filter for valid (non-expired) documents
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        const validDocs = uploadedDocs.filter(doc => {
-            const docType = docTypes.find(dt => dt.id === doc.document_id);
-            if (!docType) return false;
-
-            const expiryDate = getExpiryDate(doc, docType);
-            
-            // If no expiry date, consider it valid (permanent status)
-            if (!expiryDate) return true;
-
-            // Check if not expired
-            return expiryDate >= today;
-        });
-
-        console.log(`✅ Found ${validDocs.length} valid (non-expired) documents`);
-
-        if (validDocs.length === 0) {
-            return "Expired Status";
-        }
-
-        // 4. Sort valid documents by issue date (newest first) and get the most recent
-        const sortedDocs = validDocs.map(doc => {
-            const docType = docTypes.find(dt => dt.id === doc.document_id);
-            return { doc, docType };
-        });
-
-        // Sort by issue date
-        sortedDocs.sort((a, b) => {
-            const dateA = getIssueDate(a.doc, a.docType);
-            const dateB = getIssueDate(b.doc, b.docType);
-            
-            if (!dateA && !dateB) return 0;
-            if (!dateA) return 1;
-            if (!dateB) return -1;
-            
-            return dateB.getTime() - dateA.getTime();
-        });
-
-        const mostRecentDoc = sortedDocs[0];
-        const statusName = mostRecentDoc.docType?.display_name || mostRecentDoc.docType?.name || "Unknown Status";
-
-        console.log('🎯 Current immigration status:', statusName);
-        return statusName;
-
-    } catch (error) {
-        console.error('Error in determineImmigrationStatus:', error);
-        return "Error";
+    if (docError) {
+        console.error("[Computed] Error fetching uploaded documents:", docError);
+        return { docs: [], types: [] };
     }
+
+    console.log(`[Computed] Found ${uploadedDocs?.length} uploads and ${docTypes?.length} type definitions.`);
+    return { docs: uploadedDocs || [], types: docTypes || [] };
 }
 
 /**
- * COMPUTED FUNCTION 2: getLatestWorkPermit()
- * 
- * Retrieves the permit number from the most recent work permit by:
- * 1. Fetching all work permit documents specified in computedDocuments
- * 2. Sorting them by issue date (newest first) OR expiry date (furthest)
- * 3. Returning the permit number from the latest permit
- * 
- * @param individualId - The ID of the individual
- * @param computedDocuments - Array of work permit document type IDs (from automation config)
- * @returns The permit number from the latest work permit, or "No Previous Permit"
+ * Sorts documents by 'Effective Date' (Newest First).
  */
-export async function getLatestWorkPermit(
-    individualId: number | string,
-    computedDocuments: string[]
-): Promise<string> {
-    try {
-        if (!individualId || !computedDocuments || computedDocuments.length === 0) {
-            console.error('Missing required parameters for getLatestWorkPermit');
-            return "No Previous Permit";
-        }
+function sortDocsByRecency(docs: any[], docTypes: any[]) {
+    return docs.map(doc => {
+        const type = docTypes.find((t: any) => t.id === doc.document_id);
+        const details = doc.extracted_details || {};
+        
+        let sortDate = new Date(0);
+        let dateSource = "none";
 
-        console.log('🔍 Getting latest work permit for individual:', individualId);
-        console.log('📋 Document types to check:', computedDocuments);
-
-        // 1. Fetch document type configurations
-        const { data: docTypes, error: docTypesError } = await supabase
-            .from('acc_portal_kyc')
-            .select('*')
-            .in('id', computedDocuments);
-
-        if (docTypesError) {
-            console.error('Error fetching document types:', docTypesError);
-            return "Error Fetching Types";
-        }
-
-        if (!docTypes || docTypes.length === 0) {
-            console.warn('No document types found for IDs:', computedDocuments);
-            return "No Previous Permit";
-        }
-
-        // 2. Fetch all work permit documents for this individual
-        const { data: uploadedDocs, error: docsError } = await supabase
-            .from('acc_portal_directors_documents')
-            .select('*')
-            .eq('director_id', individualId)
-            .in('document_id', computedDocuments)
-            .neq('status', 'deleted');
-
-        if (docsError) {
-            console.error('Error fetching uploaded documents:', docsError);
-            return "Error Fetching Docs";
-        }
-
-        if (!uploadedDocs || uploadedDocs.length === 0) {
-            console.log('No work permit documents found for individual');
-            return "No Previous Permit";
-        }
-
-        console.log(`📄 Found ${uploadedDocs.length} work permit documents`);
-
-        // 3. Sort documents by BOTH issue date and expiry date to find the most recent/active permit
-        const sortedDocs = uploadedDocs.map(doc => {
-            const docType = docTypes.find(dt => dt.id === doc.document_id);
-            const issueDate = getIssueDate(doc, docType);
-            const expiryDate = getExpiryDate(doc, docType);
+        if (type?.fields && Array.isArray(type.fields)) {
+            const effectiveFromField = type.fields.find((f: any) => f.isEffectiveFrom);
             
-            return { doc, docType, issueDate, expiryDate };
-        });
-
-        // Sort by: 1) Latest expiry date (furthest in future), 2) Latest issue date
-        sortedDocs.sort((a, b) => {
-            // First, prioritize by expiry date (furthest expiry = most current/recent permit)
-            if (a.expiryDate && b.expiryDate) {
-                const expiryDiff = b.expiryDate.getTime() - a.expiryDate.getTime();
-                if (expiryDiff !== 0) return expiryDiff;
-            }
-            // If one has expiry and other doesn't, prioritize the one with expiry
-            if (a.expiryDate && !b.expiryDate) return -1;
-            if (!a.expiryDate && b.expiryDate) return 1;
-            
-            // Second, sort by issue date (newest first)
-            if (a.issueDate && b.issueDate) {
-                return b.issueDate.getTime() - a.issueDate.getTime();
-            }
-            if (a.issueDate && !b.issueDate) return -1;
-            if (!a.issueDate && b.issueDate) return 1;
-            
-            return 0;
-        });
-
-        const latestPermit = sortedDocs[0];
-
-        // 4. Extract permit number from the document's extracted_details
-        // Strategy 1: Look for fields in docType configuration that likely contain permit number
-        let permitNumber = null;
-        const extractedDetails = latestPermit.doc.extracted_details || {};
-
-        if (latestPermit.docType?.fields) {
-            // Find fields that likely contain permit/reference numbers (excluding dates)
-            const permitFields = latestPermit.docType.fields.filter(f => {
-                const lowerName = f.name.toLowerCase();
-                const isPermitRelated = 
-                    lowerName.includes('permit') || 
-                    lowerName.includes('number') ||
-                    lowerName.includes('reference') ||
-                    lowerName.includes('application');
-                
-                // Exclude date fields
-                const isDateField = f.isEffectiveTo || f.isEffectiveFrom || lowerName.includes('date');
-                
-                return isPermitRelated && !isDateField;
-            });
-
-            // Try each field in priority order
-            for (const field of permitFields) {
-                if (extractedDetails[field.name]) {
-                    permitNumber = extractedDetails[field.name];
-                    console.log(`✅ Found permit number in field: ${field.name}`);
-                    break;
+            if (effectiveFromField && details[effectiveFromField.name]) {
+                const parsed = parseDateString(details[effectiveFromField.name]);
+                if (parsed) {
+                    sortDate = parsed;
+                    dateSource = `isEffectiveFrom (${effectiveFromField.name})`;
                 }
             }
-        }
-
-        // Strategy 2: Fallback to common field name patterns (case-insensitive)
-        if (!permitNumber) {
-            const commonPermitFields = [
-                'permit_number',
-                'permitNumber',
-                'work_permit_number',
-                'workPermitNumber',
-                'permit_no',
-                'permitNo',
-                'reference_number',
-                'referenceNumber',
-                'application_number',
-                'applicationNumber',
-                'number'
-            ];
-
-            for (const fieldName of commonPermitFields) {
-                const foundKey = Object.keys(extractedDetails).find(
-                    key => key.toLowerCase() === fieldName.toLowerCase()
+            
+            if (dateSource === "none") {
+                const issueField = type.fields.find((f: any) => 
+                    f.name.toLowerCase().includes('issue') && f.name.toLowerCase().includes('date')
                 );
-                if (foundKey && extractedDetails[foundKey]) {
-                    permitNumber = extractedDetails[foundKey];
-                    console.log(`✅ Found permit number via fallback: ${foundKey}`);
-                    break;
+                if (issueField && details[issueField.name]) {
+                    const parsed = parseDateString(details[issueField.name]);
+                    if (parsed) {
+                        sortDate = parsed;
+                        dateSource = `Name Match (${issueField.name})`;
+                    }
                 }
             }
         }
 
-        if (!permitNumber) {
-            console.log('⚠️ Latest permit found but no permit number extracted');
-            console.log('Available fields:', Object.keys(extractedDetails));
-            return "Permit Number Not Found";
+        if (dateSource === "none" && doc.created_at) {
+            sortDate = new Date(doc.created_at);
+            dateSource = "created_at";
+        }
+        
+        return { doc, type, sortDate, dateSource };
+    }).sort((a, b) => b.sortDate.getTime() - a.sortDate.getTime());
+}
+
+// --- NEW: ARRAY EXTRACTION FUNCTION ---
+
+/**
+ * ARRAY EXTRACTION: extractFieldFromAllDocuments
+ * 
+ * Returns an array of values extracted from ALL documents (not just the latest).
+ * This is used for array fields like "List of Previous Permits".
+ * 
+ * @param individualId - The director/individual ID
+ * @param documentIds - Array of document type IDs to search
+ * @param fieldPath - The JSON path to extract from each document
+ * @returns Array of extracted values (one per document)
+ */
+export async function extractFieldFromAllDocuments(
+    individualId: string | number,
+    documentIds: string[],
+    fieldPath: string
+): Promise<string[]> {
+    try {
+        console.log(`[Array-Extract] Individual: ${individualId}, DocTypes: ${documentIds.join(',')}, Path: ${fieldPath}`);
+        
+        const { docs, types } = await fetchDocsAndTypes(individualId, documentIds);
+        
+        if (docs.length === 0) {
+            console.warn("[Array-Extract] No documents found");
+            return [];
         }
 
-        console.log('🎯 Latest work permit number:', permitNumber);
-        return String(permitNumber);
+        // Sort all documents by recency (newest first)
+        const sorted = sortDocsByRecency(docs, types);
+        
+        console.log(`[Array-Extract] Processing ${sorted.length} documents`);
+
+        // Extract the field from EACH document
+        const results: string[] = [];
+        
+        for (const item of sorted) {
+            const doc = item.doc;
+            let value: any = null;
+
+            if (fieldPath.includes("->>")) {
+                const match = fieldPath.match(/['"]?(\w+)['"]?\s*->>['"]?(\w+)['"]?/);
+                if (match) {
+                    const column = match[1];
+                    const key = match[2];
+                    
+                    const columnData = doc[column];
+                    if (columnData && typeof columnData === 'object') {
+                        value = columnData[key];
+                    }
+                }
+            } else {
+                value = doc[fieldPath];
+            }
+
+            // Add to results (even if null, we want to maintain array length)
+            results.push(value !== null && value !== undefined ? String(value) : "");
+        }
+
+        console.log(`[Array-Extract] Extracted ${results.length} values`);
+        return results;
 
     } catch (error) {
-        console.error('Error in getLatestWorkPermit:', error);
-        return "Error";
+        console.error("[Array-Extract] Error:", error);
+        return [];
     }
 }
 
+// --- EXISTING: SINGLE VALUE EXTRACTION ---
+
 /**
- * Generic computed field executor
- * Routes to the appropriate function based on the function name
+ * GENERIC COMPUTED FUNCTION: extractFieldFromLatestDocument
+ * 
+ * Extracts a SINGLE value from the LATEST document.
+ */
+export async function extractFieldFromLatestDocument(
+    individualId: string | number, 
+    documentIds: string[], 
+    fieldPath: string
+): Promise<string> {
+    try {
+        console.log(`[Generic-Extract] Individual: ${individualId}, DocTypes: ${documentIds.join(',')}, Path: ${fieldPath}`);
+        
+        const { docs, types } = await fetchDocsAndTypes(individualId, documentIds);
+        
+        if (docs.length === 0) {
+            console.warn("[Generic-Extract] No documents found");
+            return "Missing Document";
+        }
+
+        const sorted = sortDocsByRecency(docs, types);
+        const latest = sorted[0];
+        
+        console.log(`[Generic-Extract] Latest doc ID: ${latest.doc.id}, Type: ${latest.type?.display_name}`);
+
+        let value: any = null;
+
+        if (fieldPath.includes("->>")) {
+            const match = fieldPath.match(/['"]?(\w+)['"]?\s*->>['"]?(\w+)['"]?/);
+            if (match) {
+                const column = match[1];
+                const key = match[2];
+                
+                const columnData = latest.doc[column];
+                if (columnData && typeof columnData === 'object') {
+                    value = columnData[key];
+                }
+            }
+        } else {
+            value = latest.doc[fieldPath];
+        }
+
+        if (value === null || value === undefined) {
+            console.warn(`[Generic-Extract] Field not found in document: ${fieldPath}`);
+            return "Field Not Found";
+        }
+
+        const result = String(value);
+        console.log(`[Generic-Extract] Extracted value: "${result}"`);
+        return result;
+
+    } catch (error) {
+        console.error("[Generic-Extract] Error:", error);
+        return "Extraction Error";
+    }
+}
+
+// --- LEGACY FUNCTIONS (Unchanged) ---
+
+export async function getLatestDocumentNumber(individualId: string | number, computedDocuments: string[]): Promise<string> {
+    const commonPaths = [
+        "extracted_details->>'Passport_Number'",
+        "extracted_details->>'Passport_No'",
+        "extracted_details->>'Permit_Number'",
+        "extracted_details->>'Permit_No'",
+        "extracted_details->>'Document_Number'",
+        "extracted_details->>'ID_Number'",
+        "extracted_details->>'Reference_Number'"
+    ];
+
+    for (const path of commonPaths) {
+        const result = await extractFieldFromLatestDocument(individualId, computedDocuments, path);
+        if (result !== "Field Not Found" && result !== "Missing Document") {
+            return result;
+        }
+    }
+
+    return "Number Not Found";
+}
+
+export async function getLatestDocumentExpiryDate(individualId: string | number, computedDocuments: string[]): Promise<string> {
+    const commonPaths = [
+        "extracted_details->>'Date_of_Expiry'",
+        "extracted_details->>'Expiry_Date'",
+        "extracted_details->>'Valid_Until'",
+        "extracted_details->>'Expiration_Date'"
+    ];
+
+    for (const path of commonPaths) {
+        const result = await extractFieldFromLatestDocument(individualId, computedDocuments, path);
+        if (result !== "Field Not Found" && result !== "Missing Document") {
+            const parsed = parseDateString(result);
+            if (parsed) {
+                return parsed.toISOString().split('T')[0];
+            }
+            return result;
+        }
+    }
+
+    return "Expiry Not Found";
+}
+
+export async function getLatestDocumentIssueDate(individualId: string | number, computedDocuments: string[]): Promise<string> {
+    const commonPaths = [
+        "extracted_details->>'Date_of_Issue'",
+        "extracted_details->>'Issue_Date'",
+        "extracted_details->>'With_Effect_From'",
+        "extracted_details->>'Issued_Date'"
+    ];
+
+    for (const path of commonPaths) {
+        const result = await extractFieldFromLatestDocument(individualId, computedDocuments, path);
+        if (result !== "Field Not Found" && result !== "Missing Document") {
+            const parsed = parseDateString(result);
+            if (parsed) {
+                return parsed.toISOString().split('T')[0];
+            }
+            return result;
+        }
+    }
+
+    return "Issue Date Not Found";
+}
+
+export async function determineImmigrationStatus(individualId: string | number, computedDocuments: string[]): Promise<string> {
+    const { docs, types } = await fetchDocsAndTypes(individualId, computedDocuments);
+    if(docs.length === 0) return "No Status Doc";
+    
+    const sorted = docs.map(doc => {
+        const type = types.find((t: any) => t.id === doc.document_id);
+        const details = doc.extracted_details || {};
+        
+        let expiryDate = new Date(0);
+        let issueDate = new Date(0);
+        
+        if (type?.fields) {
+            const expField = type.fields.find((f: any) => f.isEffectiveTo);
+            if (expField && details[expField.name]) {
+                const p = parseDateString(details[expField.name]);
+                if(p) expiryDate = p;
+            }
+
+            const issueField = type.fields.find((f: any) => f.isEffectiveFrom);
+            if (issueField && details[issueField.name]) {
+                const p = parseDateString(details[issueField.name]);
+                if(p) issueDate = p;
+            } else if (doc.created_at) {
+                issueDate = new Date(doc.created_at);
+            }
+        }
+        return { doc, type, expiryDate, issueDate };
+    }).sort((a,b) => {
+        if (a.expiryDate.getTime() !== b.expiryDate.getTime()) {
+            return b.expiryDate.getTime() - a.expiryDate.getTime();
+        }
+        return b.issueDate.getTime() - a.issueDate.getTime();
+    });
+
+    const current = sorted[0];
+    const now = new Date();
+
+    if (current.expiryDate.getTime() > 0 && current.expiryDate < now) {
+        return "Expired (" + (current.type?.display_name || "Unknown") + ")";
+    }
+    
+    return current.type?.display_name || "Unknown Status";
+}
+
+export async function getLatestWorkPermit(individualId: string | number, computedDocuments: string[]): Promise<string> {
+    return await getLatestDocumentNumber(individualId, computedDocuments);
+}
+
+/**
+ * MASTER ROUTER - Enhanced to support array extraction
  */
 export async function executeComputedField(
     functionName: string,
     individualId: number | string,
-    computedDocuments: string[]
-): Promise<string> {
-    const normalizedFunctionName = functionName.replace(/\(\)/g, '').toLowerCase();
+    computedDocuments: string[],
+    fieldPath?: string,
+    extractionMode: 'latest' | 'all' = 'latest' // NEW parameter
+): Promise<string | string[]> {
+    const normalizedFunctionName = functionName.replace(/\(\)/g, '').trim();
+    console.log(`[Computed-Router] Executing: ${normalizedFunctionName}, Mode: ${extractionMode}`);
 
+    // If a fieldPath is provided
+    if (fieldPath) {
+        if (extractionMode === 'all') {
+            console.log(`[Computed-Router] Array extraction with path: ${fieldPath}`);
+            return await extractFieldFromAllDocuments(individualId, computedDocuments, fieldPath);
+        } else {
+            console.log(`[Computed-Router] Single extraction with path: ${fieldPath}`);
+            return await extractFieldFromLatestDocument(individualId, computedDocuments, fieldPath);
+        }
+    }
+
+    // Legacy named functions (always return single value)
     switch (normalizedFunctionName) {
-        case 'determineimmigrationstatus':
+        case 'determineImmigrationStatus':
             return await determineImmigrationStatus(individualId, computedDocuments);
-        
-        case 'getlatestworkpermit':
+        case 'getLatestWorkPermit':
             return await getLatestWorkPermit(individualId, computedDocuments);
-        
+        case 'getLatestDocumentNumber':
+            return await getLatestDocumentNumber(individualId, computedDocuments);
+        case 'getLatestDocumentExpiryDate':
+            return await getLatestDocumentExpiryDate(individualId, computedDocuments);
+        case 'getLatestDocumentIssueDate':
+            return await getLatestDocumentIssueDate(individualId, computedDocuments);
+        case 'extractFieldFromLatestDocument':
+            console.error('[Computed-Router] extractFieldFromLatestDocument requires a fieldPath parameter');
+            return "Missing Path Parameter";
+        case 'extractFieldFromAllDocuments':
+            console.error('[Computed-Router] extractFieldFromAllDocuments requires a fieldPath parameter');
+            return [];
         default:
-            console.error('Unknown computed function:', functionName);
+            console.error('[Computed-Router] Unknown function:', functionName);
             return "Unknown Function";
     }
 }
 
-/**
- * Batch process multiple computed fields for an individual
- * Useful when processing entire automation forms
- */
 export async function processComputedFields(
     individualId: number | string,
     computedFieldsConfig: Array<{
         variableName: string;
         computedFunction: string;
         computedDocuments: string[];
+        fieldPath?: string;
+        extractionMode?: 'latest' | 'all';
     }>
-): Promise<Record<string, string>> {
-    const results: Record<string, string> = {};
+): Promise<Record<string, string | string[]>> {
+    const results: Record<string, string | string[]> = {};
 
     for (const config of computedFieldsConfig) {
         try {
             const value = await executeComputedField(
                 config.computedFunction,
                 individualId,
-                config.computedDocuments
+                config.computedDocuments || [],
+                config.fieldPath,
+                config.extractionMode || 'latest'
             );
             results[config.variableName] = value;
         } catch (error) {
-            console.error(`Error processing computed field ${config.variableName}:`, error);
+            console.error(`[Computed-Process] Error field ${config.variableName}:`, error);
             results[config.variableName] = "Error";
         }
     }

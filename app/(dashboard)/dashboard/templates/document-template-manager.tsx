@@ -707,7 +707,7 @@ export default function DocumentTemplateManager({
                 name: tagName,
                 type: 'conditional',
                 required: true,
-                entity_type: ['company', 'principal', 'director', 'shareholder', 'dependent', 'employee'], // Conditional can apply to any entity
+                entity_type: ['company', 'principal', 'director', 'shareholder', 'dependant', 'employee'], // Conditional can apply to any entity
                 is_block_start: true,
                 description: `Conditional block: {#${tagName}}`
               });
@@ -716,14 +716,14 @@ export default function DocumentTemplateManager({
               let blockEntity: EntityType = (tagName.endsWith('s') ? tagName.slice(0, -1) : tagName) as EntityType;
               let blockRelationships: string[] = [];
 
-              if (blockEntity === 'dependent') {
+              if (blockEntity === 'dependant') {
                 const relationshipPrefixes = ['father', 'mother', 'daughter', 'son', 'husband', 'wife', 'mother_in_law', 'father_in_law'];
                 const tagNameLower = tagName.toLowerCase();
 
                 for (const prefix of relationshipPrefixes) {
                   if (tagNameLower.startsWith(prefix + '_')) {
                     blockRelationships = [prefix];
-                    console.log(`[BLOCK RELATIONSHIP DETECTED] ${tagName} -> ${prefix} (dependent)`);
+                    console.log(`[BLOCK RELATIONSHIP DETECTED] ${tagName} -> ${prefix} (dependant)`);
                     break;
                   }
                 }
@@ -769,9 +769,9 @@ export default function DocumentTemplateManager({
 
             for (const prefix of relationshipPrefixes) {
               if (tagNameLower.startsWith(prefix + '_')) {
-                inferredEntity = 'dependent';
+                inferredEntity = 'dependant';
                 inferredRelationships = [prefix];
-                console.log(`[RELATIONSHIP DETECTED] ${tagName} -> ${prefix} (dependent)`);
+                console.log(`[RELATIONSHIP DETECTED] ${tagName} -> ${prefix} (dependant)`);
                 break;
               }
             }
@@ -1287,7 +1287,7 @@ export default function DocumentTemplateManager({
         ? newPlaceholder.entity_type
         : newPlaceholder.entity_type ? [newPlaceholder.entity_type] : [],
       ...(newPlaceholder.entity_type?.includes('director') && { director_type: directorType }),
-      ...(newPlaceholder.entity_type?.includes('dependent') && { dependant_relationship: dependantRelationship }),
+      ...(newPlaceholder.entity_type?.includes('dependant') && { dependant_relationship: dependantRelationship }),
       ...(newPlaceholder.type === 'boolean' && {
         boolean_conditions: newPlaceholder.boolean_conditions || [],
         boolean_type: newPlaceholder.boolean_type || 'single'
@@ -1368,7 +1368,7 @@ export default function DocumentTemplateManager({
     }
 
     // Set dependant relationship if applicable
-    if (placeholder.entity_type?.includes('dependent') && placeholder.dependant_relationship) {
+    if (placeholder.entity_type?.includes('dependant') && placeholder.dependant_relationship) {
       setDependantRelationship(Array.isArray(placeholder.dependant_relationship) ? placeholder.dependant_relationship : []);
     } else {
       setDependantRelationship([]);
@@ -2761,7 +2761,7 @@ export default function DocumentTemplateManager({
               </div>
             )}
 
-            {(newPlaceholder.entity_type || []).includes('dependent') && (
+            {(newPlaceholder.entity_type || []).includes('dependant') && (
               <div className="space-y-3 p-4 rounded-lg bg-green-50 border border-green-200 shadow-sm">
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2">

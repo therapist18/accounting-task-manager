@@ -33,11 +33,11 @@ export default function JobFieldsPage() {
     linkSources: false,
   })
   const [allFields, setAllFields] = useState<JobField[]>([])
-  
+
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1)
   const [itemsPerPage] = useState(10)
-  
+
   // Sorting state
   const [sortConfig, setSortConfig] = useState<{ key: keyof JobField; direction: 'asc' | 'desc' } | null>({
     key: 'created_at',
@@ -145,17 +145,17 @@ export default function JobFieldsPage() {
       sortableItems.sort((a, b) => {
         let aValue = a[sortConfig.key]
         let bValue = b[sortConfig.key]
-        
+
         // Handle undefined or null values
         if (aValue === undefined || aValue === null) return sortConfig.direction === 'asc' ? -1 : 1
         if (bValue === undefined || bValue === null) return sortConfig.direction === 'asc' ? 1 : -1
-        
+
         // Convert dates to timestamps for comparison
         if (sortConfig.key === 'created_at' || sortConfig.key === 'updated_at') {
           aValue = new Date(aValue).getTime()
           bValue = new Date(bValue).getTime()
         }
-        
+
         // Compare values
         if (aValue < bValue) {
           return sortConfig.direction === 'asc' ? -1 : 1
@@ -168,7 +168,7 @@ export default function JobFieldsPage() {
     }
     return sortableItems
   }, [filteredFields, sortConfig])
-  
+
   // Handle sort request
   const requestSort = (key: keyof JobField) => {
     let direction: 'asc' | 'desc' = 'asc'
@@ -177,7 +177,7 @@ export default function JobFieldsPage() {
     }
     setSortConfig({ key, direction })
   }
-  
+
   // Sort indicator
   const getSortIndicator = (key: keyof JobField) => {
     if (sortConfig?.key !== key) return null
@@ -261,25 +261,25 @@ export default function JobFieldsPage() {
                 <TableHeader className="bg-blue-500 dark:bg-blue-800 sticky top-0 z-10">
                   <TableRow className="border-slate-200 dark:border-slate-800">
                     <TableHead className="py-4 px-6 text-white border-r w-16">#</TableHead>
-                    <TableHead 
+                    <TableHead
                       className="py-4 px-6 text-white border-r cursor-pointer hover:bg-blue-600 transition-colors"
                       onClick={() => requestSort('field_key')}
                     >
                       Field Key{getSortIndicator('field_key')}
                     </TableHead>
-                    <TableHead 
+                    <TableHead
                       className="py-4 px-6 text-white border-r cursor-pointer hover:bg-blue-600 transition-colors"
                       onClick={() => requestSort('label')}
                     >
                       Label{getSortIndicator('label')}
                     </TableHead>
-                    <TableHead 
+                    <TableHead
                       className="py-4 px-6 text-white border-r cursor-pointer hover:bg-blue-600 transition-colors"
                       onClick={() => requestSort('type')}
                     >
                       Type{getSortIndicator('type')}
                     </TableHead>
-                    <TableHead 
+                    <TableHead
                       className="py-4 px-6 text-white border-r cursor-pointer hover:bg-blue-600 transition-colors"
                       onClick={() => requestSort('is_required')}
                     >
@@ -288,7 +288,7 @@ export default function JobFieldsPage() {
                     <TableHead className="py-4 px-6 text-white border-r">
                       Sources
                     </TableHead>
-                    <TableHead 
+                    <TableHead
                       className="py-4 px-6 text-white border-r cursor-pointer hover:bg-blue-600 transition-colors"
                       onClick={() => requestSort('updated_at')}
                     >
@@ -333,13 +333,24 @@ export default function JobFieldsPage() {
                             {field.is_required ? "Required" : "Optional"}
                           </Badge>
                         </TableCell>
+
                         <TableCell className="p-6 border-r">
-                          <Badge
-                            variant="outline"
-                            className="border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400"
-                          >
-                            {field.sources?.length || 0} sources
-                          </Badge>
+                          {field.is_computed ? (
+                            <Badge
+                              variant="secondary"
+                              className="bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 border-purple-200"
+                            >
+                              <Calculator className="w-3 h-3 mr-1" />
+                              Computed
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className="border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400"
+                            >
+                              {field.sources?.length || 0} sources
+                            </Badge>
+                          )}
                         </TableCell>
                         <TableCell className="p-6 border-r">
                           {new Date(field.updated_at).toLocaleDateString()}
@@ -348,24 +359,13 @@ export default function JobFieldsPage() {
                           <div className="flex items-center justify-end space-x-1">
                             <Button
                               variant="ghost"
-                              size="icon"
-                              className="text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                              size="sm" // Changed to sm for better fit
+                              className="text-blue-600 hover:bg-blue-50 hover:text-blue-700"
                               onClick={() => openDialog("edit", field)}
                             >
-                              <Edit className="h-4 w-4" />
+                              <Edit className="h-4 w-4 mr-1" /> Edit
                             </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => openDialog("linkSources", field)}
-                              className={
-                                field.sources?.length
-                                  ? "text-blue-600 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/50 dark:text-blue-400 dark:hover:bg-blue-900"
-                                  : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-                              }
-                            >
-                              <LinkIcon className="h-4 w-4" />
-                            </Button>
+                            {/* Link button REMOVED - functionality merged into Edit */}
                             <Button
                               variant="ghost"
                               size="icon"
@@ -406,12 +406,6 @@ export default function JobFieldsPage() {
           onOpenChange={() => closeDialog("delete")}
           field={selectedField}
           onConfirm={handleDeleteField}
-        />
-        <LinkSourcesDialog
-          open={dialogStates.linkSources}
-          onOpenChange={() => closeDialog("linkSources")}
-          field={selectedField}
-          onSuccess={fetchFields}
         />
       </div>
     </div>

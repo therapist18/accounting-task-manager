@@ -530,6 +530,11 @@ const organizedRequirements = useMemo(() => {
           isMultiDocument: docIds.length > 1, // Flag to indicate multiple documents of same type
           // Determine category for sectioning based on applicantTypes and document category
           category: (() => {
+            // Check if this requirement has a template (highest priority)
+            if (req.hasTemplate) {
+              return 'template';
+            }
+            
             // Check if this requirement applies to companies
             const applicantTypes = req.applicantTypes || (req.applicantType ? [req.applicantType] : []);
             if (applicantTypes.includes('company')) {
@@ -541,7 +546,7 @@ const organizedRequirements = useMemo(() => {
               return 'company';
             }
             
-            // Check if it's a template
+            // Check if it's a template (fallback for document definition)
             if (docDef?.has_template) {
               return 'template';
             }
@@ -573,11 +578,12 @@ const organizedRequirements = useMemo(() => {
     setIsLetterDialogOpen(true);
   }, []);
 
-  // --- Handler for automation dialog ---
-  const handleAutomationAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number) => {
-    setSelectedAutomationData({ task, document: item, columnType, applicantId });
+ const handleAutomationAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number, relationshipData?: any) => {
+    console.log("⚙️ Opening Automation Dialog with Relationship Data:", relationshipData);
+    setSelectedAutomationData({ task, document: item, columnType, applicantId, relationshipData });
     setIsAutomationDialogOpen(true);
   }, []);
+
 const getDocumentStatusForColumn = useCallback((task: any, reqItem: any, columnType: ApplicantType, applicantId?: number): 
 DocumentStatus => {
   const baseStatus = { documents: [], count: 0 };
@@ -595,7 +601,21 @@ DocumentStatus => {
 
   if (columnType === 'company') {
     // Match Pool: acc_portal_kyc_uploads (company_id)
-    const companyId = task.participants_details?.find(p => p.type === 'company')?.id || task.company_id;
+    // First check applicant_details for company, then participants_details, then fallback to company_id
+    let companyId = null;
+    
+    if (task.applicant_details?.type === 'company' && task.applicant_details?.id) {
+      companyId = task.applicant_details.id;
+    } else if (task.participants_details) {
+      const companyPart = task.participants_details.find(p => p.type === 'company');
+      companyId = companyPart?.id;
+    }
+    
+    // Fallback to legacy company_id field
+    if (!companyId) {
+      companyId = task.company_id;
+    }
+    
     if (companyId && allCompanyDocuments[companyId]) {
       // Check if any of the kycDocIds match (for documents of same type)
       foundDocuments = allCompanyDocuments[companyId].filter(doc => 
@@ -605,8 +625,23 @@ DocumentStatus => {
   } else {
     // Match Pool: acc_portal_directors_documents (director_id)
     let individualId = applicantId; // from column mapping
-    if (columnType === 'principal') individualId = task.applicant_details?.id || task.individual_id;
-    if (columnType === 'understudy') individualId = task.understudy;
+    
+    // For principal, check applicant_details first, then participants_details
+    if (columnType === 'principal') {
+      if (task.applicant_details?.type === 'individual' && task.applicant_details?.id) {
+        individualId = task.applicant_details.id;
+      } else if (task.participants_details) {
+        const principalIndividual = task.participants_details.find(p => 
+          p.type === 'individual' && 
+          (p.role === 'principal' || p.role === 'applicant' || (!p.role && !p.relationship))
+        );
+        individualId = principalIndividual?.id || task.individual_id;
+      } else {
+        individualId = task.individual_id;
+      }
+    } else if (columnType === 'understudy') {
+      individualId = task.understudy;
+    }
 
     if (individualId && allIndividualDocuments[individualId]) {
       // Check if any of the kycDocIds match (for documents of same type)
@@ -620,7 +655,7 @@ DocumentStatus => {
   return { ...baseStatus, documents: foundDocuments, count: foundDocuments.length, type };
 }, [allCompanyDocuments, allIndividualDocuments]);
 
-  const renderDocumentStatus = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number) => {
+  const renderDocumentStatus = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number, relationshipData?: any) => {
     const status = getDocumentStatusForColumn(task, item, columnType, applicantId);
     const isLetter = item.main_category === 'Letters';
 
@@ -690,13 +725,12 @@ DocumentStatus => {
 
     return (
       <div className="flex items-center justify-center gap-1 h-full">
-        {/* Web automation - clickable Zap icon for automation documents */}
-        {item.web_automation?.automationId && (
+       {item.web_automation?.automationId && (
           <Button
             variant="ghost"
             size="sm"
             className="h-8 w-8 p-0 text-blue-600 hover:bg-blue-50"
-            onClick={() => handleAutomationAction(task, item, columnType, applicantId)}
+            onClick={() => handleAutomationAction(task, item, columnType, applicantId, relationshipData)}
             title={`Run Automation: ${item.web_automation.automationName}`}
           >
             <Zap className="h-4 w-4" />
@@ -745,7 +779,7 @@ DocumentStatus => {
         )}
       </div>
     );
-  }, [getDocumentStatusForColumn, handleUploadAction, handleGenerateLetterAction, handleAutomationAction, documents]);
+   }, [getDocumentStatusForColumn, handleUploadAction, handleGenerateLetterAction, handleAutomationAction, documents]);
 
   const renderClientFieldData = useCallback(() => <div className="text-center"><span className="text-gray-400 text-xs">-</span></div>, []);
   const renderReferencesData = useCallback(() => <div className="text-center p-2"><span className="text-gray-400 text-xs">N/A</span></div>, []);
@@ -876,8 +910,11 @@ DocumentStatus => {
           taskId={selectedAutomationData.task?.id}
           individualId={selectedAutomationData.applicantId?.toString()}
           task={selectedAutomationData.task}
+          // NEW PROP
+          relationshipData={selectedAutomationData.relationshipData}
         />
       )}
+
     </div>
   );
 }

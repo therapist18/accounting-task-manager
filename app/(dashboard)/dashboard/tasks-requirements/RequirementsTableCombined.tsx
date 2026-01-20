@@ -133,91 +133,143 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
       const participants = task.participants_details || [];
       const applicant = task.applicant_details || {};
+      const groupCols = [];
 
-      // 1. FIND COMPANY
+      // 1. HANDLE APPLICANT (can be company or individual)
+      if (applicant && applicant.id) {
+        if (applicant.type === 'company') {
+          groupCols.push({
+            type: 'company',
+            id: applicant.id,
+            label: applicant.name,
+            subLabel: 'Applicant',
+            task,
+            groupIndex,
+            priority: 1 // Company gets highest priority
+          });
+        } else if (applicant.type === 'individual') {
+          groupCols.push({
+            type: 'principal',
+            id: applicant.id,
+            label: applicant.name,
+            subLabel: applicant.role?.toUpperCase() || 'PRINCIPAL',
+            task,
+            groupIndex,
+            priority: 2 // Principal gets second priority
+          });
+        }
+      }
+
+      // 2. HANDLE COMPANY FROM PARTICIPANTS (if not already added as applicant)
       const companyPart = participants.find(p => p.type === 'company');
-      if (companyPart) {
-        cols.push({
+      if (companyPart && (!applicant || applicant.id !== companyPart.id)) {
+        groupCols.push({
           type: 'company',
           id: companyPart.id,
           label: companyPart.name,
           subLabel: 'Entity',
           task,
-          groupIndex
+          groupIndex,
+          priority: 1 // Company gets highest priority
         });
       }
 
-      // 2. FIND PRINCIPAL (Applicant)
-      if (applicant && applicant.type === 'individual') {
-        cols.push({
+      // 3. HANDLE PRINCIPAL INDIVIDUAL FROM PARTICIPANTS (if not already added as applicant)
+      const principalIndividual = participants.find(p => 
+        p.type === 'individual' && 
+        (p.role === 'principal' || p.role === 'applicant' || (!p.role && !p.relationship))
+      );
+      if (principalIndividual && (!applicant || applicant.id !== principalIndividual.id)) {
+        groupCols.push({
           type: 'principal',
-          id: applicant.id,
-          label: applicant.name,
-          subLabel: applicant.role?.toUpperCase() || 'PRINCIPAL',
+          id: principalIndividual.id,
+          label: principalIndividual.name,
+          subLabel: 'PRINCIPAL',
           task,
-          groupIndex
+          groupIndex,
+          priority: 2 // Principal gets second priority
         });
       }
 
-      // 3. FIND DIRECTORS / SHAREHOLDERS
+      // 4. FIND DIRECTORS / SHAREHOLDERS
       const directors = participants.filter(p =>
         p.type === 'individual' &&
         (p.role === 'director' || p.role === 'shareholder' || (Array.isArray(p.role) && p.role.includes('director')))
       );
       directors.forEach(d => {
-        cols.push({
-          type: 'director',
-          id: d.id,
-          label: d.name,
-          subLabel: 'Director',
-          task,
-          groupIndex
-        });
+        // Avoid duplicates
+        if (!groupCols.find(col => col.id === d.id && col.groupIndex === groupIndex)) {
+          groupCols.push({
+            type: 'director',
+            id: d.id,
+            label: d.name,
+            subLabel: 'Director',
+            task,
+            groupIndex,
+            priority: 3 // Directors get third priority
+          });
+        }
       });
 
-      // 4. FIND DEPENDANTS (only show if expanded)
+      // 5. FIND DEPENDANTS (only show if expanded)
       const dependants = participants.filter(p =>
         p.type === 'individual' &&
         (p.role === 'dependant' || p.relationship)
       );
       if (expandedDependants.has(groupIndex)) {
         dependants.forEach(dep => {
-          cols.push({
-            type: 'dependant',
-            id: dep.id,
-            label: dep.name,
-            subLabel: dep.relationship || 'Dependant',
-            task,
-            groupIndex,
-            relationship: dep.relationship
-          });
+          // Avoid duplicates
+          if (!groupCols.find(col => col.id === dep.id && col.groupIndex === groupIndex)) {
+            groupCols.push({
+              type: 'dependant',
+              id: dep.id,
+              label: dep.name,
+              subLabel: dep.relationship || 'Dependant',
+              task,
+              groupIndex,
+              relationship: dep.relationship,
+              priority: 4 // Dependants get fourth priority
+            });
+          }
         });
       }
 
-      // 5. FIND UNDERSTUDY (Looking in participants_details by role first)
+      // 6. FIND UNDERSTUDY (Looking in participants_details by role first)
       const understudyParticipant = participants.find(p => p.type === 'individual' && p.role === 'understudy');
       if (understudyParticipant) {
-        cols.push({
-          type: 'understudy',
-          id: understudyParticipant.id,
-          label: understudyParticipant.name,
-          subLabel: 'Understudy',
-          task,
-          groupIndex
-        });
+        // Avoid duplicates
+        if (!groupCols.find(col => col.id === understudyParticipant.id && col.groupIndex === groupIndex)) {
+          groupCols.push({
+            type: 'understudy',
+            id: understudyParticipant.id,
+            label: understudyParticipant.name,
+            subLabel: 'Understudy',
+            task,
+            groupIndex,
+            priority: 5 // Understudy gets fifth priority
+          });
+        }
       } else if (task.understudy) {
         // Fallback to root understudy field
         const understudyId = task.understudy;
         const uPart = participants.find(p => p.id === understudyId);
-        cols.push({
-          type: 'understudy',
-          id: understudyId,
-          label: uPart?.name || individualNames[understudyId] || 'Understudy',
-          subLabel: 'Understudy',
-          task,
-          groupIndex
-        });
+        // Avoid duplicates
+        if (!groupCols.find(col => col.id === understudyId && col.groupIndex === groupIndex)) {
+          groupCols.push({
+            type: 'understudy',
+            id: understudyId,
+            label: uPart?.name || individualNames[understudyId] || 'Understudy',
+            subLabel: 'Understudy',
+            task,
+            groupIndex,
+            priority: 5 // Understudy gets fifth priority
+          });
+        }
       }
+
+      // Sort columns by priority to ensure company always comes first
+      groupCols.sort((a, b) => a.priority - b.priority);
+      cols.push(...groupCols);
     });
 
     return cols;
@@ -321,13 +373,18 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       // 1. Find the specific participant for THIS column
       const participant = task.participants_details?.find(p => p.id === colId);
 
-      // 2. Resolve Company ID robustly
+      // 2. Resolve Company ID and Name robustly
       let companyId = task.company_id;
+      let companyName = task.company_name; // Define companyName
+      
       if (!companyId && task.participants_details) {
-        companyId = task.participants_details.find(p => p.type === 'company')?.id;
+        const companyPart = task.participants_details.find(p => p.type === 'company');
+        companyId = companyPart?.id;
+        companyName = companyPart?.name;
       }
       if (!companyId && task.applicant_details?.type === 'company') {
         companyId = task.applicant_details.id;
+        companyName = task.applicant_details.name;
       }
 
       // 3. Map all categories for context
@@ -348,10 +405,10 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         company: companyId,
         directors: companyRelationships?.directors?.map(d => d.id) || [],
         // FIX: If we are in a director column, set THIS specific ID as the target director
-        director: colType === 'director' ? colId : companyRelationships?.directors?.[0]?.id,
-        principal: colType === 'principal' ? colId : companyRelationships?.principal?.id,
-        dependants: companyRelationships?.dependants || [],
-        understudy: companyRelationships?.understudy?.id
+        director: colType === 'director' ? colId : (companyRelationships?.directors?.[0]?.id || null),
+        principal: colType === 'principal' ? colId : (companyRelationships?.principal?.id || null),
+        dependants: companyRelationships?.dependants?.map(d => d.id) || [],
+        understudy: companyRelationships?.understudy?.id || null
       }
       console.log("✅ Step 1: Entity ID Map created", entityIdMap);
 
@@ -1062,8 +1119,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                 </div>
               </TableCell>
 
-              {columnDefinitions.map((col, colIdx) => {
+             {columnDefinitions.map((col, colIdx) => {
                 const isApplicable = checkApplicability(col.type, reqItem);
+                
+                // NEW: Get the specific relationship data for this column's group
+                const groupRelationshipData = relationshipData[col.groupIndex];
 
                 // Parent now provides getDocumentDataForPreview which checks the pre-filtered state
                 const docData = isApplicable ? getDocumentDataForPreview(col.task, reqItem, col.type, col.id) : null;
@@ -1089,9 +1149,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                           </Button>
                         )}
 
-                        {/* Existing document status (upload/view buttons) */}
-                        {renderDocumentStatus(col.task, reqItem, col.type, col.id)}
-                      </div>
+                         {renderDocumentStatus(col.task, reqItem, col.type, col.id, groupRelationshipData)}
+                        </div>
                     )}
                   </TableCell>
                 );

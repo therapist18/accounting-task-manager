@@ -18,15 +18,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
-import { Badge } from "@/components/ui/badge"
-import { Check, ChevronsUpDown, X } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
-import type { JobField, JobFieldUpdate } from "../types/database"
+import type { JobField, JobFieldUpdate } from "../../types/database"
 import { MultiSelectDocumentTypes } from "../ui/multi-select-document-types"
-            
+import { Calculator, FunctionSquare, Database, Settings2 } from "lucide-react"
+import { DataSourceConfiguration, SourceCardState } from "./link-sources-dialog"
+
 interface EditFieldDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -34,6 +32,14 @@ interface EditFieldDialogProps {
   onSuccess: () => void
   availableFields?: Array<{ id: string; label: string; type: string }>
 }
+
+const COMPUTED_FUNCTIONS = [
+  { value: "getLatestDocumentNumber", label: "Get Document Number (e.g. Passport No)" },
+  { value: "getLatestDocumentExpiryDate", label: "Get Expiry Date" },
+  { value: "getLatestDocumentIssueDate", label: "Get Issue Date" },
+  { value: "determineImmigrationStatus", label: "Determine Immigration Status" },
+  { value: "getLatestWorkPermit", label: "Get Latest Work Permit No" },
+]
 
 export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availableFields = [] }: EditFieldDialogProps) {
   const [formData, setFormData] = useState<Partial<JobFieldUpdate> & {
@@ -44,521 +50,317 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
       defaultDate?: string;
       format?: string;
     };
-    // Document type related state
     documentTypes: Array<{ value: string; label: string }>;
-    selectedDocumentTypes: string[];
-    linkingVariable: "id" | "director_id" | null;
+    is_computed: boolean;
+    computed_function: string;
+    computed_config: { document_ids?: string[] };
   }>({
     fieldType: 'normal',
-    date_config: {
-      useCurrentDate: true,
-      format: 'YYYY-MM-DD'
-    },
+    date_config: { useCurrentDate: true, format: 'YYYY-MM-DD' },
     documentTypes: [],
-    selectedDocumentTypes: [],
-    linkingVariable: null
+    is_computed: false,
+    computed_function: "",
+    computed_config: {}
   })
+  
+  // Advanced Sources State
+  const [sources, setSources] = useState<SourceCardState[]>([])
+
   const [optionsText, setOptionsText] = useState("")
   const [loading, setLoading] = useState(false)
   const [isDependent, setIsDependent] = useState(false)
 
-  // Filter available fields to only show dropdown fields for dependency selection
+  // Filter available fields for dependency selection
   const dropdownFields = availableFields.filter(f => f.type === 'select' && f.id !== field?.id)
 
-  // Fetch document types when dialog opens
+  // Fetch document types
   useEffect(() => {
     const fetchDocumentTypes = async () => {
       try {
-        const { data: docTypes, error } = await supabase
-          .from('acc_portal_kyc')
-          .select('id, display_name')
-          .order('display_name', { ascending: true })
-
-        if (error) throw error
-
-        const formattedDocTypes = docTypes.map((dt: any) => ({
-          value: dt.id,
-          label: dt.display_name || dt.name || `Document ${dt.id}`
-        }))
-
-        setFormData(prev => ({
-          ...prev,
-          documentTypes: formattedDocTypes
-        }))
-      } catch (error) {
-        console.error("Error fetching document types:", error)
-        toast({
-          title: "Error",
-          description: "Failed to fetch document types",
-          variant: "destructive"
-        })
-      }
+        const { data } = await supabase.from('acc_portal_kyc').select('id, display_name').order('display_name', { ascending: true })
+        if (data) {
+            setFormData(prev => ({ 
+                ...prev, 
+                documentTypes: data.map((dt: any) => ({ value: dt.id, label: dt.display_name || `Doc ${dt.id}` })) 
+            }))
+        }
+      } catch (error) { console.error(error) }
     }
-
-    if (open) {
-      fetchDocumentTypes()
-    }
+    if (open) fetchDocumentTypes()
   }, [open])
 
+  // Init Data
   useEffect(() => {
-    console.log('🔍 EditFieldDialog: Field data changed:', field)
     if (field) {
       const isDropdown = field.type === 'select'
       const dependentField = field.sources?.find(s => s.source_type === 'field')
-      const documentSource = field.sources?.find(s => s.source_type === 'document')
 
-      console.log('🔍 EditFieldDialog: Parsed field data - isDropdown:', isDropdown, 'dependentField:', dependentField, 'documentSource:', documentSource)
+      // Extract computed config details
+      const computedConfig = field.computed_config || {}
+      const isComputedFromConfig = computedConfig.is_computed || false
+      const computedFunction = computedConfig.computed_function || ""
+      const documentIds = computedConfig.document_ids || []
 
-      const newFormData = {
+      setFormData({
         field_key: field.field_key,
         label: field.label,
         type: field.type,
         is_required: field.is_required,
         fieldType: isDropdown ? 'dropdown' : 'normal',
         dependentFieldId: dependentField?.table,
-        selectedDocumentTypes: documentSource?.document_id || [],
-        linkingVariable: documentSource?.linking_variable || null,
-        date_config: field.date_config || {
-          useCurrentDate: true,
-          format: 'YYYY-MM-DD'
-        }
-      }
+        date_config: field.date_config || { useCurrentDate: true, format: 'YYYY-MM-DD' },
+        is_computed: isComputedFromConfig,
+        computed_function: computedFunction,
+        computed_config: { document_ids: documentIds },
+        documentTypes: formData.documentTypes
+      })
 
-      console.log('🔍 EditFieldDialog: Setting form data:', newFormData)
-      setFormData(newFormData)
+      // Initialize Advanced Sources
+      if (field.sources && field.sources.length > 0) {
+          setSources(field.sources.map(s => ({
+              ...s,
+              id: crypto.randomUUID(), // Temp ID for UI list
+              fields: [], // Will be lazy loaded by the component
+              loadingFields: false
+          })))
+      } else {
+          setSources([])
+      }
 
       setIsDependent(!!dependentField)
-
-      if (field.options) {
-        const optionsString = Array.isArray(field.options)
-          ? JSON.stringify(field.options, null, 2)
-          : JSON.stringify(field.options, null, 2)
-        setOptionsText(optionsString)
-        console.log('🔍 EditFieldDialog: Set options text:', optionsString)
-      } else {
-        setOptionsText("")
-      }
-    } else {
-      console.log('🔍 EditFieldDialog: No field data, resetting form')
-      setFormData(prev => ({
-        ...prev,
-        fieldType: 'normal',
-        selectedDocumentTypes: [],
-        linkingVariable: null
-      }))
-      setOptionsText("")
-      setIsDependent(false)
+      setOptionsText(field.options ? JSON.stringify(field.options, null, 2) : "")
     }
-  }, [field])
-
-  // Initialize options variable with a default empty array
-  let options: any[] = []
-
-  if (formData.fieldType === 'dropdown' && !isDependent) {
-    try {
-      options = JSON.parse(optionsText)
-    } catch {
-      options = optionsText.split(',').map(opt => opt.trim()).filter(Boolean)
-    }
-  } else if (field?.options) {
-    options = Array.isArray(field.options) ? field.options : []
-  }
-
-  // Prepare sources array
-  const sources: any[] = []
-  console.log('🔍 EditFieldDialog: Building sources array, isDependent:', isDependent, 'formData.dependentFieldId:', formData.dependentFieldId)
-
-  // Add dependent field source if this is a dependent dropdown
-  if (isDependent && formData.dependentFieldId) {
-    const dependentSource = {
-      source_type: 'field',
-      table: formData.dependentFieldId,
-      path: 'id',
-      priority: 1
-    }
-    sources.push(dependentSource)
-    console.log('🔍 EditFieldDialog: Added dependent field source:', dependentSource)
-  }
-
-  // Add document source if source type is document or if document types are selected
-  if (formData.source_type === 'document' || (formData.selectedDocumentTypes && formData.selectedDocumentTypes.length > 0)) {
-    const documentSource = field?.sources?.find(s => s.source_type === 'document')
-    console.log('🔍 EditFieldDialog: Existing document source:', documentSource)
-    
-    const newDocumentSource = {
-      source_type: 'document',
-      table: 'acc_portal_directors_documents',
-      path: '',
-      priority: 1,
-      document_id: formData.selectedDocumentTypes?.length ? formData.selectedDocumentTypes : null,
-      linking_variable: formData.linkingVariable || null
-    }
-    
-    sources.push(newDocumentSource)
-    console.log('🔍 EditFieldDialog: Added document source:', newDocumentSource)
-  }
-
-  console.log('🔍 EditFieldDialog: Final sources array:', sources)
-
-  const updateData: JobFieldUpdate = {
-    field_key: formData.field_key || field?.field_key || '',
-    label: formData.label || field?.label || '',
-    type: formData.fieldType === 'dropdown' ? 'select' : (formData.type || field?.type || 'text'),
-    is_required: formData.is_required ?? field?.is_required ?? false,
-    options,
-    sources,
-    date_config: formData.type === 'date' ? {
-      useCurrentDate: formData.date_config?.useCurrentDate,
-      defaultDate: formData.date_config?.defaultDate,
-      format: formData.date_config?.format
-    } : undefined,
-    updated_at: new Date().toISOString()
-  }
-
-  console.log('🔍 EditFieldDialog: Built updateData object:', updateData)
-  console.log('🔍 EditFieldDialog: formData state:', formData)
-  console.log('🔍 EditFieldDialog: options parsed:', options)
-  console.log('🔍 EditFieldDialog: field data:', field)
-
-  delete updateData.fieldType
-  delete updateData.dependentFieldId
+  }, [field, open])
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    console.log('🔍 EditFieldDialog: Form submission started')
-    console.log('🔍 EditFieldDialog: Field data:', field)
-    
-    if (!field) {
-      console.error('❌ EditFieldDialog: No field data available')
-      return
-    }
-
+    if (!field) return
     setLoading(true)
-    console.log('🔍 EditFieldDialog: Loading state set to true')
 
     try {
-      console.log('🔍 EditFieldDialog: Update data being sent:', updateData)
-      console.log('🔍 EditFieldDialog: Field ID:', field.id)
-      
-      const { data, error } = await supabase
-        .from('tm_job_fields')
-        .update(updateData)
-        .eq('id', field.id)
-        .select()
-
-      console.log('🔍 EditFieldDialog: Supabase response data:', data)
-      console.log('🔍 EditFieldDialog: Supabase response error:', error)
-
-      if (error) {
-        console.error('❌ EditFieldDialog: Supabase error:', error)
-        throw error
+      let options: any[] = []
+      if (formData.fieldType === 'dropdown' && !isDependent) {
+        try { options = JSON.parse(optionsText) } catch { options = optionsText.split(',').map(opt => opt.trim()).filter(Boolean) }
+      } else if (field.options) {
+        options = Array.isArray(field.options) ? field.options : []
       }
 
-      console.log('✅ EditFieldDialog: Field updated successfully')
-      toast({
-        title: "Success",
-        description: "Field updated successfully",
-      })
-      console.log('🔍 EditFieldDialog: Calling onSuccess callback')
+      const updateData: JobFieldUpdate = {
+        field_key: formData.field_key || field.field_key,
+        label: formData.label || field.label,
+        type: formData.fieldType === 'dropdown' ? 'select' : (formData.type || field.type),
+        is_required: formData.is_required ?? field.is_required,
+        options,
+          updated_at: new Date().toISOString()
+      }
+
+      // Prepare clean sources (remove UI props like 'fields' and 'loadingFields')
+      const cleanSources = sources.map(({ id, fields, loadingFields, ...rest }) => rest)
+
+      if (formData.is_computed) {
+               // Extract Document IDs from the configured sources
+        const extractedDocIds = sources
+            .filter(s => s.source_type === 'document' && s.document_id && s.document_id.length > 0)
+            .flatMap(s => s.document_id || []);
+            
+        updateData.computed_config = {
+            document_ids: [...new Set(extractedDocIds)], // Save unique IDs
+            is_computed: formData.is_computed,
+            computed_function: formData.computed_function,
+        };
+        
+        // Save sources so the UI can restore them later
+        updateData.sources = cleanSources; 
+      } else {
+        // --- 2. Standard Field Mode ---
+        updateData.computed_config = null;
+        
+        if (formData.fieldType === 'dropdown' && isDependent && formData.dependentFieldId) {
+            // Dropdown Dependency Override
+            updateData.sources = [{
+                source_type: 'field',
+                table: formData.dependentFieldId,
+                path: 'id',
+                priority: 1
+            }];
+        } else {
+            // Standard Sources
+            updateData.sources = cleanSources
+        }
+      }
+
+      if (formData.type === 'date') {
+        updateData.date_config = {
+          useCurrentDate: formData.date_config?.useCurrentDate,
+          defaultDate: formData.date_config?.defaultDate,
+          format: formData.date_config?.format
+        }
+      }
+
+      const { error } = await supabase.from('tm_job_fields').update(updateData).eq('id', field.id)
+      if (error) throw error
+
+      toast({ title: "Success", description: "Field updated successfully" })
       onSuccess()
-      console.log('🔍 EditFieldDialog: Closing dialog')
       onOpenChange(false)
     } catch (error) {
-      console.error('❌ EditFieldDialog: Error updating field:', error)
-      toast({
-        title: "Error",
-        description: "Failed to update field",
-        variant: "destructive",
-      })
+      toast({ title: "Error", description: "Failed to update field", variant: "destructive" })
     } finally {
-      console.log('🔍 EditFieldDialog: Setting loading to false')
       setLoading(false)
     }
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
-        <DialogHeader>
-          <DialogTitle>Edit Field</DialogTitle>
-          <DialogDescription>Update the field configuration and settings.</DialogDescription>
+      <DialogContent className="sm:max-w-[800px] h-[90vh] flex flex-col p-0 overflow-hidden">
+        <DialogHeader className="px-6 py-4 border-b">
+          <DialogTitle>Edit Field: {field?.label}</DialogTitle>
+          <DialogDescription>Configure field settings and data mapping.</DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleFormSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="field-key">Field Key</Label>
-            <Input
-              id="field-key"
-              value={formData.field_key || ''}
-              onChange={(e) => setFormData({ ...formData, field_key: e.target.value })}
-              placeholder="Enter field key (snake_case)"
-              required
-            />
-          </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="label">Label</Label>
-            <Input
-              id="label"
-              value={formData.label || ''}
-              onChange={(e) => setFormData({ ...formData, label: e.target.value })}
-              placeholder="Enter display label"
-              required
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Field Type</Label>
-            <Select
-              value={formData.type || ''}
-              onValueChange={(value) => setFormData({
-                ...formData,
-                type: value as any,
-                fieldType: value === 'select' ? 'dropdown' : 'normal',
-                date_config: value === 'date' ? (formData.date_config || { useCurrentDate: true, format: 'YYYY-MM-DD' }) : undefined
-              })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select field type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="text">Text</SelectItem>
-                <SelectItem value="number">Number</SelectItem>
-                <SelectItem value="date">Date</SelectItem>
-                <SelectItem value="select">Dropdown</SelectItem>
-                <SelectItem value="image">Image</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {formData.type === 'date' && (
-            <div className="space-y-4 border-t pt-4">
-              <Label>Date Configuration</Label>
-              <div className="space-y-4">
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="use-current-date"
-                    checked={formData.date_config?.useCurrentDate ?? true}
-                    onCheckedChange={(checked) =>
-                      setFormData(prev => ({
-                        ...prev,
-                        date_config: {
-                          ...prev.date_config,
-                          useCurrentDate: checked as boolean,
-                        },
-                      }))
-                    }
-                  />
-                  <Label htmlFor="use-current-date" className="font-normal">
-                    Use current date automatically
-                  </Label>
-                </div>
-                
-                {!(formData.date_config?.useCurrentDate ?? true) && (
-                  <div className="space-y-2">
-                    <Label htmlFor="default-date">Default Date</Label>
-                    <Input
-                      id="default-date"
-                      type="date"
-                      value={formData.date_config?.defaultDate || ''}
-                      onChange={(e) =>
-                        setFormData(prev => ({
-                          ...prev,
-                          date_config: {
-                            ...prev.date_config,
-                            defaultDate: e.target.value,
-                          },
-                        }))
-                      }
-                    />
-                  </div>
-                )}
-                
-                <div className="space-y-2">
-                  <Label htmlFor="date-format">Date Format</Label>
-                  <Select
-                    value={formData.date_config?.format || 'YYYY-MM-DD'}
-                    onValueChange={(value) =>
-                      setFormData(prev => ({
-                        ...prev,
-                        date_config: {
-                          ...prev.date_config,
-                          format: value,
-                        },
-                      }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select date format" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="YYYY-MM-DD">YYYY-MM-DD (e.g., 2023-12-31)</SelectItem>
-                      <SelectItem value="MM/DD/YYYY">MM/DD/YYYY (e.g., 12/31/2023)</SelectItem>
-                      <SelectItem value="DD/MM/YYYY">DD/MM/YYYY (e.g., 31/12/2023)</SelectItem>
-                      <SelectItem value="MMMM D, YYYY">MMMM D, YYYY (e.g., December 31, 2023)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="space-y-2">
-            <Label>Source Type</Label>
-            <Select
-              value={formData.source_type || ''}
-              onValueChange={(value) => {
-                const newSourceType = value as any
-                setFormData({
-                  ...formData,
-                  source_type: newSourceType,
-                  // Reset document-related fields when source type changes
-                  ...(newSourceType !== 'document' && {
-                    selectedDocumentTypes: [],
-                    linkingVariable: null
-                  })
-                })
-              }}
-              disabled={isDependent}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select source type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="individual">Individual</SelectItem>
-                <SelectItem value="document">Document</SelectItem>
-                <SelectItem value="company">Company</SelectItem>
-              </SelectContent>
-            </Select>
-
-            {/* Document Type Selection (only for document source type) */}
-            {formData.source_type === 'document' && (
-              <>
-                <div className="space-y-2 mt-4">
-                  <Label>Document Types</Label>
-                  <MultiSelectDocumentTypes
-                    options={formData.documentTypes || []}
-                    selectedValues={formData.selectedDocumentTypes || []}
-                    onSelect={(value) => {
-                      if (!formData.selectedDocumentTypes?.includes(value)) {
-                        setFormData({
-                          ...formData,
-                          selectedDocumentTypes: [...(formData.selectedDocumentTypes || []), value]
-                        })
-                      }
-                    }}
-                    onRemove={(value) => {
-                      setFormData({
-                        ...formData,
-                        selectedDocumentTypes: formData.selectedDocumentTypes?.filter(v => v !== value) || []
-                      })
-                    }}
-                    onClear={() => {
-                      setFormData({
-                        ...formData,
-                        selectedDocumentTypes: [],
-                        linkingVariable: null
-                      })
-                    }}
-                    placeholder="Select document types..."
-                    emptyMessage="No document types found."
-                  />
-                </div>
-
-                {formData.selectedDocumentTypes?.length > 0 && (
-                  <div className="space-y-2 mt-4">
-                    <Label>Linking Variable</Label>
-                    <Select
-                      value={formData.linkingVariable || ''}
-                      onValueChange={(value: "id" | "director_id") =>
-                        setFormData({ ...formData, linkingVariable: value })
-                      }
-                      disabled={!formData.selectedDocumentTypes?.length}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select linking variable" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="id">Document ID</SelectItem>
-                        <SelectItem value="director_id">Director ID</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">
-                      Select how to link to the document (e.g., by document ID or director ID)
-                    </p>
-                  </div>
-                )}
-              </>
-            )}
-
-                  </div>
-
-          {formData.fieldType === 'dropdown' && (
+        <form onSubmit={handleFormSubmit} className="flex-1 overflow-y-auto p-6 space-y-8">
+            
+            {/* 1. GENERAL SETTINGS */}
             <div className="space-y-4">
-              <div className="space-y-2">
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    id="isDependent"
-                    checked={isDependent}
-                    onCheckedChange={setIsDependent}
-                  />
-                  <Label htmlFor="isDependent">Dependent on another field</Label>
+                <div className="flex items-center gap-2 pb-2 border-b">
+                    <Settings2 className="w-4 h-4 text-slate-500" />
+                    <h3 className="font-semibold text-slate-800">General Settings</h3>
                 </div>
-                {isDependent && dropdownFields.length > 0 && (
-                  <div className="space-y-2">
-                    <Label htmlFor="dependentField">Depends on</Label>
-                    <Select
-                      value={formData.dependentFieldId || ''}
-                      onValueChange={(value) => setFormData(prev => ({ ...prev, dependentFieldId: value }))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a field" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {dropdownFields.map((f) => (
-                          <SelectItem key={f.id} value={f.id}>
-                            {f.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-              </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                        <Label htmlFor="field-key">Field Key</Label>
+                        <Input id="field-key" value={formData.field_key || ''} onChange={(e) => setFormData({ ...formData, field_key: e.target.value })} required />
+                    </div>
+                    <div className="space-y-2">
+                        <Label htmlFor="label">Display Label</Label>
+                        <Input id="label" value={formData.label || ''} onChange={(e) => setFormData({ ...formData, label: e.target.value })} required />
+                    </div>
+                </div>
 
-              {!isDependent && (
                 <div className="space-y-2">
-                  <Label htmlFor="options">Options (comma-separated or JSON array)</Label>
-                  <Textarea
-                    id="options"
-                    value={optionsText}
-                    onChange={(e) => setOptionsText(e.target.value)}
-                  placeholder='JSON array: ["Option 1", "Option 2"] or comma-separated: Option 1, Option 2'
-                    rows={3}
-                  />
+                    <Label>Field Type</Label>
+                    <Select value={formData.type || ''} onValueChange={(value) => setFormData({ ...formData, type: value as any, fieldType: value === 'select' ? 'dropdown' : 'normal' })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="text">Text</SelectItem>
+                            <SelectItem value="number">Number</SelectItem>
+                            <SelectItem value="date">Date</SelectItem>
+                            <SelectItem value="select">Dropdown</SelectItem>
+                            <SelectItem value="image">Image</SelectItem>
+                        </SelectContent>
+                    </Select>
                 </div>
-              )}
-            </div>
-          )}
 
-          <div className="flex items-center space-x-2">
-            <Switch
-              id="is_required"
-              checked={formData.is_required || false}
-              onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, is_required: checked }))}
-            />
-            <Label htmlFor="is_required">Required field</Label>
-          </div>
-
-          <DialogFooter className="mt-6">
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={loading}>
-                {loading ? "Updating..." : "Update Field"}
-              </Button>
+                <div className="flex items-center space-x-2">
+                    <Switch id="is_required" checked={formData.is_required || false} onCheckedChange={(c) => setFormData(p => ({ ...p, is_required: c }))} />
+                    <Label htmlFor="is_required">Required field</Label>
+                </div>
             </div>
-          </DialogFooter>
+
+            {/* 2. LOGIC & DATA */}
+            <div className="space-y-4">
+                <div className="flex items-center justify-between pb-2 border-b">
+                    <div className="flex items-center gap-2">
+                        <Database className="w-4 h-4 text-slate-500" />
+                        <h3 className="font-semibold text-slate-800">Data & Logic</h3>
+                    </div>
+                    {/* Computed Toggle */}
+                    <div className="flex items-center gap-2">
+                        <Label htmlFor="computed_toggle" className="text-xs text-slate-500">Smart/Computed Field?</Label>
+                        <Switch id="computed_toggle" checked={formData.is_computed} onCheckedChange={(c) => setFormData({ ...formData, is_computed: c })} />
+                    </div>
+                </div>
+
+                {/* A. Computed Configuration */}
+                {formData.is_computed && (
+                    <div className="space-y-4 p-4 border border-purple-100 bg-purple-50/50 rounded-lg animate-in fade-in zoom-in-95 duration-200">
+                        <div className="flex items-center gap-2 mb-2 text-purple-700 font-medium">
+                            <FunctionSquare className="h-4 w-4" /> Computed Logic Config
+                        </div>
+                        <div className="space-y-2">
+                            <Label className="text-purple-900">Logic Function</Label>
+                            <Select value={formData.computed_function} onValueChange={(val) => setFormData({...formData, computed_function: val})}>
+                                <SelectTrigger className="bg-white"><SelectValue placeholder="Select logic..." /></SelectTrigger>
+                                <SelectContent>
+                                    {COMPUTED_FUNCTIONS.map(fn => (<SelectItem key={fn.value} value={fn.value}>{fn.label}</SelectItem>))}
+                                </SelectContent>
+                            </Select>
+                            <p className="text-xs text-purple-600 mt-1">
+                                Select the function. Use the <strong>Data Sources</strong> section below to define which documents/tables are used.
+                            </p>
+                        </div>
+                    </div>
+                )}
+
+                {/* B. Dropdown Configuration */}
+                {!formData.is_computed && formData.fieldType === 'dropdown' && (
+                    <div className="space-y-4 p-4 bg-slate-50 rounded-lg border">
+                        <div className="flex items-center space-x-2">
+                            <Switch id="isDependent" checked={isDependent} onCheckedChange={setIsDependent} />
+                            <Label htmlFor="isDependent">Dependent on another field</Label>
+                        </div>
+                        {isDependent ? (
+                            <div className="space-y-2">
+                                <Label>Parent Dropdown</Label>
+                                <Select value={formData.dependentFieldId || ''} onValueChange={(value) => setFormData(prev => ({ ...prev, dependentFieldId: value }))}>
+                                    <SelectTrigger><SelectValue placeholder="Select parent field..." /></SelectTrigger>
+                                    <SelectContent>
+                                        {dropdownFields.map((f) => (<SelectItem key={f.id} value={f.id}>{f.label}</SelectItem>))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        ) : (
+                            <div className="space-y-2">
+                                <Label htmlFor="options">Static Options (JSON array or comma-separated)</Label>
+                                <Textarea id="options" value={optionsText} onChange={(e) => setOptionsText(e.target.value)} rows={3} placeholder='["Option 1", "Option 2"]' />
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* C. Data Sources Builder (Visible for Computed OR Standard) */}
+                {!(formData.fieldType === 'dropdown' && isDependent) && (
+                    <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                            <Label className="text-sm font-semibold">Data Sources</Label>
+                            {formData.is_computed && (
+                                <span className="text-xs text-purple-600 italic">Define documents/inputs for the logic function here</span>
+                            )}
+                        </div>
+                        <DataSourceConfiguration 
+                            sources={sources} 
+                            onChange={setSources} 
+                            documentTypes={formData.documentTypes}
+                        />
+                    </div>
+                )}
+
+                {/* D. Date Configuration */}
+                {!formData.is_computed && formData.type === 'date' && (
+                    <div className="space-y-4 pt-4 border-t">
+                        <Label>Date Formatting</Label>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="flex items-center space-x-2">
+                                <Checkbox id="use-current-date" checked={formData.date_config?.useCurrentDate ?? true} onCheckedChange={(c) => setFormData(p => ({ ...p, date_config: { ...p.date_config, useCurrentDate: c as boolean } }))} />
+                                <Label htmlFor="use-current-date">Use Current Date Default</Label>
+                            </div>
+                            <Select value={formData.date_config?.format || 'YYYY-MM-DD'} onValueChange={(v) => setFormData(p => ({ ...p, date_config: { ...p.date_config, format: v } }))}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="YYYY-MM-DD">YYYY-MM-DD</SelectItem>
+                                    <SelectItem value="DD/MM/YYYY">DD/MM/YYYY</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            <DialogFooter className="pt-4 border-t">
+                <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>Cancel</Button>
+                <Button type="submit" disabled={loading}>{loading ? "Saving..." : "Save Configuration"}</Button>
+            </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
