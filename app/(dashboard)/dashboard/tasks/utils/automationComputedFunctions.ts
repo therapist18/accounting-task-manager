@@ -239,6 +239,70 @@ export async function extractFieldFromLatestDocument(
 
 // --- LEGACY FUNCTIONS WRAPPERS ---
 
+export async function getEducationalDetails(individualId: string | number, computedDocuments: string[], cache?: DocumentCache): Promise<any[]> {
+    try {
+        const { docs, types } = await fetchDocsAndTypes(individualId, computedDocuments, cache);
+        if (docs.length === 0) return [];
+
+        const sorted = sortDocsByRecency(docs, types);
+        const results: any[] = [];
+
+        for (const item of sorted) {
+            const details = item.doc.extracted_details || {};
+            
+            // Extract the educational record
+            const educationRecord: any = {};
+            
+            // Map common field names
+            if (details['Institution_Name'] || details['Institution']) {
+                educationRecord.institution = details['Institution_Name'] || details['Institution'];
+            }
+            if (details['Programme_Name'] || details['Award_Title_and_Type'] || details['Description']) {
+                educationRecord.description = details['Programme_Name'] || details['Award_Title_and_Type'] || details['Description'];
+            }
+            if (details['Education_level'] || details['Award_Title_and_Type']) {
+                educationRecord.level = details['Education_level'] || details['Award_Title_and_Type'];
+            }
+            
+            // Handle dates
+            const startDateStr = details['Date_Issued'] || details['Start_Date'];
+            const endDateStr = details['Date_Completed'] || details['End_Date'] || details['Date_of_Expiry'];
+            
+            if (startDateStr) {
+                const parsed = parseDateString(startDateStr);
+                if (parsed) {
+                    educationRecord.startDate = {
+                        day: parsed.getDate().toString(),
+                        month: parsed.toLocaleString('default', { month: 'short' }),
+                        year: parsed.getFullYear().toString()
+                    };
+                }
+            }
+            
+            if (endDateStr) {
+                const parsed = parseDateString(endDateStr);
+                if (parsed) {
+                    educationRecord.endDate = {
+                        day: parsed.getDate().toString(),
+                        month: parsed.toLocaleString('default', { month: 'short' }),
+                        year: parsed.getFullYear().toString()
+                    };
+                }
+            }
+            
+            // Only add if we have at least some data
+            if (Object.keys(educationRecord).length > 0) {
+                results.push(educationRecord);
+            }
+        }
+        
+        return results;
+    } catch (error) {
+        console.error("[Educational Details Error]:", error);
+        return [];
+    }
+}
+
 export async function getLatestDocumentNumber(individualId: string | number, computedDocuments: string[], cache?: DocumentCache): Promise<string> {
     const commonPaths = ["extracted_details->>'Passport_Number'", "extracted_details->>'Passport_No'", "extracted_details->>'Permit_Number'", "extracted_details->>'ID_Number'"];
     for (const path of commonPaths) {
@@ -350,6 +414,7 @@ export async function executeComputedField(
         case 'getLatestDocumentNumber': return await getLatestDocumentNumber(individualId, computedDocuments, cache);
         case 'getLatestDocumentExpiryDate': return await getLatestDocumentExpiryDate(individualId, computedDocuments, cache);
         case 'getLatestDocumentIssueDate': return await getLatestDocumentIssueDate(individualId, computedDocuments, cache);
+        case 'getEducationalDetails': return await getEducationalDetails(individualId, computedDocuments, cache);
         case 'extractFieldFromLatestDocument':
             console.error('[Computed-Router] extractFieldFromLatestDocument requires a fieldPath parameter');
             return "Missing Path Parameter";

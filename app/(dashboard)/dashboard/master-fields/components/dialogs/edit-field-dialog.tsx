@@ -54,6 +54,7 @@ const COMPUTED_FUNCTIONS = [
   { value: "getLatestDocumentIssueDate", label: "Get Issue Date" },
   { value: "determineImmigrationStatus", label: "Determine Immigration Status" },
   { value: "getLatestWorkPermit", label: "Get Latest Work Permit No" },
+  { value: "getEducationalDetails", label: "Extract Educational History (Array)" },
 ]
 
 export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availableFields = [] }: EditFieldDialogProps) {
