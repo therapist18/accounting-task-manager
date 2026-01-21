@@ -31,7 +31,12 @@ import {
   MousePointerClick,
   Type,
   Layers,
-  Pencil
+  Pencil,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Files,
+  ArrowRight
 } from "lucide-react"
 import * as z from "zod"
 import { useForm } from "react-hook-form"
@@ -94,7 +99,12 @@ interface WebDataGroup {
     extractionMode?: 'latest' | 'all';
   }>;
   linkedMasterFields: JobField[];
-  kycDocumentId?: string;
+  
+  // Updated Document Logic
+  kycDocumentId?: string; // Legacy support
+  linkedKycDocuments?: string[]; // Array of IDs
+  documentLogic?: 'merge' | 'fallback'; // 'merge' = use all, 'fallback' = use first available
+  
   computedFunction?: string;
   computedDocuments?: string[];
   customFieldSource?: string;
@@ -141,7 +151,7 @@ function ArrayConfigurator({ group, masterFields, onUpdate }: { group: WebDataGr
     <Popover>
       <PopoverTrigger asChild>
         <Button variant="outline" size="sm" className={cn(
-          "w-full justify-between px-3 text-xs bg-white border-slate-200",
+          "w-full justify-between px-3 text-sm bg-white border-slate-200",
           items.length > 0 ? "text-blue-700 border-blue-200 bg-blue-50" : "text-slate-500"
         )}>
           <span className="flex items-center gap-2">
@@ -162,7 +172,7 @@ function ArrayConfigurator({ group, masterFields, onUpdate }: { group: WebDataGr
               Define the schema for rows within the <strong>{group.variableName}</strong> array.
             </p>
           </div>
-          <Button size="sm" onClick={addItem} className="h-7 text-xs bg-blue-600 hover:bg-blue-700 text-white shadow-sm">
+          <Button size="sm" onClick={addItem} className="h-7 text-sm bg-blue-600 hover:bg-blue-700 text-white shadow-sm">
             <Plus className="h-3 w-3 mr-1" /> Add Column
           </Button>
         </div>
@@ -181,7 +191,7 @@ function ArrayConfigurator({ group, masterFields, onUpdate }: { group: WebDataGr
             {items.length === 0 ? (
               <div className="py-12 flex flex-col items-center justify-center text-slate-300">
                 <TableIcon className="h-10 w-10 mb-2 opacity-20" />
-                <p className="text-xs">No columns defined yet.</p>
+                <p className="text-sm">No columns defined yet.</p>
               </div>
             ) : (
               items.map((item, i) => {
@@ -197,14 +207,14 @@ function ArrayConfigurator({ group, masterFields, onUpdate }: { group: WebDataGr
                         value={item.variableName}
                         onChange={e => handleItemChange(i, 'variableName', e.target.value)}
                         placeholder="e.g. first_name"
-                        className="h-8 text-xs font-mono border-slate-200 focus:border-blue-400"
+                        className="h-8 text-sm  border-slate-200 focus:border-blue-400"
                       />
                     </div>
 
                     {/* 2. Type & Format */}
                     <div className="col-span-3 flex flex-col gap-2">
                       <Select value={item.type} onValueChange={(val) => handleItemChange(i, 'type', val)}>
-                        <SelectTrigger className="h-8 text-xs border-slate-200"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="h-8 text-sm border-slate-200"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="text">Text</SelectItem>
                           <SelectItem value="number">Number</SelectItem>
@@ -231,7 +241,7 @@ function ArrayConfigurator({ group, masterFields, onUpdate }: { group: WebDataGr
                     <div className="col-span-5 space-y-2">
                       <div className="flex gap-1">
                         <div className={cn(
-                          "flex-1 flex items-center px-3 h-8 rounded-md border text-xs transition-colors",
+                          "flex-1 flex items-center px-3 h-8 rounded-md border text-sm transition-colors",
                           linkedField 
                             ? "bg-blue-50 border-blue-200 text-blue-700" 
                             : "bg-slate-50 border-slate-200 text-slate-400 italic"
@@ -337,7 +347,7 @@ function EntityConfigurator({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="w-full justify-between px-3 text-xs bg-white border-slate-200 text-slate-700">
+        <Button variant="outline" size="sm" className="w-full justify-between px-3 text-sm bg-white border-slate-200 text-slate-700">
            <div className="flex flex-col items-start truncate">
              <span className={cn("truncate font-medium", group.entityTypes?.length ? "text-slate-700" : "text-slate-400 italic")}>
               {group.entityTypes?.length > 0
@@ -357,7 +367,7 @@ function EntityConfigurator({
       </PopoverTrigger>
       <PopoverContent className="w-[320px] p-0" align="start">
         <Command>
-          <CommandInput placeholder="Search entities..." className="h-9 text-xs" />
+          <CommandInput placeholder="Search entities..." className="h-9 text-sm" />
           <CommandList className="max-h-[300px]">
             <CommandEmpty>No entity found.</CommandEmpty>
             <CommandGroup heading="Entity Types">
@@ -477,7 +487,7 @@ function ComputedFieldConfig({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <Calculator className="h-3.5 w-3.5 text-purple-600 flex-shrink-0" />
-              <span className={cn("text-xs font-mono font-medium truncate", group.computedFunction ? "text-purple-700" : "text-slate-400 italic")}>
+              <span className={cn("text-sm  font-medium truncate", group.computedFunction ? "text-purple-700" : "text-slate-400 italic")}>
                 {group.computedFunction || "Configure function..."}
               </span>
             </div>
@@ -498,7 +508,7 @@ function ComputedFieldConfig({
 
         <div className="p-5 space-y-5">
           <div className="space-y-2">
-            <Label className="text-xs font-semibold text-slate-700 flex items-center gap-2">
+            <Label className="text-sm font-semibold text-slate-700 flex items-center gap-2">
               Function Name
             </Label>
             <div className="relative">
@@ -507,14 +517,14 @@ function ComputedFieldConfig({
                 value={group.computedFunction || ''}
                 onChange={e => onUpdate({ computedFunction: e.target.value })}
                 placeholder="e.g. calculateAgeFromId()"
-                className="pl-9 h-9 text-xs font-mono border-slate-200 focus:border-purple-400 focus:ring-purple-100"
+                className="pl-9 h-9 text-sm  border-slate-200 focus:border-purple-400 focus:ring-purple-100"
               />
             </div>
           </div>
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label className="text-xs font-semibold text-slate-700">Required Documents</Label>
+              <Label className="text-sm font-semibold text-slate-700">Required Documents</Label>
               <Badge variant="secondary" className="h-5 text-[10px] bg-purple-50 text-purple-700 border-purple-100">
                 {selectedDocs.length} selected
               </Badge>
@@ -524,7 +534,7 @@ function ComputedFieldConfig({
               <div className="bg-slate-50 px-3 py-2 border-b border-slate-200 flex items-center gap-2">
                 <Search className="h-3.5 w-3.5 text-slate-400" />
                 <Input 
-                    className="h-7 text-xs border-none shadow-none bg-transparent focus-visible:ring-0 p-0" 
+                    className="h-7 text-sm border-none shadow-none bg-transparent focus-visible:ring-0 p-0" 
                     placeholder="Search documents..." 
                     value={docSearch}
                     onChange={(e) => setDocSearch(e.target.value)}
@@ -536,7 +546,7 @@ function ComputedFieldConfig({
                   {filteredDocuments.length === 0 ? (
                     <div className="p-8 text-center">
                       <FileText className="h-8 w-8 text-slate-200 mx-auto mb-2" />
-                      <p className="text-xs text-slate-400">No documents found matching "{docSearch}"</p>
+                      <p className="text-sm text-slate-400">No documents found matching "{docSearch}"</p>
                     </div>
                   ) : (
                     filteredDocuments.map((doc) => {
@@ -563,10 +573,10 @@ function ComputedFieldConfig({
                             className="mr-3 data-[state=checked]:bg-purple-600 data-[state=checked]:border-purple-600"
                           />
                           <div className="flex-1 min-w-0">
-                            <div className="text-xs font-medium text-slate-800 truncate group-hover:text-purple-700 transition-colors">
+                            <div className="text-sm font-medium text-slate-800 truncate group-hover:text-purple-700 transition-colors">
                               {doc.display_name}
                             </div>
-                            <div className="text-[9px] text-slate-400 font-mono truncate">
+                            <div className="text-[9px] text-slate-400  truncate">
                               {doc.name}
                             </div>
                           </div>
@@ -588,7 +598,7 @@ function ComputedFieldConfig({
           <Button
             size="sm"
             variant="ghost"
-            className="h-7 text-xs text-slate-500 hover:text-red-600 hover:bg-red-50"
+            className="h-7 text-sm text-slate-500 hover:text-red-600 hover:bg-red-50"
             onClick={() => {
               onUpdate({ computedFunction: '', computedDocuments: [] });
               setSelectedDocs([]);
@@ -614,13 +624,13 @@ function MasterFieldPicker({ availableFields, onSelect }: { availableFields: Job
       </PopoverTrigger>
       <PopoverContent className="w-[280px] p-0" align="start">
         <Command>
-          <CommandInput placeholder="Search database fields..." className="h-9 text-xs" />
+          <CommandInput placeholder="Search database fields..." className="h-9 text-sm" />
           <CommandList>
             <CommandEmpty>No fields found.</CommandEmpty>
             <CommandGroup heading="Available Fields">
               <ScrollArea className="h-[200px]">
                 {availableFields.map((field) => (
-                  <CommandItem key={field.id} onSelect={() => { onSelect(field); setOpen(false) }} className="text-xs cursor-pointer">
+                  <CommandItem key={field.id} onSelect={() => { onSelect(field); setOpen(false) }} className="text-sm cursor-pointer">
                     <Database className="h-3 w-3 mr-2 text-slate-400" />
                     {field.label}
                   </CommandItem>
@@ -651,9 +661,21 @@ function WebDataGroupEditDialog({
   kycDocuments: KYCDocument[];
 }) {
     const [editingGroup, setEditingGroup] = useState<WebDataGroup | null>(null);
+    const [addDocOpen, setAddDocOpen] = useState(false);
 
     useEffect(() => {
-        if (group) setEditingGroup({ ...group });
+        if (group) {
+          // Backward Compatibility: If linkedKycDocuments is empty but kycDocumentId exists, populate array
+          const initialDocuments = group.linkedKycDocuments && group.linkedKycDocuments.length > 0
+             ? group.linkedKycDocuments 
+             : (group.kycDocumentId ? [group.kycDocumentId] : []);
+          
+          setEditingGroup({ 
+            ...group,
+            linkedKycDocuments: initialDocuments,
+            documentLogic: group.documentLogic || 'merge' 
+          });
+        }
     }, [group, open]);
 
     if (!editingGroup) return null;
@@ -676,6 +698,35 @@ function WebDataGroupEditDialog({
         }) : null);
     };
 
+    // --- Document Logic Helpers ---
+    const addDocument = (docId: string) => {
+      setEditingGroup(prev => {
+        if(!prev) return null;
+        const current = prev.linkedKycDocuments || [];
+        if(current.includes(docId)) return prev;
+        return { ...prev, linkedKycDocuments: [...current, docId] };
+      });
+      setAddDocOpen(false);
+    }
+
+    const removeDocument = (docId: string) => {
+      setEditingGroup(prev => {
+         if(!prev) return null;
+         return { ...prev, linkedKycDocuments: (prev.linkedKycDocuments || []).filter(id => id !== docId) };
+      });
+    }
+
+    const moveDocument = (index: number, dir: 'up' | 'down') => {
+       setEditingGroup(prev => {
+          if(!prev || !prev.linkedKycDocuments) return prev;
+          const newDocs = [...prev.linkedKycDocuments];
+          const targetIndex = dir === 'up' ? index - 1 : index + 1;
+          if(targetIndex < 0 || targetIndex >= newDocs.length) return prev;
+          [newDocs[index], newDocs[targetIndex]] = [newDocs[targetIndex], newDocs[index]];
+          return { ...prev, linkedKycDocuments: newDocs };
+       });
+    }
+
     const isDocument = editingGroup.fieldType === 'document';
     const isComputed = editingGroup.fieldType === 'computed';
     const hasComputedMasterField = editingGroup.linkedMasterFields?.some(f => f.is_computed || f.computed_config?.is_computed);
@@ -695,7 +746,7 @@ function WebDataGroupEditDialog({
                             <Input 
                                 value={editingGroup.variableName} 
                                 onChange={(e) => updateField('variableName', e.target.value)}
-                                className="font-mono text-xs"
+                                className=" text-sm"
                                 placeholder="e.g. first_name"
                             />
                         </div>
@@ -726,7 +777,7 @@ function WebDataGroupEditDialog({
                             
                             {editingGroup.fieldType === 'date' && (
                                 <Select value={editingGroup.dateFormat || 'iso'} onValueChange={(v) => updateField('dateFormat', v)}>
-                                    <SelectTrigger className="mt-2 text-xs h-8"><SelectValue placeholder="Format..." /></SelectTrigger>
+                                    <SelectTrigger className="mt-2 text-sm h-8"><SelectValue placeholder="Format..." /></SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="iso">YYYY-MM-DD</SelectItem>
                                         <SelectItem value="object_split">Object &#123;d,m,y&#125;</SelectItem>
@@ -755,22 +806,105 @@ function WebDataGroupEditDialog({
 
                     {/* DYNAMIC CONFIGURATION AREA */}
                     <div className="space-y-2 border rounded-lg p-4 bg-slate-50">
-                        <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">
+                        <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-2 block">
                             Source Configuration
                         </Label>
 
                         {isDocument ? (
-                             <Select 
-                                value={editingGroup.kycDocumentId} 
-                                onValueChange={(v) => updateField('kycDocumentId', v)}
-                             >
-                                <SelectTrigger className="bg-white"><SelectValue placeholder="Select Document..." /></SelectTrigger>
-                                <SelectContent>
-                                    {kycDocuments.map(doc => (
-                                        <SelectItem key={doc.id} value={doc.id}>{doc.display_name}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                             </Select>
+                           <div className="space-y-4">
+                              <div className="flex justify-between items-center">
+                                 <Label className="text-xs text-slate-600">Document Logic Condition:</Label>
+                                 <Select 
+                                    value={editingGroup.documentLogic || 'merge'} 
+                                    onValueChange={(v) => updateField('documentLogic', v)}
+                                 >
+                                    <SelectTrigger className="w-[200px] h-8 text-xs bg-white">
+                                       <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                       <SelectItem value="merge">Merge (Use All)</SelectItem>
+                                       <SelectItem value="fallback">Fallback (Use First Found)</SelectItem>
+                                    </SelectContent>
+                                 </Select>
+                              </div>
+
+                              <div className="border rounded-md bg-white p-2 space-y-2">
+                                 {editingGroup.linkedKycDocuments?.map((docId, index) => {
+                                    const doc = kycDocuments.find(d => d.id === docId);
+                                    return (
+                                       <div key={docId} className="flex items-center gap-2 p-2 rounded border border-slate-100 bg-slate-50 group">
+                                          <div className="flex flex-col gap-0.5">
+                                             <Button 
+                                                variant="ghost" 
+                                                size="icon" 
+                                                className="h-4 w-4 rounded-none hover:bg-slate-200" 
+                                                onClick={() => moveDocument(index, 'up')}
+                                                disabled={index === 0}
+                                             >
+                                                <ArrowUp className="h-2 w-2 text-slate-500" />
+                                             </Button>
+                                             <Button 
+                                                variant="ghost" 
+                                                size="icon" 
+                                                className="h-4 w-4 rounded-none hover:bg-slate-200" 
+                                                onClick={() => moveDocument(index, 'down')}
+                                                disabled={index === (editingGroup.linkedKycDocuments?.length || 0) - 1}
+                                             >
+                                                <ArrowDown className="h-2 w-2 text-slate-500" />
+                                             </Button>
+                                          </div>
+                                          <FileText className="h-4 w-4 text-amber-500" />
+                                          <span className="text-sm font-medium flex-1 truncate">{doc?.display_name || "Unknown Doc"}</span>
+                                          <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400 hover:text-red-600 hover:bg-red-50" onClick={() => removeDocument(docId)}>
+                                             <X className="h-3 w-3" />
+                                          </Button>
+                                       </div>
+                                    )
+                                 })}
+                                 {(!editingGroup.linkedKycDocuments || editingGroup.linkedKycDocuments.length === 0) && (
+                                    <div className="text-center py-4 text-slate-400 text-xs italic">
+                                       No documents linked.
+                                    </div>
+                                 )}
+
+                                 <Popover open={addDocOpen} onOpenChange={setAddDocOpen}>
+                                    <PopoverTrigger asChild>
+                                       <Button variant="outline" size="sm" className="w-full border-dashed text-slate-500 hover:text-blue-600 hover:border-blue-300">
+                                          <Plus className="h-3 w-3 mr-2" /> Link Document Type
+                                       </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-[300px] p-0" align="start">
+                                       <Command>
+                                          <CommandInput placeholder="Search documents..." />
+                                          <CommandList>
+                                             <CommandEmpty>No document found.</CommandEmpty>
+                                             <CommandGroup>
+                                                <ScrollArea className="h-[200px]">
+                                                   {kycDocuments.map(doc => (
+                                                      <CommandItem 
+                                                         key={doc.id} 
+                                                         onSelect={() => addDocument(doc.id)}
+                                                         disabled={editingGroup.linkedKycDocuments?.includes(doc.id)}
+                                                      >
+                                                         <div className="flex items-center gap-2">
+                                                            <Check className={cn("h-3 w-3", editingGroup.linkedKycDocuments?.includes(doc.id) ? "opacity-100" : "opacity-0")} />
+                                                            {doc.display_name}
+                                                         </div>
+                                                      </CommandItem>
+                                                   ))}
+                                                </ScrollArea>
+                                             </CommandGroup>
+                                          </CommandList>
+                                       </Command>
+                                    </PopoverContent>
+                                 </Popover>
+                              </div>
+                              <p className="text-[10px] text-slate-500">
+                                 {editingGroup.documentLogic === 'merge' 
+                                    ? "All documents listed above will be combined into a single file during upload." 
+                                    : "The system will check for documents in the order listed above and use the first one available."}
+                              </p>
+                           </div>
                         ) : isComputed ? (
                             <div className="flex gap-2">
                                 <div className="flex-1">
@@ -814,12 +948,12 @@ function WebDataGroupEditDialog({
                                 </div>
                                 {hasComputedMasterField && (
                                     <div className="flex items-center gap-2">
-                                        <Label className="text-xs">Extraction Mode:</Label>
+                                        <Label className="text-sm">Extraction Mode:</Label>
                                          <Select 
                                             value={editingGroup.extractionMode || 'latest'} 
                                             onValueChange={(v) => updateField('extractionMode', v)}
                                         >
-                                            <SelectTrigger className="w-[120px] h-8 text-xs bg-white"><SelectValue /></SelectTrigger>
+                                            <SelectTrigger className="w-[120px] h-8 text-sm bg-white"><SelectValue /></SelectTrigger>
                                             <SelectContent>
                                                 <SelectItem value="latest">Latest</SelectItem>
                                                 <SelectItem value="all">All</SelectItem>
@@ -835,6 +969,173 @@ function WebDataGroupEditDialog({
                 <DialogFooter>
                     <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
                     <Button onClick={() => onSave(editingGroup)}>Save Changes</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    )
+}
+
+// --- NEW COMPONENT: Simplified Add Data Field Dialog ---
+function AddDataFieldDialog({
+    open,
+    onOpenChange,
+    onAdd,
+    masterFields,
+    kycDocuments
+}: {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    onAdd: (type: 'text' | 'document' | 'computed' | 'db', data?: any) => void;
+    masterFields: JobField[];
+    kycDocuments: KYCDocument[];
+}) {
+    const [selectedTab, setSelectedTab] = useState("db");
+    const [dbFieldOpen, setDbFieldOpen] = useState(false);
+    const [docFieldOpen, setDocFieldOpen] = useState(false);
+
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent className="max-w-[500px] p-0 gap-0 overflow-hidden">
+                <DialogHeader className="px-6 py-4 border-b bg-slate-50/50">
+                    <DialogTitle>Add Data Field</DialogTitle>
+                    <DialogDescription>Select the type of data to map.</DialogDescription>
+                </DialogHeader>
+
+                <Tabs value={selectedTab} onValueChange={setSelectedTab} className="w-full">
+                    <TabsList className="w-full justify-start rounded-none border-b bg-white px-6 h-12 gap-6">
+                        <TabsTrigger value="db" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none h-full px-0">Database</TabsTrigger>
+                        <TabsTrigger value="doc" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-amber-500 rounded-none h-full px-0">Document</TabsTrigger>
+                        <TabsTrigger value="manual" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-slate-600 rounded-none h-full px-0">Manual / Computed</TabsTrigger>
+                    </TabsList>
+
+                    <div className="p-6 min-h-[200px]">
+                        <TabsContent value="db" className="mt-0 space-y-4">
+                            <div className="bg-blue-50/50 p-3 rounded-lg border border-blue-100 mb-4 flex gap-3">
+                                <Database className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                                <div className="space-y-1">
+                                    <h4 className="text-sm font-semibold text-blue-900">Map from Database</h4>
+                                    <p className="text-xs text-blue-700">Select an existing field from the database to map automatically.</p>
+                                </div>
+                            </div>
+                            
+                            <div className="space-y-2">
+                                <Label>Select Field</Label>
+                                <Popover open={dbFieldOpen} onOpenChange={setDbFieldOpen}>
+                                    <PopoverTrigger asChild>
+                                        <Button variant="outline" role="combobox" aria-expanded={dbFieldOpen} className="w-full justify-between font-normal">
+                                            Select a field...
+                                            <Search className="ml-2 h-4 w-4 opacity-50" />
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-[450px] p-0" align="start">
+                                        <Command>
+                                            <CommandInput placeholder="Search database fields..." />
+                                            <CommandList>
+                                                <CommandEmpty>No field found.</CommandEmpty>
+                                                <CommandGroup>
+                                                    <ScrollArea className="h-[200px]">
+                                                        {masterFields.map((field) => (
+                                                            <CommandItem
+                                                                key={field.id}
+                                                                value={field.label}
+                                                                onSelect={() => {
+                                                                    onAdd('db', field);
+                                                                    setDbFieldOpen(false);
+                                                                }}
+                                                            >
+                                                                <Database className="mr-2 h-4 w-4 text-slate-400" />
+                                                                {field.label}
+                                                            </CommandItem>
+                                                        ))}
+                                                    </ScrollArea>
+                                                </CommandGroup>
+                                            </CommandList>
+                                        </Command>
+                                    </PopoverContent>
+                                </Popover>
+                            </div>
+                        </TabsContent>
+
+                        <TabsContent value="doc" className="mt-0 space-y-4">
+                            <div className="bg-amber-50/50 p-3 rounded-lg border border-amber-100 mb-4 flex gap-3">
+                                <Paperclip className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                                <div className="space-y-1">
+                                    <h4 className="text-sm font-semibold text-amber-900">Upload Attachment</h4>
+                                    <p className="text-xs text-amber-700">Map a document upload field (e.g. Passport Scan).</p>
+                                </div>
+                            </div>
+
+                             <div className="space-y-2">
+                                <Label>Select Document Type</Label>
+                                <Popover open={docFieldOpen} onOpenChange={setDocFieldOpen}>
+                                    <PopoverTrigger asChild>
+                                        <Button variant="outline" role="combobox" aria-expanded={docFieldOpen} className="w-full justify-between font-normal">
+                                            Select a document...
+                                            <Search className="ml-2 h-4 w-4 opacity-50" />
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-[450px] p-0" align="start">
+                                        <Command>
+                                            <CommandInput placeholder="Search documents..." />
+                                            <CommandList>
+                                                <CommandEmpty>No document found.</CommandEmpty>
+                                                <CommandGroup>
+                                                    <ScrollArea className="h-[200px]">
+                                                        {kycDocuments.map((doc) => (
+                                                            <CommandItem
+                                                                key={doc.id}
+                                                                value={doc.display_name}
+                                                                onSelect={() => {
+                                                                    onAdd('document', doc);
+                                                                    setDocFieldOpen(false);
+                                                                }}
+                                                            >
+                                                                <FileText className="mr-2 h-4 w-4 text-amber-400" />
+                                                                {doc.display_name}
+                                                            </CommandItem>
+                                                        ))}
+                                                    </ScrollArea>
+                                                </CommandGroup>
+                                            </CommandList>
+                                        </Command>
+                                    </PopoverContent>
+                                </Popover>
+                            </div>
+                        </TabsContent>
+
+                        <TabsContent value="manual" className="mt-0 grid grid-cols-2 gap-4">
+                             <button
+                                type="button"
+                                onClick={() => onAdd('text')}
+                                className="relative flex flex-col items-start p-4 bg-white border border-slate-200 rounded-xl hover:border-blue-400 hover:shadow-md hover:shadow-blue-50 transition-all group text-left"
+                              >
+                                <div className="h-10 w-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                                  <Type className="h-5 w-5" />
+                                </div>
+                                <div className="font-semibold text-sm text-slate-800">Empty Field</div>
+                                <div className="text-[11px] text-slate-500 leading-tight mt-1">
+                                  Create a placeholder variable for manual data entry later.
+                                </div>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => onAdd('computed')}
+                                className="relative flex flex-col items-start p-4 bg-white border border-slate-200 rounded-xl hover:border-purple-400 hover:shadow-md hover:shadow-purple-50 transition-all group text-left"
+                              >
+                                <div className="h-10 w-10 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                                  <Calculator className="h-5 w-5" />
+                                </div>
+                                <div className="font-semibold text-sm text-slate-800">Computed Logic</div>
+                                <div className="text-[11px] text-slate-500 leading-tight mt-1">
+                                  Calculate values server-side (e.g. Age) before automation runs.
+                                </div>
+                              </button>
+                        </TabsContent>
+                    </div>
+                </Tabs>
+                 <DialogFooter className="border-t p-2 bg-slate-50">
+                     <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>Cancel</Button>
                 </DialogFooter>
             </DialogContent>
         </Dialog>
@@ -885,12 +1186,14 @@ export function AutomationDialog({
   const [kycDocuments, setKycDocuments] = useState<KYCDocument[]>([])
 
   const [isAddFieldOpen, setIsAddFieldOpen] = useState(false)
-  const [addDialogSearchTerm, setAddDialogSearchTerm] = useState('')
   const [fieldSearch, setFieldSearch] = useState('')
 
   // Editing State
   const [editingGroup, setEditingGroup] = useState<WebDataGroup | null>(null);
   const [isEditDialogopen, setIsEditDialogopen] = useState(false);
+
+  // Sorting State
+  const [sortConfig, setSortConfig] = useState<{ key: string | null, direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' });
 
   const form = useForm<AutomationFormValues>({
     resolver: zodResolver(automationFormSchema),
@@ -944,6 +1247,9 @@ export function AutomationDialog({
           ...g,
           id: g.id || crypto.randomUUID(),
           linkedMasterFields: g.linkedMasterFields || [],
+          // Normalize legacy kycDocumentId to array
+          linkedKycDocuments: g.linkedKycDocuments ? g.linkedKycDocuments : (g.kycDocumentId ? [g.kycDocumentId] : []),
+          documentLogic: g.documentLogic || 'merge',
           kycDocumentId: g.kycDocumentId || undefined,
           fieldType: g.fieldType || 'text',
           customFieldSource: g.customFieldSource || '',
@@ -973,7 +1279,62 @@ export function AutomationDialog({
   const removeGroup = (id: string) =>
     setWebDataGroups(prev => prev.filter(g => g.id !== id));
 
-  const availableForPicking = useMemo(() => masterFields, [masterFields]);
+  // --- Sorting & Reordering Logic ---
+  const handleSort = (key: string) => {
+    setSortConfig(current => {
+      if (current.key === key) {
+        return { key, direction: current.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key, direction: 'asc' };
+    });
+  };
+
+  const moveRow = (index: number, direction: 'up' | 'down') => {
+      // Reordering is only allowed when NO sort is active to avoid index confusion
+      if (sortConfig.key) {
+          toast({ title: "Cannot reorder while sorted", description: "Clear the sort (click the header until arrow disappears) to reorder.", variant: "destructive" });
+          return;
+      }
+
+      const newGroups = [...webDataGroups];
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+
+      if (targetIndex < 0 || targetIndex >= newGroups.length) return;
+
+      [newGroups[index], newGroups[targetIndex]] = [newGroups[targetIndex], newGroups[index]];
+      setWebDataGroups(newGroups);
+  };
+
+  const processedWebDataGroups = useMemo(() => {
+    let groups = [...webDataGroups];
+
+    // Filter
+    if (fieldSearch) {
+        const lower = fieldSearch.toLowerCase();
+        groups = groups.filter(g => 
+            g.variableName.toLowerCase().includes(lower) || 
+            g.efnsDisplayName.toLowerCase().includes(lower)
+        );
+    }
+
+    // Sort
+    if (sortConfig.key) {
+        groups.sort((a, b) => {
+            let aVal = a[sortConfig.key as keyof WebDataGroup] || '';
+            let bVal = b[sortConfig.key as keyof WebDataGroup] || '';
+            
+            // Special handling for nested checks if needed, simplistic for now
+            if (typeof aVal === 'string') aVal = aVal.toLowerCase();
+            if (typeof bVal === 'string') bVal = bVal.toLowerCase();
+
+            if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+            if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+    }
+    
+    return groups;
+  }, [webDataGroups, fieldSearch, sortConfig]);
 
   const handleExportToExcel = () => {
     try {
@@ -985,7 +1346,7 @@ export function AutomationDialog({
         'Entities': group.entityTypes?.join(', ') || 'None',
         'Custom Source': group.customFieldSource || 'None',
         'Source Mapping': group.fieldType === 'document'
-          ? kycDocuments.find(d => d.id === group.kycDocumentId)?.display_name || "Unknown Doc"
+          ? (group.linkedKycDocuments || []).map(id => kycDocuments.find(d => d.id === id)?.display_name).join(', ')
           : group.fieldType === 'array'
             ? `Array with ${group.arrayItems?.length || 0} items`
             : group.fieldType === 'computed'
@@ -1040,47 +1401,42 @@ export function AutomationDialog({
     }
   }
 
-  const addNewRow = (type: 'text' | 'document' | 'computed') => {
-    const newRow: WebDataGroup = {
-      id: crypto.randomUUID(),
-      efnsDisplayName: type === 'document' ? 'New Document' : 'New Field',
-      variableName: '',
-      fieldType: type,
-      entityTypes: ['principal'],
-      linkedMasterFields: [],
-      arrayItems: []
-    };
-    setWebDataGroups(prev => [...prev, newRow]);
-    setIsAddFieldOpen(false);
+  const handleAddData = (type: 'text' | 'document' | 'computed' | 'db', data?: any) => {
+      if (type === 'db' && data) {
+         setWebDataGroups(prev => [...prev, {
+            id: crypto.randomUUID(),
+            efnsDisplayName: data.label,
+            variableName: data.field_key.toLowerCase().replace(/[^a-z0-9]+(.)/g, (_, chr) => chr.toUpperCase()),
+            fieldType: 'text',
+            entityTypes: ['principal'],
+            linkedMasterFields: [data]
+        }]);
+      } else if (type === 'document' && data) {
+         setWebDataGroups(prev => [...prev, {
+            id: crypto.randomUUID(),
+            efnsDisplayName: data.display_name,
+            variableName: data.name,
+            fieldType: 'document',
+            entityTypes: ['principal'],
+            linkedMasterFields: [],
+            kycDocumentId: data.id,
+            linkedKycDocuments: [data.id], // Initialize array
+            documentLogic: 'merge'
+        }]);
+      } else {
+        const newRow: WebDataGroup = {
+            id: crypto.randomUUID(),
+            efnsDisplayName: type === 'computed' ? 'Computed Field' : 'New Field',
+            variableName: '',
+            fieldType: type === 'computed' ? 'computed' : 'text',
+            entityTypes: ['principal'],
+            linkedMasterFields: [],
+            arrayItems: []
+        };
+        setWebDataGroups(prev => [...prev, newRow]);
+      }
+      setIsAddFieldOpen(false);
   }
-
-  const addFromMasterField = (field: JobField) => {
-    setWebDataGroups(prev => [...prev, {
-      id: crypto.randomUUID(),
-      efnsDisplayName: field.label,
-      variableName: field.field_key.toLowerCase().replace(/[^a-z0-9]+(.)/g, (_, chr) => chr.toUpperCase()),
-      fieldType: 'text',
-      entityTypes: ['principal'],
-      linkedMasterFields: [field]
-    }]);
-    setIsAddFieldOpen(false);
-  }
-
-  const addFromDocument = (doc: KYCDocument) => {
-    setWebDataGroups(prev => [...prev, {
-      id: crypto.randomUUID(),
-      efnsDisplayName: doc.display_name,
-      variableName: doc.name,
-      fieldType: 'document',
-      entityTypes: ['principal'],
-      linkedMasterFields: [],
-      kycDocumentId: doc.id
-    }]);
-    setIsAddFieldOpen(false);
-  }
-
-  const filteredAddFields = masterFields.filter(f => f.label?.toLowerCase().includes(addDialogSearchTerm.toLowerCase()));
-  const filteredAddDocs = kycDocuments.filter(d => d.display_name?.toLowerCase().includes(addDialogSearchTerm.toLowerCase()));
 
   const openEditDialog = (group: WebDataGroup) => {
       setEditingGroup(group);
@@ -1096,7 +1452,7 @@ export function AutomationDialog({
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-[85vw] h-[90vh] flex flex-col p-0 overflow-hidden bg-slate-50 border-none shadow-2xl rounded-xl">
+        <DialogContent className="max-w-[67vw] h-[90vh] flex flex-col p-0 overflow-hidden bg-slate-50 border-none shadow-2xl rounded-xl">
           <DialogHeader className="px-6 py-4 bg-white border-b flex-shrink-0 flex-row items-center justify-between space-y-0 z-20">
             <div className="flex items-center gap-4">
               <div className="h-10 w-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-200">
@@ -1104,20 +1460,20 @@ export function AutomationDialog({
               </div>
               <div>
                 <DialogTitle className="text-xl font-bold text-slate-900">{initialData ? 'Edit Automation Flow' : 'Create Automation Flow'}</DialogTitle>
-                <DialogDescription className="text-xs text-slate-500 mt-0.5 font-medium">
+                <DialogDescription className="text-sm text-slate-500 mt-0.5 font-medium">
                   Configure connection details and map database fields to the target system.
                 </DialogDescription>
               </div>
             </div>
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
-                <span className="text-xs font-semibold text-slate-600">Status:</span>
+                <span className="text-sm font-semibold text-slate-600">Status:</span>
                 <Switch
                   checked={form.watch('is_active')}
                   onCheckedChange={(c) => form.setValue('is_active', c)}
                   className="data-[state=checked]:bg-green-500"
                 />
-                <span className={cn("text-xs font-bold", form.watch('is_active') ? "text-green-600" : "text-slate-400")}>
+                <span className={cn("text-sm font-bold", form.watch('is_active') ? "text-green-600" : "text-slate-400")}>
                   {form.watch('is_active') ? "Active" : "Inactive"}
                 </span>
               </div>
@@ -1132,7 +1488,7 @@ export function AutomationDialog({
                     type="button"
                     onClick={() => setActiveTab('general')}
                     className={cn(
-                      "px-6 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2",
+                      "px-6 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2",
                       activeTab === 'general' ? "bg-white shadow-sm text-blue-700" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50"
                     )}
                   >
@@ -1142,7 +1498,7 @@ export function AutomationDialog({
                     type="button"
                     onClick={() => setActiveTab('webdata')}
                     className={cn(
-                      "px-6 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2",
+                      "px-6 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2",
                       activeTab === 'webdata' ? "bg-white shadow-sm text-blue-700" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50"
                     )}
                   >
@@ -1157,11 +1513,11 @@ export function AutomationDialog({
               <div className="flex-1 overflow-hidden relative bg-slate-50/50">
                 {activeTab === 'general' && (
                   <ScrollArea className="h-full">
-                    <div className="p-8 max-w-5xl mx-auto space-y-6">
+                    <div className="p-8 mx-auto space-y-6">
                       <Card className="border-none shadow-sm ring-1 ring-slate-200">
                         <CardHeader className="pb-4 border-b">
-                          <CardTitle className="text-sm font-bold flex items-center gap-2">
-                            <FileText className="h-4 w-4 text-blue-500" /> Basic Information
+                          <CardTitle className="font-bold flex items-center gap-2">
+                            <FileText className="h-6 w-6 text-blue-500" /> Basic Information
                           </CardTitle>
                         </CardHeader>
                         <CardContent className="grid grid-cols-2 gap-6 pt-6">
@@ -1170,7 +1526,7 @@ export function AutomationDialog({
                             name="name"
                             render={({ field }) => (
                               <FormItem className="col-span-1">
-                                <FormLabel className="text-xs font-bold text-slate-500 uppercase">Automation Name</FormLabel>
+                                <FormLabel className="text-sm font-bold text-slate-500 uppercase">Automation Name</FormLabel>
                                 <FormControl><Input placeholder="e.g. Alien Card Application" {...field} className="bg-slate-50" /></FormControl>
                                 <FormMessage />
                               </FormItem>
@@ -1181,7 +1537,7 @@ export function AutomationDialog({
                             name="category"
                             render={({ field }) => (
                               <FormItem className="col-span-1">
-                                <FormLabel className="text-xs font-bold text-slate-500 uppercase">Category</FormLabel>
+                                <FormLabel className="text-sm font-bold text-slate-500 uppercase">Category</FormLabel>
                                 <Select onValueChange={field.onChange} value={field.value}>
                                   <FormControl><SelectTrigger className="bg-slate-50"><SelectValue /></SelectTrigger></FormControl>
                                   <SelectContent>
@@ -1199,7 +1555,7 @@ export function AutomationDialog({
                             name="description"
                             render={({ field }) => (
                               <FormItem className="col-span-2">
-                                <FormLabel className="text-xs font-bold text-slate-500 uppercase">Description</FormLabel>
+                                <FormLabel className="text-sm font-bold text-slate-500 uppercase">Description</FormLabel>
                                 <FormControl><Textarea placeholder="Describe the purpose..." className="resize-none bg-slate-50 min-h-[80px]" {...field} /></FormControl>
                                 <FormMessage />
                               </FormItem>
@@ -1211,8 +1567,8 @@ export function AutomationDialog({
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <Card className="border-none shadow-sm ring-1 ring-slate-200 h-full">
                           <CardHeader className="pb-4 border-b bg-slate-50/50">
-                            <CardTitle className="text-sm font-bold flex items-center gap-2">
-                              <Globe className="h-4 w-4 text-purple-500" /> Connection & Security
+                            <CardTitle className="font-bold flex items-center gap-2">
+                              <Globe className="h-6 w-6 text-purple-500" /> Connection & Security
                             </CardTitle>
                           </CardHeader>
                           <CardContent className="space-y-4 pt-6">
@@ -1222,7 +1578,7 @@ export function AutomationDialog({
                                 name="webhook_method"
                                 render={({ field }) => (
                                   <FormItem className="w-28">
-                                    <FormLabel className="text-xs font-bold text-slate-500">Method</FormLabel>
+                                    <FormLabel className="text-sm font-bold text-slate-500">Method</FormLabel>
                                     <Select onValueChange={field.onChange} value={field.value}>
                                       <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
                                       <SelectContent>
@@ -1239,8 +1595,8 @@ export function AutomationDialog({
                                 name="webhook_url"
                                 render={({ field }) => (
                                   <FormItem className="flex-1">
-                                    <FormLabel className="text-xs font-bold text-slate-500">Endpoint URL</FormLabel>
-                                    <FormControl><Input placeholder="https://api..." {...field} className="font-mono text-xs" /></FormControl>
+                                    <FormLabel className="text-sm font-bold text-slate-500">Endpoint URL</FormLabel>
+                                    <FormControl><Input placeholder="https://api..." {...field} className=" text-sm" /></FormControl>
                                   </FormItem>
                                 )}
                               />
@@ -1248,13 +1604,13 @@ export function AutomationDialog({
                             <div className="grid grid-cols-2 gap-4 pt-2">
                               <FormField control={form.control} name="max_concurrent_runs" render={({ field }) => (
                                 <FormItem>
-                                  <FormLabel className="text-xs font-bold text-slate-500">Concurrency</FormLabel>
+                                  <FormLabel className="text-sm font-bold text-slate-500">Concurrency</FormLabel>
                                   <FormControl><Input type="number" {...field} onChange={e => field.onChange(Number(e.target.value))} /></FormControl>
                                 </FormItem>
                               )} />
                               <FormField control={form.control} name="queue_priority" render={({ field }) => (
                                 <FormItem>
-                                  <FormLabel className="text-xs font-bold text-slate-500">Priority</FormLabel>
+                                  <FormLabel className="text-sm font-bold text-slate-500">Priority</FormLabel>
                                   <FormControl><Input type="number" {...field} onChange={e => field.onChange(Number(e.target.value))} /></FormControl>
                                 </FormItem>
                               )} />
@@ -1264,20 +1620,20 @@ export function AutomationDialog({
 
                         <Card className="border-none shadow-sm ring-1 ring-slate-200 h-full">
                           <CardHeader className="pb-4 border-b bg-slate-50/50">
-                            <CardTitle className="text-sm font-bold flex items-center gap-2">
-                              <Key className="h-4 w-4 text-amber-500" /> Authentication
+                            <CardTitle className="font-bold flex items-center gap-2">
+                              <Key className="h-6 w-6 text-amber-500" /> Authentication
                             </CardTitle>
                           </CardHeader>
                           <CardContent className="space-y-4 pt-6">
                             <FormField control={form.control} name="login.url" render={({ field }) => (
-                              <FormItem><FormLabel className="text-xs font-bold text-slate-500">Login Page URL</FormLabel><FormControl><Input {...field} placeholder="https://login..." /></FormControl></FormItem>
+                              <FormItem><FormLabel className="text-sm font-bold text-slate-500">Login Page URL</FormLabel><FormControl><Input {...field} placeholder="https://login..." /></FormControl></FormItem>
                             )} />
                             <div className="grid grid-cols-2 gap-4">
                               <FormField control={form.control} name="login.email" render={({ field }) => (
-                                <FormItem><FormLabel className="text-xs font-bold text-slate-500">Username/Email</FormLabel><FormControl><Input {...field} /></FormControl></FormItem>
+                                <FormItem><FormLabel className="text-sm font-bold text-slate-500">Username/Email</FormLabel><FormControl><Input {...field} /></FormControl></FormItem>
                               )} />
                               <FormField control={form.control} name="login.password" render={({ field }) => (
-                                <FormItem><FormLabel className="text-xs font-bold text-slate-500">Password</FormLabel><FormControl><Input type="password" {...field} /></FormControl></FormItem>
+                                <FormItem><FormLabel className="text-sm font-bold text-slate-500">Password</FormLabel><FormControl><Input type="password" {...field} /></FormControl></FormItem>
                               )} />
                             </div>
                           </CardContent>
@@ -1301,14 +1657,14 @@ export function AutomationDialog({
                           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                           <Input
                             placeholder="Filter current mapping..."
-                            className="h-9 pl-9 text-xs bg-slate-50 border-slate-200 focus:bg-white transition-all"
+                            className="h-9 pl-9 text-sm bg-slate-50 border-slate-200 focus:bg-white transition-all"
                             value={fieldSearch}
                             onChange={e => setFieldSearch(e.target.value)}
                           />
                         </div>
                       </div>
 
-                      <Button type="button" size="sm" variant="outline" onClick={handleExportToExcel} className="h-9 text-xs text-slate-600 border-slate-200 hover:bg-slate-50">
+                      <Button type="button" size="sm" variant="outline" onClick={handleExportToExcel} className="h-9 text-sm text-slate-600 border-slate-200 hover:bg-slate-50">
                         <FileSpreadsheet className="h-3.5 w-3.5 mr-2 text-green-600" /> Export
                       </Button>
                     </div>
@@ -1319,34 +1675,90 @@ export function AutomationDialog({
                           <Table className="w-full border-collapse">
                             <TableHeader className="bg-blue-600 sticky top-0 z-10 backdrop-blur-sm border-b border-slate-200">
                               <TableRow className="hover:bg-transparent border-none">
-                                <TableHead className="w-[50px] text-center h-10 text-[10px] font-bold text-white border-r uppercase tracking-wider">#</TableHead>
-                                <TableHead className="w-[200px] h-10 text-[10px] font-bold text-white border-r uppercase tracking-wider pl-4">Target Key (Variable)</TableHead>
-                                <TableHead className="w-[200px] h-10 text-[10px] font-bold text-white border-r uppercase tracking-wider pl-4">Display Label</TableHead>
-                                <TableHead className="w-[120px] h-10 text-[10px] font-bold text-white border-r uppercase tracking-wider pl-4">Type</TableHead>
-                                <TableHead className="w-[150px] h-10 text-[10px] font-bold text-white border-r uppercase tracking-wider pl-4">Entities</TableHead>
-                                <TableHead className="w-[120px] h-10 text-[10px] font-bold text-white border-r uppercase tracking-wider pl-4">Custom Source</TableHead>
-                                <TableHead className="h-10 text-[10px] font-bold text-white border-r uppercase tracking-wider pl-4">Source Configuration</TableHead>
+                                <TableHead className="w-[60px] text-center h-10 font-bold text-white border-r uppercase tracking-wider">
+                                    #
+                                </TableHead>
+                                <TableHead 
+                                    className="w-[250px] h-10 font-bold text-white border-r uppercase tracking-wider pl-4 cursor-pointer hover:bg-blue-700 transition-colors"
+                                    onClick={() => handleSort('variableName')}
+                                >
+                                    <div className="flex items-center justify-between">
+                                        Target Key
+                                        {sortConfig.key === 'variableName' && <ArrowUpDown className="h-3 w-3 opacity-80" />}
+                                    </div>
+                                </TableHead>
+                                <TableHead 
+                                    className="w-[250px] h-10 font-bold text-white border-r uppercase tracking-wider pl-4 cursor-pointer hover:bg-blue-700 transition-colors"
+                                    onClick={() => handleSort('efnsDisplayName')}
+                                >
+                                    <div className="flex items-center justify-between">
+                                        Display Label
+                                        {sortConfig.key === 'efnsDisplayName' && <ArrowUpDown className="h-3 w-3 opacity-80" />}
+                                    </div>
+                                </TableHead>
+                                <TableHead 
+                                    className="w-[150px] h-10 font-bold text-white border-r uppercase tracking-wider pl-4 cursor-pointer hover:bg-blue-700 transition-colors"
+                                    onClick={() => handleSort('fieldType')}
+                                >
+                                    <div className="flex items-center justify-between">
+                                        Type
+                                        {sortConfig.key === 'fieldType' && <ArrowUpDown className="h-3 w-3 opacity-80" />}
+                                    </div>
+                                </TableHead>
+                                <TableHead className="w-[150px] h-10 font-bold text-white border-r uppercase tracking-wider pl-4">Entities</TableHead>
+                                <TableHead className="w-[150px] h-10 font-bold text-white border-r uppercase tracking-wider pl-4">Custom Source</TableHead>
+                                <TableHead className="w-[150px] h-10 font-bold text-white border-r uppercase tracking-wider pl-4">Source Configuration</TableHead>
                                 <TableHead className="w-[80px] h-10"></TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {webDataGroups
-                                .filter(g => g.variableName.includes(fieldSearch) || g.efnsDisplayName.includes(fieldSearch))
-                                .map((group, index) => {
+                              {processedWebDataGroups.map((group, index) => {
                                   const isDocument = group.fieldType === 'document';
                                   const isComputed = group.fieldType === 'computed';
                                   const rowBg = isDocument ? "bg-amber-50/30 hover:bg-amber-50/60" : isComputed ? "bg-purple-50/30 hover:bg-purple-50/60" : "hover:bg-slate-50";
 
                                   return (
                                     <TableRow key={group.id} className={cn("h-10 border-b border-slate-100 group transition-all", rowBg)}>
-                                      <TableCell className="text-center text-xs font-mono text-slate-400 border-r border-slate-100 p-0">{index + 1}</TableCell>
-
-                                      <TableCell className="p-3 border-r border-slate-100">
-                                         <span className="font-mono text-xs font-medium text-blue-600">{group.variableName}</span>
+                                      <TableCell className="text-center text-sm border-r border-slate-100 p-0 relative">
+                                          <div className="flex flex-col items-center justify-center w-full h-full gap-0.5 py-1">
+                                             {!sortConfig.key && (
+                                                <>
+                                                    <Button 
+                                                        variant="ghost" 
+                                                        size="icon" 
+                                                        type="button" 
+                                                        className="h-3 w-full rounded-none hover:bg-slate-200 text-slate-400"
+                                                        onClick={() => moveRow(index, 'up')}
+                                                        disabled={index === 0}
+                                                    >
+                                                        <ArrowUp className="h-2 w-2" />
+                                                    </Button>
+                                                </>
+                                             )}
+                                             <span className="text-[10px] text-slate-500 font-medium">{index + 1}</span>
+                                             {!sortConfig.key && (
+                                                <>
+                                                    <Button 
+                                                        variant="ghost" 
+                                                        size="icon" 
+                                                        type="button" 
+                                                        className="h-3 w-full rounded-none hover:bg-slate-200 text-slate-400"
+                                                        onClick={() => moveRow(index, 'down')}
+                                                        disabled={index === processedWebDataGroups.length - 1}
+                                                    >
+                                                        <ArrowDown className="h-2 w-2" />
+                                                    </Button>
+                                                </>
+                                             )}
+                                          </div>
                                       </TableCell>
 
                                       <TableCell className="p-3 border-r border-slate-100">
-                                         <span className="text-xs text-slate-700">{group.efnsDisplayName}</span>
+                                         <span className=" text-sm font-medium text-blue-600">{group.variableName}</span>
+                                      </TableCell>
+
+                                      <TableCell className="p-3 border-r border-slate-100">
+                                         <span className="text-sm text-slate-700">{group.efnsDisplayName}</span>
                                       </TableCell>
 
                                       <TableCell className="p-3 border-r border-slate-100 align-top">
@@ -1372,21 +1784,32 @@ export function AutomationDialog({
                                       </TableCell>
 
                                       <TableCell className="p-3 border-r border-slate-100 align-middle">
-                                         <span className="text-xs text-slate-500 italic">{group.customFieldSource || '-'}</span>
+                                         <span className="text-sm text-slate-500 italic">{group.customFieldSource || '-'}</span>
                                       </TableCell>
 
                                       <TableCell className="p-3 border-r border-slate-100 align-middle">
                                         {isDocument ? (
-                                          <div className="flex items-center gap-2 text-amber-700">
-                                            <Paperclip className="h-3.5 w-3.5" />
-                                            <span className="text-xs font-medium truncate">
-                                              {kycDocuments.find(d => d.id === group.kycDocumentId)?.display_name || "Unknown Document"}
-                                            </span>
+                                          <div className="flex flex-col justify-center gap-1">
+                                             <div className="flex items-center gap-2 text-amber-700">
+                                                <Paperclip className="h-3.5 w-3.5" />
+                                                <span className="text-sm font-medium truncate">
+                                                {(group.linkedKycDocuments || []).length > 0 
+                                                   ? `${(group.linkedKycDocuments || []).length} Document Types` 
+                                                   : "No Documents Linked"}
+                                                </span>
+                                             </div>
+                                             {(group.linkedKycDocuments || []).length > 0 && (
+                                                <div className="flex items-center gap-2 pl-5">
+                                                   <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200">
+                                                      {group.documentLogic === 'merge' ? 'Merge All' : 'Fallback (First Found)'}
+                                                   </Badge>
+                                                </div>
+                                             )}
                                           </div>
                                         ) : isComputed ? (
                                           <div className="flex items-center gap-2">
                                               <FunctionSquare className="h-3.5 w-3.5 text-purple-600" />
-                                              <span className="text-xs font-mono text-purple-700 truncate max-w-[200px]">{group.computedFunction || 'No function'}</span>
+                                              <span className="text-sm  text-purple-700 truncate max-w-[200px]">{group.computedFunction || 'No function'}</span>
                                               <Badge variant="outline" className="text-[9px] bg-purple-50 text-purple-600 ml-auto">
                                                 {group.computedDocuments?.length || 0} Docs
                                               </Badge>
@@ -1394,7 +1817,7 @@ export function AutomationDialog({
                                         ) : group.fieldType === 'array' ? (
                                           <div className="flex items-center gap-2">
                                             <TableIcon className="h-3.5 w-3.5 text-blue-600" />
-                                            <span className="text-xs text-slate-600">{group.arrayItems?.length || 0} columns mapped</span>
+                                            <span className="text-sm text-slate-600">{group.arrayItems?.length || 0} columns mapped</span>
                                           </div>
                                         ) : (
                                           <div className="flex items-center flex-wrap gap-1.5">
@@ -1433,7 +1856,7 @@ export function AutomationDialog({
                               <Database className="h-6 w-6 text-slate-200" />
                             </div>
                             <p className="text-sm font-medium text-slate-500">No data mapping configured</p>
-                            <p className="text-xs text-slate-400">Use the "Add Data Field" button to start mapping.</p>
+                            <p className="text-sm text-slate-400">Use the "Add Data Field" button to start mapping.</p>
                           </div>
                         )}
                       </div>
@@ -1475,152 +1898,14 @@ export function AutomationDialog({
         kycDocuments={kycDocuments}
       />
 
-      <Dialog open={isAddFieldOpen} onOpenChange={setIsAddFieldOpen}>
-        <DialogContent className="max-w-2xl p-0 overflow-hidden bg-white gap-0">
-          <div className="px-4 py-3 border-b flex items-center gap-3 bg-slate-50/50">
-            <Search className="h-4 w-4 text-slate-400" />
-            <Input
-              autoFocus
-              className="border-none shadow-none focus-visible:ring-0 bg-transparent h-9 text-sm"
-              placeholder="Search database fields or documents..."
-              value={addDialogSearchTerm}
-              onChange={e => setAddDialogSearchTerm(e.target.value)}
-            />
-            <div className="text-[10px] text-slate-400 font-medium px-2 py-1 border rounded bg-white">ESC to close</div>
-          </div>
-
-          <ScrollArea className="h-[450px] bg-slate-50/50">
-            <div className="p-4 space-y-6">
-
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-xs font-semibold text-slate-900 uppercase tracking-wider">
-                  <FunctionSquare className="h-3.5 w-3.5 text-blue-600" />
-                  <span>Logic & Manual Input</span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => addNewRow('text')}
-                    className="relative flex flex-col items-start p-3 bg-white border border-slate-200 rounded-xl hover:border-blue-400 hover:shadow-md hover:shadow-blue-50 transition-all group text-left"
-                  >
-                    <div className="h-8 w-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
-                      <Type className="h-4 w-4" />
-                    </div>
-                    <div className="font-semibold text-sm text-slate-800">Empty Field</div>
-                    <div className="text-[10px] text-slate-500 leading-tight mt-1">
-                      Create a placeholder variable for manual data entry later.
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => addNewRow('computed')}
-                    className="relative flex flex-col items-start p-3 bg-white border border-slate-200 rounded-xl hover:border-purple-400 hover:shadow-md hover:shadow-purple-50 transition-all group text-left"
-                  >
-                    <div className="h-8 w-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
-                      <Calculator className="h-4 w-4" />
-                    </div>
-                    <div className="font-semibold text-sm text-slate-800">Computed Logic</div>
-                    <div className="text-[10px] text-slate-500 leading-tight mt-1">
-                      Calculate values server-side (e.g. Age) before automation runs.
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              <div className="h-px bg-slate-200 w-full" />
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-slate-900 uppercase tracking-wider">
-                    <Database className="h-3.5 w-3.5 text-slate-500" />
-                    <span>Database Fields</span>
-                  </div>
-                  <Badge variant="secondary" className="text-[10px] h-5 bg-white border border-slate-200 text-slate-500">
-                    {filteredAddFields.length} found
-                  </Badge>
-                </div>
-
-                {filteredAddFields.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-8 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50">
-                    <Search className="h-6 w-6 text-slate-300 mb-2" />
-                    <p className="text-xs text-slate-500">No database fields match "{addDialogSearchTerm}"</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    {filteredAddFields.map(f => (
-                      <button
-                        type="button"
-                        key={f.id}
-                        onClick={() => addFromMasterField(f)}
-                        className="flex items-center gap-3 p-2 bg-white border border-slate-200 rounded-lg hover:border-blue-400 hover:bg-blue-50/30 transition-all text-left group"
-                      >
-                        <div className="flex-shrink-0 h-8 w-8 rounded-md bg-slate-50 text-slate-400 flex items-center justify-center border border-slate-100 group-hover:bg-blue-100 group-hover:text-blue-600 group-hover:border-blue-200 transition-colors">
-                          <Database className="h-4 w-4" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-xs font-semibold text-slate-700 truncate group-hover:text-blue-700">
-                            {f.label}
-                          </div>
-                          <div className="text-[10px] text-slate-400 font-mono truncate group-hover:text-blue-400">
-                            {f.field_key}
-                          </div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="h-px bg-slate-200 w-full" />
-
-              <div className="space-y-3 pb-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-slate-900 uppercase tracking-wider">
-                    <FileText className="h-3.5 w-3.5 text-amber-600" />
-                    <span>Attachments</span>
-                  </div>
-                  <Badge variant="secondary" className="text-[10px] h-5 bg-white border border-slate-200 text-slate-500">
-                    {filteredAddDocs.length} found
-                  </Badge>
-                </div>
-
-                {filteredAddDocs.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-8 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50">
-                    <Search className="h-6 w-6 text-slate-300 mb-2" />
-                    <p className="text-xs text-slate-500">No documents match "{addDialogSearchTerm}"</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    {filteredAddDocs.map(d => (
-                      <button
-                        type="button"
-                        key={d.id}
-                        onClick={() => addFromDocument(d)}
-                        className="flex items-center gap-3 p-2 bg-white border border-slate-200 rounded-lg hover:border-amber-400 hover:bg-amber-50/30 transition-all text-left group"
-                      >
-                        <div className="flex-shrink-0 h-8 w-8 rounded-md bg-amber-50 text-amber-500 flex items-center justify-center border border-amber-100 group-hover:bg-amber-100 group-hover:text-amber-700 group-hover:border-amber-200 transition-colors">
-                          <Paperclip className="h-4 w-4" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-xs font-semibold text-slate-700 truncate group-hover:text-amber-800">
-                            {d.display_name}
-                          </div>
-                          <div className="text-[10px] text-slate-400 truncate group-hover:text-amber-600">
-                            {d.name}
-                          </div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-            </div>
-          </ScrollArea>
-        </DialogContent>
-      </Dialog>
+     {/* NEW Add Data Field Dialog */}
+      <AddDataFieldDialog 
+        open={isAddFieldOpen}
+        onOpenChange={setIsAddFieldOpen}
+        onAdd={handleAddData}
+        masterFields={masterFields}
+        kycDocuments={kycDocuments}
+      />
     </>
   )
 }

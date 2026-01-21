@@ -2,15 +2,15 @@
 "use client"
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
-  Loader2, Zap, User, Database, FileText, Eye,
-  Settings, Link, Webhook, ChevronRight, AlertCircle,
-  CheckCircle2, Info, ArrowRight, Edit3, X, Save, Calculator,
-  FunctionSquare, ExternalLink, Layers, Copy
+  Loader2, Zap, User, Database, FileText,
+  Settings, Webhook, ChevronRight, AlertCircle,
+  CheckCircle2, Edit3, X, Save, Calculator,
+  FunctionSquare, ExternalLink, Paperclip, AlertTriangle,
+  ArrowUpDown, Filter
 } from 'lucide-react';
 import {
   Table,
@@ -22,15 +22,16 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { toast } from '@/hooks/use-toast';
 import supabase from '@/lib/supabase/client';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { processComputedFields, executeComputedField } from '../utils/automationComputedFunctions';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-// ... (Previous Interfaces remain the same) ...
+// ... (Keep existing interfaces) ...
 
 interface AutomationMappingDialogProps {
   isOpen: boolean;
@@ -50,30 +51,13 @@ interface AutomationMappingDialogProps {
   relationshipData?: any;
 }
 
-interface AutomationDetails {
-  id: string;
-  name: string;
-  description: string;
-  webhook_url: string;
-  webhook_type: string;
-  webhook_method: string;
-  login?: {
-    url?: string;
-    email?: string;
-    idNumber?: string;
-    password?: string;
-  };
-  parameters?: any;
-  is_active: boolean;
-}
-
 interface EntityAutomationMapping {
   entityKey: string;
   entityName: string;
   entityType: string;
   automationId: string;
   documentId?: string;
-  automation?: AutomationDetails;
+  automation?: any;
 }
 
 // --- UTILS ---
@@ -84,7 +68,7 @@ const parseJsonValue = (data: any, path: string): any => {
     const column = parts[0].trim().replace(/['"]/g, '');
     const jsonPath = parts[2].trim().replace(/['"]/g, '');
     const jsonData = data[column];
-    if (!jsonData || typeof jsonData !== 'object') return undefined;
+    if (!jsonData || typeof jsonData === 'object') return undefined;
     return jsonPath.split('.').reduce((acc, key) => (acc && typeof acc === 'object' ? acc[key] : undefined), jsonData);
   }
   return path.split('.').reduce((acc, key) => (acc && typeof acc === 'object' ? acc[key] : undefined), data);
@@ -137,8 +121,6 @@ const formatDateValue = (dateStr: string, format?: string) => {
     const y = date.getFullYear();
     return `${d}/${m}/${y}`;
   }
-
-  // Default ISO
   return date.toISOString().split('T')[0];
 };
 
@@ -163,14 +145,24 @@ export const AutomationMappingDialog = ({
   const [documentFiles, setDocumentFiles] = useState<any[]>([]);
   const [entityAutomationMappings, setEntityAutomationMappings] = useState<EntityAutomationMapping[]>([]);
   const [selectedAutomationId, setSelectedAutomationId] = useState<string>('');
+  
+  // Editing State
   const [editingCell, setEditingCell] = useState<any>(null);
   const [editValue, setEditValue] = useState('');
+  
   const [activeTab, setActiveTab] = useState('fields');
   const [currentIndividualId, setCurrentIndividualId] = useState(individualId || task?.individual_id?.toString() || '');
   const [computedFieldsPreview, setComputedFieldsPreview] = useState<Record<string, string>>({});
   const [isComputing, setIsComputing] = useState(false);
   const [sourceData, setSourceData] = useState<Record<string, Record<string, any>>>({});
   const [masterFieldComputedValues, setMasterFieldComputedValues] = useState<Record<string, string | string[]>>({});
+
+  // Sorting State
+  const [sortMissingFirst, setSortMissingFirst] = useState(false);
+
+  // Fetch tracking to prevent infinite loops
+  const lastFetchKey = React.useRef<string>('');
+  const isFetchingRef = React.useRef(false);
 
   // --- HELPERS ---
   const buildFileUrl = (linkedDoc: any): string | null => {
@@ -218,99 +210,176 @@ export const AutomationMappingDialog = ({
     return [];
   };
 
-  // --- FETCH SOURCE DATA ---
   const fetchSourceData = useCallback(async () => {
-    if (Object.keys(jobFields).length === 0 || !webData.length || !selectedAutomationId) return;
+    // Guard: Don't fetch if not ready
+    if (!isOpen || !selectedAutomationId || Object.keys(jobFields).length === 0 || !webData.length) {
+      return;
+    }
 
+    // Create a unique key for this fetch configuration
+    const fetchKey = `${selectedAutomationId}-${Object.keys(jobFields).length}-${webData.length}`;
+    
+    // Guard: Prevent duplicate fetches with the same configuration
+    if (isFetchingRef.current || lastFetchKey.current === fetchKey) {
+      console.log('[fetchSourceData] Skipping duplicate fetch:', fetchKey);
+      return;
+    }
+
+    lastFetchKey.current = fetchKey;
+    isFetchingRef.current = true;
     setIsLoadingData(true);
 
     try {
-      const fetchQueue = new Map<string, Set<string>>();
+      // 1. Setup Queues
+      const standardFetchQueue = new Map<string, Set<string>>();
+      const computedRequirements = {
+          individualIds: new Set<string>(),
+          documentIds: new Set<string>()
+      };
+      
       const activeAutomation = webData.find(w => w.automationId === selectedAutomationId);
       const fieldsToProcess = activeAutomation?.fields || [];
       const computedMasterFields: any[] = [];
 
+      // 2. Iterate Fields to build queues
       fieldsToProcess.forEach((field: any) => {
-        if (field.fieldType === 'array') {
-          // --- Array Items Logic ---
-          const entityIds = resolveEntityIdsForArray(field, relationshipData);
-          (field.arrayItems || []).forEach((col: any) => {
-            if (col.linkedMasterFieldId) {
-              const jobField = jobFields[col.linkedMasterFieldId];
-
-              if (jobField) {
-                if (jobField.is_computed || jobField.computed_config?.is_computed) {
-                  // Pass the extraction mode defined on the ARRAY COLUMN
-                  const extractionMode = col.extractionMode || 'latest';
-                  entityIds.forEach((id: any) => {
-                    computedMasterFields.push({
-                      field: jobField,
-                      entityId: String(id),
-                      extractionMode: extractionMode
-                    });
-                  });
-                } else {
-                  // Standard DB Fetch for Array Items
-                  jobField.sources?.forEach((source: any) => {
-                    if (source.table) {
-                      if (!fetchQueue.has(source.table)) fetchQueue.set(source.table, new Set());
-                      entityIds.forEach(id => fetchQueue.get(source.table)!.add(String(id)));
-                    }
-                  });
-                }
-              }
-            }
-          });
+        const isArray = field.fieldType === 'array';
+        const cols = isArray ? (field.arrayItems || []) : [{ linkedMasterFieldId: field.masterFieldIds?.[0] }];
+        
+        // Determine Entities involved
+        let entityIds: string[] = [];
+        if (isArray) {
+            entityIds = resolveEntityIdsForArray(field, relationshipData);
         } else {
-          // --- Standard High-Level Field Logic ---
-          const targetId = resolveTargetEntityId(field);
-          if (targetId) {
-            (field.masterFieldIds || []).forEach((mid: string) => {
-              const jobField = jobFields[mid];
-              if (jobField) {
-                if (jobField.is_computed || jobField.computed_config?.is_computed) {
-                  // Pass the extraction mode defined on the STANDARD FIELD
-                  const extractionMode = field.extractionMode || 'latest';
-                  computedMasterFields.push({
-                    field: jobField,
-                    entityId: targetId,
-                    extractionMode: extractionMode
-                  });
-                } else {
-                  // Standard DB Fetch
-                  jobField.sources?.forEach((source: any) => {
-                    if (source.table) {
-                      if (!fetchQueue.has(source.table)) fetchQueue.set(source.table, new Set());
-                      fetchQueue.get(source.table)!.add(String(targetId));
-                    }
-                  });
-                }
-              }
-            });
-          }
+            const targetId = resolveTargetEntityId(field);
+            if (targetId) entityIds = [String(targetId)];
         }
+
+        // Check columns/fields
+        cols.forEach((col: any) => {
+            if(!col.linkedMasterFieldId && !field.masterFieldIds) return;
+            const mid = col.linkedMasterFieldId || field.masterFieldIds?.[0];
+            const jobField = jobFields[mid];
+            
+            if (jobField) {
+                // A. COMPUTED FIELDS
+                if (jobField.is_computed || jobField.computed_config?.is_computed) {
+                    const extractionMode = col.extractionMode || field.extractionMode || 'latest';
+                    const config = jobField.computed_config || {};
+                    const docIds = config.document_ids || [];
+                    
+                    docIds.forEach((did: string) => computedRequirements.documentIds.add(did));
+                    entityIds.forEach(id => computedRequirements.individualIds.add(String(id)));
+
+                    entityIds.forEach((id: any) => {
+                        computedMasterFields.push({
+                            field: jobField,
+                            entityId: String(id),
+                            extractionMode: extractionMode
+                        });
+                    });
+
+                // B. STANDARD DB FIELDS
+                } else {
+                     jobField.sources?.forEach((source: any) => {
+                        if (source.table) {
+                            if (!standardFetchQueue.has(source.table)) standardFetchQueue.set(source.table, new Set());
+                            
+                            // CRITICAL FIX: Only add IDs that match the table's entity type
+                            const tableEntityMap: Record<string, string[]> = {
+                                'acc_portal_directors_documents': ['principal', 'director', 'dependant', 'understudy'],
+                                'acc_portal_individuals': ['principal', 'director', 'dependant', 'understudy'],
+                                'acc_portal_company_duplicate': ['company'],
+                                'acc_portal_companies': ['company'],
+                                'tm_tasks': ['task']
+                            };
+                            
+                            const allowedEntityTypes = tableEntityMap[source.table] || [];
+                            const fieldEntityTypes = field.entityTypes || [];
+                            
+                            // Only add entity IDs if there's overlap between field types and table types
+                            const hasMatchingEntityType = allowedEntityTypes.length === 0 || 
+                                fieldEntityTypes.some(type => allowedEntityTypes.includes(type));
+                            
+                            if (hasMatchingEntityType) {
+                                entityIds.forEach(id => standardFetchQueue.get(source.table)!.add(String(id)));
+                            }
+                        }
+                    });
+                }
+            }
+        });
       });
 
-      // 2. Process Standard DB Fetches
+      // 3. EXECUTE BATCH FETCHES (OPTIMIZED - SINGLE QUERY PER TABLE)
       const newSourceData: Record<string, Record<string, any>> = {};
-      for (const [table, ids] of fetchQueue.entries()) {
+      const documentCache = { documents: [], docTypes: [] };
+      const fetchPromises = [];
+
+      const fullDocsDirectorIds = standardFetchQueue.get('acc_portal_directors_documents');
+      
+      // A. Batch Standard Tables (ONLY ONE QUERY PER TABLE)
+      for (const [table, ids] of standardFetchQueue.entries()) {
         const idArray = Array.from(ids);
         if (idArray.length === 0) continue;
         const queryField = table === 'acc_portal_directors_documents' ? 'director_id' : table === 'tm_tasks' ? 'id' : 'id';
-        const { data, error } = await supabase.from(table).select('*').in(queryField, idArray);
-        if (!error) {
-          if (!newSourceData[table]) newSourceData[table] = {};
-          data?.forEach(record => {
-            const recordKey = String(record[queryField]);
-            newSourceData[table][recordKey] = record;
-          });
-        }
+        
+        fetchPromises.push(
+            supabase.from(table).select('*').in(queryField, idArray)
+            .then(({ data, error }) => {
+                if (!error && data) {
+                    if (!newSourceData[table]) newSourceData[table] = {};
+                    data.forEach(record => {
+                        const recordKey = String(record[queryField]);
+                        newSourceData[table][recordKey] = record;
+                    });
+                    
+                    if (table === 'acc_portal_directors_documents') {
+                        documentCache.documents.push(...data);
+                    }
+                }
+            })
+        );
       }
-      setSourceData(newSourceData);
 
-      // 3. Process Computed Fields
+      await Promise.all(fetchPromises);
+
+      // B. Computed Documents (Batched, only for people not already fetched)
+      const neededDocTypes = Array.from(computedRequirements.documentIds);
+      const allNeededPeople = Array.from(computedRequirements.individualIds);
+      
+      const remainingPeople = allNeededPeople.filter(pid => 
+          !fullDocsDirectorIds || !fullDocsDirectorIds.has(pid)
+      );
+
+      const computedPromises = [];
+
+      if (neededDocTypes.length > 0) {
+          computedPromises.push(
+              supabase.from('acc_portal_kyc').select('*').in('id', neededDocTypes)
+              .then(({ data }) => { if(data) documentCache.docTypes = data; })
+          );
+
+          if (remainingPeople.length > 0) {
+              computedPromises.push(
+                  supabase.from('acc_portal_directors_documents')
+                  .select('*')
+                  .in('director_id', remainingPeople)
+                  .in('document_id', neededDocTypes)
+                  .neq('status', 'deleted')
+                  .then(({ data }) => { 
+                      if(data) documentCache.documents.push(...data); 
+                  })
+              );
+          }
+      }
+
+      await Promise.all(computedPromises);
+
+      // 4. PROCESS COMPUTED VALUES (USING CACHE)
       if (computedMasterFields.length > 0) {
         const newComputedValues: Record<string, string | string[]> = {};
+        
         await Promise.all(computedMasterFields.map(async (item) => {
           const { field, entityId, extractionMode } = item;
           const config = field.computed_config || {};
@@ -319,39 +388,46 @@ export const AutomationMappingDialog = ({
           let val: string | string[];
 
           if (source && source.path && source.source_type === 'document') {
-            console.log(`[Computed] ID: ${entityId}, Mode: ${extractionMode}, Path: ${source.path}`);
             val = await executeComputedField(
               'extractFieldFromLatestDocument',
               entityId,
               docs,
               source.path,
-              extractionMode // 'latest' or 'all'
+              extractionMode,
+              documentCache
             );
           } else if (config.computed_function) {
-            val = await executeComputedField(config.computed_function, entityId, docs, undefined, extractionMode);
+            val = await executeComputedField(
+                config.computed_function, 
+                entityId, 
+                docs, 
+                undefined, 
+                extractionMode,
+                documentCache
+            );
           } else {
             val = "No Config";
           }
-
-          // !!! FIX: INCLUDE MODE IN KEY TO AVOID COLLISION !!!
           newComputedValues[`${field.id}_${entityId}_${extractionMode}`] = val;
         }));
         setMasterFieldComputedValues(newComputedValues);
       }
+      
+      setSourceData(newSourceData);
+      
     } catch (error) {
       console.error("Fetch Error:", error);
     } finally {
+      isFetchingRef.current = false;
       setIsLoadingData(false);
     }
-  }, [jobFields, selectedAutomationId, webData, resolveTargetEntityId, relationshipData]);
+  }, [jobFields, selectedAutomationId, webData, resolveTargetEntityId, relationshipData, isOpen]);
 
   const getSourceValue = (table: string, path: string, entityId: string) => {
     const tableData = sourceData[table];
     if (!tableData) return "Missing";
-
     const record = tableData[entityId];
     if (!record) return "Missing";
-
     const val = parseJsonValue(record, path);
     return val !== undefined && val !== null ? String(val) : "Missing";
   };
@@ -359,27 +435,36 @@ export const AutomationMappingDialog = ({
   const getFieldValue = (fieldId: string, entityId: string, sourceIdx: number = 0, extractionMode: string = 'latest') => {
     const field = jobFields[fieldId];
     if (!field) return "Missing Config";
-
-    // Computed
     if (field.is_computed || field.computed_config?.is_computed) {
-      // !!! FIX: INCLUDE MODE IN LOOKUP KEY !!!
       const key = `${field.id}_${entityId}_${extractionMode}`;
       const val = masterFieldComputedValues[key];
       if (val === undefined) return "Computing...";
       return val;
     }
-    // Standard Source
     const source = field.sources?.[sourceIdx];
     if (!source) return "No Source";
     return getSourceValue(source.table, source.path, String(entityId));
   };
 
-  // --- DOCUMENT FETCHER ---
+  // --- DOCUMENT FETCHER (OPTIMIZED - Reuses cache if possible) ---
   const fetchDocumentFiles = useCallback(async () => {
-    if (!selectedAutomationId || !webData.length) return;
+    // Guard: Don't fetch if not ready
+    if (!isOpen || !selectedAutomationId || !webData.length) {
+      return;
+    }
+
+    // Guard: Prevent duplicate fetches
+    if (isLoadingDocuments) {
+      console.log('[fetchDocumentFiles] Already loading, skipping...');
+      return;
+    }
+
     setIsLoadingDocuments(true);
     const activeAutomation = webData.find(w => w.automationId === selectedAutomationId);
-    if (!activeAutomation) { setIsLoadingDocuments(false); return; }
+    if (!activeAutomation) { 
+      setIsLoadingDocuments(false); 
+      return; 
+    }
 
     const docFields = activeAutomation.fields?.filter((f: any) => f.fieldType === 'document') || [];
     const personIds = new Set<string>();
@@ -397,12 +482,25 @@ export const AutomationMappingDialog = ({
 
     try {
       const results = [];
-      if (personIds.size > 0 && requiredKycIds.size > 0) {
+      
+      // OPTIMIZATION: Check if data is already in sourceData cache
+      const cachedPersonDocs = sourceData['acc_portal_directors_documents'];
+      if (cachedPersonDocs && personIds.size > 0) {
+        // Filter from cache instead of fetching
+        const cached = Object.values(cachedPersonDocs).filter((doc: any) => 
+          personIds.has(String(doc.director_id)) && requiredKycIds.has(doc.document_id)
+        );
+        if (cached.length > 0) {
+          results.push(...cached.map(d => ({ ...d, owner_type: 'person', owner_id: String(d.director_id) })));
+        }
+      } else if (personIds.size > 0 && requiredKycIds.size > 0) {
+        // Fallback to network
         const { data: personDocs } = await supabase.from('acc_portal_directors_documents')
           .select('*, kyc_document:acc_portal_kyc!document_id(*)')
           .in('director_id', Array.from(personIds)).in('document_id', Array.from(requiredKycIds)).neq('status', 'deleted');
         if (personDocs) results.push(...personDocs.map(d => ({ ...d, owner_type: 'person', owner_id: String(d.director_id) })));
       }
+      
       if (companyIds.size > 0 && requiredKycIds.size > 0) {
         const { data: companyDocs } = await supabase.from('acc_portal_company_documents')
           .select('*, kyc_document:acc_portal_kyc!document_id(*)')
@@ -411,8 +509,9 @@ export const AutomationMappingDialog = ({
       }
       setDocumentFiles(results);
     } catch (err) { console.error("Error fetching documents:", err); } finally { setIsLoadingDocuments(false); }
-  }, [selectedAutomationId, webData, resolveTargetEntityId]);
+  }, [selectedAutomationId, webData, resolveTargetEntityId, sourceData, isOpen]);
 
+  // --- INITIAL DATA FETCH ---
   useEffect(() => {
     if (!isOpen) return;
     const fetchData = async () => {
@@ -472,19 +571,15 @@ export const AutomationMappingDialog = ({
           if (!selectedAutomationId || !mappings.some(m => m.automationId === selectedAutomationId)) setSelectedAutomationId(mappings[0].automationId);
         } else { setSelectedAutomationId(''); }
 
-        // --- UPDATED FIELD ID EXTRACTION LOGIC ---
         const fieldIds = finalWebDataItems.flatMap(i => {
           const fields = i.fields || [];
-          // 1. Get IDs from top-level standard fields
           const directIds = fields.flatMap((f: any) => f.masterFieldIds || []);
-          // 2. Get IDs from nested array items
           const arrayIds = fields.flatMap((f: any) =>
             (f.arrayItems || []).map((item: any) => item.linkedMasterFieldId)
           );
           return [...directIds, ...arrayIds];
-        }).filter(Boolean); // Remove nulls/undefined/0
+        }).filter(Boolean);
 
-        // De-duplicate IDs before fetching
         const uniqueFieldIds = [...new Set(fieldIds)];
 
         if (uniqueFieldIds.length > 0) {
@@ -497,10 +592,12 @@ export const AutomationMappingDialog = ({
   }, [isOpen, task?.job_level]);
 
   useEffect(() => {
-    if (isOpen && selectedAutomationId) { fetchSourceData(); fetchDocumentFiles(); }
-  }, [selectedAutomationId, isOpen, jobFields, resolveTargetEntityId, fetchSourceData, fetchDocumentFiles]);
+    if (isOpen && selectedAutomationId && Object.keys(jobFields).length > 0) { 
+      fetchSourceData(); 
+      fetchDocumentFiles(); 
+    }
+  }, [selectedAutomationId, isOpen, fetchSourceData, fetchDocumentFiles]);
 
-  // --- AUTO COMPUTATION EFFECT ---
   useEffect(() => {
     const runComputation = async () => {
       if (!currentIndividualId || !selectedAutomationId) return;
@@ -518,7 +615,7 @@ export const AutomationMappingDialog = ({
     return () => clearTimeout(timer);
   }, [currentIndividualId, selectedAutomationId, webData]);
 
-  // --- PAYLOAD GENERATION ---
+  // --- ACTION HANDLERS ---
   const handleRunAutomation = async () => {
     if (!selectedAutomationId) {
       toast({ title: "Validation Error", description: "Missing automation selection", variant: "destructive" });
@@ -536,7 +633,6 @@ export const AutomationMappingDialog = ({
       const activeWeb = webData.find(w => w.automationId === selectedAutomationId);
 
       activeWeb?.fields?.forEach((f: any) => {
-        // 1. Documents
         if (f.fieldType === 'document') {
           const targetId = resolveTargetEntityId(f);
           const doc = documentFiles.find(d => d.document_id === f.kycDocumentId && String(d.owner_id) === String(targetId));
@@ -546,19 +642,16 @@ export const AutomationMappingDialog = ({
 
         if (f.fieldType === 'computed') return;
 
-        // 2. Arrays with Expansion Logic (extractionMode: 'all')
         if (f.fieldType === 'array') {
           const entityIds = resolveEntityIdsForArray(f, relationshipData);
           const finalArrayData: any[] = [];
 
           entityIds.forEach((id: string) => {
-            // First, fetch values for all columns for this entity
             const columnsData = (f.arrayItems || []).map((col: any) => {
               let val: any = '';
               if (col.linkedMasterFieldId) {
                 const field = jobFields[col.linkedMasterFieldId];
                 if (field?.is_computed || field?.computed_config?.is_computed) {
-                  // !!! FIX: USE COL-SPECIFIC MODE FOR KEY !!!
                   const key = `${field.id}_${id}_${col.extractionMode || 'latest'}`;
                   val = masterFieldComputedValues[key];
                 } else if (field?.sources?.[0]) {
@@ -569,25 +662,20 @@ export const AutomationMappingDialog = ({
               return { ...col, value: val };
             });
 
-            // Determine maximum rows needed for this entity based on 'all' mode columns
             const maxRows = Math.max(
               1,
               ...columnsData.map((c: any) => Array.isArray(c.value) ? c.value.length : 1)
             );
 
-            // Generate rows for this entity
             for (let i = 0; i < maxRows; i++) {
               const rowObj: Record<string, any> = {};
               columnsData.forEach((col: any) => {
                 let v = col.value;
                 if (Array.isArray(v)) {
-                  // It's an array (from 'all' mode). Pick index i.
                   v = v[i] !== undefined ? v[i] : "";
                 } else {
-                  // It's a single value. Repeat it for all expanded rows
                   v = v !== undefined && v !== 'Computing...' ? v : "";
                 }
-
                 if (col.type === 'date' && v) {
                   v = formatDateValue(v, col.dateFormat);
                 }
@@ -601,12 +689,9 @@ export const AutomationMappingDialog = ({
           return;
         }
 
-        // 3. Standard Fields
         const targetId = resolveTargetEntityId(f);
         const values = (f.masterFieldIds || []).map((mid: string) => {
-          // !!! FIX: PASS FIELD-SPECIFIC MODE !!!
           let val = getFieldValue(mid, String(targetId), 0, f.extractionMode || 'latest');
-
           if (Array.isArray(val)) {
             val = val.join(', ');
           }
@@ -636,7 +721,6 @@ export const AutomationMappingDialog = ({
         formData: formData, step2Data: {}, step3Data: {}
       };
 
-      console.log("🚀 Payload:", payload);
       const res = await fetch(automation.webhook_url, { method: automation.webhook_method || 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (!res.ok) throw new Error("Trigger failed: " + res.status);
       toast({ title: 'Success', description: 'Automation process initiated successfully' });
@@ -650,6 +734,11 @@ export const AutomationMappingDialog = ({
     setEditingCell({ fieldId, sourceIdx, table, path, entityId });
     setEditValue(val === 'Missing' ? '' : val);
   };
+
+  const cancelEditing = () => {
+    setEditingCell(null);
+    setEditValue('');
+  }
 
   const saveEdit = async () => {
     if (!editingCell) return;
@@ -669,66 +758,133 @@ export const AutomationMappingDialog = ({
   const selectedMapping = useMemo(() => entityAutomationMappings.find(m => m.automationId === selectedAutomationId), [selectedAutomationId, entityAutomationMappings]);
   const activeWebEntry = useMemo(() => webData.find(e => e.automationId === selectedAutomationId), [selectedAutomationId, webData]);
 
+  // --- RENDER TABLE (Same as before, truncated for brevity) ---
   const renderFieldsTable = () => {
     if (!activeWebEntry?.fields || activeWebEntry.fields.length === 0) return <div className="p-12 text-center text-slate-400">No fields configured.</div>;
-    const regularFields = activeWebEntry.fields.filter((f: any) => f.fieldType !== 'document' && f.fieldType !== 'computed');
+    
+    const allFields = activeWebEntry.fields.filter((f: any) => f.fieldType !== 'computed');
     const computedFields = activeWebEntry.fields.filter((f: any) => f.fieldType === 'computed');
 
+    // Pre-calculate Missing Status for Sorting
+    const processedFields = allFields.map(field => {
+        let isMissing = false;
+        
+        if (field.fieldType === 'array') {
+             const entityIds = resolveEntityIdsForArray(field, relationshipData);
+             if (entityIds.length === 0) isMissing = true;
+        } else if (field.fieldType === 'document') {
+             const targetId = resolveTargetEntityId(field);
+             const foundDoc = documentFiles.find(d => d.document_id === field.kycDocumentId && String(d.owner_id) === String(targetId));
+             if (!foundDoc) isMissing = true;
+        } else {
+             const targetId = resolveTargetEntityId(field);
+             if (!targetId) {
+                 isMissing = true;
+             } else {
+                 const masterIds = field.masterFieldIds || [];
+                 const mergedValue = masterIds.map(mid => {
+                     const v = getFieldValue(mid, String(targetId), 0, field.extractionMode || 'latest');
+                     return Array.isArray(v) ? v.join(', ') : v;
+                 }).join(' ');
+                 if (!mergedValue || mergedValue === 'Missing' || mergedValue === '') isMissing = true;
+             }
+        }
+        return { ...field, isMissing };
+    });
+
+    const missingCount = processedFields.filter(f => f.isMissing).length;
+
+    const sortedFields = sortMissingFirst 
+        ? [...processedFields].sort((a, b) => (a.isMissing === b.isMissing ? 0 : a.isMissing ? -1 : 1))
+        : processedFields;
+
     return (
-      <div className="flex flex-col h-full space-y-8">
-        <div className="flex-1 border border-slate-300 shadow-md bg-white flex flex-col overflow-hidden rounded-md">
+      <div className="flex flex-col h-full space-y-4">
+        <div className="flex items-center justify-between px-2">
+            <div className="flex items-center gap-4">
+                <Badge variant="outline" className="px-3 py-1 bg-white border-slate-200 text-slate-600 gap-2">
+                    Total Fields: <span className="font-bold text-slate-900">{processedFields.length}</span>
+                </Badge>
+                {missingCount > 0 && (
+                    <Badge variant="destructive" className="px-3 py-1 bg-red-100 text-red-700 hover:bg-red-200 border-red-200 gap-2">
+                        Missing Data: <span className="font-bold">{missingCount}</span>
+                    </Badge>
+                )}
+            </div>
+            <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-slate-500">View:</span>
+                <Button 
+                    variant={sortMissingFirst ? "secondary" : "outline"} 
+                    size="sm" 
+                    onClick={() => setSortMissingFirst(!sortMissingFirst)}
+                    className={cn("h-8 text-xs gap-2", sortMissingFirst && "bg-blue-100 text-blue-700 hover:bg-blue-200")}
+                >
+                    <Filter className="h-3 w-3" />
+                    {sortMissingFirst ? "Priority (Missing First)" : "Default Order"}
+                </Button>
+            </div>
+        </div>
+
+        <div className="flex-1 border border-slate-200 shadow-sm bg-white flex flex-col overflow-hidden rounded-xl">
           <ScrollArea className="flex-1 w-full h-full">
             <Table className="w-full border-collapse">
-              <TableHeader className="bg-blue-600 sticky top-0 z-20 shadow-sm">
-                <TableRow className="hover:bg-blue-600 border-b-0">
-                  <TableHead className="w-[40px] text-blue-100 text-xs border-r border-blue-500 text-center h-9">#</TableHead>
-                  <TableHead className="w-[300px] text-white font-semibold border-r border-blue-500 h-9">Automation Variable</TableHead>
-                  <TableHead className="w-[400px] text-white font-semibold border-r border-blue-500 h-9">Field Source</TableHead>
-                  <TableHead className="text-white font-semibold h-9">Value (Click to Edit)</TableHead>
+              <TableHeader className="bg-blue-600 sticky top-0 z-20 shadow-md">
+                <TableRow className="border-none hover:bg-blue-600">
+                  <TableHead className="w-[50px] text-xs font-bold text-blue-100 text-center h-10 border-r border-blue-500/50">#</TableHead>
+                  <TableHead className="w-[280px] text-xs font-bold text-white h-10 border-r border-blue-500/50">Target Variable</TableHead>
+                  <TableHead className="w-[120px] text-xs font-bold text-white h-10 border-r border-blue-500/50">Type</TableHead>
+                  <TableHead className="w-[350px] text-xs font-bold text-white h-10 border-r border-blue-500/50">Source Path</TableHead>
+                  <TableHead 
+                        className="text-xs font-bold text-white h-10 cursor-pointer hover:bg-blue-500 transition-colors select-none group border-r border-blue-500/50"
+                        onClick={() => setSortMissingFirst(!sortMissingFirst)}
+                  >
+                        <div className="flex items-center gap-2">
+                            Current Value / Status
+                            <ArrowUpDown className={cn("h-3 w-3 transition-opacity", sortMissingFirst ? "opacity-100" : "opacity-40 group-hover:opacity-100")} />
+                        </div>
+                  </TableHead>
+                  <TableHead className="w-[80px] text-xs font-bold text-white h-10 text-right pr-4">Actions</TableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody>
-                {regularFields.map((field, fIdx) => {
+               <TableBody>
+                {sortedFields.map((field, fIdx) => {
+                  const isEditing = editingCell?.fieldId === field.variableName;
+                  
+                  // --- CASE 1: ARRAYS ---
                   if (field.fieldType === 'array') {
                     const entityIds = resolveEntityIdsForArray(field, relationshipData);
                     return (
-                      <TableRow key={fIdx} className="bg-slate-50/50 hover:bg-slate-50 border-b border-slate-300">
-                        <TableCell className="text-center text-xs text-slate-400 bg-slate-50 border-r border-b border-slate-300">{fIdx + 1}</TableCell>
-                        <TableCell className="border-r border-b border-slate-300 px-2 py-2 align-top">
-                          <div className="text-sm font-bold text-slate-800">{field.efnsDisplayName || field.variableName}</div>
-                          <Badge variant="secondary" className="mt-1 text-[10px] bg-blue-100 text-blue-700">
-                            Array (Mapped from {entityIds.length} entities)
-                          </Badge>
+                      <TableRow key={fIdx} className="bg-slate-50/30 hover:bg-slate-50 border-b border-slate-100">
+                        <TableCell className="text-center text-xs text-slate-400 font-mono py-3 border-r border-slate-50">{fIdx + 1}</TableCell>
+                        <TableCell className="py-3 align-top border-r border-slate-50">
+                          <div className="flex flex-col gap-1">
+                             <div className="text-sm font-semibold text-slate-800">{field.efnsDisplayName || field.variableName}</div>
+                            </div>
                         </TableCell>
-                        <TableCell colSpan={2} className="p-0 border-b border-slate-300">
-                          <div className="border rounded m-2 bg-white overflow-hidden shadow-sm">
+                        <TableCell className="py-3 align-top border-r border-slate-50"><Badge variant="outline" className="text-[10px] font-medium border-blue-200 text-blue-700 bg-blue-50">Array List</Badge></TableCell>
+                        <TableCell colSpan={3} className="p-2 align-top">
+                          <div className="rounded-lg border border-slate-200 bg-white overflow-hidden shadow-sm">
                             <Table>
-                              <TableHeader className="bg-slate-100">
+                              <TableHeader className="bg-slate-50 border-b border-slate-100">
                                 <TableRow>
-                                  <TableHead className="h-7 text-[10px] font-bold uppercase w-[40px]">#</TableHead>
+                                  <TableHead className="h-8 text-[10px] font-bold uppercase w-[40px] text-slate-500">#</TableHead>
                                   {(field.arrayItems || []).map((col: any, i: number) => (
-                                    <TableHead key={i} className="h-7 text-[10px] font-bold uppercase">
-                                      <div className="flex items-center gap-1">
-                                        {col.name}
-                                        {col.extractionMode === 'all' && <Badge variant="outline" className="text-[9px] h-3 px-1 py-0 border-purple-200 text-purple-600 bg-purple-50">ALL</Badge>}
-                                        <span className="text-slate-400 font-normal normal-case">({col.type})</span>
-                                      </div>
+                                    <TableHead key={i} className="h-8 text-[10px] font-bold uppercase text-slate-600">
+                                      {col.name}
                                     </TableHead>
                                   ))}
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
                                 {entityIds.length === 0 ? (
-                                  <TableRow><TableCell colSpan={10} className="text-center text-xs py-2 italic text-slate-400">No entities found.</TableCell></TableRow>
+                                  <TableRow><TableCell colSpan={10} className="text-center text-xs py-3 text-slate-400 italic">No related entities found to populate this array.</TableCell></TableRow>
                                 ) : (
                                   entityIds.map((id: string, entityIdx: number) => {
-                                    // 1. Gather data for this entity
                                     const columnsData = (field.arrayItems || []).map((col: any) => {
                                       let val: any = 'Manual/Unmapped';
                                       if (col.linkedMasterFieldId) {
                                         const mField = jobFields[col.linkedMasterFieldId];
                                         if (mField?.is_computed || mField?.computed_config?.is_computed) {
-                                          // !!! FIX: USE COL-SPECIFIC MODE FOR KEY !!!
                                           const key = `${mField.id}_${id}_${col.extractionMode || 'latest'}`;
                                           val = masterFieldComputedValues[key];
                                         } else if (mField?.sources?.[0]) {
@@ -738,30 +894,25 @@ export const AutomationMappingDialog = ({
                                       return { ...col, value: val };
                                     });
 
-                                    // 2. Calculate expansion (rows needed) for this entity
                                     const maxSubRows = Math.max(1, ...columnsData.map((c: any) => Array.isArray(c.value) ? c.value.length : 1));
 
-                                    // 3. Render sub-rows
                                     return Array.from({ length: maxSubRows }).map((_, subRowIdx) => (
-                                      <TableRow key={`${entityIdx}-${subRowIdx}`} className="h-8 hover:bg-slate-50 border-b border-slate-100 last:border-0">
-                                        <TableCell className="text-xs text-slate-400 text-center font-mono">
+                                      <TableRow key={`${entityIdx}-${subRowIdx}`} className="h-8 border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                                        <TableCell className="text-[10px] text-slate-400 text-center font-mono bg-slate-50/50">
                                           {entityIdx + 1}.{subRowIdx + 1}
                                         </TableCell>
                                         {columnsData.map((col: any, cIdx: number) => {
                                           let displayVal = col.value;
-
                                           if (Array.isArray(displayVal)) {
-                                            // Array item: pick index or show blank if out of bounds
                                             displayVal = displayVal[subRowIdx] !== undefined ? displayVal[subRowIdx] : '';
-                                          } else {
-                                            // Single value: Repeat it
-                                            displayVal = displayVal || '';
-                                            if (displayVal === 'Computing...') displayVal = <span className="text-purple-400 italic text-[10px]">Computing...</span>;
                                           }
-
+                                          const isMissing = !displayVal || displayVal === 'Missing';
+                                          
                                           return (
-                                            <TableCell key={cIdx} className="text-xs max-w-[150px] truncate border-r border-slate-50 last:border-0" title={typeof displayVal === 'string' ? displayVal : ''}>
-                                              {displayVal}
+                                            <TableCell key={cIdx} className="text-xs py-1 px-3 border-r border-slate-50 last:border-0">
+                                               <span className={isMissing ? "text-red-500 text-[11px]" : "text-slate-700"}>
+                                                 {isMissing ? "Missing" : displayVal}
+                                               </span>
                                             </TableCell>
                                           );
                                         })}
@@ -777,6 +928,57 @@ export const AutomationMappingDialog = ({
                     );
                   }
 
+                  // --- CASE 2: DOCUMENTS ---
+                  if (field.fieldType === 'document') {
+                    const targetId = resolveTargetEntityId(field);
+                    const foundDoc = documentFiles.find(d => d.document_id === field.kycDocumentId && String(d.owner_id) === String(targetId));
+                    let entityLabel = "Principal";
+                    if (field.entityTypes?.includes('company')) entityLabel = "Company";
+                    else if (field.entityTypes?.includes('dependant')) entityLabel = "Dependant";
+
+                    return (
+                        <TableRow key={fIdx} className="group hover:bg-slate-50 border-b border-slate-100">
+                             <TableCell className="text-center text-xs text-slate-400 font-mono py-3 border-r border-slate-50">{fIdx + 1}</TableCell>
+                             <TableCell className="py-3 border-r border-slate-50">
+                                <div className="flex flex-col gap-1">
+                                    <div className="text-sm font-semibold text-slate-800">{field.efnsDisplayName || field.variableName}</div>
+                                    </div>
+                             </TableCell>
+                             <TableCell className="py-3 border-r border-slate-50">
+                                <Badge variant="outline" className="text-[10px] font-medium border-amber-200 text-amber-700 bg-amber-50">Document</Badge>
+                             </TableCell>
+                             <TableCell className="py-3 border-r border-slate-50">
+                                <div className="flex items-center gap-2 text-xs text-slate-500">
+                                    <User className="h-3 w-3" />
+                                    <span>{entityLabel}</span>
+                                    <span className="text-slate-300">|</span>
+                                    <span>KYC ID: {field.kycDocumentId?.substring(0,8)}...</span>
+                                </div>
+                             </TableCell>
+                             <TableCell className="py-3 border-r border-slate-50">
+                                {foundDoc ? (
+                                    <div className="flex items-center gap-2">
+                                        <Badge className="bg-green-100 text-green-700 hover:bg-green-200 border border-green-200 px-2 py-0.5 h-6 shadow-none gap-1">
+                                            <CheckCircle2 className="h-3 w-3" /> Found
+                                        </Badge>
+                                        <a href={buildFileUrl(foundDoc)} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+                                            View <ExternalLink className="h-3 w-3" />
+                                        </a>
+                                    </div>
+                                ) : (
+                                    <Badge variant="outline" className="bg-red-50 text-red-600 border-red-200 px-2 py-0.5 h-6 gap-1">
+                                        <AlertTriangle className="h-3 w-3" /> Missing
+                                    </Badge>
+                                )}
+                             </TableCell>
+                             <TableCell className="text-right py-3 pr-4">
+                                <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-300 cursor-not-allowed"><Edit3 className="h-3 w-3" /></Button>
+                             </TableCell>
+                        </TableRow>
+                    )
+                  }
+
+                  // --- CASE 3: STANDARD FIELDS ---
                   const targetId = resolveTargetEntityId(field);
                   const isMissingEntity = !targetId;
                   const masterIds = field.masterFieldIds || [];
@@ -797,48 +999,34 @@ export const AutomationMappingDialog = ({
                   }).filter(Boolean);
 
                   const mergedValue = masterIds.map(mid => {
-                    // !!! FIX: PASS FIELD-SPECIFIC MODE !!!
                     const v = getFieldValue(mid, String(targetId), 0, field.extractionMode || 'latest');
                     return Array.isArray(v) ? v.join(', ') : v;
                   }).join(' ');
 
-                  const isEditing = editingCell?.fieldId === field.variableName;
-                  let entityDisplay = "Principal";
-                  if (field.entityType === 'company') entityDisplay = "Company";
-                  else if (field.entityType === 'dependant') entityDisplay = `Dependant (${field.dependantRelationship || 'First'})`;
-
-                  if (sourcesDisplay.length === 0 && sources.length === 0) {
-                    return (
-                      <TableRow key={fIdx} className="h-9 hover:bg-slate-50">
-                        <TableCell className="text-center text-xs text-slate-400 bg-slate-50 border-r border-slate-200 border-b">{fIdx + 1}</TableCell>
-                        <TableCell className="border-r border-b border-slate-200 px-2 py-1 text-sm font-medium text-slate-700 bg-slate-50/30">{field.efnsDisplayName || field.name}</TableCell>
-                        <TableCell className="border-r border-b border-slate-200 px-2 py-1 text-xs text-slate-500">{entityDisplay}</TableCell>
-                        <TableCell className="border-r border-b border-slate-200 px-2 py-1 text-xs text-slate-400 italic" colSpan={1}>No database mapping configured</TableCell>
-                        <TableCell className="border-b border-slate-200 px-2 py-1 text-xs text-slate-400">-</TableCell>
-                      </TableRow>
-                    );
-                  }
+                  const isValueMissing = !mergedValue || mergedValue === 'Missing' || mergedValue === '';
 
                   return (
-                    <TableRow key={fIdx} className="h-9 group hover:bg-slate-50 transition-colors">
-                      <TableCell className="text-center text-xs text-slate-400 bg-slate-50 border-r border-b border-slate-300">{fIdx + 1}</TableCell>
-                      <TableCell className="border-r border-b border-slate-300 px-2 py-0 align-middle">
-                        <div className="text-sm font-semibold text-slate-800 truncate" title={field.variableName}>
-                          {field.efnsDisplayName || field.variableName}
-                        </div>
+                    <TableRow key={fIdx} className="group hover:bg-slate-50 border-b border-slate-100">
+                      <TableCell className="text-center text-xs text-slate-400 font-mono py-3 border-r border-slate-50">{fIdx + 1}</TableCell>
+                      <TableCell className="py-3 align-top border-r border-slate-50">
+                         <div className="flex flex-col gap-1">
+                             <div className="text-sm font-semibold text-slate-800 truncate" title={field.variableName}>{field.efnsDisplayName || field.variableName}</div>
+                             </div>
                       </TableCell>
-                      <TableCell className="border-r border-b border-slate-300 px-2 py-0 align-middle bg-slate-50/20">
+                      <TableCell className="py-3 align-top border-r border-slate-50">
+                         {field.fieldType === 'date' ? <Badge variant="outline" className="text-[10px] border-slate-200 text-slate-500">Date</Badge> : <Badge variant="outline" className="text-[10px] border-slate-200 text-slate-500">Text</Badge>}
+                      </TableCell>
+                      <TableCell className="py-3 align-top border-r border-slate-50">
                         <div className="flex flex-col gap-1">
                           {field.customFieldSource ? (
-                            <div className="text-xs text-slate-600 truncate" title={field.customFieldSource}>{field.customFieldSource}</div>
+                            <span className="text-xs text-slate-600 italic">Custom: {field.customFieldSource}</span>
                           ) : (
                             sourcesDisplay.map((source, idx) => (
-                              <div key={idx} className="flex items-center gap-1.5 overflow-hidden">
+                              <div key={idx} className="flex items-center gap-1.5">
                                 {source.type === 'computed' ? (
                                   <>
                                     <FunctionSquare className="h-3 w-3 text-purple-500 flex-shrink-0" />
                                     <span className="text-xs text-purple-700 truncate font-medium" title={source.info}>{source.label}</span>
-                                    {source.mode === 'all' && <Badge variant="outline" className="text-[9px] h-3.5 px-1 py-0 border-purple-300 text-purple-700">ALL</Badge>}
                                   </>
                                 ) : (
                                   <>
@@ -849,38 +1037,89 @@ export const AutomationMappingDialog = ({
                               </div>
                             ))
                           )}
+                          {sourcesDisplay.length === 0 && !field.customFieldSource && <span className="text-xs text-slate-300 italic">No source mapped</span>}
                         </div>
                       </TableCell>
-                      <TableCell className="border-b border-slate-300 p-0 relative h-9 align-middle">
+                      
+                      {/* VALUE CELL WITH EDIT MODE */}
+                      <TableCell className="py-2 align-middle border-r border-slate-50">
                         {isEditing ? (
-                          <div className="w-full h-full flex">
-                            <Input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => e.key === 'Enter' && saveEdit()} onBlur={saveEdit} className="w-full h-full rounded-none border-none focus-visible:ring-0 px-2 text-sm bg-blue-50 text-slate-900" />
+                          <div className="flex items-center gap-2">
+                             <div className="relative w-full max-w-[200px]">
+                                <Input 
+                                    autoFocus 
+                                    value={editValue} 
+                                    onChange={e => setEditValue(e.target.value)} 
+                                    onKeyDown={e => {
+                                        if(e.key === 'Enter') saveEdit();
+                                        if(e.key === 'Escape') cancelEditing();
+                                    }}
+                                    className="h-8 text-xs pr-2" 
+                                />
+                             </div>
+                             <div className="flex items-center gap-1">
+                                <Button size="icon" onClick={saveEdit} className="h-8 w-8 bg-green-600 hover:bg-green-700 text-white"><Save className="h-4 w-4" /></Button>
+                                <Button size="icon" variant="ghost" onClick={cancelEditing} className="h-8 w-8 text-slate-400 hover:text-red-500 hover:bg-red-50"><X className="h-4 w-4" /></Button>
+                             </div>
                           </div>
                         ) : (
-                          <div onClick={() => !isMissingEntity && sources[0] && startEditing(field.variableName, 0, sources[0]?.table, sources[0]?.path, mergedValue, String(targetId))} className={cn("w-full h-full px-2 flex items-center select-none text-sm", sourcesDisplay.some(s => s.type === 'computed') ? "cursor-default" : "cursor-text hover:bg-blue-50 transition-colors", mergedValue === '' ? "text-red-500 italic bg-red-50/30" : "text-slate-800", isMissingEntity && "opacity-50 cursor-not-allowed")}>
-                            <span className="truncate" title={mergedValue}>{mergedValue || 'Missing'}</span>
-                            {mergedValue === '' && (
-                              <>
-                                <Badge variant="destructive" className="ml-2 text-[9px] h-4 px-1.5 py-0 bg-red-100 text-red-700 border-red-200">No Data</Badge>
-                                <AlertCircle className="h-3 w-3 ml-1 text-red-400 opacity-50" />
-                              </>
-                            )}
+                          <div className={cn("text-sm break-words pr-2", isValueMissing ? "text-red-500 font-medium flex items-center gap-1.5" : "text-slate-700")}>
+                            {isValueMissing ? (
+                                <>
+                                    <AlertCircle className="h-3 w-3" /> Missing
+                                </>
+                            ) : mergedValue}
+                            {mergedValue === 'Computing...' && <Loader2 className="h-3 w-3 animate-spin inline ml-2 text-purple-500" />}
                           </div>
                         )}
+                      </TableCell>
+
+                      {/* ACTIONS CELL */}
+                      <TableCell className="text-right py-2 pr-4">
+                         {!isEditing && !isMissingEntity && sources[0] && sourcesDisplay.every(s => s.type !== 'computed') && (
+                             <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                onClick={() => startEditing(field.variableName, 0, sources[0]?.table, sources[0]?.path, mergedValue, String(targetId))}
+                                className="h-8 w-8 text-slate-400 hover:text-blue-600 hover:bg-blue-50 opacity-0 group-hover:opacity-100 transition-all"
+                             >
+                                <Edit3 className="h-4 w-4" />
+                             </Button>
+                         )}
                       </TableCell>
                     </TableRow>
                   );
                 })}
-                {/* ... Computed Fields Render ... */}
-                {computedFields.length > 0 && regularFields.length > 0 && (
-                  <TableRow className="bg-slate-100 border-b-2 border-slate-300"><TableCell colSpan={5} className="py-2 px-4"><div className="flex items-center gap-2 text-slate-500 font-bold text-xs uppercase tracking-widest"><Calculator className="h-4 w-4" /> Computed Automatically</div></TableCell></TableRow>
+
+                {/* COMPUTED FIELDS SECTION */}
+                {computedFields.length > 0 && allFields.length > 0 && (
+                  <TableRow className="bg-slate-50 border-y border-slate-200">
+                    <TableCell colSpan={6} className="py-2 px-4">
+                        <div className="flex items-center gap-2 text-slate-500 font-bold text-xs uppercase tracking-widest">
+                            <Calculator className="h-3 w-3" /> System Calculated Fields
+                        </div>
+                    </TableCell>
+                  </TableRow>
                 )}
+                
                 {computedFields.map((field, fIdx) => (
-                  <TableRow key={`computed-${fIdx}`} className="h-9 hover:bg-purple-50/30 transition-colors">
-                    <TableCell className="text-center text-xs text-purple-400 bg-purple-50/30 border-r border-b border-slate-300">{regularFields.length + fIdx + 1}</TableCell>
-                    <TableCell className="border-r border-b border-slate-300 px-2 py-0 align-middle"><div className="text-sm font-semibold text-slate-800 truncate" title={field.variableName}>{field.efnsDisplayName || field.variableName}</div></TableCell>
-                    <TableCell className="border-r border-b border-slate-300 px-2 py-0 align-middle bg-purple-50/10"><div className="flex flex-col gap-1"><div className="flex items-center gap-1.5 overflow-hidden"><FunctionSquare className="h-3 w-3 text-purple-400 flex-shrink-0" /><span className="text-xs text-purple-700 truncate" title={field.computedFunction}>{field.computedFunction}</span></div></div></TableCell>
-                    <TableCell className="border-b border-slate-300 px-2 py-0 align-middle bg-slate-50/50">{isComputing ? <div className="flex items-center gap-2 text-xs text-slate-400"><Loader2 className="h-3 w-3 animate-spin" /> Calculating...</div> : computedFieldsPreview[field.variableName] ? <span className="text-sm font-bold text-green-700 truncate block" title={computedFieldsPreview[field.variableName]}>{computedFieldsPreview[field.variableName]}</span> : <span className="text-xs text-slate-400 italic">Pending...</span>}</TableCell>
+                  <TableRow key={`computed-${fIdx}`} className="hover:bg-purple-50/20 border-b border-slate-100">
+                    <TableCell className="text-center text-xs text-purple-400 bg-purple-50/10 font-mono py-3 border-r border-purple-100">{allFields.length + fIdx + 1}</TableCell>
+                    <TableCell className="py-3 border-r border-purple-50/20"><div className="text-sm font-semibold text-slate-800">{field.efnsDisplayName || field.variableName}</div></TableCell>
+                    <TableCell className="py-3 border-r border-purple-50/20"><Badge variant="secondary" className="bg-purple-100 text-purple-700 border-none text-[10px]">Computed</Badge></TableCell>
+                    <TableCell className="py-3 border-r border-purple-50/20">
+                        <div className="flex items-center gap-1.5 text-xs text-purple-600 font-medium font-mono bg-purple-50 w-fit px-2 py-0.5 rounded border border-purple-100">
+                            <FunctionSquare className="h-3 w-3" /> {field.computedFunction}
+                        </div>
+                    </TableCell>
+                    <TableCell className="py-3" colSpan={2}>
+                        {isComputing ? 
+                            <div className="flex items-center gap-2 text-xs text-slate-400"><Loader2 className="h-3 w-3 animate-spin" /> Calculating...</div> 
+                            : computedFieldsPreview[field.variableName] ? 
+                                <span className="text-sm font-bold text-green-700">{computedFieldsPreview[field.variableName]}</span> 
+                                : <span className="text-xs text-slate-400 italic">Pending...</span>
+                        }
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -891,91 +1130,38 @@ export const AutomationMappingDialog = ({
     );
   };
 
-    const renderDocumentsSection = () => {
-    // 1. Filter automation fields for 'document' type
-    const docFields = activeWebEntry?.fields?.filter((f: any) => f.fieldType === 'document') || [];
-
-    // 2. Add legacy kycDocsUpload if any (for backward compatibility)
-    const legacyDocs = activeWebEntry?.kycDocsUpload || [];
-    // Convert legacy to match field structure roughly
-    const allDocs = [
-      ...docFields,
-      ...legacyDocs.map((d: any) => ({
-        id: d.id,
-        variableName: d.kycDocumentId,
-        efnsDisplayName: d.documentName || "Legacy Document",
-        kycDocumentId: d.kycDocumentId,
-        entityTypes: ['principal'] // Default for legacy
-      }))
-    ];
-
-    if (allDocs.length === 0) return <div className="p-12 text-center text-slate-400">No document assets configured.</div>;
-
-    return (
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {allDocs.map((req, idx) => {
-          // Resolve which entity this document belongs to
-          const targetId = resolveTargetEntityId(req);
-
-          // Find the file in our fetched list
-          const foundDoc = documentFiles.find(d =>
-            d.document_id === req.kycDocumentId &&
-            String(d.owner_id) === String(targetId)
-          );
-
-          // Determine label for the entity (e.g. "Principal", "Company")
-          let entityLabel = "Principal";
-          if (req.entityTypes?.includes('company')) entityLabel = "Company";
-          else if (req.entityTypes?.includes('dependant')) entityLabel = "Dependant";
-
-          return (
-            <Card key={idx} className={cn("overflow-hidden border-2 transition-all", foundDoc ? "border-green-100 shadow-sm" : "border-amber-100 shadow-none bg-amber-50/20")}>
-              <CardContent className="p-4 flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className={cn("p-3 rounded-xl", foundDoc ? "bg-green-100 text-green-600" : "bg-amber-100 text-amber-600")}>
-                    <FileText className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h4 className="font-bold text-slate-900 leading-tight">{req.efnsDisplayName || 'Document'}</h4>
-                      <Badge variant="secondary" className="text-[9px] h-4 px-1.5">{entityLabel}</Badge>
-                    </div>
-                    <p className="text-[10px] text-slate-400 mt-1">KYC ID: {req.kycDocumentId}</p>
-                    {req.variableName && <p className="text-[10px] text-blue-400 font-mono">var: {req.variableName}</p>}
-                  </div>
-                </div>
-                {foundDoc ? (
-                  <div className="flex flex-col items-end gap-2">
-                    <Badge className="bg-green-500 hover:bg-green-600 gap-1.5 py-1 px-3">
-                      <CheckCircle2 className="h-3 w-3" /> Ready
-                    </Badge>
-                    <a
-                      href={buildFileUrl(foundDoc)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-[10px] text-blue-600 flex items-center gap-1 hover:underline"
-                    >
-                      Preview <ExternalLink className="h-3 w-3" />
-                    </a>
-                  </div>
-                ) : (
-                  <Badge variant="outline" className="text-amber-600 border-amber-200 bg-white gap-1.5 py-1 px-3">
-                    <AlertCircle className="h-3 w-3" /> Missing
-                  </Badge>
-                )}
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-    );
+  const renderDocumentsSection = () => {
+     const docFields = activeWebEntry?.fields?.filter((f: any) => f.fieldType === 'document') || [];
+     if (docFields.length === 0) return <div className="p-12 text-center text-slate-400">No document assets configured.</div>;
+     return (
+         <div className="grid grid-cols-2 gap-4">
+             {docFields.map((req, idx) => {
+                 const targetId = resolveTargetEntityId(req);
+                 const foundDoc = documentFiles.find(d => d.document_id === req.kycDocumentId && String(d.owner_id) === String(targetId));
+                 return (
+                    <Card key={idx} className={cn("overflow-hidden border transition-all", foundDoc ? "border-green-200 shadow-sm" : "border-red-200 bg-red-50/10")}>
+                        <CardContent className="p-4 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className={cn("p-2 rounded-lg", foundDoc ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600")}><Paperclip className="h-4 w-4" /></div>
+                                <div>
+                                    <h4 className="font-bold text-sm text-slate-900">{req.efnsDisplayName || req.variableName}</h4>
+                                    <p className="text-[10px] text-slate-500">Target: {req.variableName}</p>
+                                </div>
+                            </div>
+                            {foundDoc ? <Badge className="bg-green-600">Ready</Badge> : <Badge variant="destructive">Missing</Badge>}
+                        </CardContent>
+                    </Card>
+                 )
+             })}
+         </div>
+     )
   };
-  
 
-   return (
+  return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-[95vw] w-[1400px] h-[90vh] flex flex-col p-0 overflow-hidden border-none shadow-2xl">
-        <div className="p-5 border-b bg-white flex items-center justify-between shadow-sm z-20">
+      <DialogContent className="max-w-[95vw] w-[1400px] h-[90vh] flex flex-col p-0 overflow-hidden border-none shadow-2xl bg-slate-50">
+        {/* HEADER */}
+        <div className="p-5 border-b bg-white flex items-center justify-between shadow-sm z-30">
           <div className="flex items-center gap-5">
             <div className="h-12 w-12 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-200"><Zap className="h-6 w-6 fill-white" /></div>
             <div>
@@ -983,68 +1169,79 @@ export const AutomationMappingDialog = ({
               <div className="flex items-center gap-2 text-slate-500 font-medium text-sm mt-0.5"><span>Task #{task?.id}</span><ChevronRight className="h-4 w-4 text-slate-300" /><span className="text-slate-900">{task?.applicant_name}</span></div>
             </div>
           </div>
-          <div className="px-3 space-y-2 pb-5">
-            {entityAutomationMappings.map((mapping) => (
-              <button key={mapping.automationId} onClick={() => setSelectedAutomationId(mapping.automationId)} className={cn("w-full text-left p-4 rounded-2xl border-2 transition-all group relative", selectedAutomationId === mapping.automationId ? "bg-blue-50/50 border-blue-600 shadow-sm" : "hover:bg-slate-50 border-transparent")}>
-                <div className="flex items-center gap-4"><div className={cn("h-10 w-10 rounded-xl flex items-center justify-center transition-all", selectedAutomationId === mapping.automationId ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-400 group-hover:bg-slate-200")}><Webhook className="h-5 w-5" /></div><div className="flex-1 min-w-0"><p className={cn("text-sm font-bold truncate", selectedAutomationId === mapping.automationId ? "text-blue-900" : "text-slate-700")}>{mapping.automation?.name || "Unnamed Flow"}</p></div></div>
-                {selectedAutomationId === mapping.automationId && <div className="absolute right-4 top-1/2 -translate-y-1/2"><div className="h-2 w-2 rounded-full bg-blue-600 animate-pulse" /></div>}
-              </button>
-            ))}
-            {entityAutomationMappings.length === 0 && <div className="p-10 text-center space-y-3"><Settings className="h-10 w-10 text-slate-200 mx-auto" /><p className="text-xs text-slate-400 font-medium">No automations configured for this class level.</p></div>}
-          </div>
-          <div className="flex items-center gap-3 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-xl border border-slate-200 shadow-sm"><User className="h-4 w-4 text-blue-500" /><input value={currentIndividualId} onChange={(e) => setCurrentIndividualId(e.target.value)} placeholder="ID Number..." className="w-32 outline-none text-sm font-bold text-slate-700" /></div>
-            {isLoading && <Loader2 className="h-5 w-5 animate-spin text-blue-600 mx-2" />}
+
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200">
+               <Webhook className="h-4 w-4 text-slate-400 ml-2" />
+               <Select value={selectedAutomationId} onValueChange={setSelectedAutomationId}>
+                  <SelectTrigger className="w-[250px] border-none bg-transparent shadow-none h-8 text-sm font-bold text-slate-700 focus:ring-0">
+                     <SelectValue placeholder="Select Workflow" />
+                  </SelectTrigger>
+                  <SelectContent>
+                     {entityAutomationMappings.length > 0 ? (
+                         entityAutomationMappings.map(m => (
+                             <SelectItem key={m.automationId} value={m.automationId}>{m.automation?.name || "Unnamed Flow"}</SelectItem>
+                         ))
+                     ) : (
+                         <div className="p-2 text-xs text-slate-400 italic text-center">No workflows found</div>
+                     )}
+                  </SelectContent>
+               </Select>
+            </div>
+
+            <div className="h-8 w-px bg-slate-200 mx-2" />
+
+            <div className="flex items-center gap-3 bg-slate-50 p-1.5 rounded-xl border border-slate-200">
+               <div className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-lg border border-slate-200 shadow-sm">
+                  <User className="h-4 w-4 text-blue-500" />
+                  <input value={currentIndividualId} onChange={(e) => setCurrentIndividualId(e.target.value)} placeholder="ID Number..." className="w-28 outline-none text-sm font-bold text-slate-700" />
+               </div>
+               {isLoading && <Loader2 className="h-5 w-5 animate-spin text-blue-600 mx-2" />}
+            </div>
           </div>
         </div>
 
-        <div className="flex-1 flex overflow-hidden bg-slate-50/50">
-          <div className="flex-1 flex flex-col overflow-hidden">
+        {/* BODY */}
+        <div className="flex-1 flex flex-col overflow-hidden bg-slate-50/50 relative">
             {!selectedAutomationId ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-slate-300"><Webhook className="h-16 w-16 mb-4 opacity-10" /><p className="text-lg font-medium">Select a workflow from the sidebar</p></div>
+            <div className="flex-1 flex flex-col items-center justify-center text-slate-300"><Webhook className="h-16 w-16 mb-4 opacity-10" /><p className="text-lg font-medium">Select a workflow from the header</p></div>
             ) : (
-              <>
+            <>
                 <div className="px-8 py-4 bg-white border-b flex items-center justify-between flex-shrink-0">
-                  <Tabs value={activeTab} onValueChange={setActiveTab} className="w-fit">
-                    <TabsList className="bg-slate-100/80 p-1 h-11 rounded-xl">
-                      <TabsTrigger value="fields" className="rounded-lg px-6 data-[state=active]:shadow-sm"><Database className="h-4 w-4 mr-2" /> Data Map</TabsTrigger>
-                      <TabsTrigger value="documents" className="rounded-lg px-6 data-[state=active]:shadow-sm"><FileText className="h-4 w-4 mr-2" /> Assets</TabsTrigger>
-                    </TabsList>
-                  </Tabs>
-                  <div className="flex items-center gap-4">
+                    <Tabs value={activeTab} onValueChange={setActiveTab} className="w-fit">
+                        <TabsList className="bg-slate-100 p-1 h-10 rounded-lg">
+                        <TabsTrigger value="fields" className="px-6 text-xs font-bold"><Database className="h-3 w-3 mr-2" /> Data Map</TabsTrigger>
+                        <TabsTrigger value="documents" className="px-6 text-xs font-bold"><FileText className="h-3 w-3 mr-2" /> Gallery</TabsTrigger>
+                        </TabsList>
+                    </Tabs>
                     <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild><div className="flex flex-col items-end"><span className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">Status</span><div className="flex items-center gap-1.5 text-green-600 font-bold text-sm"><CheckCircle2 className="h-4 w-4" /> Endpoint Active</div></div></TooltipTrigger>
-                        <TooltipContent className="bg-slate-900 text-white border-none p-3"><p className="text-xs">{selectedMapping?.automation?.webhook_url}</p></TooltipContent>
-                      </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger asChild><div className="flex items-center gap-2 cursor-help"><div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" /><span className="text-xs font-medium text-slate-500">Webhook Ready</span></div></TooltipTrigger>
+                            <TooltipContent><p className="text-xs">{selectedMapping?.automation?.webhook_url}</p></TooltipContent>
+                        </Tooltip>
                     </TooltipProvider>
-                  </div>
                 </div>
 
-                <div className="flex-1 overflow-hidden relative">
-                  <Tabs value={activeTab} className="h-full w-full">
-                    <TabsContent value="fields" className="h-full m-0 p-8 flex flex-col overflow-hidden data-[state=active]:flex">
-                      <div className="mb-4 flex items-center justify-between flex-shrink-0">
-                        <div><h2 className="text-xl font-bold text-slate-900">Field Correspondence</h2><p className="text-sm text-slate-500">Mapping master database fields to the target automation schema.</p></div>
-                        <Badge variant="outline" className="px-4 py-1 text-blue-600 border-blue-100 bg-blue-50/50">{activeWebEntry?.fields?.filter((f: any) => f.fieldType !== 'document').length || 0} Total Fields</Badge>
-                      </div>
-                      <div className="flex-1 overflow-hidden">{renderFieldsTable()}</div>
-                    </TabsContent>
-                    <TabsContent value="documents" className="h-full m-0 p-8 overflow-auto"><div className="mb-6"><h2 className="text-xl font-bold text-slate-900">Required Assets</h2><p className="text-sm text-slate-500">Documents that will be sent as part of the automation payload.</p></div>{renderDocumentsSection()}</TabsContent>
-                  </Tabs>
+                <div className="flex-1 overflow-hidden p-6">
+                    <Tabs value={activeTab} className="h-full w-full">
+                        <TabsContent value="fields" className="h-full m-0 flex flex-col">
+                            {renderFieldsTable()}
+                        </TabsContent>
+                        <TabsContent value="documents" className="h-[full] overflow-auto">
+                            {renderDocumentsSection()}
+                        </TabsContent>
+                    </Tabs>
                 </div>
-              </>
+            </>
             )}
-          </div>
         </div>
 
-        <div className="p-6 border-t bg-white flex justify-between items-center z-20 shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.1)]">
-          <Button variant="ghost" className="font-bold text-slate-500 hover:bg-slate-50" onClick={onClose}>Discard Changes</Button>
-          <div className="flex items-center justify-between">
-            <Button onClick={handleRunAutomation} disabled={isAutomationRunning} className="bg-blue-600 hover:bg-blue-700 text-white h-12 px-10 rounded-xl font-bold shadow-lg shadow-blue-200 flex items-center gap-3 transition-all hover:scale-[1.02] active:scale-[0.98]">
-              {isAutomationRunning ? <Loader2 className="h-5 w-5 animate-spin" /> : <Zap className="h-5 w-5 fill-white" />}<span>{isAutomationRunning ? 'Executing...' : 'Execute Workflow'}</span>
-            </Button>
-          </div>
+        {/* FOOTER */}
+        <div className="p-5 border-t bg-white flex justify-between items-center z-30">
+          <Button variant="ghost" className="font-bold text-slate-500 hover:text-slate-700" onClick={onClose}>Close</Button>
+          <Button onClick={handleRunAutomation} disabled={isAutomationRunning} className="bg-blue-600 hover:bg-blue-700 text-white h-11 px-8 rounded-xl font-bold shadow-md shadow-blue-100 flex items-center gap-2 transition-all">
+            {isAutomationRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4 fill-white" />}<span>Execute Workflow</span>
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

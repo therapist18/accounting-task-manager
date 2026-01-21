@@ -1,6 +1,12 @@
 // @ts-nocheck
 import supabase from "@/lib/supabase/client";
 
+// --- TYPES ---
+export interface DocumentCache {
+    documents: any[]; // All fetched acc_portal_directors_documents
+    docTypes: any[];  // All fetched acc_portal_kyc
+}
+
 /**
  * Parses a date string into a Date object, supporting multiple date formats
  */
@@ -56,39 +62,43 @@ const parseDateString = (dateInput: string | Date | null | undefined): Date | nu
 // --- HELPERS ---
 
 /**
- * Fetches uploaded documents and their corresponding type definitions from the DB.
+ * Fetches uploaded documents and types. 
+ * OPTIMIZED: Checks cache first.
  */
-async function fetchDocsAndTypes(individualId: string | number, documentIds: string[]) {
-    console.log(`[Computed] Fetching docs for Individual: ${individualId}, DocTypes: ${documentIds.join(', ')}`);
+async function fetchDocsAndTypes(
+    individualId: string | number, 
+    documentIds: string[], 
+    cache?: DocumentCache
+) {
+    // 1. USE CACHE IF AVAILABLE
+    if (cache) {
+        // Filter the pre-fetched cache for this specific individual and requested doc types
+        const relevantDocs = cache.documents.filter(d => 
+            String(d.director_id) === String(individualId) && 
+            documentIds.includes(d.document_id)
+        );
+        
+        const relevantTypes = cache.docTypes.filter(t => 
+            documentIds.includes(t.id)
+        );
 
+        return { docs: relevantDocs, types: relevantTypes };
+    }
+
+    // 2. FALLBACK TO NETWORK (Legacy behavior)
+    console.log(`[Computed] Cache miss - fetching for Individual: ${individualId}`);
+    
     if (!individualId || !documentIds || documentIds.length === 0) {
-        console.warn("[Computed] Missing individualId or computedDocuments array.");
         return { docs: [], types: [] };
     }
 
-    const { data: docTypes, error: typeError } = await supabase
-        .from('acc_portal_kyc')
-        .select('*')
-        .in('id', documentIds);
-
-    if (typeError) {
-        console.error("[Computed] Error fetching doc types:", typeError);
-        return { docs: [], types: [] };
-    }
-
-    const { data: uploadedDocs, error: docError } = await supabase
-        .from('acc_portal_directors_documents')
+    const { data: docTypes } = await supabase.from('acc_portal_kyc').select('*').in('id', documentIds);
+    const { data: uploadedDocs } = await supabase.from('acc_portal_directors_documents')
         .select('*')
         .eq('director_id', individualId)
         .in('document_id', documentIds)
         .neq('status', 'deleted');
 
-    if (docError) {
-        console.error("[Computed] Error fetching uploaded documents:", docError);
-        return { docs: [], types: [] };
-    }
-
-    console.log(`[Computed] Found ${uploadedDocs?.length} uploads and ${docTypes?.length} type definitions.`);
     return { docs: uploadedDocs || [], types: docTypes || [] };
 }
 
@@ -137,202 +147,135 @@ function sortDocsByRecency(docs: any[], docTypes: any[]) {
     }).sort((a, b) => b.sortDate.getTime() - a.sortDate.getTime());
 }
 
-// --- NEW: ARRAY EXTRACTION FUNCTION ---
-
 /**
- * ARRAY EXTRACTION: extractFieldFromAllDocuments
- * 
- * Returns an array of values extracted from ALL documents (not just the latest).
- * This is used for array fields like "List of Previous Permits".
- * 
- * @param individualId - The director/individual ID
- * @param documentIds - Array of document type IDs to search
- * @param fieldPath - The JSON path to extract from each document
- * @returns Array of extracted values (one per document)
+ * IMPROVED: Parse JSON path from document data
+ * Handles both ->> (text extraction) and -> (JSON extraction)
  */
+function parseJsonPath(doc: any, fieldPath: string): any {
+    if (!fieldPath) return null;
+
+    // Handle ->> operator (PostgreSQL text extraction)
+    if (fieldPath.includes("->>")) {
+        const parts = fieldPath.split("->>");
+        if (parts.length === 2) {
+            const column = parts[0].trim().replace(/['"]/g, '');
+            const key = parts[1].trim().replace(/['"]/g, '');
+            const columnData = doc[column];
+            if (columnData && typeof columnData === 'object') {
+                return columnData[key];
+            }
+        }
+        return null;
+    }
+
+    // Handle -> operator (PostgreSQL JSON extraction)
+    if (fieldPath.includes("->")) {
+        const parts = fieldPath.split("->");
+        if (parts.length === 2) {
+            const column = parts[0].trim().replace(/['"]/g, '');
+            const key = parts[1].trim().replace(/['"]/g, '');
+            const columnData = doc[column];
+            if (columnData && typeof columnData === 'object') {
+                return columnData[key];
+            }
+        }
+        return null;
+    }
+
+    // Handle direct column access
+    return doc[fieldPath];
+}
+
+// --- ARRAY EXTRACTION ---
+
 export async function extractFieldFromAllDocuments(
     individualId: string | number,
     documentIds: string[],
-    fieldPath: string
+    fieldPath: string,
+    cache?: DocumentCache
 ): Promise<string[]> {
     try {
-        console.log(`[Array-Extract] Individual: ${individualId}, DocTypes: ${documentIds.join(',')}, Path: ${fieldPath}`);
-        
-        const { docs, types } = await fetchDocsAndTypes(individualId, documentIds);
-        
-        if (docs.length === 0) {
-            console.warn("[Array-Extract] No documents found");
-            return [];
-        }
+        const { docs, types } = await fetchDocsAndTypes(individualId, documentIds, cache);
+        if (docs.length === 0) return [];
 
-        // Sort all documents by recency (newest first)
         const sorted = sortDocsByRecency(docs, types);
-        
-        console.log(`[Array-Extract] Processing ${sorted.length} documents`);
-
-        // Extract the field from EACH document
         const results: string[] = [];
         
         for (const item of sorted) {
-            const doc = item.doc;
-            let value: any = null;
-
-            if (fieldPath.includes("->>")) {
-                const match = fieldPath.match(/['"]?(\w+)['"]?\s*->>['"]?(\w+)['"]?/);
-                if (match) {
-                    const column = match[1];
-                    const key = match[2];
-                    
-                    const columnData = doc[column];
-                    if (columnData && typeof columnData === 'object') {
-                        value = columnData[key];
-                    }
-                }
-            } else {
-                value = doc[fieldPath];
-            }
-
-            // Add to results (even if null, we want to maintain array length)
+            const value = parseJsonPath(item.doc, fieldPath);
             results.push(value !== null && value !== undefined ? String(value) : "");
         }
-
-        console.log(`[Array-Extract] Extracted ${results.length} values`);
         return results;
-
     } catch (error) {
         console.error("[Array-Extract] Error:", error);
         return [];
     }
 }
 
-// --- EXISTING: SINGLE VALUE EXTRACTION ---
+// --- SINGLE VALUE EXTRACTION ---
 
-/**
- * GENERIC COMPUTED FUNCTION: extractFieldFromLatestDocument
- * 
- * Extracts a SINGLE value from the LATEST document.
- */
 export async function extractFieldFromLatestDocument(
     individualId: string | number, 
     documentIds: string[], 
-    fieldPath: string
+    fieldPath: string,
+    cache?: DocumentCache
 ): Promise<string> {
     try {
-        console.log(`[Generic-Extract] Individual: ${individualId}, DocTypes: ${documentIds.join(',')}, Path: ${fieldPath}`);
-        
-        const { docs, types } = await fetchDocsAndTypes(individualId, documentIds);
-        
-        if (docs.length === 0) {
-            console.warn("[Generic-Extract] No documents found");
-            return "Missing Document";
-        }
+        const { docs, types } = await fetchDocsAndTypes(individualId, documentIds, cache);
+        if (docs.length === 0) return "Missing Document";
 
         const sorted = sortDocsByRecency(docs, types);
         const latest = sorted[0];
-        
-        console.log(`[Generic-Extract] Latest doc ID: ${latest.doc.id}, Type: ${latest.type?.display_name}`);
+        const value = parseJsonPath(latest.doc, fieldPath);
 
-        let value: any = null;
-
-        if (fieldPath.includes("->>")) {
-            const match = fieldPath.match(/['"]?(\w+)['"]?\s*->>['"]?(\w+)['"]?/);
-            if (match) {
-                const column = match[1];
-                const key = match[2];
-                
-                const columnData = latest.doc[column];
-                if (columnData && typeof columnData === 'object') {
-                    value = columnData[key];
-                }
-            }
-        } else {
-            value = latest.doc[fieldPath];
-        }
-
-        if (value === null || value === undefined) {
-            console.warn(`[Generic-Extract] Field not found in document: ${fieldPath}`);
-            return "Field Not Found";
-        }
-
-        const result = String(value);
-        console.log(`[Generic-Extract] Extracted value: "${result}"`);
-        return result;
+        if (value === null || value === undefined) return "Field Not Found";
+        return String(value);
 
     } catch (error) {
-        console.error("[Generic-Extract] Error:", error);
+        console.error("[Extract Error]:", error);
         return "Extraction Error";
     }
 }
 
-// --- LEGACY FUNCTIONS (Unchanged) ---
+// --- LEGACY FUNCTIONS WRAPPERS ---
 
-export async function getLatestDocumentNumber(individualId: string | number, computedDocuments: string[]): Promise<string> {
-    const commonPaths = [
-        "extracted_details->>'Passport_Number'",
-        "extracted_details->>'Passport_No'",
-        "extracted_details->>'Permit_Number'",
-        "extracted_details->>'Permit_No'",
-        "extracted_details->>'Document_Number'",
-        "extracted_details->>'ID_Number'",
-        "extracted_details->>'Reference_Number'"
-    ];
-
+export async function getLatestDocumentNumber(individualId: string | number, computedDocuments: string[], cache?: DocumentCache): Promise<string> {
+    const commonPaths = ["extracted_details->>'Passport_Number'", "extracted_details->>'Passport_No'", "extracted_details->>'Permit_Number'", "extracted_details->>'ID_Number'"];
     for (const path of commonPaths) {
-        const result = await extractFieldFromLatestDocument(individualId, computedDocuments, path);
-        if (result !== "Field Not Found" && result !== "Missing Document") {
-            return result;
-        }
+        const result = await extractFieldFromLatestDocument(individualId, computedDocuments, path, cache);
+        if (result !== "Field Not Found" && result !== "Missing Document") return result;
     }
-
     return "Number Not Found";
 }
 
-export async function getLatestDocumentExpiryDate(individualId: string | number, computedDocuments: string[]): Promise<string> {
-    const commonPaths = [
-        "extracted_details->>'Date_of_Expiry'",
-        "extracted_details->>'Expiry_Date'",
-        "extracted_details->>'Valid_Until'",
-        "extracted_details->>'Expiration_Date'"
-    ];
-
+export async function getLatestDocumentExpiryDate(individualId: string | number, computedDocuments: string[], cache?: DocumentCache): Promise<string> {
+    const commonPaths = ["extracted_details->>'Date_of_Expiry'", "extracted_details->>'Expiry_Date'", "extracted_details->>'Valid_Until'", "extracted_details->>'Expiration_Date'"];
     for (const path of commonPaths) {
-        const result = await extractFieldFromLatestDocument(individualId, computedDocuments, path);
+        const result = await extractFieldFromLatestDocument(individualId, computedDocuments, path, cache);
         if (result !== "Field Not Found" && result !== "Missing Document") {
             const parsed = parseDateString(result);
-            if (parsed) {
-                return parsed.toISOString().split('T')[0];
-            }
+            if (parsed) return parsed.toISOString().split('T')[0];
             return result;
         }
     }
-
     return "Expiry Not Found";
 }
 
-export async function getLatestDocumentIssueDate(individualId: string | number, computedDocuments: string[]): Promise<string> {
-    const commonPaths = [
-        "extracted_details->>'Date_of_Issue'",
-        "extracted_details->>'Issue_Date'",
-        "extracted_details->>'With_Effect_From'",
-        "extracted_details->>'Issued_Date'"
-    ];
-
+export async function getLatestDocumentIssueDate(individualId: string | number, computedDocuments: string[], cache?: DocumentCache): Promise<string> {
+    const commonPaths = ["extracted_details->>'Date_of_Issue'", "extracted_details->>'Issue_Date'", "extracted_details->>'With_Effect_From'", "extracted_details->>'Issued_Date'"];
     for (const path of commonPaths) {
-        const result = await extractFieldFromLatestDocument(individualId, computedDocuments, path);
+        const result = await extractFieldFromLatestDocument(individualId, computedDocuments, path, cache);
         if (result !== "Field Not Found" && result !== "Missing Document") {
             const parsed = parseDateString(result);
-            if (parsed) {
-                return parsed.toISOString().split('T')[0];
-            }
+            if (parsed) return parsed.toISOString().split('T')[0];
             return result;
         }
     }
-
     return "Issue Date Not Found";
 }
 
-export async function determineImmigrationStatus(individualId: string | number, computedDocuments: string[]): Promise<string> {
-    const { docs, types } = await fetchDocsAndTypes(individualId, computedDocuments);
+export async function determineImmigrationStatus(individualId: string | number, computedDocuments: string[], cache?: DocumentCache): Promise<string> {
+    const { docs, types } = await fetchDocsAndTypes(individualId, computedDocuments, cache);
     if(docs.length === 0) return "No Status Doc";
     
     const sorted = docs.map(doc => {
@@ -375,46 +318,38 @@ export async function determineImmigrationStatus(individualId: string | number, 
     return current.type?.display_name || "Unknown Status";
 }
 
-export async function getLatestWorkPermit(individualId: string | number, computedDocuments: string[]): Promise<string> {
-    return await getLatestDocumentNumber(individualId, computedDocuments);
+export async function getLatestWorkPermit(individualId: string | number, computedDocuments: string[], cache?: DocumentCache): Promise<string> {
+    return await getLatestDocumentNumber(individualId, computedDocuments, cache);
 }
 
-/**
- * MASTER ROUTER - Enhanced to support array extraction
- */
+// --- MASTER ROUTER ---
+
 export async function executeComputedField(
     functionName: string,
     individualId: number | string,
     computedDocuments: string[],
     fieldPath?: string,
-    extractionMode: 'latest' | 'all' = 'latest' // NEW parameter
+    extractionMode: 'latest' | 'all' = 'latest',
+    cache?: DocumentCache
 ): Promise<string | string[]> {
     const normalizedFunctionName = functionName.replace(/\(\)/g, '').trim();
-    console.log(`[Computed-Router] Executing: ${normalizedFunctionName}, Mode: ${extractionMode}`);
 
-    // If a fieldPath is provided
+    // If path is provided, use generic extraction
     if (fieldPath) {
         if (extractionMode === 'all') {
-            console.log(`[Computed-Router] Array extraction with path: ${fieldPath}`);
-            return await extractFieldFromAllDocuments(individualId, computedDocuments, fieldPath);
+            return await extractFieldFromAllDocuments(individualId, computedDocuments, fieldPath, cache);
         } else {
-            console.log(`[Computed-Router] Single extraction with path: ${fieldPath}`);
-            return await extractFieldFromLatestDocument(individualId, computedDocuments, fieldPath);
+            return await extractFieldFromLatestDocument(individualId, computedDocuments, fieldPath, cache);
         }
     }
 
-    // Legacy named functions (always return single value)
+    // Otherwise use named functions
     switch (normalizedFunctionName) {
-        case 'determineImmigrationStatus':
-            return await determineImmigrationStatus(individualId, computedDocuments);
-        case 'getLatestWorkPermit':
-            return await getLatestWorkPermit(individualId, computedDocuments);
-        case 'getLatestDocumentNumber':
-            return await getLatestDocumentNumber(individualId, computedDocuments);
-        case 'getLatestDocumentExpiryDate':
-            return await getLatestDocumentExpiryDate(individualId, computedDocuments);
-        case 'getLatestDocumentIssueDate':
-            return await getLatestDocumentIssueDate(individualId, computedDocuments);
+        case 'determineImmigrationStatus': return await determineImmigrationStatus(individualId, computedDocuments, cache);
+        case 'getLatestWorkPermit': return await getLatestWorkPermit(individualId, computedDocuments, cache);
+        case 'getLatestDocumentNumber': return await getLatestDocumentNumber(individualId, computedDocuments, cache);
+        case 'getLatestDocumentExpiryDate': return await getLatestDocumentExpiryDate(individualId, computedDocuments, cache);
+        case 'getLatestDocumentIssueDate': return await getLatestDocumentIssueDate(individualId, computedDocuments, cache);
         case 'extractFieldFromLatestDocument':
             console.error('[Computed-Router] extractFieldFromLatestDocument requires a fieldPath parameter');
             return "Missing Path Parameter";
@@ -429,16 +364,11 @@ export async function executeComputedField(
 
 export async function processComputedFields(
     individualId: number | string,
-    computedFieldsConfig: Array<{
-        variableName: string;
-        computedFunction: string;
-        computedDocuments: string[];
-        fieldPath?: string;
-        extractionMode?: 'latest' | 'all';
-    }>
+    computedFieldsConfig: any[]
 ): Promise<Record<string, string | string[]>> {
     const results: Record<string, string | string[]> = {};
-
+    // Note: To optimize initial load, fetching should be handled by the caller (Component) 
+    // and passed via cache. This function is kept for backward compatibility or direct calls.
     for (const config of computedFieldsConfig) {
         try {
             const value = await executeComputedField(
@@ -450,10 +380,8 @@ export async function processComputedFields(
             );
             results[config.variableName] = value;
         } catch (error) {
-            console.error(`[Computed-Process] Error field ${config.variableName}:`, error);
             results[config.variableName] = "Error";
         }
     }
-
     return results;
 }

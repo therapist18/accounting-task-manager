@@ -142,7 +142,7 @@ const fetchInitialData = async () => {
     try {
       const { data, error } = await supabase
         .from('acc_portal_templates')
-        .select('*')
+        .select('*,job_level')
         .in('document_id', docIds)
         .or('banks_associated.is.null,banks_associated.eq.[]')
         .order('file_name', { ascending: true });
