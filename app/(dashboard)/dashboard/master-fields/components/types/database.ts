@@ -10,6 +10,7 @@ export interface Database {
             is_required: boolean
             sources: JobFieldSource[]
             options: any
+            category?: string | null
             created_at: string
             updated_at: string
           }
@@ -21,6 +22,7 @@ export interface Database {
             is_required?: boolean
             sources?: JobFieldSource[]
             options?: any
+            category?: string | null
             created_at?: string
             updated_at?: string
           }
@@ -32,6 +34,7 @@ export interface Database {
             is_required?: boolean
             sources?: JobFieldSource[]
             options?: any
+            category?: string | null
             updated_at?: string
           }
         }

@@ -51,7 +51,7 @@ export type SourceCardState = {
   table: string
   path: string
   priority: number
-  linking_variable?: "id" | "director_id" | "kyc_document_id" | "company_id" | null
+  linking_variable?: "id" | "individual_id" | "director_id" | "kyc_document_id" | "company_id" | null
   document_id?: string[] | null
   // UI state
   fields?: TableColumn[]
@@ -483,6 +483,7 @@ export function DataSourceConfiguration({ sources, onChange, documentTypes }: Da
                   onValueChange={value => updateSource(index, { linking_variable: value as any })}
                   options={[
                     { value: "id", label: "ID" },
+                    { value: "individual_id", label: "Individual ID" },
                     { value: "director_id", label: "Director ID" },
                     { value: "kyc_document_id", label: "KYC Document ID" },
                     { value: "company_id", label: "Company ID" },

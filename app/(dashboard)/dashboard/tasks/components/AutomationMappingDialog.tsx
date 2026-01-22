@@ -31,8 +31,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { processComputedFields, executeComputedField } from '../utils/automationComputedFunctions';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-// ... (Keep existing interfaces) ...
-
 interface AutomationMappingDialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -68,7 +66,10 @@ const parseJsonValue = (data: any, path: string): any => {
     const column = parts[0].trim().replace(/['"]/g, '');
     const jsonPath = parts[2].trim().replace(/['"]/g, '');
     const jsonData = data[column];
-    if (!jsonData || typeof jsonData === 'object') return undefined;
+    
+    // FIX: removed the check that returned undefined if jsonData was an object
+    if (jsonData === undefined || jsonData === null) return undefined;
+    
     return jsonPath.split('.').reduce((acc, key) => (acc && typeof acc === 'object' ? acc[key] : undefined), jsonData);
   }
   return path.split('.').reduce((acc, key) => (acc && typeof acc === 'object' ? acc[key] : undefined), data);
@@ -215,13 +216,9 @@ export const AutomationMappingDialog = ({
     if (!isOpen || !selectedAutomationId || Object.keys(jobFields).length === 0 || !webData.length) {
       return;
     }
-
-    // Create a unique key for this fetch configuration
-    const fetchKey = `${selectedAutomationId}-${Object.keys(jobFields).length}-${webData.length}`;
+  const fetchKey = `${selectedAutomationId}-${Object.keys(jobFields).length}-${webData.length}`;
     
-    // Guard: Prevent duplicate fetches with the same configuration
     if (isFetchingRef.current || lastFetchKey.current === fetchKey) {
-      console.log('[fetchSourceData] Skipping duplicate fetch:', fetchKey);
       return;
     }
 
@@ -231,7 +228,9 @@ export const AutomationMappingDialog = ({
 
     try {
       // 1. Setup Queues
-      const standardFetchQueue = new Map<string, Set<string>>();
+      // Key: Table Name, Value: { ids: Set of IDs, linkingVariable: column name }
+      const standardFetchQueue = new Map<string, { ids: Set<string>, linkingVariable: string }>();
+      
       const computedRequirements = {
           individualIds: new Set<string>(),
           documentIds: new Set<string>()
@@ -282,27 +281,29 @@ export const AutomationMappingDialog = ({
                 // B. STANDARD DB FIELDS
                 } else {
                      jobField.sources?.forEach((source: any) => {
-                        if (source.table) {
-                            if (!standardFetchQueue.has(source.table)) standardFetchQueue.set(source.table, new Set());
+                        if (source.table && entityIds.length > 0) {
                             
-                            // CRITICAL FIX: Only add IDs that match the table's entity type
-                            const tableEntityMap: Record<string, string[]> = {
-                                'acc_portal_directors_documents': ['principal', 'director', 'dependant', 'understudy'],
-                                'acc_portal_individuals': ['principal', 'director', 'dependant', 'understudy'],
-                                'acc_portal_company_duplicate': ['company'],
-                                'acc_portal_companies': ['company'],
-                                'tm_tasks': ['task']
-                            };
-                            
-                            const allowedEntityTypes = tableEntityMap[source.table] || [];
-                            const fieldEntityTypes = field.entityTypes || [];
-                            
-                            // Only add entity IDs if there's overlap between field types and table types
-                            const hasMatchingEntityType = allowedEntityTypes.length === 0 || 
-                                fieldEntityTypes.some(type => allowedEntityTypes.includes(type));
-                            
-                            if (hasMatchingEntityType) {
-                                entityIds.forEach(id => standardFetchQueue.get(source.table)!.add(String(id)));
+                            // 1. Determine the linking variable (Priority: Source Config > Table Default > 'id')
+                            let linkVar = source.linking_variable;
+                            if (!linkVar) {
+                                // Fallback for legacy tables if not defined in JSON
+                                if (source.table === 'acc_portal_directors_documents') linkVar = 'director_id';
+                                else if (source.table === 'acc_portal_company_documents') linkVar = 'company_id';
+                                else linkVar = 'id';
+                            }
+
+                            // 2. Initialize Queue for this table if not exists
+                            if (!standardFetchQueue.has(source.table)) {
+                                standardFetchQueue.set(source.table, { 
+                                    ids: new Set(), 
+                                    linkingVariable: linkVar 
+                                });
+                            }
+
+                            // 3. Add IDs to queue
+                            const queueItem = standardFetchQueue.get(source.table);
+                            if (queueItem && queueItem.linkingVariable === linkVar) {
+                                entityIds.forEach(id => queueItem.ids.add(String(id)));
                             }
                         }
                     });
@@ -316,35 +317,36 @@ export const AutomationMappingDialog = ({
       const documentCache = { documents: [], docTypes: [] };
       const fetchPromises = [];
 
-      const fullDocsDirectorIds = standardFetchQueue.get('acc_portal_directors_documents');
-      
-      // A. Batch Standard Tables (ONLY ONE QUERY PER TABLE)
-      for (const [table, ids] of standardFetchQueue.entries()) {
+      // A. Batch Standard Tables
+      for (const [table, { ids, linkingVariable }] of standardFetchQueue.entries()) {
         const idArray = Array.from(ids);
         if (idArray.length === 0) continue;
-        const queryField = table === 'acc_portal_directors_documents' ? 'director_id' : table === 'tm_tasks' ? 'id' : 'id';
         
         fetchPromises.push(
-            supabase.from(table).select('*').in(queryField, idArray)
-            .then(({ data, error }) => {
-                if (!error && data) {
-                    if (!newSourceData[table]) newSourceData[table] = {};
-                    data.forEach(record => {
-                        const recordKey = String(record[queryField]);
-                        newSourceData[table][recordKey] = record;
-                    });
-                    
-                    if (table === 'acc_portal_directors_documents') {
-                        documentCache.documents.push(...data);
+            supabase.from(table)
+                .select('*')
+                .in(linkingVariable, idArray)
+                .then(({ data, error }) => {
+                    if (!error && data) {
+                        if (!newSourceData[table]) newSourceData[table] = {};
+                        data.forEach(record => {
+                            // Map by linking variable value so we can retrieve it by ID later
+                            const recordKey = String(record[linkingVariable]);
+                            newSourceData[table][recordKey] = record;
+                        });
+                        
+                        if (table === 'acc_portal_directors_documents') {
+                            documentCache.documents.push(...data);
+                        }
                     }
-                }
-            })
+                })
         );
       }
 
       await Promise.all(fetchPromises);
 
       // B. Computed Documents (Batched, only for people not already fetched)
+      const fullDocsDirectorIds = standardFetchQueue.get('acc_portal_directors_documents')?.ids;
       const neededDocTypes = Array.from(computedRequirements.documentIds);
       const allNeededPeople = Array.from(computedRequirements.individualIds);
       
@@ -455,7 +457,6 @@ export const AutomationMappingDialog = ({
 
     // Guard: Prevent duplicate fetches
     if (isLoadingDocuments) {
-      console.log('[fetchDocumentFiles] Already loading, skipping...');
       return;
     }
 
@@ -483,18 +484,12 @@ export const AutomationMappingDialog = ({
     try {
       const results = [];
       
-      // OPTIMIZATION: Check if data is already in sourceData cache
-      const cachedPersonDocs = sourceData['acc_portal_directors_documents'];
-      if (cachedPersonDocs && personIds.size > 0) {
-        // Filter from cache instead of fetching
-        const cached = Object.values(cachedPersonDocs).filter((doc: any) => 
-          personIds.has(String(doc.director_id)) && requiredKycIds.has(doc.document_id)
-        );
-        if (cached.length > 0) {
-          results.push(...cached.map(d => ({ ...d, owner_type: 'person', owner_id: String(d.director_id) })));
-        }
-      } else if (personIds.size > 0 && requiredKycIds.size > 0) {
-        // Fallback to network
+      // FIX: Removed the logic that tried to read documents from sourceData cache.
+      // sourceData is a Key-Value map optimized for 1:1 records (e.g. Person ID -> Person Data).
+      // Since a Person can have multiple documents, storing them in sourceData causes key collisions
+      // (last document overwrites previous ones). We must fetch documents directly here to get the full list.
+      
+      if (personIds.size > 0 && requiredKycIds.size > 0) {
         const { data: personDocs } = await supabase.from('acc_portal_directors_documents')
           .select('*, kyc_document:acc_portal_kyc!document_id(*)')
           .in('director_id', Array.from(personIds)).in('document_id', Array.from(requiredKycIds)).neq('status', 'deleted');
@@ -509,7 +504,7 @@ export const AutomationMappingDialog = ({
       }
       setDocumentFiles(results);
     } catch (err) { console.error("Error fetching documents:", err); } finally { setIsLoadingDocuments(false); }
-  }, [selectedAutomationId, webData, resolveTargetEntityId, sourceData, isOpen]);
+  }, [selectedAutomationId, webData, resolveTargetEntityId, isOpen]);
 
   // --- INITIAL DATA FETCH ---
   useEffect(() => {
@@ -1004,6 +999,19 @@ export const AutomationMappingDialog = ({
                   }).join(' ');
 
                   const isValueMissing = !mergedValue || mergedValue === 'Missing' || mergedValue === '';
+
+                  // --- DEBUG LOGGING ADDED HERE ---
+                  const primarySource = sources[0];
+                  if (!field.is_computed) {
+                      // console.log(`[Automation Debug] Field: ${field.variableName}`, {
+                      //     entityType: field.entityTypes?.join(', '),
+                      //     targetEntityId: targetId,
+                      //     linkingVariable: primarySource?.linking_variable || 'id (implicit)',
+                      //     table: primarySource?.table,
+                      //     path: primarySource?.path,
+                      //     value: mergedValue
+                      // });
+                  }
 
                   return (
                     <TableRow key={fIdx} className="group hover:bg-slate-50 border-b border-slate-100">

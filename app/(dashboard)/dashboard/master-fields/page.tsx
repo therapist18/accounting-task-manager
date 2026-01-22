@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Plus, Search, Download, Edit, Trash2, LinkIcon } from "lucide-react"
+import { Plus, Search, Download, Edit, Trash2, LinkIcon, ListFilter, Calculator } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import type { JobField } from "../types/database"
 import { AddFieldDialog } from "./components/dialogs/add-field-dialog"
@@ -22,9 +22,14 @@ export default function JobFieldsPage() {
   const [fields, setFields] = useState<JobField[]>([])
   const [filteredFields, setFilteredFields] = useState<JobField[]>([])
   const [loading, setLoading] = useState(true)
+  
+  // Filter States
   const [searchTerm, setSearchTerm] = useState("")
   const [typeFilter, setTypeFilter] = useState<string>("all")
   const [requiredFilter, setRequiredFilter] = useState<string>("all")
+  const [categoryFilter, setCategoryFilter] = useState<string>("all") 
+  const [categories, setCategories] = useState<string[]>([]) 
+
   const [selectedField, setSelectedField] = useState<JobField | null>(null)
   const [dialogStates, setDialogStates] = useState({
     add: false,
@@ -34,30 +39,40 @@ export default function JobFieldsPage() {
   })
   const [allFields, setAllFields] = useState<JobField[]>([])
 
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(1)
-  const [itemsPerPage] = useState(10)
-
   // Sorting state
   const [sortConfig, setSortConfig] = useState<{ key: keyof JobField; direction: 'asc' | 'desc' } | null>({
     key: 'created_at',
     direction: 'desc'
   })
 
+  // 1. Fetch Data
   useEffect(() => {
     fetchFields()
   }, [])
 
+  // 2. Filter Trigger
   useEffect(() => {
     filterFields()
-  }, [fields, searchTerm, typeFilter, requiredFilter])
+  }, [fields, searchTerm, typeFilter, requiredFilter, categoryFilter])
 
   const fetchFields = async () => {
     try {
+      setLoading(true)
       const { data, error } = await supabase.from("tm_job_fields").select("*").order("created_at", { ascending: false })
 
       if (error) throw error
       setFields(data || [])
+      setAllFields(data || [])
+
+      // Extract Unique Categories for the Filter Dropdown
+      // We only want non-null, non-empty categories
+      const uniqueCats = Array.from(new Set(
+        (data || [])
+          .map((f: any) => f.category)
+          .filter((c) => c && typeof c === 'string' && c.trim().length > 0)
+      )) as string[]
+      
+      setCategories(uniqueCats.sort())
     } catch (error) {
       toast({
         title: "Error",
@@ -70,8 +85,9 @@ export default function JobFieldsPage() {
   }
 
   const filterFields = () => {
-    let filtered = fields
+    let filtered = [...fields]
 
+    // Search Filter
     if (searchTerm) {
       filtered = filtered.filter(
         (field) =>
@@ -80,13 +96,20 @@ export default function JobFieldsPage() {
       )
     }
 
+    // Type Filter
     if (typeFilter !== "all") {
       filtered = filtered.filter((field) => field.type === typeFilter)
     }
 
+    // Required Filter
     if (requiredFilter !== "all") {
       const isRequired = requiredFilter === "required"
       filtered = filtered.filter((field) => field.is_required === isRequired)
+    }
+
+    // Category Filter (Logic Fixed)
+    if (categoryFilter !== "all") {
+      filtered = filtered.filter((field) => field.category === categoryFilter)
     }
 
     setFilteredFields(filtered)
@@ -95,36 +118,21 @@ export default function JobFieldsPage() {
   const handleDeleteField = async (fieldId: string) => {
     try {
       const { error } = await supabase.from("tm_job_fields").delete().eq("id", fieldId)
-
       if (error) throw error
 
       setFields(fields.filter((field) => field.id !== fieldId))
-      toast({
-        title: "Success",
-        description: "Field deleted successfully",
-      })
+      toast({ title: "Success", description: "Field deleted successfully" })
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to delete field",
-        variant: "destructive",
-      })
+      toast({ title: "Error", description: "Failed to delete field", variant: "destructive" })
     }
   }
 
   const handleExportToExcel = async () => {
     try {
       await exportToExcel(fields)
-      toast({
-        title: "Success",
-        description: "Fields exported to Excel successfully",
-      })
+      toast({ title: "Success", description: "Fields exported to Excel successfully" })
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to export fields",
-        variant: "destructive",
-      })
+      toast({ title: "Error", description: "Failed to export fields", variant: "destructive" })
     }
   }
 
@@ -138,13 +146,19 @@ export default function JobFieldsPage() {
     setSelectedField(null)
   }
 
-  // Apply sorting to filtered fields
+  // Sorting Logic
   const sortedFields = React.useMemo(() => {
     const sortableItems = [...filteredFields]
     if (sortConfig !== null) {
       sortableItems.sort((a, b) => {
         let aValue = a[sortConfig.key]
         let bValue = b[sortConfig.key]
+
+        // Handle category specific sorting (treat null as "")
+        if (sortConfig.key === 'category') {
+             aValue = aValue || ""
+             bValue = bValue || ""
+        }
 
         // Handle undefined or null values
         if (aValue === undefined || aValue === null) return sortConfig.direction === 'asc' ? -1 : 1
@@ -157,19 +171,14 @@ export default function JobFieldsPage() {
         }
 
         // Compare values
-        if (aValue < bValue) {
-          return sortConfig.direction === 'asc' ? -1 : 1
-        }
-        if (aValue > bValue) {
-          return sortConfig.direction === 'asc' ? 1 : -1
-        }
+        if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1
+        if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1
         return 0
       })
     }
     return sortableItems
   }, [filteredFields, sortConfig])
 
-  // Handle sort request
   const requestSort = (key: keyof JobField) => {
     let direction: 'asc' | 'desc' = 'asc'
     if (sortConfig?.key === key && sortConfig.direction === 'asc') {
@@ -178,7 +187,6 @@ export default function JobFieldsPage() {
     setSortConfig({ key, direction })
   }
 
-  // Sort indicator
   const getSortIndicator = (key: keyof JobField) => {
     if (sortConfig?.key !== key) return null
     return sortConfig.direction === 'asc' ? ' ↑' : ' ↓'
@@ -230,6 +238,21 @@ export default function JobFieldsPage() {
                     className="pl-10 w-full sm:w-64 bg-slate-50 dark:bg-slate-800 border-slate-300 dark:border-slate-700 focus-visible:ring-blue-500"
                   />
                 </div>
+                
+                {/* CATEGORY FILTER */}
+                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                  <SelectTrigger className="w-full sm:w-[180px] bg-slate-50 border-slate-300">
+                    <ListFilter className="w-4 h-4 mr-2 text-slate-500" />
+                    <SelectValue placeholder="All Sections" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Sections</SelectItem>
+                    {categories.map(cat => (
+                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
                   <SelectTrigger className="w-full sm:w-[160px] bg-slate-50 dark:bg-slate-800 border-slate-300 dark:border-slate-700 focus:ring-blue-500">
                     <SelectValue placeholder="Filter by type" />
@@ -242,6 +265,7 @@ export default function JobFieldsPage() {
                     <SelectItem value="select">Select</SelectItem>
                   </SelectContent>
                 </Select>
+                
                 <Select value={requiredFilter} onValueChange={setRequiredFilter}>
                   <SelectTrigger className="w-full sm:w-[160px] bg-slate-50 dark:bg-slate-800 border-slate-300 dark:border-slate-700 focus:ring-blue-500">
                     <SelectValue placeholder="Filter by required" />
@@ -278,6 +302,12 @@ export default function JobFieldsPage() {
                       onClick={() => requestSort('type')}
                     >
                       Type{getSortIndicator('type')}
+                    </TableHead>
+                    <TableHead
+                      className="py-4 px-6 text-white border-r cursor-pointer hover:bg-blue-600 transition-colors"
+                      onClick={() => requestSort('category')}
+                    >
+                      Section{getSortIndicator('category')}
                     </TableHead>
                     <TableHead
                       className="py-4 px-6 text-white border-r cursor-pointer hover:bg-blue-600 transition-colors"
@@ -322,6 +352,11 @@ export default function JobFieldsPage() {
                           </Badge>
                         </TableCell>
                         <TableCell className="p-6 border-r">
+                          <Badge variant="secondary" className="bg-slate-100 text-slate-700">
+                            {field.category || "General"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="p-6 border-r">
                           <Badge
                             variant={field.is_required ? "default" : "outline"}
                             className={
@@ -359,13 +394,12 @@ export default function JobFieldsPage() {
                           <div className="flex items-center justify-end space-x-1">
                             <Button
                               variant="ghost"
-                              size="sm" // Changed to sm for better fit
+                              size="sm"
                               className="text-blue-600 hover:bg-blue-50 hover:text-blue-700"
                               onClick={() => openDialog("edit", field)}
                             >
                               <Edit className="h-4 w-4 mr-1" /> Edit
                             </Button>
-                            {/* Link button REMOVED - functionality merged into Edit */}
                             <Button
                               variant="ghost"
                               size="icon"
@@ -379,8 +413,8 @@ export default function JobFieldsPage() {
                       </TableRow>
                     ))
                   ) : (
-                    <TableRow>
-                      <TableCell colSpan={8} className="h-24 text-center text-slate-500 dark:text-slate-400">
+                    <TableRow>  
+                      <TableCell colSpan={9} className="h-24 text-center text-slate-500 dark:text-slate-400">
                         No fields found. Try adjusting your search or filters.
                       </TableCell>
                     </TableRow>
@@ -392,7 +426,7 @@ export default function JobFieldsPage() {
           </CardContent>
         </Card>
 
-        {/* Dialogs will inherit the theme through shadcn's styling */}
+        {/* Dialogs */}
         <AddFieldDialog open={dialogStates.add} onOpenChange={() => closeDialog("add")} onSuccess={fetchFields} />
         <EditFieldDialog
           open={dialogStates.edit}
