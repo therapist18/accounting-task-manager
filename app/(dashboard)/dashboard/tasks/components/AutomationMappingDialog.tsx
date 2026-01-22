@@ -1003,14 +1003,14 @@ export const AutomationMappingDialog = ({
                   // --- DEBUG LOGGING ADDED HERE ---
                   const primarySource = sources[0];
                   if (!field.is_computed) {
-                      // console.log(`[Automation Debug] Field: ${field.variableName}`, {
-                      //     entityType: field.entityTypes?.join(', '),
-                      //     targetEntityId: targetId,
-                      //     linkingVariable: primarySource?.linking_variable || 'id (implicit)',
-                      //     table: primarySource?.table,
-                      //     path: primarySource?.path,
-                      //     value: mergedValue
-                      // });
+                      console.log(`[Automation Debug] Field: ${field.variableName}`, {
+                          entityType: field.entityTypes?.join(', '),
+                          targetEntityId: targetId,
+                          linkingVariable: primarySource?.linking_variable || 'id (implicit)',
+                          table: primarySource?.table,
+                          path: primarySource?.path,
+                          value: mergedValue
+                      });
                   }
 
                   return (
