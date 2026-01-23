@@ -9,6 +9,7 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
+  DialogTrigger,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -147,9 +148,11 @@ function ArrayConfigurator({ group, masterFields, onUpdate }: { group: WebDataGr
     onUpdate(newItems);
   };
 
+  const [open, setOpen] = useState(false);
+
   return (
-    <Popover>
-      <PopoverTrigger asChild>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
         <Button variant="outline" size="sm" className={cn(
           "w-full justify-between px-3 text-sm bg-white border-slate-200",
           items.length > 0 ? "text-blue-700 border-blue-200 bg-blue-50" : "text-slate-500"
@@ -160,144 +163,154 @@ function ArrayConfigurator({ group, masterFields, onUpdate }: { group: WebDataGr
           </span>
           <ChevronRight className="h-3 w-3 opacity-50" />
         </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[800px] p-0 shadow-2xl border-slate-200" align="start">
-        {/* Header */}
-        <div className="bg-slate-50/80 backdrop-blur px-4 py-3 border-b flex justify-between items-center">
-          <div>
-            <span className="text-sm font-bold text-slate-800 flex items-center gap-2">
-              <TableIcon className="h-4 w-4 text-blue-600" /> Array Column Mapping
-            </span>
-            <p className="text-[10px] text-slate-500 mt-0.5">
-              Define the schema for rows within the <strong>{group.variableName}</strong> array.
-            </p>
-          </div>
-          <Button size="sm" onClick={addItem} className="h-7 text-sm bg-blue-600 hover:bg-blue-700 text-white shadow-sm">
+      </DialogTrigger>
+      <DialogContent className="max-w-4xl max-h-[80vh] p-0">
+        <DialogHeader className="px-6 py-4 border-b bg-slate-50">
+          <DialogTitle className="flex items-center gap-2 text-slate-800">
+            <TableIcon className="h-4 w-4 text-blue-600" />
+            Array Column Mapping
+          </DialogTitle>
+          <DialogDescription>
+            Define the schema for rows within the <strong>{group.variableName}</strong> array.
+          </DialogDescription>
+          <Button size="sm" onClick={addItem} className="h-7 text-sm bg-blue-600 hover:bg-blue-700 text-white shadow-sm absolute right-6 top-4">
             <Plus className="h-3 w-3 mr-1" /> Add Column
           </Button>
-        </div>
+        </DialogHeader>
 
-        {/* Table Header Row */}
-        <div className="grid grid-cols-12 gap-4 px-4 py-2 bg-slate-100/50 border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-          <div className="col-span-3">Web Key (JSON Property)</div>
-          <div className="col-span-3">Data Type & Format</div>
-          <div className="col-span-5">Source Mapping</div>
-          <div className="col-span-1 text-center">Action</div>
-        </div>
-
-        {/* Rows */}
-        <ScrollArea className="max-h-[400px] bg-white">
-          <div className="divide-y divide-slate-100">
-            {items.length === 0 ? (
-              <div className="py-12 flex flex-col items-center justify-center text-slate-300">
-                <TableIcon className="h-10 w-10 mb-2 opacity-20" />
-                <p className="text-sm">No columns defined yet.</p>
-              </div>
-            ) : (
-              items.map((item, i) => {
-                const linkedField = masterFields.find(f => f.id === item.linkedMasterFieldId);
-                const isComputed = linkedField?.is_computed || linkedField?.computed_config?.is_computed;
-
-                return (
-                  <div key={i} className="grid grid-cols-12 gap-4 px-4 py-3 items-start hover:bg-slate-50 transition-colors group">
-                    
-                    {/* 1. Web Key */}
-                    <div className="col-span-3">
-                      <Input
-                        value={item.variableName}
-                        onChange={e => handleItemChange(i, 'variableName', e.target.value)}
-                        placeholder="e.g. first_name"
-                        className="h-8 text-sm  border-slate-200 focus:border-blue-400"
-                      />
-                    </div>
-
-                    {/* 2. Type & Format */}
-                    <div className="col-span-3 flex flex-col gap-2">
-                      <Select value={item.type} onValueChange={(val) => handleItemChange(i, 'type', val)}>
-                        <SelectTrigger className="h-8 text-sm border-slate-200"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="text">Text</SelectItem>
-                          <SelectItem value="number">Number</SelectItem>
-                          <SelectItem value="date">Date</SelectItem>
-                          <SelectItem value="boolean">Boolean</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      
-                      {item.type === 'date' && (
-                        <Select value={item.dateFormat || 'iso'} onValueChange={(val) => handleItemChange(i, 'dateFormat', val)}>
-                          <SelectTrigger className="h-7 text-[10px] bg-blue-50 text-blue-700 border-blue-100">
-                            <span className="truncate">Fmt: <SelectValue /></span>
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="iso">YYYY-MM-DD</SelectItem>
-                            <SelectItem value="object_split">Object &#123;d, m, y&#125;</SelectItem>
-                            <SelectItem value="dd_mm_yyyy">DD/MM/YYYY</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      )}
-                    </div>
-
-                    {/* 3. Source Mapping */}
-                    <div className="col-span-5 space-y-2">
-                      <div className="flex gap-1">
-                        <div className={cn(
-                          "flex-1 flex items-center px-3 h-8 rounded-md border text-sm transition-colors",
-                          linkedField 
-                            ? "bg-blue-50 border-blue-200 text-blue-700" 
-                            : "bg-slate-50 border-slate-200 text-slate-400 italic"
-                        )}>
-                          <Database className="h-3.5 w-3.5 mr-2 opacity-70" />
-                          <span className="truncate font-medium">
-                            {linkedField ? linkedField.label : "Manual Entry / None"}
-                          </span>
-                        </div>
-                        <MasterFieldPicker
-                          availableFields={masterFields}
-                          onSelect={(f) => linkMasterField(i, f)}
-                        />
+        {/* Table */}
+        <ScrollArea className="max-h-[400px]">
+          <div className="w-full">
+            <Table>
+              <TableHeader className="bg-slate-100/50 border-b border-slate-200 sticky top-0 z-10">
+                <TableRow>
+                  <TableHead className="w-[25%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Web Key (JSON Property)</TableHead>
+                  <TableHead className="w-[25%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Data Type & Format</TableHead>
+                  <TableHead className="w-[42%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Source Mapping</TableHead>
+                  <TableHead className="w-[8%] text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {items.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="py-12">
+                      <div className="flex flex-col items-center justify-center text-slate-300">
+                        <TableIcon className="h-10 w-10 mb-2 opacity-20" />
+                        <p className="text-sm">No columns defined yet.</p>
                       </div>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  items.map((item, i) => {
+                    const linkedField = masterFields.find(f => f.id === item.linkedMasterFieldId);
+                    const isComputed = linkedField?.is_computed || linkedField?.computed_config?.is_computed;
 
-                      {/* Extraction Mode for Computed Fields inside Array */}
-                      {isComputed && (
-                         <div className="flex items-center gap-2 bg-purple-50 px-2 py-1.5 rounded border border-purple-100">
-                           <Label className="text-[9px] text-purple-700 font-bold uppercase whitespace-nowrap">
-                             Mode:
-                           </Label>
-                           <Select
-                             value={item.extractionMode || 'latest'}
-                             onValueChange={(val) => handleItemChange(i, 'extractionMode', val)}
-                           >
-                             <SelectTrigger className="h-5 text-[10px] border-none bg-white/50 shadow-none p-0 px-1.5 w-full">
-                               <SelectValue />
-                             </SelectTrigger>
-                             <SelectContent>
-                               <SelectItem value="latest">Latest Doc</SelectItem>
-                               <SelectItem value="all">All Docs</SelectItem>
-                             </SelectContent>
-                           </Select>
-                         </div>
-                      )}
-                    </div>
+                    return (
+                      <TableRow key={i} className="hover:bg-slate-50 transition-colors group">
+                        
+                        {/* 1. Web Key */}
+                        <TableCell className="p-3">
+                          <Input
+                            value={item.variableName}
+                            onChange={e => handleItemChange(i, 'variableName', e.target.value)}
+                            placeholder="e.g. first_name"
+                            className="h-8 text-sm border-slate-200 focus:border-blue-400"
+                          />
+                        </TableCell>
 
-                    {/* 4. Action */}
-                    <div className="col-span-1 flex justify-center pt-1">
-                      <Button 
-                        size="icon" 
-                        variant="ghost" 
-                        className="h-7 w-7 text-slate-300 hover:text-red-500 hover:bg-red-50" 
-                        onClick={() => removeItem(i)}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                )
-              })
-            )}
+                        {/* 2. Type & Format */}
+                        <TableCell className="p-3">
+                          <div className="flex flex-col gap-2">
+                            <Select value={item.type} onValueChange={(val) => handleItemChange(i, 'type', val)}>
+                              <SelectTrigger className="h-8 text-sm border-slate-200"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="text">Text</SelectItem>
+                                <SelectItem value="number">Number</SelectItem>
+                                <SelectItem value="date">Date</SelectItem>
+                                <SelectItem value="boolean">Boolean</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            
+                            {item.type === 'date' && (
+                              <Select value={item.dateFormat || 'iso'} onValueChange={(val) => handleItemChange(i, 'dateFormat', val)}>
+                                <SelectTrigger className="h-7 text-[10px] bg-blue-50 text-blue-700 border-blue-100">
+                                  <span className="truncate">Fmt: <SelectValue /></span>
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="iso">YYYY-MM-DD</SelectItem>
+                                  <SelectItem value="object_split">Object &#123;d, m, y&#125;</SelectItem>
+                                  <SelectItem value="dd_mm_yyyy">DD/MM/YYYY</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            )}
+                          </div>
+                        </TableCell>
+
+                        {/* 3. Source Mapping */}
+                        <TableCell className="p-3">
+                          <div className="space-y-2">
+                            <div className="flex gap-1">
+                              <div className={cn(
+                                "flex-1 flex items-center px-3 h-8 rounded-md border text-sm transition-colors",
+                                linkedField 
+                                  ? "bg-blue-50 border-blue-200 text-blue-700" 
+                                  : "bg-slate-50 border-slate-200 text-slate-400 italic"
+                              )}>
+                                <Database className="h-3.5 w-3.5 mr-2 opacity-70" />
+                                <span className="truncate font-medium">
+                                  {linkedField ? linkedField.label : "Manual Entry / None"}
+                                </span>
+                              </div>
+                              <MasterFieldPicker
+                                availableFields={masterFields}
+                                onSelect={(f) => linkMasterField(i, f)}
+                              />
+                            </div>
+
+                            {/* Extraction Mode for Computed Fields inside Array */}
+                            {isComputed && (
+                               <div className="flex items-center gap-2 bg-purple-50 px-2 py-1.5 rounded border border-purple-100">
+                                 <Label className="text-[9px] text-purple-700 font-bold uppercase whitespace-nowrap">
+                                   Mode:
+                                 </Label>
+                                 <Select
+                                   value={item.extractionMode || 'latest'}
+                                   onValueChange={(val) => handleItemChange(i, 'extractionMode', val)}
+                                 >
+                                   <SelectTrigger className="h-5 text-[10px] border-none bg-white/50 shadow-none p-0 px-1.5 w-full">
+                                     <SelectValue />
+                                   </SelectTrigger>
+                                   <SelectContent>
+                                     <SelectItem value="latest">Latest Doc</SelectItem>
+                                     <SelectItem value="all">All Docs</SelectItem>
+                                   </SelectContent>
+                                 </Select>
+                               </div>
+                            )}
+                          </div>
+                        </TableCell>
+
+                        {/* 4. Action */}
+                        <TableCell className="p-3 text-center">
+                          <Button 
+                            size="icon" 
+                            variant="ghost" 
+                            className="h-7 w-7 text-slate-300 hover:text-red-500 hover:bg-red-50" 
+                            onClick={() => removeItem(i)}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })
+                )}
+              </TableBody>
+            </Table>
           </div>
         </ScrollArea>
-      </PopoverContent>
-    </Popover>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -828,7 +841,7 @@ function WebDataGroupEditDialog({
                                  </Select>
                               </div>
 
-                              <div className="border rounded-md bg-white p-2 space-y-2">
+                              <div className="border rounded-md bg-white p-2 space-y-2 overflow-auto max-h-[300px]">
                                  {editingGroup.linkedKycDocuments?.map((docId, index) => {
                                     const doc = kycDocuments.find(d => d.id === docId);
                                     return (
@@ -992,6 +1005,18 @@ function AddDataFieldDialog({
     const [selectedTab, setSelectedTab] = useState("db");
     const [dbFieldOpen, setDbFieldOpen] = useState(false);
     const [docFieldOpen, setDocFieldOpen] = useState(false);
+    const [selectedFields, setSelectedFields] = useState<number[]>([]);
+    const [selectedDocuments, setSelectedDocuments] = useState<string[]>([]);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [docSearchTerm, setDocSearchTerm] = useState("");
+
+    const filteredFields = masterFields.filter(field =>
+        field.label.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    const filteredDocuments = kycDocuments.filter(doc =>
+        (doc.display_name || '').toLowerCase().includes(docSearchTerm.toLowerCase())
+    );
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1022,35 +1047,72 @@ function AddDataFieldDialog({
                                 <Label>Select Field</Label>
                                 <Popover open={dbFieldOpen} onOpenChange={setDbFieldOpen}>
                                     <PopoverTrigger asChild>
-                                        <Button variant="outline" role="combobox" aria-expanded={dbFieldOpen} className="w-full justify-between font-normal">
-                                            Select a field...
+                                        <Button variant="outline" role="combobox" className="w-full justify-between font-normal">
+                                            {selectedFields?.length > 0 
+                                                ? `${selectedFields.length} field${selectedFields.length > 1 ? 's' : ''} selected`
+                                                : "Select fields..."
+                                            }
                                             <Search className="ml-2 h-4 w-4 opacity-50" />
                                         </Button>
                                     </PopoverTrigger>
                                     <PopoverContent className="w-[450px] p-0" align="start">
-                                        <Command>
-                                            <CommandInput placeholder="Search database fields..." />
-                                            <CommandList>
-                                                <CommandEmpty>No field found.</CommandEmpty>
-                                                <CommandGroup>
-                                                    <ScrollArea className="h-[200px]">
-                                                        {masterFields.map((field) => (
-                                                            <CommandItem
-                                                                key={field.id}
-                                                                value={field.label}
-                                                                onSelect={() => {
-                                                                    onAdd('db', field);
-                                                                    setDbFieldOpen(false);
-                                                                }}
-                                                            >
-                                                                <Database className="mr-2 h-4 w-4 text-slate-400" />
-                                                                {field.label}
-                                                            </CommandItem>
-                                                        ))}
-                                                    </ScrollArea>
-                                                </CommandGroup>
-                                            </CommandList>
-                                        </Command>
+                                        <div className="p-3 border-b">
+                                            <Input
+                                                placeholder="Search database fields..."
+                                                className="h-9 text-sm"
+                                                value={searchTerm}
+                                                onChange={(e) => setSearchTerm(e.target.value)}
+                                            />
+                                        </div>
+                                        <ScrollArea className="h-[200px]">
+                                            <div className="p-1">
+                                                {filteredFields.length === 0 ? (
+                                                    <div className="py-6 text-center text-sm text-slate-500">
+                                                        No field found.
+                                                    </div>
+                                                ) : (
+                                                    filteredFields.map((field) => (
+                                                        <div
+                                                            key={field.id}
+                                                            className="flex items-center gap-2 p-2 rounded-sm hover:bg-slate-100 cursor-pointer"
+                                                            onClick={() => {
+                                                                const isSelected = selectedFields?.includes(field.id);
+                                                                if (isSelected) {
+                                                                    setSelectedFields(selectedFields.filter(id => id !== field.id));
+                                                                } else {
+                                                                    setSelectedFields([...(selectedFields || []), field.id]);
+                                                                }
+                                                            }}
+                                                        >
+                                                            <Check className={cn(
+                                                                "h-4 w-4",
+                                                                selectedFields?.includes(field.id) ? "opacity-100" : "opacity-0"
+                                                            )} />
+                                                            <Database className="h-4 w-4 text-slate-400" />
+                                                            <span className="text-sm">{field.label}</span>
+                                                        </div>
+                                                    ))
+                                                )}
+                                            </div>
+                                        </ScrollArea>
+                                        {selectedFields && selectedFields.length > 0 && (
+                                            <div className="border-t p-2">
+                                                <Button 
+                                                    size="sm" 
+                                                    className="w-full"
+                                                    onClick={() => {
+                                                        selectedFields.forEach(fieldId => {
+                                                            const field = masterFields.find(f => f.id === fieldId);
+                                                            if (field) onAdd('db', field);
+                                                        });
+                                                        setSelectedFields([]);
+                                                        setDbFieldOpen(false);
+                                                    }}
+                                                >
+                                                    Add {selectedFields.length} Selected Fields
+                                                </Button>
+                                            </div>
+                                        )}
                                     </PopoverContent>
                                 </Popover>
                             </div>
@@ -1070,34 +1132,71 @@ function AddDataFieldDialog({
                                 <Popover open={docFieldOpen} onOpenChange={setDocFieldOpen}>
                                     <PopoverTrigger asChild>
                                         <Button variant="outline" role="combobox" aria-expanded={docFieldOpen} className="w-full justify-between font-normal">
-                                            Select a document...
+                                            {selectedDocuments?.length > 0 
+                                                ? `${selectedDocuments.length} document${selectedDocuments.length > 1 ? 's' : ''} selected`
+                                                : "Select documents..."
+                                            }
                                             <Search className="ml-2 h-4 w-4 opacity-50" />
                                         </Button>
                                     </PopoverTrigger>
                                     <PopoverContent className="w-[450px] p-0" align="start">
-                                        <Command>
-                                            <CommandInput placeholder="Search documents..." />
-                                            <CommandList>
-                                                <CommandEmpty>No document found.</CommandEmpty>
-                                                <CommandGroup>
-                                                    <ScrollArea className="h-[200px]">
-                                                        {kycDocuments.map((doc) => (
-                                                            <CommandItem
-                                                                key={doc.id}
-                                                                value={doc.display_name}
-                                                                onSelect={() => {
-                                                                    onAdd('document', doc);
-                                                                    setDocFieldOpen(false);
-                                                                }}
-                                                            >
-                                                                <FileText className="mr-2 h-4 w-4 text-amber-400" />
-                                                                {doc.display_name}
-                                                            </CommandItem>
-                                                        ))}
-                                                    </ScrollArea>
-                                                </CommandGroup>
-                                            </CommandList>
-                                        </Command>
+                                        <div className="p-3 border-b">
+                                            <Input
+                                                placeholder="Search documents..."
+                                                className="h-9 text-sm"
+                                                value={docSearchTerm}
+                                                onChange={(e) => setDocSearchTerm(e.target.value)}
+                                            />
+                                        </div>
+                                        <ScrollArea className="h-[200px]">
+                                            <div className="p-1">
+                                                {filteredDocuments.length === 0 ? (
+                                                    <div className="py-6 text-center text-sm text-slate-500">
+                                                        No document found.
+                                                    </div>
+                                                ) : (
+                                                    filteredDocuments.map((doc) => (
+                                                        <div
+                                                            key={doc.id}
+                                                            className="flex items-center gap-2 p-2 rounded-sm hover:bg-slate-100 cursor-pointer"
+                                                            onClick={() => {
+                                                                const isSelected = selectedDocuments?.includes(doc.id);
+                                                                if (isSelected) {
+                                                                    setSelectedDocuments(selectedDocuments.filter(id => id !== doc.id));
+                                                                } else {
+                                                                    setSelectedDocuments([...(selectedDocuments || []), doc.id]);
+                                                                }
+                                                            }}
+                                                        >
+                                                            <Check className={cn(
+                                                                "h-4 w-4",
+                                                                selectedDocuments?.includes(doc.id) ? "opacity-100" : "opacity-0"
+                                                            )} />
+                                                            <FileText className="h-4 w-4 text-amber-400" />
+                                                            <span className="text-sm">{doc.display_name || 'Unnamed Document'}</span>
+                                                        </div>
+                                                    ))
+                                                )}
+                                            </div>
+                                        </ScrollArea>
+                                        {selectedDocuments && selectedDocuments.length > 0 && (
+                                            <div className="border-t p-2">
+                                                <Button 
+                                                    size="sm" 
+                                                    className="w-full"
+                                                    onClick={() => {
+                                                        selectedDocuments.forEach(docId => {
+                                                            const doc = kycDocuments.find(d => d.id === docId);
+                                                            if (doc) onAdd('document', doc);
+                                                        });
+                                                        setSelectedDocuments([]);
+                                                        setDocFieldOpen(false);
+                                                    }}
+                                                >
+                                                    Add {selectedDocuments.length} Selected Documents
+                                                </Button>
+                                            </div>
+                                        )}
                                     </PopoverContent>
                                 </Popover>
                             </div>
