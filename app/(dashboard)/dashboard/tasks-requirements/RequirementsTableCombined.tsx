@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { AlertTriangle, Briefcase, Users, Plus, Minus, UserCheck, Loader2, Download, FileText, FileUp, Trash2, RefreshCw, Wand2, Save, ChevronDown, ChevronRight, Users2, User, Building2, Zap, FileType } from "lucide-react"
+import { AlertTriangle, Briefcase, Users, Plus, Minus, UserCheck, Loader2, Download, FileText, FileUp, Trash2, RefreshCw, Wand2, Save, ChevronDown, ChevronRight, Users2, User, Building2, Zap, FileType, UploadCloud, Eye } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import * as XLSX from 'xlsx'
@@ -66,7 +66,7 @@ const getFileUrl = (filePath: string) => {
   // If it's already a full URL, return as is
   if (filePath.startsWith('http')) return filePath;
   // Otherwise, construct the Supabase storage URL
-  return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
+  return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${filePath}`;
 };
 
 export default function RequirementsTableCombined({ loading, error, filteredGroupedTasks, organizedRequirements, classRequirements, expandedDocuments, toggleDocumentExpansion, renderDocumentStatus, renderClientFieldData, renderReferencesData, hasReferencesColumn, individualNames, companyData, getCurrentRequirements, fuzzyMatch, kycDocuments, documentTypes, mainTab, handleUploadSubmit, handleDeleteDocument, handleRetryExtraction, handleSaveEditedDocument, documentTemplates, allIndividualDocuments, allCompanyDocuments, }: any) {
@@ -78,6 +78,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     letters: true,
   });
   const [expandedDependants, setExpandedDependants] = useState<Set<number>>(new Set());
+  const [expandedCompositeRequirements, setExpandedCompositeRequirements] = useState<Set<string>>(new Set());
 
   const toggleDependants = (groupIndex: number) => {
     setExpandedDependants(prev => {
@@ -90,6 +91,19 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       return newSet;
     });
   };
+
+  const toggleCompositeRequirement = (requirementId: string) => {
+    setExpandedCompositeRequirements(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(requirementId)) {
+        newSet.delete(requirementId);
+      } else {
+        newSet.add(requirementId);
+      }
+      return newSet;
+    });
+  };
+
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [selectedDocForUpload, setSelectedDocForUpload] = useState<any>(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
@@ -99,6 +113,9 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   const [isPreparingTemplate, setIsPreparingTemplate] = useState(false);
   const [masterFields, setMasterFields] = useState<Map<number, any>>(new Map());
   const hasFetchedMasterFields = useRef(false);
+
+  // New state for document metadata cache
+  const [documentMetadataCache, setDocumentMetadataCache] = useState<Map<string, any>>(new Map());
 
   // RequirementsTableCombined.tsx - Around line 105
   const classDocsAndFields = useMemo(() => { return classRequirements?.[0]?.documents_and_fields || []; }, [classRequirements]);
@@ -175,8 +192,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       }
 
       // 3. HANDLE PRINCIPAL INDIVIDUAL FROM PARTICIPANTS (if not already added as applicant)
-      const principalIndividual = participants.find(p => 
-        p.type === 'individual' && 
+      const principalIndividual = participants.find(p =>
+        p.type === 'individual' &&
         (p.role === 'principal' || p.role === 'applicant' || (!p.role && !p.relationship))
       );
       if (principalIndividual && (!applicant || applicant.id !== principalIndividual.id)) {
@@ -316,6 +333,40 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     fetchMasterFields();
   }, []);
 
+  // Fetch document metadata in batch
+  useEffect(() => {
+    const fetchDocumentMetadata = async () => {
+      // Collect all unique document IDs from requirements
+      const allDocIds = new Set<string>();
+
+      Object.values(organizedRequirements.documents).forEach((reqList: any[]) => {
+        reqList.forEach(req => {
+          if (req.kyc_document_ids) {
+            req.kyc_document_ids.forEach(id => allDocIds.add(id));
+          }
+        });
+      });
+
+      if (allDocIds.size === 0) return;
+
+      try {
+        const { data, error } = await supabase
+          .from('acc_portal_kyc')
+          .select('*')
+          .in('id', Array.from(allDocIds));
+
+        if (error) throw error;
+
+        const metadataMap = new Map(data.map(doc => [doc.id, doc]));
+        setDocumentMetadataCache(metadataMap);
+      } catch (error) {
+        console.error('Error fetching document metadata:', error);
+      }
+    };
+
+    fetchDocumentMetadata();
+  }, [organizedRequirements]);
+
   const fetchDocumentTemplates = async (documentId: string, task: any) => {
     try {
       console.log('=== fetchDocumentTemplates Debug ===');
@@ -335,10 +386,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         .order('file_name', { ascending: true });
 
       // If bank ID is found, filter templates by bank_id
-      // If bank ID is found, filter templates by bank_id
       if (bankId) {
         console.log(`Filtering templates for bank ID: ${bankId}`);
-        // Use raw SQL filter for JSONB array containment
         query = query.filter('banks_associated', 'cs', `[{"bank_id":${bankId},"bank_name":"${bankParticipant.name}"}]`);
       } else {
         console.log('No bank ID found, fetching all templates for document');
@@ -357,7 +406,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       }
 
       console.log(`Found ${templates?.length || 0} templates`);
-      console.log('Templates sample:', templates?.slice(0, 2)); // Log first 2 templates to avoid cluttering
+      console.log('Templates sample:', templates?.slice(0, 2));
       console.log('=== End of Debug ===');
 
       return templates || [];
@@ -375,8 +424,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
       // 2. Resolve Company ID and Name robustly
       let companyId = task.company_id;
-      let companyName = task.company_name; // Define companyName
-      
+      let companyName = task.company_name;
+
       if (!companyId && task.participants_details) {
         const companyPart = task.participants_details.find(p => p.type === 'company');
         companyId = companyPart?.id;
@@ -404,7 +453,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       const entityIdMap = {
         company: companyId,
         directors: companyRelationships?.directors?.map(d => d.id) || [],
-        // FIX: If we are in a director column, set THIS specific ID as the target director
         director: colType === 'director' ? colId : (companyRelationships?.directors?.[0]?.id || null),
         principal: colType === 'principal' ? colId : (companyRelationships?.principal?.id || null),
         dependants: companyRelationships?.dependants?.map(d => d.id) || [],
@@ -417,7 +465,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       if (!templates || templates.length === 0) {
         console.log('❌ No templates found, showing toast...');
         toast.error(`No templates are available for: ${docItem.document.display_name}`, {
-          duration: 5000, // 5 seconds
+          duration: 5000,
           style: {
             background: 'hsl(var(--destructive))',
             color: 'hsl(var(--destructive-foreground))',
@@ -454,18 +502,15 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                   if (!tableQueries.links.has(linkVar)) {
                     tableQueries.links.set(linkVar, new Set());
                   }
-                  // Handle both single entity IDs and arrays of entity IDs (for directors)
                   if (Array.isArray(entityId)) {
                     entityId.forEach(id => {
                       if (id) {
-                        // Extract ID if it's an object, otherwise use as is
                         const idValue = id && typeof id === 'object' ? (id.id || id.director_id || id.individual_id || id.company_id) : id;
                         if (idValue) tableQueries.links.get(linkVar).add(idValue);
                       }
                     });
                   } else {
                     if (entityId) {
-                      // Extract ID if it's an object, otherwise use as is
                       const idValue = entityId && typeof entityId === 'object' ?
                         (entityId.id || entityId.director_id || entityId.individual_id || entityId.company_id) :
                         entityId;
@@ -478,7 +523,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
           });
 
           if (placeholder.type === 'document_checklist' && placeholder.linked_document_ids) {
-            // Get data source configuration with defaults
             const dataSource = placeholder.checklist_data_source || {
               table: 'acc_portal_kyc_uploads',
               linking_variable: 'company_id',
@@ -493,19 +537,16 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
               linkedDocs: placeholder.linked_document_ids
             });
 
-            // Initialize table queries if not exists
             if (!queriesToRun.has(tableName)) {
               queriesToRun.set(tableName, { docIds: new Set(), links: new Map() });
             }
 
             const tableQueries = queriesToRun.get(tableName);
 
-            // Add document IDs
             placeholder.linked_document_ids.forEach(docId => {
               tableQueries.docIds.add(docId);
             });
 
-            // Determine entity type and ID
             const entityType = Array.isArray(placeholder.entity_type)
               ? placeholder.entity_type[0]
               : placeholder.entity_type || 'company';
@@ -513,14 +554,12 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             const entityId = entityIdMap[entityType] || entityIdMap.company;
 
             if (entityId) {
-              // Use the configured linking variable
               const linkVar = dataSource.linking_variable;
 
               if (!tableQueries.links.has(linkVar)) {
                 tableQueries.links.set(linkVar, new Set());
               }
 
-              // Handle both single IDs and arrays
               if (Array.isArray(entityId)) {
                 entityId.forEach(id => {
                   const idValue = id && typeof id === 'object'
@@ -559,10 +598,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         const records = new Map();
         console.log(`  - Querying table '${table}'...`);
 
-        // CORRECTED CODE
-        // Handle dynamic document tables (acc_portal_kyc_uploads, acc_portal_directors_documents, etc.)
         if (table === 'acc_portal_kyc_uploads' || table === 'acc_portal_directors_documents') {
-          // Filter valid UUIDs
           const validDocIds = [...docIds].filter(id =>
             /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
           );
@@ -570,12 +606,10 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
           if (validDocIds.length > 0) {
             console.log(`[Query Execution] Fetching from ${table}:`, validDocIds);
 
-            // ✅ FIX: Determine the correct document ID field for this table
             const docIdField = table === 'acc_portal_kyc_uploads' ? 'kyc_document_id' : 'document_id';
 
             console.log(`[Query Execution] Using document ID field: ${docIdField}`);
 
-            // ✅ FIX: Use single .in() with correct field
             let query = supabase
               .from(table)
               .select('*')
@@ -591,7 +625,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             }
           }
 
-          // Continue with linking variables...
           for (const [linkVar, entityIdsSet] of links.entries()) {
             const entityIds = Array.from(entityIdsSet).map(id => {
               if (id && typeof id === 'object') {
@@ -638,14 +671,12 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
           }
 
           for (const [linkVar, entityIdsSet] of links.entries()) {
-            // Convert Set to array and ensure all values are primitives
             const entityIds = Array.from(entityIdsSet).map(id => {
-              // If it's an object with id property, extract it
               if (id && typeof id === 'object') {
                 return id.id || id.director_id || id.individual_id || id.company_id;
               }
               return id;
-            }).filter(id => id != null && id !== ''); // Remove any null/undefined/empty values
+            }).filter(id => id != null && id !== '');
 
             if (entityIds.length > 0) {
               console.log(`    - by linking_variable '${linkVar}':`, entityIds);
@@ -677,14 +708,13 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
       console.log("✅ Step 4: Data fetching complete. Final source data cache:", sourceDataCache);
 
-      // Extract relationship data for the dialog
       console.log("🔍 Debug: task.participants_details:", task.participants_details);
       console.log("🔍 Debug: Looking for director ID:", entityIdMap.director);
 
       const relationshipData = {
         company: task.participants_details?.find(p => p.type === 'company') ||
           (task.applicant_details?.type === 'company' ? task.applicant_details : null) ||
-          { id: task.company_id, name: task.company_name, type: 'company' }, // Fallback to top-level task props
+          { id: task.company_id, name: task.company_name, type: 'company' },
 
         directors: (() => {
           if (colType === 'director') {
@@ -720,12 +750,10 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       console.log("🔗 Relationship Data Extracted:", relationshipData);
       console.log("🔗 Directors found:", relationshipData.directors.length, relationshipData.directors);
 
-      // Debug: Log the full task object to see what's available
       console.log("🔍 Debug: Full task object:", task);
       console.log("🔍 Debug: task.applicant_details:", task.applicant_details);
       console.log("🔍 Debug: Looking for company in participants_details:", task.participants_details?.find(p => p.type === 'company'));
 
-      // Try to get applicant details from different possible locations
       const applicantDetails = task.applicant_details ||
         task.participants_details?.find(p => p.type === 'company') ||
         {};
@@ -739,7 +767,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         entityIdMap: entityIdMap,
         sourceDataCache: sourceDataCache,
         availableTemplates: templates,
-        // Pre-select template if only one exists, otherwise null to trigger selection screen
         template: templates.length === 1 ? templates[0] : null,
         personData: applicantDetails?.type === 'individual' ? applicantDetails : {},
         companyData: applicantDetails?.type === 'company' ? applicantDetails : {},
@@ -749,7 +776,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       console.log("✅ Step 5: Final data package prepared for dialog.");
 
       setSelectedLetterInfo(letterInfo);
-      setShowTemplateGenerator(true); // Directly open the main dialog
+      setShowTemplateGenerator(true);
       console.log("🏁 Process complete. Opening template generation dialog.");
 
     } catch (error) {
@@ -776,12 +803,9 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     handleUploadSubmit(uploadData);
   };
 
-  // --- RequirementsTableCombined.tsx ---
-
   const getRelationshipData = useCallback(() => {
     if (columnDefinitions.length === 0) return [];
 
-    // Group columns by their task group
     const groupedColumns = columnDefinitions.reduce((groups, col) => {
       if (!groups[col.groupIndex]) groups[col.groupIndex] = [];
       groups[col.groupIndex].push(col);
@@ -793,7 +817,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       const participants = task?.participants_details || [];
       const applicant = task?.applicant_details || {};
 
-      // Company from participants
       const companyParticipant = participants.find(p => p.type === 'company');
 
       return {
@@ -822,7 +845,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             relationship: dep.relationship || 'dependant'
           })),
         understudy: (() => {
-          // First try to find understudy in participants_details by role
           const understudyParticipant = participants.find(p => p.type === 'individual' && p.role === 'understudy');
           if (understudyParticipant) {
             return {
@@ -830,8 +852,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
               name: understudyParticipant.name
             };
           }
-          
-          // Fallback to root understudy field
+
           const uId = task?.understudy || task?.understudy_id;
           if (!uId) return null;
           const uPart = participants.find(p => p.id === uId);
@@ -843,9 +864,9 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       };
     }).filter(Boolean);
   }, [columnDefinitions, individualNames]);
+
   const relationshipData = useMemo(() => getRelationshipData(), [getRelationshipData]);
 
-  // Debug effect for relationship data
   useEffect(() => {
     if (relationshipData && relationshipData.length > 0) {
       console.log('=== RELATIONSHIP DATA ===', JSON.parse(JSON.stringify(relationshipData)));
@@ -863,20 +884,16 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     if (!documents || documents.length === 0) return;
 
     const previewData = {
-      // 1. Map the documents to the format ExtractionPreview expects
       documents: documents.map(d => ({
         ...d,
         id: d.id,
-        // Pass the current state of data (prioritize user edits)
         extracted_details: d.extracted_details || {},
         edited_details: d.edited_details || d.extracted_details || {},
         file_path: d.file_path || d.url || d.document_url,
         file_name: d.file_name || d.name || 'document.pdf',
       })),
-      // 2. The Title/Labels
       document_display_name: docInfo?.display_name || 'Document',
       person_full_name: column?.label || '',
-      // 3. The SCHEMA: Critical for ExtractionPreview to render the form fields
       document_fields: docInfo?.fields || []
     };
 
@@ -895,6 +912,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       };
     });
   }, []);
+
   const toggleSectionExpansion = (section: 'company' | 'individual' | 'letters') => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
@@ -923,7 +941,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       const companyId = group.tasks[0]?.company_id;
       const company = companyId ? companyData[companyId] : null;
       headers.push(company ? company.company_name : "Company");
-      // Find principal from applicant_details
       const principal = group.tasks[0]?.participants_details?.find(p =>
         (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')
       );
@@ -962,7 +979,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       headers.push(company ? company.company_name : `Company (Group ${groupIndex + 1})`);
       entityColumns.push({ type: 'company', name: 'company', groupIndex });
 
-      // Find principal and understudy from participants_details
       const participants = group.tasks[0]?.participants_details || [];
       const principal = participants.find(p =>
         (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')
@@ -1017,7 +1033,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   };
 
   const handleGenerateTemplate = async (reqItem: any, task: any, columnType: string, columnId?: number) => {
-    // Create a docItem structure compatible with handleOpenTemplateGenerator
     const docItem = {
       document: {
         id: reqItem.kyc_document_ids?.[0] || reqItem.id,
@@ -1041,13 +1056,10 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       return companyDocs.find(doc => kycDocIds.includes(doc.kyc_document_id));
     } else {
       const individualId = entityId || task.applicant_details?.id || task.individual_id;
-
       const indDocs = allIndividualDocuments[individualId] || [];
-
       return indDocs.find(doc => kycDocIds.includes(doc.document_id));
     }
   }, [allCompanyDocuments, allIndividualDocuments]);
-
 
   const getDocumentStatusText = useCallback((task: any, docItem: any, columnType: string, entityId?: number) => {
     const reqItem = {
@@ -1059,17 +1071,66 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     return docData ? 'Uploaded' : 'Missing';
   }, [getDocumentDataForPreview]);
 
+  // NEW: Get composite requirement status
+  const getCompositeRequirementStatus = useCallback((reqItem: any, task: any, columnType: string, entityId?: number) => {
+    const kycDocIds = reqItem.kyc_document_ids || [];
+    if (kycDocIds.length === 0) return { type: 'missing', count: 0, total: kycDocIds.length };
+
+    let foundCount = 0;
+
+    if (columnType === 'company') {
+      const companyId = task.participants_details?.find(p => p.type === 'company')?.id || task.company_id;
+      const companyDocs = allCompanyDocuments[companyId] || [];
+
+      kycDocIds.forEach(docId => {
+        if (companyDocs.some(doc => doc.kyc_document_id === docId)) {
+          foundCount++;
+        }
+      });
+    } else {
+      const individualId = entityId || task.applicant_details?.id || task.individual_id;
+      const indDocs = allIndividualDocuments[individualId] || [];
+
+      kycDocIds.forEach(docId => {
+        if (indDocs.some(doc => doc.document_id === docId)) {
+          foundCount++;
+        }
+      });
+    }
+
+    return {
+      type: foundCount > 0 ? 'uploaded' : 'missing',
+      count: foundCount,
+      total: kycDocIds.length
+    };
+  }, [allCompanyDocuments, allIndividualDocuments]);
+
+  // NEW: Get documents by type for composite requirements
+  const getDocumentsByType = useCallback((docTypeId: string, task: any, columnType: string, entityId?: number) => {
+    if (columnType === 'company') {
+      const companyId = task.participants_details?.find(p => p.type === 'company')?.id || task.company_id;
+      const companyDocs = allCompanyDocuments[companyId] || [];
+      return companyDocs.filter(doc => doc.kyc_document_id === docTypeId);
+    } else {
+      const individualId = entityId || task.applicant_details?.id || task.individual_id;
+      const indDocs = allIndividualDocuments[individualId] || [];
+      return indDocs.filter(doc => doc.document_id === docTypeId);
+    }
+  }, [allCompanyDocuments, allIndividualDocuments]);
+
   const renderDocumentSection = (requirementsList: any[], sectionName: string) => {
     return requirementsList
       .sort((a, b) => (a.order || 0) - (b.order || 0))
       .map((reqItem, reqIndex) => {
-        // Use uniqueId for tracking expansion (combines requirement ID with document ID)
         const requirementId = reqItem.uniqueId || reqItem.id;
         const isExpanded = expandedDocuments.has(requirementId);
+        const isCompositeExpanded = expandedCompositeRequirements.has(requirementId);
 
-        // The KYC definition (metadata, fields) attached in RequirementsTable.tsx
         const docDef = reqItem.documentDefinition;
         const fieldsToRender = docDef?.fields || [];
+
+        // Check if this is a composite requirement (multiple document types)
+        const isComposite = reqItem.isMultiDocument && reqItem.kyc_document_ids?.length > 1;
 
         return (
           <React.Fragment key={`${sectionName}-${requirementId}`}>
@@ -1080,25 +1141,30 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
               <TableCell className={`sticky left-16 border-r z-10 ${reqIndex % 2 === 0 ? 'bg-white group-hover:bg-gray-50' : 'bg-gray-50/30 group-hover:bg-gray-100'}`}>
                 <div className="flex flex-col">
                   <div className="flex items-center gap-2">
+                    {isComposite && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0"
+                        onClick={() => toggleCompositeRequirement(requirementId)}
+                      >
+                        {isCompositeExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                      </Button>
+                    )}
                     <span className="truncate max-w-[250px] font-medium text-slate-700">
-                      {docDef?.display_name || reqItem.name}
-                      {reqItem.isMultiDocument && (
-                        <span className="text-xs text-blue-600 ml-2">
-                          ({reqItem.documentCount} docs)
-                        </span>
-                      )}
+                      {reqItem.name}
                     </span>
-                    {fieldsToRender.length > 0 && (
+                    {isComposite && (
+                      <span className="text-xs text-blue-600 ml-2">
+                        ({reqItem.documentCount} types)
+                      </span>
+                    )}
+                    {!isComposite && fieldsToRender.length > 0 && (
                       <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => toggleDocumentExpansion(requirementId)}>
                         {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
                       </Button>
                     )}
                   </div>
-                  {reqItem.isMultiDocument && (
-                    <span className="text-[9px] text-blue-500 font-medium">
-                      Multiple documents of this type
-                    </span>
-                  )}
 
                   {/* Template and Automation Indicators */}
                   <div className="flex items-center gap-2 mt-1">
@@ -1119,29 +1185,32 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                 </div>
               </TableCell>
 
-             {columnDefinitions.map((col, colIdx) => {
+              {columnDefinitions.map((col, colIdx) => {
                 const isApplicable = checkApplicability(col.type, reqItem);
-                
-                // NEW: Get the specific relationship data for this column's group
                 const groupRelationshipData = relationshipData[col.groupIndex];
 
-                // Parent now provides getDocumentDataForPreview which checks the pre-filtered state
-                const docData = isApplicable ? getDocumentDataForPreview(col.task, reqItem, col.type, col.id) : null;
-
-                return (
-                  <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-2">
-                    {!isApplicable ? (
+                if (!isApplicable) {
+                  return (
+                    <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-2">
                       <span className="text-[10px] text-gray-300 font-medium italic">N/A</span>
-                    ) : (
-                      <div className="flex items-center justify-center gap-1">
-                        {/* Generate template button for requirements with templates */}
+                    </TableCell>
+                  );
+                }
+
+                // For composite requirements, show aggregated status
+                if (isComposite) {
+                  const status = getCompositeRequirementStatus(reqItem, col.task, col.type, col.id);
+
+                  return (
+                    <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-2">
+                      <div className="flex flex-col items-center justify-center gap-1">
                         {reqItem.hasTemplate && (
                           <Button
                             variant="ghost"
                             size="sm"
                             className="h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
                             onClick={() => handleGenerateTemplate(reqItem, col.task, col.type, col.id)}
-                            title={`Generate ${reqItem.documentDefinition?.display_name || reqItem.name} Template`}
+                            title={`Generate ${reqItem.name} Template`}
                             disabled={isPreparingTemplate}
                           >
                             {isPreparingTemplate ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3 mr-1" />}
@@ -1149,16 +1218,137 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                           </Button>
                         )}
 
-                         {renderDocumentStatus(col.task, reqItem, col.type, col.id, groupRelationshipData)}
+                        <div className="flex items-center gap-1">
+                          {status.type === 'uploaded' ? (
+                            <div className="flex flex-col items-center">
+                              <span className="text-xs text-green-600 font-bold">
+                                {status.count}/{status.total}
+                              </span>
+                              <span className="text-[8px] text-gray-500">
+                                types
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col items-center">
+                              <span className="text-xs text-amber-600 font-bold">
+                                0/{status.total}
+                              </span>
+                              <span className="text-[8px] text-gray-500">
+                                types
+                              </span>
+                            </div>
+                          )}
                         </div>
-                    )}
+                      </div>
+                    </TableCell>
+                  );
+                }
+
+                // For non-composite requirements, use existing logic
+                return (
+                  <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-2">
+                    <div className="flex items-center justify-center gap-1">
+                      {reqItem.hasTemplate && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                          onClick={() => handleGenerateTemplate(reqItem, col.task, col.type, col.id)}
+                          title={`Generate ${reqItem.documentDefinition?.display_name || reqItem.name} Template`}
+                          disabled={isPreparingTemplate}
+                        >
+                          {isPreparingTemplate ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3 mr-1" />}
+                          <span className="text-[10px] font-bold uppercase">Generate</span>
+                        </Button>
+                      )}
+
+                      {renderDocumentStatus(col.task, reqItem, col.type, col.id, groupRelationshipData)}
+                    </div>
                   </TableCell>
                 );
               })}
             </TableRow>
 
-            {/* Expanded Field Data Rows */}
-            {isExpanded && fieldsToRender.map((field, fIdx) => (
+            {/* Expanded view for composite requirements showing individual document types */}
+            {isComposite && isCompositeExpanded && reqItem.kyc_document_ids?.map((docId: string, docIdx: number) => {
+              const docMetadata = documentMetadataCache.get(docId);
+              if (!docMetadata) return null;
+
+              return (
+                <TableRow key={`${requirementId}-doctype-${docIdx}`} className="bg-blue-50/30">
+                  <TableCell className="sticky left-0 border-r text-center text-[10px] text-gray-400 bg-blue-50/30">
+                    {reqIndex + 1}.{docIdx + 1}
+                  </TableCell>
+                  <TableCell className="sticky left-16 bg-blue-50/50 border-r pl-8">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-3 w-3 text-blue-600" />
+                      <span className="text-[11px] text-slate-700 font-medium">
+                        {docMetadata.display_name || docMetadata.name}
+                      </span>
+                    </div>
+                  </TableCell>
+                  {columnDefinitions.map((col, colIdx) => {
+                    const isApplicable = checkApplicability(col.type, reqItem);
+                    if (!isApplicable) {
+                      return (
+                        <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-1">
+                          <span className="text-[10px] text-gray-300">-</span>
+                        </TableCell>
+                      );
+                    }
+
+                    const docs = getDocumentsByType(docId, col.task, col.type, col.id);
+
+                    return (
+                      <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-1">
+                        <div className="flex items-center justify-center gap-1">
+                          {docs.length > 0 ? (
+                            <div className="flex items-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0 text-green-600 hover:bg-green-100"
+                                onClick={() => handleViewDocuments(docs, docMetadata, col)}
+                                title={`View ${docs.length} document(s)`}
+                              >
+                                <Eye className="h-3 w-3" />
+                              </Button>
+                              {docs.length > 1 && (
+                                <span className="text-[9px] text-green-600 font-bold">{docs.length}</span>
+                              )}
+                            </div>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0 text-amber-600 hover:bg-amber-50"
+                              onClick={() => {
+                                // Trigger upload for this specific document type
+                                setSelectedDocForUpload({
+                                  doc: docMetadata,
+                                  fields: docMetadata.fields,
+                                  person: { full_name: col.label },
+                                  task: col.task,
+                                  columnType: col.type,
+                                  columnId: col.id
+                                });
+                                setShowUploadModal(true);
+                              }}
+                              title={`Upload ${docMetadata.display_name || docMetadata.name}`}
+                            >
+                              <UploadCloud className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              );
+            })}
+
+            {/* Expanded Field Data Rows (for non-composite or when not showing document types) */}
+            {!isComposite && isExpanded && fieldsToRender.map((field, fIdx) => (
               <TableRow key={`${requirementId}-field-${field.id}`} className={`${reqIndex % 2 === 0 ? 'bg-slate-50/50' : 'bg-slate-100/50'}`}>
                 <TableCell className={`sticky left-0 border-r text-center text-[10px] text-gray-400 ${reqIndex % 2 === 0 ? 'bg-slate-50/50' : 'bg-slate-100/50'}`}>
                   {reqIndex + 1}.{fIdx + 1}
@@ -1168,7 +1358,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                 </TableCell>
                 {columnDefinitions.map((col, colIdx) => {
                   const isApplicable = checkApplicability(col.type, reqItem);
-                  // Use the single document ID for field extraction
                   const docData = isApplicable ? getDocumentDataForPreview(col.task, reqItem, col.type, col.id) : null;
                   return (
                     <TableCell key={`${field.id}-val-${colIdx}`} className="text-center border p-1 text-[11px] text-slate-600">
@@ -1281,36 +1470,17 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
                     return (
                       <div key={docId} className="group relative border rounded-2xl bg-white shadow-xl overflow-hidden transition-all hover:shadow-2xl">
-                        {/* File Info Bar */}
                         <div className="p-4 bg-slate-50 border-b flex justify-between items-center sticky top-0 z-20">
-                          <div className="flex items-center gap-3">
-                            <div className="bg-white p-2 rounded-lg border shadow-sm">
+                          <div className="flex items-center justify-between">
+                           <div className="flex items-center"> <div className="bg-white p-2 rounded-lg border shadow-sm">
                               <FileText className="h-5 w-5 text-blue-600" />
                             </div>
                             <div className="flex flex-col">
-                              <p className="text-sm font-bold text-slate-800 line-clamp-1">{doc.file_name || 'Document'}</p>
-                              <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">ID: {docId}</p>
+                              <p className="text-sm font-bold text-slate-800 line-clamp-1">{previewingDocuments?.document_display_name || 'Document'}</p>
+                            </div></div>
+                            <div className="text-xs text-slate-600">
+                              {`${index + 1}/${previewingDocuments?.documents?.length || 0}`}
                             </div>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            {/* We use the props from the parent (RequirementsTableCombined) */}
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-9 border-red-200 text-red-600 hover:bg-red-50"
-                              onClick={() => handleDeleteDocument?.(doc)}
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" /> Delete
-                            </Button>
-                            <Button
-                              variant="default"
-                              size="sm"
-                              className="h-9 bg-emerald-600 hover:bg-emerald-700 shadow-md shadow-emerald-200"
-                              onClick={() => handleSaveEditedDocument?.(doc)}
-                            >
-                              <Save className="h-4 w-4 mr-2" /> Save Changes
-                            </Button>
                           </div>
                         </div>
 
@@ -1319,16 +1489,12 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                             key={docId}
                             documentId={docId}
                             documentName={previewingDocuments?.document_display_name || 'Document'}
-                            // Pass the details object
                             extractedData={doc.edited_details || doc.extracted_details || {}}
-                            // Pass the schema array
                             fields={previewingDocuments?.document_fields || []}
-                            // Construct the full URL
                             fileUrl={getFileUrl(doc.file_path)}
                             fileName={doc.file_name || 'document.pdf'}
                             expanded={true}
                             showSaveButton={false}
-                            // Pass down handlers to the internal DocumentActions
                             onDelete={() => handleDeleteDocument?.(doc)}
                             onSave={(data) => handleSaveEditedDocument?.({ ...doc, edited_details: data })}
                             onRetryExtraction={() => handleRetryExtraction?.(doc)}
@@ -1352,6 +1518,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
           )}
         </DialogContent>
       </Dialog>
+
       <div className="rounded-md border bg-white shadow-sm overflow-hidden">
         <div className="overflow-x-auto overflow-y-auto max-h-[75vh]">
           <Table className="border-separate border-spacing-0">

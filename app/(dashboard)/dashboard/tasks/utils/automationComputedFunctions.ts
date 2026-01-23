@@ -1,3 +1,4 @@
+
 // @ts-nocheck
 import supabase from "@/lib/supabase/client";
 
@@ -59,36 +60,25 @@ const parseDateString = (dateInput: string | Date | null | undefined): Date | nu
     return null;
 };
 
-// --- HELPERS ---
-
-/**
- * Fetches uploaded documents and types. 
- * OPTIMIZED: Checks cache first.
- */
 async function fetchDocsAndTypes(
-    individualId: string | number, 
-    documentIds: string[], 
+    individualId: string | number,
+    documentIds: string[],
     cache?: DocumentCache
 ) {
     // 1. USE CACHE IF AVAILABLE
     if (cache) {
         // Filter the pre-fetched cache for this specific individual and requested doc types
-        const relevantDocs = cache.documents.filter(d => 
-            String(d.director_id) === String(individualId) && 
+        const relevantDocs = cache.documents.filter(d =>
+            String(d.director_id) === String(individualId) &&
             documentIds.includes(d.document_id)
         );
-        
-        const relevantTypes = cache.docTypes.filter(t => 
+
+        const relevantTypes = cache.docTypes.filter(t =>
             documentIds.includes(t.id)
         );
 
         return { docs: relevantDocs, types: relevantTypes };
-    }
-
-    // 2. FALLBACK TO NETWORK (Legacy behavior)
-    console.log(`[Computed] Cache miss - fetching for Individual: ${individualId}`);
-    
-    if (!individualId || !documentIds || documentIds.length === 0) {
+    } if (!individualId || !documentIds || documentIds.length === 0) {
         return { docs: [], types: [] };
     }
 
@@ -109,13 +99,13 @@ function sortDocsByRecency(docs: any[], docTypes: any[]) {
     return docs.map(doc => {
         const type = docTypes.find((t: any) => t.id === doc.document_id);
         const details = doc.extracted_details || {};
-        
+
         let sortDate = new Date(0);
         let dateSource = "none";
 
         if (type?.fields && Array.isArray(type.fields)) {
             const effectiveFromField = type.fields.find((f: any) => f.isEffectiveFrom);
-            
+
             if (effectiveFromField && details[effectiveFromField.name]) {
                 const parsed = parseDateString(details[effectiveFromField.name]);
                 if (parsed) {
@@ -123,9 +113,9 @@ function sortDocsByRecency(docs: any[], docTypes: any[]) {
                     dateSource = `isEffectiveFrom (${effectiveFromField.name})`;
                 }
             }
-            
+
             if (dateSource === "none") {
-                const issueField = type.fields.find((f: any) => 
+                const issueField = type.fields.find((f: any) =>
                     f.name.toLowerCase().includes('issue') && f.name.toLowerCase().includes('date')
                 );
                 if (issueField && details[issueField.name]) {
@@ -142,7 +132,7 @@ function sortDocsByRecency(docs: any[], docTypes: any[]) {
             sortDate = new Date(doc.created_at);
             dateSource = "created_at";
         }
-        
+
         return { doc, type, sortDate, dateSource };
     }).sort((a, b) => b.sortDate.getTime() - a.sortDate.getTime());
 }
@@ -200,7 +190,7 @@ export async function extractFieldFromAllDocuments(
 
         const sorted = sortDocsByRecency(docs, types);
         const results: string[] = [];
-        
+
         for (const item of sorted) {
             const value = parseJsonPath(item.doc, fieldPath);
             results.push(value !== null && value !== undefined ? String(value) : "");
@@ -215,8 +205,8 @@ export async function extractFieldFromAllDocuments(
 // --- SINGLE VALUE EXTRACTION ---
 
 export async function extractFieldFromLatestDocument(
-    individualId: string | number, 
-    documentIds: string[], 
+    individualId: string | number,
+    documentIds: string[],
     fieldPath: string,
     cache?: DocumentCache
 ): Promise<string> {
@@ -249,10 +239,10 @@ export async function getEducationalDetails(individualId: string | number, compu
 
         for (const item of sorted) {
             const details = item.doc.extracted_details || {};
-            
+
             // Extract the educational record
             const educationRecord: any = {};
-            
+
             // Map common field names
             if (details['Institution_Name'] || details['Institution']) {
                 educationRecord.institution = details['Institution_Name'] || details['Institution'];
@@ -263,11 +253,11 @@ export async function getEducationalDetails(individualId: string | number, compu
             if (details['Education_level'] || details['Award_Title_and_Type']) {
                 educationRecord.level = details['Education_level'] || details['Award_Title_and_Type'];
             }
-            
+
             // Handle dates
             const startDateStr = details['Date_Issued'] || details['Start_Date'];
             const endDateStr = details['Date_Completed'] || details['End_Date'] || details['Date_of_Expiry'];
-            
+
             if (startDateStr) {
                 const parsed = parseDateString(startDateStr);
                 if (parsed) {
@@ -278,7 +268,7 @@ export async function getEducationalDetails(individualId: string | number, compu
                     };
                 }
             }
-            
+
             if (endDateStr) {
                 const parsed = parseDateString(endDateStr);
                 if (parsed) {
@@ -289,13 +279,13 @@ export async function getEducationalDetails(individualId: string | number, compu
                     };
                 }
             }
-            
+
             // Only add if we have at least some data
             if (Object.keys(educationRecord).length > 0) {
                 results.push(educationRecord);
             }
         }
-        
+
         return results;
     } catch (error) {
         console.error("[Educational Details Error]:", error);
@@ -339,54 +329,88 @@ export async function getLatestDocumentIssueDate(individualId: string | number, 
 }
 
 export async function determineImmigrationStatus(individualId: string | number, computedDocuments: string[], cache?: DocumentCache): Promise<string> {
-    const { docs, types } = await fetchDocsAndTypes(individualId, computedDocuments, cache);
-    if(docs.length === 0) return "No Status Doc";
-    
-    const sorted = docs.map(doc => {
-        const type = types.find((t: any) => t.id === doc.document_id);
-        const details = doc.extracted_details || {};
-        
-        let expiryDate = new Date(0);
-        let issueDate = new Date(0);
-        
-        if (type?.fields) {
-            const expField = type.fields.find((f: any) => f.isEffectiveTo);
-            if (expField && details[expField.name]) {
-                const p = parseDateString(details[expField.name]);
-                if(p) expiryDate = p;
-            }
+    try {
+        const { docs, types } = await fetchDocsAndTypes(individualId, computedDocuments, cache);
+        if (docs.length === 0) return "No Status Doc";
+        const sorted = docs.map(doc => {
+            const type = types.find((t: any) => t.id === doc.document_id);
+            const details = doc.extracted_details || {};
+            let expiryDate = new Date(0);
+            let issueDate = new Date(0);
 
-            const issueField = type.fields.find((f: any) => f.isEffectiveFrom);
-            if (issueField && details[issueField.name]) {
-                const p = parseDateString(details[issueField.name]);
-                if(p) issueDate = p;
+            if (type?.fields) {
+                const expField = type.fields.find((f: any) => f.isEffectiveTo);
+                if (expField && details[expField.name]) {
+                    const p = parseDateString(details[expField.name]);
+                    if (p) expiryDate = p;
+                }
+
+                const issueField = type.fields.find((f: any) => f.isEffectiveFrom);
+                if (issueField && details[issueField.name]) {
+                    const p = parseDateString(details[issueField.name]);
+                    if (p) issueDate = p;
+                } else if (doc.created_at) {
+                    issueDate = new Date(doc.created_at);
+                }
             } else if (doc.created_at) {
                 issueDate = new Date(doc.created_at);
             }
-        }
-        return { doc, type, expiryDate, issueDate };
-    }).sort((a,b) => {
-        if (a.expiryDate.getTime() !== b.expiryDate.getTime()) {
-            return b.expiryDate.getTime() - a.expiryDate.getTime();
-        }
-        return b.issueDate.getTime() - a.issueDate.getTime();
-    });
 
-    const current = sorted[0];
-    const now = new Date();
+            return { doc, type, expiryDate, issueDate };
+        }).sort((a, b) => {
+            if (a.expiryDate.getTime() !== b.expiryDate.getTime()) {
+                return b.expiryDate.getTime() - a.expiryDate.getTime();
+            }
+            return b.issueDate.getTime() - a.issueDate.getTime();
+        });
 
-    if (current.expiryDate.getTime() > 0 && current.expiryDate < now) {
-        return "Expired (" + (current.type?.display_name || "Unknown") + ")";
+        const current = sorted[0];
+        const now = new Date();
+        if (current.expiryDate.getTime() > 0 && current.expiryDate < now) {
+            const displayName = current.type?.display_name;
+            let displayNameStr: string;
+
+            if (typeof displayName === 'string') {
+                displayNameStr = displayName;
+            } else if (typeof displayName === 'object' && displayName !== null) {
+                displayNameStr = JSON.stringify(displayName);
+            } else {
+                displayNameStr = "Unknown";
+            }
+            const expiredResult = `Expired (${displayNameStr})`;
+            return expiredResult;
+        }
+
+        // CRITICAL FIX: Properly extract the display_name as a string
+        const displayName = current.type?.display_name;
+        let finalStatus: string;
+
+        if (typeof displayName === 'string') {
+            finalStatus = displayName;
+        } else if (typeof displayName === 'object' && displayName !== null) {
+            if ('en' in displayName) {
+                finalStatus = String(displayName.en);
+            } else if ('name' in displayName) {
+                finalStatus = String(displayName.name);
+            } else {
+                finalStatus = current.type?.name || current.type?.id || "Unknown Status";
+            }
+        } else {
+            finalStatus = "Unknown Status";
+        }
+        if (typeof finalStatus !== 'string') {
+            return "Status Extraction Error";
+        }
+
+        return finalStatus;
+    } catch (e) {
+        return "COMPUTATION_RUNTIME_FAIL";
     }
-    
-    return current.type?.display_name || "Unknown Status";
 }
 
 export async function getLatestWorkPermit(individualId: string | number, computedDocuments: string[], cache?: DocumentCache): Promise<string> {
     return await getLatestDocumentNumber(individualId, computedDocuments, cache);
 }
-
-// --- MASTER ROUTER ---
 
 export async function executeComputedField(
     functionName: string,
@@ -395,10 +419,8 @@ export async function executeComputedField(
     fieldPath?: string,
     extractionMode: 'latest' | 'all' = 'latest',
     cache?: DocumentCache
-): Promise<string | string[]> {
+): Promise<any> {
     const normalizedFunctionName = functionName.replace(/\(\)/g, '').trim();
-
-    // If path is provided, use generic extraction
     if (fieldPath) {
         if (extractionMode === 'all') {
             return await extractFieldFromAllDocuments(individualId, computedDocuments, fieldPath, cache);
@@ -406,23 +428,20 @@ export async function executeComputedField(
             return await extractFieldFromLatestDocument(individualId, computedDocuments, fieldPath, cache);
         }
     }
-
-    // Otherwise use named functions
     switch (normalizedFunctionName) {
-        case 'determineImmigrationStatus': return await determineImmigrationStatus(individualId, computedDocuments, cache);
+        case 'determineImmigrationStatus':
+            const result = await determineImmigrationStatus(individualId, computedDocuments, cache);
+            return result;
         case 'getLatestWorkPermit': return await getLatestWorkPermit(individualId, computedDocuments, cache);
         case 'getLatestDocumentNumber': return await getLatestDocumentNumber(individualId, computedDocuments, cache);
         case 'getLatestDocumentExpiryDate': return await getLatestDocumentExpiryDate(individualId, computedDocuments, cache);
         case 'getLatestDocumentIssueDate': return await getLatestDocumentIssueDate(individualId, computedDocuments, cache);
         case 'getEducationalDetails': return await getEducationalDetails(individualId, computedDocuments, cache);
         case 'extractFieldFromLatestDocument':
-            console.error('[Computed-Router] extractFieldFromLatestDocument requires a fieldPath parameter');
             return "Missing Path Parameter";
         case 'extractFieldFromAllDocuments':
-            console.error('[Computed-Router] extractFieldFromAllDocuments requires a fieldPath parameter');
             return [];
         default:
-            console.error('[Computed-Router] Unknown function:', functionName);
             return "Unknown Function";
     }
 }
@@ -432,8 +451,6 @@ export async function processComputedFields(
     computedFieldsConfig: any[]
 ): Promise<Record<string, string | string[]>> {
     const results: Record<string, string | string[]> = {};
-    // Note: To optimize initial load, fetching should be handled by the caller (Component) 
-    // and passed via cache. This function is kept for backward compatibility or direct calls.
     for (const config of computedFieldsConfig) {
         try {
             const value = await executeComputedField(

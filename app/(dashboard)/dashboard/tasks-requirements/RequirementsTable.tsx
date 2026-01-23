@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
-import { Briefcase, FileText, Loader2, Search, Upload, Eye, Zap, FileType, Wand2 } from "lucide-react"
+import { Briefcase, FileText, Loader2, Search, UploadCloud, Eye, Zap, FileType, Wand2 } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
@@ -15,7 +15,6 @@ import { FileUploadComponent } from "../tasks/components/FileUploadComponent"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { AutomationMappingDialog } from "../tasks/components/AutomationMappingDialog"
 
-// --- MODIFICATION: Placeholder for the Letter Template Dialog ---
 const LetterTemplateDialog = ({ open, onOpenChange, letterData, individualNames }) => {
   if (!letterData) return null;
 
@@ -37,7 +36,6 @@ const LetterTemplateDialog = ({ open, onOpenChange, letterData, individualNames 
         </DialogHeader>
         <div className="py-4 space-y-4">
           <h3 className="font-semibold">Template Details</h3>
-          {/* This is where your actual template engine and form would go */}
           <div className="p-4 border rounded-md bg-gray-50 text-sm">
             <p className="text-gray-600">Your dynamic letter template for '{document?.name}' would be rendered here.</p>
             <p className="mt-2 text-gray-600">It would include input fields for any variables needed to generate the final document.</p>
@@ -50,7 +48,6 @@ const LetterTemplateDialog = ({ open, onOpenChange, letterData, individualNames 
     </Dialog>
   );
 };
-
 
 interface RequirementsTableProps {
   tasks: any[]
@@ -100,11 +97,8 @@ export function RequirementsTable({
     currentIndex: number;
   } | null>(null);
 
-  // --- MODIFICATION: State for the new letter dialog ---
   const [isLetterDialogOpen, setIsLetterDialogOpen] = useState(false);
   const [selectedLetterData, setSelectedLetterData] = useState(null);
-
-  // --- State for automation dialog ---
   const [isAutomationDialogOpen, setIsAutomationDialogOpen] = useState(false);
   const [selectedAutomationData, setSelectedAutomationData] = useState(null);
 
@@ -126,7 +120,6 @@ export function RequirementsTable({
     [filteredTasks]
   );
 
-  // Memoize individual IDs extraction
   const individualIds = useMemo(() => {
     const ids = new Set<number>();
     filteredTasks.forEach(task => {
@@ -149,7 +142,6 @@ export function RequirementsTable({
     Object.values(taskClassRequirements).forEach(classReq => {
       if (classReq?.requirements) {
         classReq.requirements.forEach(req => {
-          // Handle both old and new field structures
           if (req.kyc_document_id) ids.add(req.kyc_document_id);
           if (req.kyc_document_ids) req.kyc_document_ids.forEach(id => ids.add(id));
         });
@@ -158,117 +150,137 @@ export function RequirementsTable({
     return Array.from(ids);
   }, [taskClassRequirements]);
 
-const fetchAllIndividualData = useCallback(async (tasksToFetch: any[], requiredKycIds: string[]) => {
-  const uniqueIds = new Set<number>();
-  const individualTypeMap = new Map<number, string>();
+  // OPTIMIZED: Batch fetch individual documents
+  const fetchAllIndividualData = useCallback(async (tasksToFetch: any[], requiredKycIds: string[]) => {
+    console.log('🔄 [fetchAllIndividualData] Starting batch fetch...');
+    const startTime = performance.now();
 
-  tasksToFetch.forEach(task => {
-    // 1. Principal
-    if (task.applicant_details?.id) {
-      uniqueIds.add(task.applicant_details.id);
-      individualTypeMap.set(task.applicant_details.id, 'principal');
-    }
-    
-    // 2. Participants (Dependants & Understudy)
-    if (Array.isArray(task.participants_details)) {
-      task.participants_details.forEach(p => {
-        if (p.id) {
-          uniqueIds.add(p.id);
-          // Map roles: 'dependant', 'understudy', 'director'
-          individualTypeMap.set(p.id, p.role || 'individual');
-        }
-      });
-    }
-    
-    // 3. Fallback Understudy from root
-    if (task.understudy) {
-      uniqueIds.add(task.understudy);
-      if (!individualTypeMap.has(task.understudy)) individualTypeMap.set(task.understudy, 'understudy');
-    }
-  });
+    const uniqueIds = new Set<number>();
+    const individualTypeMap = new Map<number, string>();
 
-  const validIds = Array.from(uniqueIds).filter(Boolean);
-  if (validIds.length === 0 || requiredKycIds.length === 0) return;
-
-  try {
-    const { data: documentsRes, error } = await supabase
-      .from('acc_portal_directors_documents')
-      .select('*, acc_portal_kyc (id, name, display_name)')
-      .in('director_id', validIds)
-      .in('document_id', requiredKycIds)
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-
-    // Filter documents based on applicability
-    const filteredDocuments = documentsRes?.filter(doc => {
-      const individualType = individualTypeMap.get(doc.director_id);
-      const docApplicantTypes = doc.acc_portal_kyc?.applicant_types;
+    tasksToFetch.forEach(task => {
+      if (task.applicant_details?.id) {
+        uniqueIds.add(task.applicant_details.id);
+        individualTypeMap.set(task.applicant_details.id, 'principal');
+      }
       
-      // If document metadata doesn't restrict types, or we don't know the person's type, allow it
-      if (!docApplicantTypes || !Array.isArray(docApplicantTypes) || docApplicantTypes.length === 0) return true;
+      if (Array.isArray(task.participants_details)) {
+        task.participants_details.forEach(p => {
+          if (p.id) {
+            uniqueIds.add(p.id);
+            individualTypeMap.set(p.id, p.role || 'individual');
+          }
+        });
+      }
       
-      // Strict match
-      return docApplicantTypes.includes(individualType);
+      if (task.understudy) {
+        uniqueIds.add(task.understudy);
+        if (!individualTypeMap.has(task.understudy)) individualTypeMap.set(task.understudy, 'understudy');
+      }
     });
 
-    const documentsByDirector = filteredDocuments?.reduce((acc, doc) => {
-      if (!acc[doc.director_id]) acc[doc.director_id] = [];
-      acc[doc.director_id].push(doc);
-      return acc;
-    }, {});
+    const validIds = Array.from(uniqueIds).filter(Boolean);
+    if (validIds.length === 0 || requiredKycIds.length === 0) {
+      console.log('⏭️ No individual IDs or required KYC IDs to fetch');
+      return;
+    }
 
-    setAllIndividualDocuments(prev => ({ ...prev, ...documentsByDirector }));
-  } catch (err) { console.error('Error Individual Fetch:', err); }
-}, []);
+    try {
+      console.log(`📊 Fetching documents for ${validIds.length} individuals across ${requiredKycIds.length} document types...`);
+      
+      // SINGLE QUERY for all individuals and all document types
+      const { data: documentsRes, error } = await supabase
+        .from('acc_portal_directors_documents')
+        .select('*, acc_portal_kyc (id, name, display_name)')
+        .in('director_id', validIds)
+        .in('document_id', requiredKycIds)
+        .order('created_at', { ascending: false });
 
-const fetchAllCompanyDocuments = useCallback(async (tasksToFetch: any[], requiredKycIds: string[]) => {
-  const companyIds = [...new Set(tasksToFetch.flatMap(t => {
-    // Look for the actual company ID in participants
-    const companyPart = t.participants_details?.find(p => p.type === 'company');
-    return [t.company_id, companyPart?.id].filter(Boolean);
-  }))];
+      if (error) throw error;
 
-  if (companyIds.length === 0 || requiredKycIds.length === 0) return;
+      const endTime = performance.now();
+      console.log(`✅ Fetched ${documentsRes?.length || 0} individual documents in ${Math.round(endTime - startTime)}ms`);
 
-  try {
-    // acc_portal_kyc_uploads table structure:
-    // - company_id: links to company
-    // - kyc_document_id: links to requirement (NOT document_id)
-    // - acc_portal_kyc: document type info with applicant_types for applicability
-    const { data, error } = await supabase
-      .from('acc_portal_kyc_uploads')
-      .select('*, acc_portal_kyc (id, name, display_name)')
-      .in('company_id', companyIds)
-      .in('kyc_document_id', requiredKycIds) // Correct field for company documents
-      .order('created_at', { ascending: false });
+      // Filter documents based on applicability
+      const filteredDocuments = documentsRes?.filter(doc => {
+        const individualType = individualTypeMap.get(doc.director_id);
+        const docApplicantTypes = doc.acc_portal_kyc?.applicant_types;
+        
+        if (!docApplicantTypes || !Array.isArray(docApplicantTypes) || docApplicantTypes.length === 0) return true;
+        
+        return docApplicantTypes.includes(individualType);
+      });
 
-    if (error) throw error;
+      console.log(`🔍 After applicability filter: ${filteredDocuments?.length || 0} documents`);
+
+      const documentsByDirector = filteredDocuments?.reduce((acc, doc) => {
+        if (!acc[doc.director_id]) acc[doc.director_id] = [];
+        acc[doc.director_id].push(doc);
+        return acc;
+      }, {});
+
+      setAllIndividualDocuments(prev => ({ ...prev, ...documentsByDirector }));
+    } catch (err) { 
+      console.error('❌ Error Individual Fetch:', err); 
+    }
+  }, []);
+
+  // OPTIMIZED: Batch fetch company documents
+  const fetchAllCompanyDocuments = useCallback(async (tasksToFetch: any[], requiredKycIds: string[]) => {
+    console.log('🔄 [fetchAllCompanyDocuments] Starting batch fetch...');
+    const startTime = performance.now();
+
+    const companyIds = [...new Set(tasksToFetch.flatMap(t => {
+      const companyPart = t.participants_details?.find(p => p.type === 'company');
+      return [t.company_id, companyPart?.id].filter(Boolean);
+    }))];
+
+    if (companyIds.length === 0 || requiredKycIds.length === 0) {
+      console.log('⏭️ No company IDs or required KYC IDs to fetch');
+      return;
+    }
+
+    try {
+      console.log(`📊 Fetching documents for ${companyIds.length} companies across ${requiredKycIds.length} document types...`);
+      
+      // SINGLE QUERY for all companies and all document types
+      const { data, error } = await supabase
+        .from('acc_portal_kyc_uploads')
+        .select('*, acc_portal_kyc (id, name, display_name)')
+        .in('company_id', companyIds)
+        .in('kyc_document_id', requiredKycIds)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      
+      const endTime = performance.now();
+      console.log(`✅ Fetched ${data?.length || 0} company documents in ${Math.round(endTime - startTime)}ms`);
     
-  const docsByCompany = data?.reduce((acc, doc) => {
-  if (!acc[doc.company_id]) acc[doc.company_id] = [];
-  acc[doc.company_id].push(doc);
-  return acc;
-}, {});
-    
-    setAllCompanyDocuments(prev => ({ ...prev, ...docsByCompany }));
-  } catch (err) { console.error('Error Company Fetch:', err); }
-}, []);
+      const docsByCompany = data?.reduce((acc, doc) => {
+        if (!acc[doc.company_id]) acc[doc.company_id] = [];
+        acc[doc.company_id].push(doc);
+        return acc;
+      }, {});
+      
+      setAllCompanyDocuments(prev => ({ ...prev, ...docsByCompany }));
+    } catch (err) { 
+      console.error('❌ Error Company Fetch:', err); 
+    }
+  }, []);
 
-    const fetchCompanyData = useCallback(async (tasksToFetch: any[]) => {
-    console.log('🔍 [fetchCompanyData] Input tasks:', tasksToFetch.map(t => ({ id: t.id, company_id: t.company_id, company_name: t.company_name })));
+  // OPTIMIZED: Batch fetch company metadata
+  const fetchCompanyData = useCallback(async (tasksToFetch: any[]) => {
+    console.log('🔄 [fetchCompanyData] Starting batch fetch...');
+    const startTime = performance.now();
     
-    // Extract company IDs from multiple possible locations
     const companyIds = [...new Set(tasksToFetch.flatMap(t => {
       const ids = [];
       if (t.company_id) ids.push(t.company_id);
       
-      // Check applicant_details for company
       if (t.applicant_details?.type === 'company' && t.applicant_details?.id) {
         ids.push(t.applicant_details.id);
       }
       
-      // Check participants_details for company
       if (Array.isArray(t.participants_details)) {
         const companyParticipant = t.participants_details.find(p => p.type === 'company');
         if (companyParticipant?.id) ids.push(companyParticipant.id);
@@ -282,9 +294,10 @@ const fetchAllCompanyDocuments = useCallback(async (tasksToFetch: any[], require
       return;
     }
 
-    console.log(`📋 Fetching data for ${companyIds.length} companies`);
+    console.log(`📊 Fetching metadata for ${companyIds.length} companies...`);
 
     try {
+      // SINGLE QUERY for all companies
       const { data, error } = await supabase
         .from('acc_portal_company_duplicate')
         .select('id, company_name')
@@ -292,90 +305,74 @@ const fetchAllCompanyDocuments = useCallback(async (tasksToFetch: any[], require
 
       if (error) throw error;
 
-      // Single pass reduce
+      const endTime = performance.now();
+      console.log(`✅ Fetched ${data?.length || 0} companies in ${Math.round(endTime - startTime)}ms`);
+
       const companiesMap = data?.reduce((acc, co) => {
         acc[co.id] = co;
         return acc;
       }, {} as Record<number, any>);
 
       setCompanyData(companiesMap || {});
-      console.log(`✅ Fetched ${data?.length || 0} companies`);
 
     } catch (err) {
       console.error('❌ Error fetching company data:', err);
     }
   }, []);
 
-  // Update the loading effect to wait for requirements first
+  // OPTIMIZED: Load all data in parallel with minimal queries
   useEffect(() => {
     const loadData = async () => {
       if (!filteredTasks.length) return;
       
-      // 1. Fetch Class Requirements first to get the KYC IDs
+      console.log('🚀 [loadData] Starting optimized data loading pipeline...');
+      const pipelineStartTime = performance.now();
+      
+      // Step 1: Fetch class requirements (unavoidable serial step)
+      console.log('📋 Step 1: Fetching class requirements...');
       const reqMap = {};
-      for (const task of filteredTasks) {
-        const { data } = await supabase.from('tm_class_requirements')
+      const classReqPromises = filteredTasks.map(async task => {
+        const { data } = await supabase
+          .from('tm_class_requirements')
           .select('*')
           .eq('job_level->>class_id', task.class_id)
           .maybeSingle();
         if (data) reqMap[task.id] = data;
-      }
+      });
+      
+      await Promise.all(classReqPromises);
       setTaskClassRequirements(reqMap);
 
-      // 2. Extract required IDs
+      // Step 2: Extract all required KYC IDs from requirements
       const requiredKycIds = [];
       Object.values(reqMap).forEach(cr => cr.requirements?.forEach(r => {
-        // Handle both old and new field structures
         if(r.kyc_document_id) requiredKycIds.push(r.kyc_document_id);
         if(r.kyc_document_ids) requiredKycIds.push(...r.kyc_document_ids);
       }));
 
-      // 3. Parallel fetch with filters
+      const uniqueKycIds = [...new Set(requiredKycIds)];
+      console.log(`📝 Identified ${uniqueKycIds.length} unique KYC document types needed`);
+
+      // Step 3: PARALLEL fetch all data with KYC filters
+      console.log('⚡ Step 2: Parallel fetching documents and metadata...');
       setDocumentsLoading(true);
+      
       await Promise.all([
-        fetchAllIndividualData(filteredTasks, requiredKycIds),
+        fetchAllIndividualData(filteredTasks, uniqueKycIds),
         fetchCompanyData(filteredTasks),
-        fetchAllCompanyDocuments(filteredTasks, requiredKycIds)
+        fetchAllCompanyDocuments(filteredTasks, uniqueKycIds)
       ]);
+      
       setDocumentsLoading(false);
+      
+      const pipelineEndTime = performance.now();
+      console.log(`🎉 [loadData] Complete pipeline finished in ${Math.round(pipelineEndTime - pipelineStartTime)}ms`);
     };
+    
     loadData();
-  }, [filteredTasks]);
+  }, [filteredTasks, fetchAllIndividualData, fetchCompanyData, fetchAllCompanyDocuments]);
 
   const hasReferencesColumn = useMemo(() => filteredTasks.some(task => REFERENCE_SUBDEPARTMENT_IDS.includes(task.subdepartment?.id) || REFERENCE_SUBDEPARTMENT_IDS.includes(task.subdepartment?.parent_id)), [filteredTasks]);
-
-  // useEffect(() => {
-  //   if (!filteredTasks.length) {
-  //     setDocumentsLoading(false);
-  //     return;
-  //   }
-
-  //   const loadAllData = async () => {
-  //     setDocumentsLoading(true);
-  //     console.log('🚀 [loadAllData] Starting parallel data fetch for', filteredTasks.length, 'tasks');
-
-  //     const startTime = performance.now();
-
-  //     try {
-  //       // PARALLEL EXECUTION - All 3 fetches run simultaneously
-  //       await Promise.all([
-  //         fetchAllIndividualData(filteredTasks),
-  //         fetchCompanyData(filteredTasks),
-  //         fetchAllCompanyDocuments(filteredTasks)
-  //       ]);
-
-  //       const endTime = performance.now();
-  //       console.log(`✅ [loadAllData] Complete in ${Math.round(endTime - startTime)}ms`);
-
-  //     } catch (error) {
-  //       console.error('❌ [loadAllData] Error:', error);
-  //     } finally {
-  //       setDocumentsLoading(false);
-  //     }
-  //   };
-
-  //   loadAllData();
-  // }, [filteredTasks, fetchAllIndividualData, fetchCompanyData, fetchAllCompanyDocuments]);
 
   useEffect(() => {
     let isMounted = true;
@@ -387,16 +384,13 @@ const fetchAllCompanyDocuments = useCallback(async (tasksToFetch: any[], require
         if (docsErr) throw docsErr;
         setDocuments((docsRes || []).map(doc => ({ ...doc, display_name: doc.display_name || doc.name })));
 
-        // Fetch class requirements for each task
         const taskDataPromises = filteredTasks.map(async (task) => {
           const jobLevel = task.job_level || {};
 
-          // Construct a query that targets the job_level JSON structure
           let query = supabase
             .from('tm_class_requirements')
             .select('*');
 
-          // Filter based on the hierarchical IDs stored in the task's job_level
           if (jobLevel.department_id) {
             query = query.eq('job_level->>department_id', jobLevel.department_id.toString());
           }
@@ -404,7 +398,6 @@ const fetchAllCompanyDocuments = useCallback(async (tasksToFetch: any[], require
             query = query.eq('job_level->>subdepartment_id', jobLevel.subdepartment_id.toString());
           }
 
-          // Use .is() for null values in JSONB
           query = query.eq('job_level->>class_id', jobLevel.class_id ? jobLevel.class_id.toString() : 'null');
 
           if (jobLevel.subclass_id) {
@@ -432,14 +425,11 @@ const fetchAllCompanyDocuments = useCallback(async (tasksToFetch: any[], require
   const groupedTasks = useMemo(() => {
     const groups = new Map<string, any[]>();
     filteredTasks.forEach(task => {
-      // Get applicant name from applicant_details or fall back to participants_details
       let applicantName = 'Unknown Applicant';
 
       if (task.applicant_details?.name) {
-        // If we have applicant_details, use that name
         applicantName = task.applicant_details.name;
       } else if (task.participants_details?.length) {
-        // Otherwise try to find a principal or company in participants_details
         const principal = task.participants_details.find(p =>
           p.type === 'individual' &&
           (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')
@@ -448,7 +438,6 @@ const fetchAllCompanyDocuments = useCallback(async (tasksToFetch: any[], require
         if (principal) {
           applicantName = principal.name;
         } else {
-          // Fall back to first participant with a name
           const namedParticipant = task.participants_details.find(p => p.name);
           if (namedParticipant) {
             applicantName = namedParticipant.name;
@@ -479,181 +468,168 @@ const fetchAllCompanyDocuments = useCallback(async (tasksToFetch: any[], require
     }
   }, [searchedGroupedTasks, selectedApplicant]);
 
-const organizedRequirements = useMemo(() => {
-  const allTasks = filteredGroupedTasks.flatMap(g => g.tasks);
-  const requirementRows: any[] = [];
+  const organizedRequirements = useMemo(() => {
+    const allTasks = filteredGroupedTasks.flatMap(g => g.tasks);
+    const requirementRows: any[] = [];
 
-  allTasks.forEach(task => {
-    const classReqs = taskClassRequirements[task.id];
-    // Check for the new 'requirements' array instead of 'documents_and_fields'
-    if (!classReqs?.requirements || !Array.isArray(classReqs.requirements)) return;
+    allTasks.forEach(task => {
+      const classReqs = taskClassRequirements[task.id];
+      if (!classReqs?.requirements || !Array.isArray(classReqs.requirements)) return;
 
-    classReqs.requirements.forEach((req: any) => {
-      // Handle both kyc_document_id (singular) and kyc_document_ids (array)
-      const kycDocIds = req.kyc_document_ids || (req.kyc_document_id ? [req.kyc_document_id] : []);
-      
-      if (kycDocIds.length === 0) return;
-      
-      // Group documents by their type name to avoid duplicates
-      const documentGroups = new Map<string, string[]>(); // displayName -> array of document IDs
-      
-      kycDocIds.forEach((docId: string) => {
-        const docDef = documents.find(d => d.id === docId);
-        const documentName = docDef?.display_name || docDef?.name || req.name;
+      classReqs.requirements.forEach((req: any) => {
+        const kycDocIds = req.kyc_document_ids || (req.kyc_document_id ? [req.kyc_document_id] : []);
         
-        if (!documentGroups.has(documentName)) {
-          documentGroups.set(documentName, []);
-        }
-        documentGroups.get(documentName)!.push(docId);
-      });
-      
-      // Create one row per unique document type
-      documentGroups.forEach((docIds: string[], documentName: string) => {
-        // Use the first document ID for display and matching
-        const firstDocId = docIds[0];
-        const docDef = documents.find(d => d.id === firstDocId);
+        if (kycDocIds.length === 0) return;
         
-        // Create a unique identifier for this document type group
-        const uniqueId = `${req.id}-${documentName.replace(/\s+/g, '-')}`;
+        // Check if we already have this requirement (by ID, not name)
+        const existingReq = requirementRows.find(r => r.id === req.id);
+        if (existingReq) return; // Skip duplicates from multiple tasks
         
-        // Avoid duplicate requirement rows if the same document type already exists
-        if (requirementRows.find(r => r.documentTypeName === documentName)) return;
+        // Get the first document for display purposes
+        const firstDocId = kycDocIds[0];
+        const firstDocDef = documents.find(d => d.id === firstDocId);
+        
+        // Determine if this is a composite requirement (multiple different document types)
+        const uniqueDocTypes = new Set(
+          kycDocIds.map(docId => {
+            const doc = documents.find(d => d.id === docId);
+            return doc?.display_name || doc?.name || 'Unknown';
+          })
+        );
+        
+        const isComposite = uniqueDocTypes.size > 1;
+        
+        // Use requirement name, not document name
+        const requirementName = req.name || firstDocDef?.display_name || firstDocDef?.name || 'Unnamed Requirement';
         
         requirementRows.push({
-          ...req, // The requirement object from your JSON
-          documentDefinition: docDef, // The KYC metadata (fields, etc)
-          kyc_document_ids: docIds, // Store all document IDs of this type
-          kyc_document_id: firstDocId, // Also store first ID for backward compatibility
-          uniqueId: uniqueId, // Unique identifier for this document type group
-          documentTypeName: documentName, // Store the document type name for deduplication
-          documentCount: docIds.length, // Number of documents of this type
-          isMultiDocument: docIds.length > 1, // Flag to indicate multiple documents of same type
-          // Determine category for sectioning based on applicantTypes and document category
+          ...req,
+          documentDefinition: firstDocDef, // For fields and metadata
+          kyc_document_ids: kycDocIds, // All document IDs
+          kyc_document_id: firstDocId, // First ID for backward compatibility
+          uniqueId: req.id, // Use requirement ID as unique identifier
+          name: requirementName, // Use requirement name
+          documentCount: kycDocIds.length, // Total number of document types
+          isMultiDocument: isComposite, // True if multiple different types
           category: (() => {
-            // Check if this requirement has a template (highest priority)
             if (req.hasTemplate) {
               return 'template';
             }
             
-            // Check if this requirement applies to companies
             const applicantTypes = req.applicantTypes || (req.applicantType ? [req.applicantType] : []);
             if (applicantTypes.includes('company')) {
               return 'company';
             }
             
-            // For non-company requirements, check document category
-            if (docDef?.category === 'company-docs') {
+            if (firstDocDef?.category === 'company-docs') {
               return 'company';
             }
             
-            // Check if it's a template (fallback for document definition)
-            if (docDef?.has_template) {
+            if (firstDocDef?.has_template) {
               return 'template';
             }
             
-            // Default to individual
             return 'individual';
           })()
         });
       });
     });
-  });
 
-  return {
-    documents: {
-      company: requirementRows.filter(r => r.category === 'company'),
-      individual: requirementRows.filter(r => r.category === 'individual'),
-      templates: requirementRows.filter(r => r.category === 'template'),
-    }
-  };
-}, [filteredGroupedTasks, taskClassRequirements, documents]);
+    return {
+      documents: {
+        company: requirementRows.filter(r => r.category === 'company'),
+        individual: requirementRows.filter(r => r.category === 'individual'),
+        templates: requirementRows.filter(r => r.category === 'template'),
+      }
+    };
+  }, [filteredGroupedTasks, taskClassRequirements, documents]);
+
   const handleSelectApplicant = (applicantName: string) => setSelectedApplicant(applicantName);
   const toggleDocumentExpansion = useCallback((docId: string) => setExpandedDocuments(prev => { const newSet = new Set(prev); newSet.has(docId) ? newSet.delete(docId) : newSet.add(docId); return newSet; }), []);
   const handleUploadAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number) => { setSelectedUploadData({ task, document: item, columnType, applicantId }); setUploadDialogOpen(true); }, []);
-  const handleUploadComplete = useCallback(() => { setUploadDialogOpen(false); if (filteredTasks.length > 0) Promise.all([fetchAllIndividualData(filteredTasks), fetchAllCompanyDocuments(filteredTasks)]); }, [filteredTasks, fetchAllIndividualData, fetchAllCompanyDocuments]);
+  const handleUploadComplete = useCallback(() => { 
+    setUploadDialogOpen(false); 
+    if (filteredTasks.length > 0) {
+      const requiredKycIds = getRequiredKycIds();
+      Promise.all([
+        fetchAllIndividualData(filteredTasks, requiredKycIds), 
+        fetchAllCompanyDocuments(filteredTasks, requiredKycIds)
+      ]); 
+    }
+  }, [filteredTasks, getRequiredKycIds, fetchAllIndividualData, fetchAllCompanyDocuments]);
 
-  // --- MODIFICATION: Handler for the new Generate Letter button ---
   const handleGenerateLetterAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number) => {
     setSelectedLetterData({ task, document: item, columnType, applicantId });
     setIsLetterDialogOpen(true);
   }, []);
 
- const handleAutomationAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number, relationshipData?: any) => {
+  const handleAutomationAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number, relationshipData?: any) => {
     console.log("⚙️ Opening Automation Dialog with Relationship Data:", relationshipData);
     setSelectedAutomationData({ task, document: item, columnType, applicantId, relationshipData });
     setIsAutomationDialogOpen(true);
   }, []);
 
-const getDocumentStatusForColumn = useCallback((task: any, reqItem: any, columnType: ApplicantType, applicantId?: number): 
-DocumentStatus => {
-  const baseStatus = { documents: [], count: 0 };
-  // Handle multiple document IDs of the same type
-  const kycDocIds = reqItem.kyc_document_ids || (reqItem.kyc_document_id ? [reqItem.kyc_document_id] : []);
-  
-  if (kycDocIds.length === 0) return baseStatus;
+  const getDocumentStatusForColumn = useCallback((task: any, reqItem: any, columnType: ApplicantType, applicantId?: number): 
+  DocumentStatus => {
+    const baseStatus = { documents: [], count: 0 };
+    const kycDocIds = reqItem.kyc_document_ids || (reqItem.kyc_document_id ? [reqItem.kyc_document_id] : []);
+    
+    if (kycDocIds.length === 0) return baseStatus;
 
-  // Strict applicability check (matches column type to requirement definition)
-  const allowedTypes = reqItem.applicantTypes || (reqItem.applicantType ? [reqItem.applicantType] : []);
-  const normalizedColType = columnType === 'director' ? 'principal' : columnType;
-  if (!allowedTypes.includes(normalizedColType)) return { ...baseStatus, type: 'na' };
+    const allowedTypes = reqItem.applicantTypes || (reqItem.applicantType ? [reqItem.applicantType] : []);
+    const normalizedColType = columnType === 'director' ? 'principal' : columnType;
+    if (!allowedTypes.includes(normalizedColType)) return { ...baseStatus, type: 'na' };
 
-  let foundDocuments: any[] = [];
+    let foundDocuments: any[] = [];
 
-  if (columnType === 'company') {
-    // Match Pool: acc_portal_kyc_uploads (company_id)
-    // First check applicant_details for company, then participants_details, then fallback to company_id
-    let companyId = null;
-    
-    if (task.applicant_details?.type === 'company' && task.applicant_details?.id) {
-      companyId = task.applicant_details.id;
-    } else if (task.participants_details) {
-      const companyPart = task.participants_details.find(p => p.type === 'company');
-      companyId = companyPart?.id;
-    }
-    
-    // Fallback to legacy company_id field
-    if (!companyId) {
-      companyId = task.company_id;
-    }
-    
-    if (companyId && allCompanyDocuments[companyId]) {
-      // Check if any of the kycDocIds match (for documents of same type)
-      foundDocuments = allCompanyDocuments[companyId].filter(doc => 
-        kycDocIds.includes(doc.kyc_document_id)
-      );
-    }
-  } else {
-    // Match Pool: acc_portal_directors_documents (director_id)
-    let individualId = applicantId; // from column mapping
-    
-    // For principal, check applicant_details first, then participants_details
-    if (columnType === 'principal') {
-      if (task.applicant_details?.type === 'individual' && task.applicant_details?.id) {
-        individualId = task.applicant_details.id;
+    if (columnType === 'company') {
+      let companyId = null;
+      
+      if (task.applicant_details?.type === 'company' && task.applicant_details?.id) {
+        companyId = task.applicant_details.id;
       } else if (task.participants_details) {
-        const principalIndividual = task.participants_details.find(p => 
-          p.type === 'individual' && 
-          (p.role === 'principal' || p.role === 'applicant' || (!p.role && !p.relationship))
-        );
-        individualId = principalIndividual?.id || task.individual_id;
-      } else {
-        individualId = task.individual_id;
+        const companyPart = task.participants_details.find(p => p.type === 'company');
+        companyId = companyPart?.id;
       }
-    } else if (columnType === 'understudy') {
-      individualId = task.understudy;
+      
+      if (!companyId) {
+        companyId = task.company_id;
+      }
+      
+      if (companyId && allCompanyDocuments[companyId]) {
+        foundDocuments = allCompanyDocuments[companyId].filter(doc => 
+          kycDocIds.includes(doc.kyc_document_id)
+        );
+      }
+    } else {
+      let individualId = applicantId;
+      
+      if (columnType === 'principal') {
+        if (task.applicant_details?.type === 'individual' && task.applicant_details?.id) {
+          individualId = task.applicant_details.id;
+        } else if (task.participants_details) {
+          const principalIndividual = task.participants_details.find(p => 
+            p.type === 'individual' && 
+            (p.role === 'principal' || p.role === 'applicant' || (!p.role && !p.relationship))
+          );
+          individualId = principalIndividual?.id || task.individual_id;
+        } else {
+          individualId = task.individual_id;
+        }
+      } else if (columnType === 'understudy') {
+        individualId = task.understudy;
+      }
+
+      if (individualId && allIndividualDocuments[individualId]) {
+        foundDocuments = allIndividualDocuments[individualId].filter(doc => 
+          kycDocIds.includes(doc.document_id)
+        );
+      }
     }
 
-    if (individualId && allIndividualDocuments[individualId]) {
-      // Check if any of the kycDocIds match (for documents of same type)
-      foundDocuments = allIndividualDocuments[individualId].filter(doc => 
-        kycDocIds.includes(doc.document_id)
-      );
-    }
-  }
-
-  const type = foundDocuments.length > 0 ? 'view' : 'upload';
-  return { ...baseStatus, documents: foundDocuments, count: foundDocuments.length, type };
-}, [allCompanyDocuments, allIndividualDocuments]);
+    const type = foundDocuments.length > 0 ? 'view' : 'upload';
+    return { ...baseStatus, documents: foundDocuments, count: foundDocuments.length, type };
+  }, [allCompanyDocuments, allIndividualDocuments]);
 
   const renderDocumentStatus = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number, relationshipData?: any) => {
     const status = getDocumentStatusForColumn(task, item, columnType, applicantId);
@@ -664,7 +640,6 @@ DocumentStatus => {
 
       try {
         const documentPreviews = (await Promise.all(status.documents.map(async (doc) => {
-          // Skip documents without valid file_path
           if (!doc.file_path) {
             console.warn('Document missing file_path:', doc.id);
             return null;
@@ -676,7 +651,6 @@ DocumentStatus => {
 
           if (error) throw error;
 
-          // Fetch fields from acc_portal_kyc table using the document's KYC relationship
           let fields = [];
           if (doc.document_id) {
             try {
@@ -699,14 +673,12 @@ DocumentStatus => {
           return {
             id: doc.id,
             fileUrl: data.signedUrl,
-            // Map extracted_details from your JSON
             extractedData: doc.extracted_details || {},
-            // Use fields from the KYC table
             fields: fields,
             name: doc.acc_portal_kyc?.display_name || item.display_name,
             uploadedAt: doc.created_at
           };
-        }))).filter(Boolean); // Filter out null entries
+        }))).filter(Boolean);
 
         setPreviewDocument({
           documents: documentPreviews,
@@ -720,12 +692,11 @@ DocumentStatus => {
       }
     };
 
-    // UI Rendering Logic...
     if (status.type === 'na') return <div className="text-gray-400 text-[10px]">N/A</div>;
 
     return (
       <div className="flex items-center justify-center gap-1 h-full">
-       {item.web_automation?.automationId && (
+        {item.web_automation?.automationId && (
           <Button
             variant="ghost"
             size="sm"
@@ -737,7 +708,6 @@ DocumentStatus => {
           </Button>
         )}
 
-        {/* Generate template button for letters with templates */}
         {isLetter && item.hasTemplate && (
           <Button
             variant="ghost"
@@ -751,7 +721,6 @@ DocumentStatus => {
           </Button>
         )}
         
-        {/* Regular generate letter button for letters without templates */}
         {isLetter && !item.hasTemplate && (
           <Button
             variant="ghost"
@@ -765,12 +734,10 @@ DocumentStatus => {
           </Button>
         )}
         
-        {/* Upload button - hide for automation documents */}
         {!item.web_automation?.automationId && (
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-amber-600 hover:bg-amber-50" onClick={() => handleUploadAction(task, item, columnType, applicantId)} title={`Upload ${item.display_name}`}><Upload className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-amber-600 hover:bg-amber-50" onClick={() => handleUploadAction(task, item, columnType, applicantId)} title={`Upload ${item.display_name}`}><UploadCloud className="h-4 w-4" /></Button>
         )}
         
-        {/* View button for existing documents */}
         {status.type === 'view' && (
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-green-600 hover:bg-green-100" onClick={handleViewClick} title={`View ${status.count} document(s)`}><Eye className="h-4 w-4" /></Button>
@@ -779,7 +746,7 @@ DocumentStatus => {
         )}
       </div>
     );
-   }, [getDocumentStatusForColumn, handleUploadAction, handleGenerateLetterAction, handleAutomationAction, documents]);
+  }, [getDocumentStatusForColumn, handleUploadAction, handleGenerateLetterAction, handleAutomationAction, documents]);
 
   const renderClientFieldData = useCallback(() => <div className="text-center"><span className="text-gray-400 text-xs">-</span></div>, []);
   const renderReferencesData = useCallback(() => <div className="text-center p-2"><span className="text-gray-400 text-xs">N/A</span></div>, []);
@@ -793,23 +760,19 @@ DocumentStatus => {
     return requirements ? [requirements] : [];
   }, [filteredGroupedTasks, taskClassRequirements]);
 
-  // Get company data for each applicant group
   const getCompanyName = (group) => {
     const task = group.tasks[0];
     if (!task) return null;
 
-    // If this is a company applicant, return its name
     if (task.applicant_details?.type === 'company') {
       return task.applicant_details.name;
     }
 
-    // For individual applicants, find the company in participants_details
     if (Array.isArray(task.participants_details)) {
       const company = task.participants_details.find(p => p.type === 'company');
       if (company) return company.name;
     }
 
-    // Fallback to company data if available
     if (task.company_id && companyData[task.company_id]) {
       return companyData[task.company_id].company_name;
     }
@@ -867,7 +830,7 @@ DocumentStatus => {
             renderReferencesData={renderReferencesData}
             hasReferencesColumn={hasReferencesColumn}
             allIndividualDocuments={allIndividualDocuments}
-  allCompanyDocuments={allCompanyDocuments}
+            allCompanyDocuments={allCompanyDocuments}
             individualNames={individualNames}
             companyData={companyData}
             getCurrentRequirements={getCurrentRequirements}
@@ -892,7 +855,6 @@ DocumentStatus => {
       )}
       <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}><DialogContent className="max-w-6xl w-[90vw] max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>Upload {(selectedUploadData?.document?.display_name || 'Document')}</DialogTitle></DialogHeader><FileUploadComponent open={uploadDialogOpen} onOpenChange={setUploadDialogOpen} task={selectedUploadData?.task} document={selectedUploadData?.document} columnType={selectedUploadData?.columnType} applicantId={selectedUploadData?.applicantId} individualNames={individualNames} onUploadComplete={handleUploadComplete} /></DialogContent></Dialog>
 
-      {/* --- MODIFICATION: Render the new Letter Template Dialog --- */}
       <LetterTemplateDialog
         open={isLetterDialogOpen}
         onOpenChange={setIsLetterDialogOpen}
@@ -900,7 +862,6 @@ DocumentStatus => {
         individualNames={individualNames}
       />
 
-      {/* Automation Dialog */}
       {selectedAutomationData && (
         <AutomationMappingDialog
           isOpen={isAutomationDialogOpen}
@@ -910,7 +871,6 @@ DocumentStatus => {
           taskId={selectedAutomationData.task?.id}
           individualId={selectedAutomationData.applicantId?.toString()}
           task={selectedAutomationData.task}
-          // NEW PROP
           relationshipData={selectedAutomationData.relationshipData}
         />
       )}
