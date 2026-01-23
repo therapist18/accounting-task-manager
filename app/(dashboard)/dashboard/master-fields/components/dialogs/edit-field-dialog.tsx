@@ -97,11 +97,17 @@ const COMPUTED_FUNCTIONS = [
 
 function MultiSelectBox({ options, selectedValues, onChange, placeholder = "Select items..." }: { options: Array<{ value: string; label: string }>, selectedValues: string[], onChange: (values: string[]) => void, placeholder?: string }) {
   const [open, setOpen] = useState(false)
+  const [searchTerm, setSearchTerm] = useState("")
+  
   const handleSelect = (value: string) => {
     if (selectedValues.includes(value)) onChange(selectedValues.filter((item) => item !== value))
     else onChange([...selectedValues, value])
   }
   const handleRemove = (value: string) => onChange(selectedValues.filter((item) => item !== value))
+
+  const filteredOptions = options.filter(option =>
+    option.label.toLowerCase().includes(searchTerm.toLowerCase())
+  )
 
   return (
     <div className="space-y-2">
@@ -113,27 +119,39 @@ function MultiSelectBox({ options, selectedValues, onChange, placeholder = "Sele
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-[350px] p-0" align="start">
-          <Command>
-            <CommandInput placeholder="Search..." />
-            <CommandList>
-                <ScrollArea className="h-[200px]">
-                    <CommandEmpty>No results found.</CommandEmpty>
-                    <CommandGroup>
-                        {options.map((option) => {
-                            const isSelected = selectedValues.includes(option.value)
-                            return (
-                                <CommandItem key={option.value} value={option.label} onSelect={() => handleSelect(option.value)}>
-                                    <div className={cn("mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary", isSelected ? "bg-primary text-primary-foreground" : "opacity-50 [&_svg]:invisible")}>
-                                        <Check className={cn("h-4 w-4")} />
-                                    </div>
-                                    <span>{option.label}</span>
-                                </CommandItem>
-                            )
-                        })}
-                    </CommandGroup>
-                </ScrollArea>
-            </CommandList>
-          </Command>
+          <div className="p-3 border-b">
+            <Input
+              placeholder="Search..."
+              className="h-9 text-sm"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <ScrollArea className="h-[200px]">
+            <div className="p-1">
+              {filteredOptions.length === 0 ? (
+                <div className="py-6 text-center text-sm text-slate-500">
+                  No results found.
+                </div>
+              ) : (
+                filteredOptions.map((option) => {
+                  const isSelected = selectedValues.includes(option.value)
+                  return (
+                    <div
+                      key={option.value}
+                      className="flex items-center gap-2 p-2 rounded-sm hover:bg-slate-100 cursor-pointer"
+                      onClick={() => handleSelect(option.value)}
+                    >
+                      <div className={cn("mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary", isSelected ? "bg-primary text-primary-foreground" : "opacity-50 [&_svg]:invisible")}>
+                        <Check className={cn("h-4 w-4")} />
+                      </div>
+                      <span>{option.label}</span>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </ScrollArea>
         </PopoverContent>
       </Popover>
       {selectedValues.length > 0 && (
@@ -155,6 +173,12 @@ function MultiSelectBox({ options, selectedValues, onChange, placeholder = "Sele
 
 function SearchableSelect({ value, onValueChange, options, placeholder = "Select...", searchPlaceholder = "Search...", loading = false, emptyMessage = "No results found." }: any) {
   const [open, setOpen] = useState(false)
+  const [searchTerm, setSearchTerm] = useState("")
+  
+  const filteredOptions = options.filter((option: any) =>
+    option.label.toLowerCase().includes(searchTerm.toLowerCase())
+  )
+  
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -164,26 +188,41 @@ function SearchableSelect({ value, onValueChange, options, placeholder = "Select
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[300px] p-0" align="start">
-        <Command>
-          <CommandInput placeholder={searchPlaceholder} />
-          <CommandList>
-            <ScrollArea className="h-[200px]">
-                <CommandEmpty>{loading ? "Loading..." : emptyMessage}</CommandEmpty>
-                <CommandGroup>
-                {options.map((framework: any) => (
-                    <CommandItem key={framework.value} value={framework.label} onSelect={(currentValue) => {
-                        const selectedOption = options.find((o: any) => o.label.toLowerCase() === currentValue.toLowerCase()) || options.find((o: any) => o.value === currentValue);
-                        onValueChange(selectedOption ? selectedOption.value : currentValue)
-                        setOpen(false)
-                    }}>
-                    <Check className={cn("mr-2 h-4 w-4", value === framework.value ? "opacity-100" : "opacity-0")} />
-                    {framework.label}
-                    </CommandItem>
-                ))}
-                </CommandGroup>
-            </ScrollArea>
-          </CommandList>
-        </Command>
+        <div className="p-3 border-b">
+          <Input
+            placeholder={searchPlaceholder}
+            className="h-9 text-sm"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        <ScrollArea className="h-[200px]">
+          <div className="p-1">
+            {loading ? (
+              <div className="py-6 text-center text-sm text-slate-500">
+                Loading...
+              </div>
+            ) : filteredOptions.length === 0 ? (
+              <div className="py-6 text-center text-sm text-slate-500">
+                {emptyMessage}
+              </div>
+            ) : (
+              filteredOptions.map((framework: any) => (
+                <div
+                  key={framework.value}
+                  className="flex items-center gap-2 p-2 rounded-sm hover:bg-slate-100 cursor-pointer"
+                  onClick={() => {
+                    onValueChange(framework.value)
+                    setOpen(false)
+                  }}
+                >
+                  <Check className={cn("mr-2 h-4 w-4", value === framework.value ? "opacity-100" : "opacity-0")} />
+                  {framework.label}
+                </div>
+              ))
+            )}
+          </div>
+        </ScrollArea>
       </PopoverContent>
     </Popover>
   )

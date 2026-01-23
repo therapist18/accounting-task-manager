@@ -288,12 +288,16 @@ export async function getEducationalDetails(individualId: string | number, compu
 
         return results;
     } catch (error) {
-        console.error("[Educational Details Error]:", error);
         return [];
     }
 }
 
-export async function getLatestDocumentNumber(individualId: string | number, computedDocuments: string[], cache?: DocumentCache): Promise<string> {
+export async function getLatestDocumentNumber(individualId: string | number, computedDocuments: string[], fieldPath?: string, cache?: DocumentCache): Promise<string> {
+    if (fieldPath) {
+        const result = await extractFieldFromLatestDocument(individualId, computedDocuments, fieldPath, cache);
+        if (result !== "Field Not Found" && result !== "Missing Document") return result;
+    }
+    
     const commonPaths = ["extracted_details->>'Passport_Number'", "extracted_details->>'Passport_No'", "extracted_details->>'Permit_Number'", "extracted_details->>'ID_Number'"];
     for (const path of commonPaths) {
         const result = await extractFieldFromLatestDocument(individualId, computedDocuments, path, cache);
@@ -408,8 +412,8 @@ export async function determineImmigrationStatus(individualId: string | number, 
     }
 }
 
-export async function getLatestWorkPermit(individualId: string | number, computedDocuments: string[], cache?: DocumentCache): Promise<string> {
-    return await getLatestDocumentNumber(individualId, computedDocuments, cache);
+export async function getLatestWorkPermit(individualId: string | number, computedDocuments: string[], fieldPath?: string, cache?: DocumentCache): Promise<string> {
+    return await getLatestDocumentNumber(individualId, computedDocuments, fieldPath, cache);
 }
 
 export async function executeComputedField(
@@ -432,8 +436,8 @@ export async function executeComputedField(
         case 'determineImmigrationStatus':
             const result = await determineImmigrationStatus(individualId, computedDocuments, cache);
             return result;
-        case 'getLatestWorkPermit': return await getLatestWorkPermit(individualId, computedDocuments, cache);
-        case 'getLatestDocumentNumber': return await getLatestDocumentNumber(individualId, computedDocuments, cache);
+        case 'getLatestWorkPermit': return await getLatestWorkPermit(individualId, computedDocuments, fieldPath, cache);
+        case 'getLatestDocumentNumber': return await getLatestDocumentNumber(individualId, computedDocuments, fieldPath, cache);
         case 'getLatestDocumentExpiryDate': return await getLatestDocumentExpiryDate(individualId, computedDocuments, cache);
         case 'getLatestDocumentIssueDate': return await getLatestDocumentIssueDate(individualId, computedDocuments, cache);
         case 'getEducationalDetails': return await getEducationalDetails(individualId, computedDocuments, cache);

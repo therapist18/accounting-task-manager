@@ -454,7 +454,7 @@ export function DataSourceConfiguration({ sources, onChange, documentTypes }: Da
                 <div className="space-y-1">
                   <Label className="text-[10px] text-slate-500 uppercase font-bold">Priority</Label>
                   <Input
-                    type="number"
+                    type="number" 
                     className="h-9 bg-white"
                     value={source.priority}
                     onChange={e => updateSource(index, { priority: Number.parseInt(e.target.value) || 1 })}

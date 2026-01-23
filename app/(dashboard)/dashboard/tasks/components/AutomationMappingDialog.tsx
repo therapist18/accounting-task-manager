@@ -440,11 +440,15 @@ export const AutomationMappingDialog = ({
           const source = field.sources?.[0];
           let computedValue: any;
           if (config.computed_function) {
+            // Only pass fieldPath to functions that support it
+            const functionsSupportingFieldPath = ['getLatestDocumentNumber', 'getLatestWorkPermit', 'extractFieldFromLatestDocument', 'extractFieldFromAllDocuments'];
+            const fieldPathToUse = functionsSupportingFieldPath.includes(config.computed_function) ? source?.path : undefined;
+            
             computedValue = await executeComputedField(
               config.computed_function,
               entityId,
               docs,
-              undefined,
+              fieldPathToUse,
               extractionMode,
               documentCache
             );
