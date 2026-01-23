@@ -47,6 +47,8 @@ const COMPUTED_FUNCTIONS = [
     { value: "determineImmigrationStatus", label: "Determine Immigration Status" },
     { value: "getLatestWorkPermit", label: "Get Latest Work Permit No" },
     { value: "getEducationalDetails", label: "Extract Educational History (Array)" },
+    { value: "calculateArithmetic", label: "Arithmetic Calculation (Plus, Minus, etc.)" },
+    { value: "calculateDateDifference", label: "Date Difference (Days, Months, Years)" },
 ]
 
 // --- TYPE DEFINITIONS (from EditFieldDialog context) ---
@@ -91,6 +93,11 @@ interface FieldCardState {
   // New computed state
   is_computed: boolean // ADDED
   computed_function: string // ADDED
+  // Arithmetic configuration
+  arithmeticOperation?: string // ADDED
+  arithmeticField2Path?: string // ADDED
+  arithmeticOperand?: number // ADDED
+  arithmeticUnit?: 'days' | 'months' | 'years' // ADDED
 }
 
 interface AddFieldDialogProps {
@@ -161,6 +168,11 @@ export function AddFieldDialog({ open, onOpenChange, onSuccess }: AddFieldDialog
     selectedJsonPath: "",
     is_computed: false, // ADDED
     computed_function: "", // ADDED
+    // Arithmetic configuration
+    arithmeticOperation: undefined, // ADDED
+    arithmeticField2Path: undefined, // ADDED
+    arithmeticOperand: undefined, // ADDED
+    arithmeticUnit: undefined, // ADDED
   })
 
   // Resets the dialog to its initial state with one empty card
@@ -290,6 +302,13 @@ export function AddFieldDialog({ open, onOpenChange, onSuccess }: AddFieldDialog
               // document_ids extraction is complex and depends on the specific source card's 'document_id' array
               // Since we don't have that state in FieldCardState, we leave it out, 
               // relying on the sources array for data retrieval by the computed function.
+              // Arithmetic configuration
+              arithmetic_config: (card.computed_function === 'calculateArithmetic' || card.computed_function === 'calculateDateDifference') ? {
+                  operation: card.arithmeticOperation,
+                  field2Path: card.arithmeticField2Path,
+                  operand: card.arithmeticOperand,
+                  unit: card.arithmeticUnit
+              } : undefined
           } : null,
         }
       }).filter(field => field.field_key && field.label)

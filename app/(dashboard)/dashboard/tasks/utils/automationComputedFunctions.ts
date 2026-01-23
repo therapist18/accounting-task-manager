@@ -1,4 +1,3 @@
-
 // @ts-nocheck
 import supabase from "@/lib/supabase/client";
 
@@ -554,48 +553,56 @@ export async function calculateDateDifference(
 }
 
 export async function getLatestWorkPermit(individualId: string | number, computedDocuments: string[], fieldPath?: string, cache?: DocumentCache): Promise<string> {
-return await getLatestDocumentNumber(individualId, computedDocuments, fieldPath, cache);
+    return await getLatestDocumentNumber(individualId, computedDocuments, fieldPath, cache);
 }
 
 export async function executeComputedField(
-functionName: string,
-individualId: number | string,
-computedDocuments: string[],
-fieldPath?: string,
-extractionMode: 'latest' | 'all' = 'latest',
-cache?: DocumentCache,
-arithmeticConfig?: { operation?: string; field2Path?: string; operand?: number; unit?: string }
+    functionName: string,
+    individualId: number | string,
+    computedDocuments: string[],
+    fieldPath?: string,
+    extractionMode: 'latest' | 'all' = 'latest',
+    cache?: DocumentCache,
+    arithmeticConfig?: { operation?: string; field2Path?: string; operand?: number; unit?: string }
 ): Promise<any> {
-const normalizedFunctionName = functionName.replace(/\(\)/g, '').trim();
-if (fieldPath) {
-if (extractionMode === 'all') {
-return await extractFieldFromAllDocuments(individualId, computedDocuments, fieldPath, cache);
-} else {
-return await extractFieldFromLatestDocument(individualId, computedDocuments, fieldPath, cache);
-}
-}
-switch (normalizedFunctionName) {
-case 'determineImmigrationStatus':
-const result = await determineImmigrationStatus(individualId, computedDocuments, cache);
-return result;
-case 'getLatestWorkPermit': return await getLatestWorkPermit(individualId, computedDocuments, fieldPath, cache);
-case 'getLatestDocumentNumber': return await getLatestDocumentNumber(individualId, computedDocuments, fieldPath, cache);
-case 'getLatestDocumentExpiryDate': return await getLatestDocumentExpiryDate(individualId, computedDocuments, cache);
-case 'getLatestDocumentIssueDate': return await getLatestDocumentIssueDate(individualId, computedDocuments, cache);
-case 'getEducationalDetails': return await getEducationalDetails(individualId, computedDocuments, cache);
-case 'calculateArithmetic': 
-if (!arithmeticConfig?.operation || !fieldPath) return "Missing Arithmetic Config";
-return await calculateArithmetic(individualId, computedDocuments, arithmeticConfig.operation, fieldPath, arithmeticConfig.field2Path, arithmeticConfig.operand, cache);
-case 'calculateDateDifference':
-if (!arithmeticConfig?.field2Path || !fieldPath) return "Missing Date Config";
-return await calculateDateDifference(individualId, computedDocuments, fieldPath, arithmeticConfig.field2Path, arithmeticConfig.unit as any, cache);
-case 'extractFieldFromLatestDocument':
-return "Missing Path Parameter";
-case 'extractFieldFromAllDocuments':
-return [];
-default:
-return "Unknown Function";
-}
+    const normalizedFunctionName = functionName.replace(/\(\)/g, '').trim();
+
+    // Handle field path extraction for generic extraction functions
+    if (fieldPath) {
+        if (extractionMode === 'all') {
+            return await extractFieldFromAllDocuments(individualId, computedDocuments, fieldPath, cache);
+        } else {
+            return await extractFieldFromLatestDocument(individualId, computedDocuments, fieldPath, cache);
+        }
+    }
+
+    // Handle specific computed functions
+    switch (normalizedFunctionName) {
+        case 'determineImmigrationStatus':
+            return await determineImmigrationStatus(individualId, computedDocuments, cache);
+        case 'getLatestWorkPermit': 
+            return await getLatestWorkPermit(individualId, computedDocuments, fieldPath, cache);
+        case 'getLatestDocumentNumber': 
+            return await getLatestDocumentNumber(individualId, computedDocuments, fieldPath, cache);
+        case 'getLatestDocumentExpiryDate': 
+            return await getLatestDocumentExpiryDate(individualId, computedDocuments, cache);
+        case 'getLatestDocumentIssueDate': 
+            return await getLatestDocumentIssueDate(individualId, computedDocuments, cache);
+        case 'getEducationalDetails': 
+            return await getEducationalDetails(individualId, computedDocuments, cache);
+        case 'calculateArithmetic': 
+            if (!arithmeticConfig?.operation || !fieldPath) return "Missing Arithmetic Config";
+            return await calculateArithmetic(individualId, computedDocuments, arithmeticConfig.operation, fieldPath, arithmeticConfig.field2Path, arithmeticConfig.operand, cache);
+        case 'calculateDateDifference':
+            if (!arithmeticConfig?.field2Path || !fieldPath) return "Missing Date Config";
+            return await calculateDateDifference(individualId, computedDocuments, fieldPath, arithmeticConfig.field2Path, arithmeticConfig.unit as any, cache);
+        case 'extractFieldFromLatestDocument':
+            return "Missing Path Parameter";
+        case 'extractFieldFromAllDocuments':
+            return [];
+        default:
+            return "Unknown Function";
+    }
 }
 
 export async function processComputedFields(

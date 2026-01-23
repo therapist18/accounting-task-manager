@@ -1576,6 +1576,19 @@ export function AutomationDialog({
                             </CardTitle>
                           </CardHeader>
                           <CardContent className="space-y-4 pt-6">
+                            {initialData?.id && (
+                              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                                <div className="flex items-center gap-2">
+                                  <Key className="h-4 w-4 text-amber-600" />
+                                  <div className="text-sm">
+                                    <span className="font-semibold text-amber-800">Field ID:</span>
+                                    <span className="ml-2 font-mono text-amber-700 bg-amber-100 px-2 py-1 rounded">
+                                      {initialData.id}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                             <FormField control={form.control} name="login.url" render={({ field }) => (
                               <FormItem><FormLabel className="text-sm font-bold text-slate-500">Login Page URL</FormLabel><FormControl><Input {...field} placeholder="https://login..." /></FormControl></FormItem>
                             )} />

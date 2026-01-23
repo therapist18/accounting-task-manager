@@ -8,13 +8,11 @@ import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Plus, Search, Download, Edit, Trash2, LinkIcon, ListFilter, Calculator } from "lucide-react"
+import { Plus, Search, Download, Edit, Trash2, ListFilter, Calculator } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import type { JobField } from "../types/database"
-import { AddFieldDialog } from "./components/dialogs/add-field-dialog"
-import { EditFieldDialog } from "./components/dialogs/edit-field-dialog"
+import { FieldDialog } from "./components/dialogs/field-dialog"
 import { DeleteFieldDialog } from "./components/dialogs/delete-field-dialog"
-import { LinkSourcesDialog } from "./components/dialogs/link-sources-dialog"
 import { toast } from "@/hooks/use-toast"
 import { exportToExcel } from "./components/lib/excel-export"
 
@@ -35,7 +33,6 @@ export default function JobFieldsPage() {
     add: false,
     edit: false,
     delete: false,
-    linkSources: false,
   })
   const [allFields, setAllFields] = useState<JobField[]>([])
 
@@ -426,14 +423,21 @@ export default function JobFieldsPage() {
           </CardContent>
         </Card>
 
-        {/* Dialogs */}
-        <AddFieldDialog open={dialogStates.add} onOpenChange={() => closeDialog("add")} onSuccess={fetchFields} />
-        <EditFieldDialog
+        {/* Dialogs - Using unified FieldDialog for both add and edit */}
+        <FieldDialog 
+          open={dialogStates.add} 
+          onOpenChange={() => closeDialog("add")} 
+          onSuccess={fetchFields}
+          availableFields={allFields}
+          mode="add"
+        />
+        <FieldDialog
           open={dialogStates.edit}
           onOpenChange={() => closeDialog("edit")}
           field={selectedField}
           onSuccess={fetchFields}
           availableFields={allFields}
+          mode="edit"
         />
         <DeleteFieldDialog
           open={dialogStates.delete}

@@ -44,12 +44,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 
 // --- TYPES ---
-interface EditFieldDialogProps {
+interface FieldDialogProps {
     open: boolean
     onOpenChange: (open: boolean) => void
-    field: JobField | null
+    field?: JobField | null
     onSuccess: () => void
     availableFields?: Array<{ id: string; label: string; type: string }>
+    mode?: 'add' | 'edit'
 }
 
 interface DropdownOption {
@@ -93,6 +94,19 @@ const COMPUTED_FUNCTIONS = [
     { value: "getEducationalDetails", label: "Extract Educational History (Array)" },
     { value: "calculateArithmetic", label: "Arithmetic Calculation (Plus, Minus, etc.)" },
     { value: "calculateDateDifference", label: "Date Difference (Days, Months, Years)" },
+]
+
+const ARITHMETIC_OPERATIONS = [
+    { value: "plus", label: "Addition (+)" },
+    { value: "minus", label: "Subtraction (-)" },
+    { value: "multiply", label: "Multiplication (×)" },
+    { value: "divide", label: "Division (÷)" },
+]
+
+const DATE_DIFF_UNITS = [
+    { value: "days", label: "Days" },
+    { value: "months", label: "Months" },
+    { value: "years", label: "Years" },
 ]
 
 // --- HELPER COMPONENTS FOR DATA SOURCE CONFIG ---
@@ -279,14 +293,13 @@ function DataSourceConfiguration({ sources, onChange, documentTypes }: { sources
     } catch (error) { console.error(`Error fetching columns:`, error); dispatchField({ type: 'CLEAR_LOADING', index }) } finally { delete fetchInProgressRef.current[fetchKey] }
   }, []) 
 
-  // Trigger fetch when sources are loaded or table changes
   useEffect(() => {
     sources.forEach((source, index) => {
         if (source.table && (!fieldState[index]?.fields || fieldState[index].fields.length === 0)) {
             fetchFieldsForTable(source.table, index);
         }
     });
-  }, [sources, fetchFieldsForTable]); // Removing fieldState from deps to avoid loop, reliance on length check inside
+  }, [sources, fetchFieldsForTable]);
 
   const addSource = () => onChange([...sources, { id: crypto.randomUUID(), source_type: "individual", table: "", path: "", priority: sources.length + 1, fields: [], loadingFields: false, document_id: [], linking_variable: "id" }])
   const updateSource = (index: number, updates: Partial<SourceCardState>) => {
@@ -336,7 +349,9 @@ function DataSourceConfiguration({ sources, onChange, documentTypes }: { sources
 
 // --- MAIN DIALOG COMPONENT ---
 
-export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availableFields = [] }: EditFieldDialogProps) {
+export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFields = [], mode }: FieldDialogProps) {
+    const isEditMode = mode === 'edit' || (field !== null && field !== undefined)
+    
     const [formData, setFormData] = useState<Partial<JobFieldUpdate> & {
         fieldType: 'normal' | 'dropdown';
         dependentFieldId?: string;
@@ -355,7 +370,16 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
         documentTypes: Array<{ value: string; label: string }>;
         is_computed: boolean;
         computed_function: string;
-        computed_config: { document_ids?: string[] };
+        computed_config: { 
+            document_ids?: string[];
+            arithmeticConfig?: {
+                operation?: string;
+                field1Path?: string;
+                field2Path?: string;
+                operand?: number;
+                unit?: string;
+            };
+        };
         category: string;
     }>({
         fieldType: 'normal',
@@ -379,17 +403,20 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
     const [openParentCombo, setOpenParentCombo] = useState(false)
     const [openFunctionCombo, setOpenFunctionCombo] = useState(false)
 
-    // Manual Mapping Builder State
     const [parentFieldOptions, setParentFieldOptions] = useState<ParentOptionItem[]>([]) 
     const [loadingParentOptions, setLoadingParentOptions] = useState(false)
     const [currentParentValue, setCurrentParentValue] = useState("") 
     const [currentChildInput, setCurrentChildInput] = useState("") 
     const [currentChildList, setCurrentChildList] = useState<DropdownOption[]>([]) 
     const [openParentValueCombo, setOpenParentValueCombo] = useState(false)
+    const [masterFields, setMasterFields] = useState<Array<{ id: string; label: string; field_key: string }>>([])
+    const [loadingMasterFields, setLoadingMasterFields] = useState(false)
+
+    // Bulk input for add mode
+    const [bulkInput, setBulkInput] = useState("")
 
     const dropdownFields = availableFields.filter(f => f.type === 'select' && f.id !== field?.id)
 
-    // Helper to fetch parent options
     const fetchParentOptions = useCallback(async (parentId: string) => {
         setLoadingParentOptions(true);
         try {
@@ -443,12 +470,26 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                 }
             } catch (error) { console.error(error) }
         }
-        if (open) fetchDocumentTypes()
+        
+        const fetchMasterFields = async () => {
+            setLoadingMasterFields(true)
+            try {
+                const { data } = await supabase.from('tm_job_fields').select('id, label, field_key').order('label')
+                if (data) {
+                    setMasterFields(data)
+                }
+            } catch (error) { console.error(error) } finally { setLoadingMasterFields(false) }
+        }
+        
+        if (open) {
+            fetchDocumentTypes()
+            fetchMasterFields()
+        }
     }, [open])
 
     useEffect(() => {
         const initData = async () => {
-            if (field) {
+            if (isEditMode && field) {
                 const isDropdown = field.type === 'select'
                 let depConfig = field.options?.dependencyConfig || {};
                 const dependentSource = field.sources?.find(s => s.source_type === 'field')
@@ -481,12 +522,14 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                     date_config: field.date_config || { useCurrentDate: true, format: 'YYYY-MM-DD' },
                     is_computed: computedConfig.is_computed || false,
                     computed_function: computedConfig.computed_function || "",
-                    computed_config: { document_ids: computedConfig.document_ids || [] },
+                    computed_config: { 
+                        document_ids: computedConfig.document_ids || [],
+                        arithmeticConfig: computedConfig.arithmeticConfig || {}
+                    },
                     category: field.category || "General",
                     documentTypes: formData.documentTypes
                 })
 
-                // FIX: Always load sources that are NOT "field" sources (which are dependency links)
                 if (field.sources && field.sources.length > 0) {
                     const validSources = field.sources.filter(s => s.source_type !== 'field');
                     if (validSources.length > 0) {
@@ -501,10 +544,34 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                         setOptionsText(field.options[0]);
                     } else { setOptionsText(JSON.stringify(field.options, null, 2)) }
                 } else { setOptionsText("") }
+            } else {
+                setFormData({
+                    field_key: "",
+                    label: "",
+                    type: "text",
+                    is_required: false,
+                    fieldType: 'normal',
+                    date_config: { useCurrentDate: true, format: 'YYYY-MM-DD' },
+                    documentTypes: formData.documentTypes,
+                    is_computed: false,
+                    computed_function: "",
+                    category: "General",
+                    computed_config: {},
+                    dependencyConfig: { mode: 'db_filter', valueKey: "name", labelKey: "name", parentOptionKey: "parent_id" },
+                    manualMapping: {}
+                })
+                setSources([])
+                setOptionsText("")
+                setBulkInput("")
+                setIsDependent(false)
+                setParentFieldOptions([])
+                setCurrentParentValue("")
+                setCurrentChildInput("")
+                setCurrentChildList([])
             }
         };
         initData();
-    }, [field, open, fetchParentOptions])
+    }, [field, open, fetchParentOptions, isEditMode])
 
     useEffect(() => {
         const fetchCategories = async () => {
@@ -523,7 +590,6 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
         }
     }, [formData.dependentFieldId, open, parentFieldOptions.length, fetchParentOptions])
 
-    // Normalize manual mapping when parent options are loaded
     useEffect(() => {
         if (parentFieldOptions.length > 0 && formData.manualMapping && Object.keys(formData.manualMapping).length > 0) {
             const normalized = normalizeManualMapping(formData.manualMapping, parentFieldOptions);
@@ -595,7 +661,6 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
 
     const handleFormSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
-        if (!field) return
         setLoading(true)
 
         try {
@@ -613,7 +678,7 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                         options = Array.isArray(parsed) ? parsed : [parsed]; 
                     } catch { options = optionsText.split(/[\n,]+/).map(opt => opt.trim()).filter(Boolean) }
                 }
-            } else if (field.options) {
+            } else if (isEditMode && field?.options) {
                 options = Array.isArray(field.options) ? field.options : []
             }
 
@@ -631,18 +696,17 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                 if (idBasedOptions.length > 0) { options = idBasedOptions; }
             }
 
-            const updateData: JobFieldUpdate = {
-                field_key: formData.field_key || field.field_key,
-                label: formData.label || field.label,
-                type: formData.fieldType === 'dropdown' ? 'select' : (formData.type || field.type),
-                is_required: formData.is_required ?? field.is_required,
+            const updateData: any = {
+                field_key: formData.field_key || (isEditMode ? field?.field_key : ""),
+                label: formData.label || (isEditMode ? field?.label : ""),
+                type: formData.fieldType === 'dropdown' ? 'select' : (formData.type || (isEditMode ? field?.type : 'text')),
+                is_required: formData.is_required ?? (isEditMode ? field?.is_required : false),
                 options,
                 category: formData.category,
                 updated_at: new Date().toISOString()
             }
 
             let finalSources: any[] = []
-            // Use the actual configured sources from state
             const userConfiguredSources = sources.map(({ id, fields, loadingFields, ...rest }) => rest);
 
             if (formData.is_computed) {
@@ -651,6 +715,7 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                     document_ids: [...new Set(extractedDocIds)],
                     is_computed: formData.is_computed,
                     computed_function: formData.computed_function,
+                    arithmeticConfig: formData.computed_config.arithmeticConfig
                 };
                 finalSources = userConfiguredSources;
             } else {
@@ -667,28 +732,63 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                 }
             }
 
-            const { error } = await supabase.from('tm_job_fields').update(updateData).eq('id', field.id)
-            if (error) throw error
+            if (isEditMode && field) {
+                const { error } = await supabase.from('tm_job_fields').update(updateData).eq('id', field.id)
+                if (error) throw error
+                toast({ title: "Success", description: "Field updated successfully" })
+            } else {
+                updateData.created_at = new Date().toISOString()
+                const { error } = await supabase.from('tm_job_fields').insert(updateData)
+                if (error) throw error
+                toast({ title: "Success", description: "Field created successfully" })
+            }
 
-            toast({ title: "Success", description: "Field updated successfully" })
             onSuccess()
             onOpenChange(false)
         } catch (error) {
             console.error(error)
-            toast({ title: "Error", description: "Failed to update field", variant: "destructive" })
+            toast({ 
+                title: "Error", 
+                description: isEditMode ? "Failed to update field" : "Failed to create field", 
+                variant: "destructive" 
+            })
         } finally { setLoading(false) }
     }
+
+    const requiresArithmeticConfig = formData.computed_function === 'calculateArithmetic' || formData.computed_function === 'calculateDateDifference';
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-[900px] h-[95vh] flex flex-col p-0 overflow-hidden bg-slate-50">
                 <DialogHeader className="px-6 py-4 border-b bg-white">
-                    <DialogTitle>Edit Field: {field?.label}</DialogTitle>
-                    <DialogDescription>Configure field settings and data mapping.</DialogDescription>
+                    <DialogTitle>
+                        {isEditMode ? `Edit Field: ${field?.label}` : "Add New Field"}
+                    </DialogTitle>
+                    <DialogDescription>
+                        {isEditMode 
+                            ? "Configure field settings and data mapping." 
+                            : "Create a new job field with custom configuration."}
+                    </DialogDescription>
                 </DialogHeader>
 
                 <form onSubmit={handleFormSubmit} className="flex-1 overflow-y-auto p-6 space-y-8">
-                    {/* 1. BASIC SETTINGS */}
+                    {/* BULK INPUT SECTION (ADD MODE ONLY) */}
+                    {!isEditMode && (
+                        <Card className="border-2 border-dashed border-blue-300 bg-blue-50/30">
+                            <CardContent className="p-4">
+                                <Label className="text-sm font-bold text-blue-900 mb-2 block">Quick Create Multiple Fields (Bulk Input)</Label>
+                                <Textarea
+                                    value={bulkInput}
+                                    onChange={(e) => setBulkInput(e.target.value)}
+                                    placeholder="Paste field names here (one per line or comma-separated)&#10;Example:&#10;First Name&#10;Last Name&#10;Email Address"
+                                    className="min-h-[120px] font-mono text-sm bg-white"
+                                />
+                                <p className="text-xs text-slate-500 mt-2">Fields will be created with default settings. You can edit them individually afterward.</p>
+                            </CardContent>
+                        </Card>
+                    )}
+
+                    {/* REST OF THE FORM... */}
                     <Card className="space-y-4 border shadow-sm bg-white p-5 rounded-xl">
                         <div className="flex items-center gap-2 pb-2 mb-2 border-b">
                             <Settings2 className="w-4 h-4 text-slate-500" />
@@ -742,7 +842,7 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                         </div>
                     </Card>
 
-                    {/* 2. DATA LOGIC */}
+                    {/* DATA LOGIC SECTION */}
                     <div className="space-y-4">
                         <div className="flex items-center justify-between pb-2 border-b border-slate-200">
                             <div className="flex items-center gap-2">
@@ -755,23 +855,192 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                             </div>
                         </div>
 
-                        {/* A. Computed Configuration */}
                         {formData.is_computed && (
-                            <div className="p-5 border border-purple-200 bg-purple-50/30 rounded-xl">
-                                <Label className="text-xs font-bold text-purple-900 uppercase">Computed Function</Label>
-                                <Popover open={openFunctionCombo} onOpenChange={setOpenFunctionCombo}>
-                                    <PopoverTrigger asChild>
-                                        <Button variant="outline" role="combobox" aria-expanded={openFunctionCombo} className="w-full justify-between bg-white border-purple-200 mt-2">
-                                            {formData.computed_function ? COMPUTED_FUNCTIONS.find((f) => f.value === formData.computed_function)?.label : "Select logic..."}
-                                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                        </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-[400px] p-0"><Command><CommandInput placeholder="Search function..." /><CommandList><CommandGroup>{COMPUTED_FUNCTIONS.map((fn) => (<CommandItem key={fn.value} value={fn.label} onSelect={() => { setFormData({ ...formData, computed_function: fn.value }); setOpenFunctionCombo(false) }}><Check className={cn("mr-2 h-4 w-4", formData.computed_function === fn.value ? "opacity-100" : "opacity-0")} />{fn.label}</CommandItem>))}</CommandGroup></CommandList></Command></PopoverContent>
-                                </Popover>
+                            <div className="p-5 border border-purple-200 bg-purple-50/30 rounded-xl space-y-4">
+                                <div>
+                                    <Label className="text-xs font-bold text-purple-900 uppercase">Computed Function</Label>
+                                    <Popover open={openFunctionCombo} onOpenChange={setOpenFunctionCombo}>
+                                        <PopoverTrigger asChild>
+                                            <Button variant="outline" role="combobox" aria-expanded={openFunctionCombo} className="w-full justify-between bg-white border-purple-200 mt-2">
+                                                {formData.computed_function ? COMPUTED_FUNCTIONS.find((f) => f.value === formData.computed_function)?.label : "Select logic..."}
+                                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-[400px] p-0"><Command><CommandInput placeholder="Search function..." /><CommandList><CommandGroup>{COMPUTED_FUNCTIONS.map((fn) => (<CommandItem key={fn.value} value={fn.label} onSelect={() => { setFormData({ ...formData, computed_function: fn.value }); setOpenFunctionCombo(false) }}><Check className={cn("mr-2 h-4 w-4", formData.computed_function === fn.value ? "opacity-100" : "opacity-0")} />{fn.label}</CommandItem>))}</CommandGroup></CommandList></Command></PopoverContent>
+                                    </Popover>
+                                </div>
+
+                                {/* ARITHMETIC CONFIG */}
+                                {formData.computed_function === 'calculateArithmetic' && (
+                                    <div className="space-y-3 pt-3 border-t border-purple-200">
+                                        <Label className="text-xs font-bold text-purple-900 uppercase">Arithmetic Configuration</Label>
+                                        <Select 
+                                            value={formData.computed_config.arithmeticConfig?.operation || ""} 
+                                            onValueChange={(v) => setFormData(prev => ({
+                                                ...prev,
+                                                computed_config: {
+                                                    ...prev.computed_config,
+                                                    arithmeticConfig: {
+                                                        ...prev.computed_config.arithmeticConfig,
+                                                        operation: v
+                                                    }
+                                                }
+                                            }))}
+                                        >
+                                            <SelectTrigger className="bg-white">
+                                                <SelectValue placeholder="Select operation" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {ARITHMETIC_OPERATIONS.map(op => (
+                                                    <SelectItem key={op.value} value={op.value}>{op.label}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="space-y-2">
+                                                <Label className="text-[10px] font-bold uppercase text-purple-700">Field 1 Path</Label>
+                                                <Input 
+                                                    className="h-9 bg-white text-xs font-mono"
+                                                    placeholder="e.g. extracted_details->>'permit_wef'"
+                                                    value={formData.computed_config.arithmeticConfig?.field1Path || ""}
+                                                    onChange={(e) => setFormData(prev => ({
+                                                        ...prev,
+                                                        computed_config: {
+                                                            ...prev.computed_config,
+                                                            arithmeticConfig: {
+                                                                ...prev.computed_config.arithmeticConfig,
+                                                                field1Path: e.target.value
+                                                            }
+                                                        }
+                                                    }))}
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="text-[10px] font-bold uppercase text-purple-700">Field 2 Path (Optional)</Label>
+                                                <Input 
+                                                    className="h-9 bg-white text-xs font-mono"
+                                                    placeholder="e.g. extracted_details->>'permit_expiry_date'"
+                                                    value={formData.computed_config.arithmeticConfig?.field2Path || ""}
+                                                    onChange={(e) => setFormData(prev => ({
+                                                        ...prev,
+                                                        computed_config: {
+                                                            ...prev.computed_config,
+                                                            arithmeticConfig: {
+                                                                ...prev.computed_config.arithmeticConfig,
+                                                                field2Path: e.target.value
+                                                            }
+                                                        }
+                                                    }))}
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <Label className="text-[10px] font-bold uppercase text-purple-700">Or Use Fixed Operand</Label>
+                                            <Input 
+                                                type="number"
+                                                className="h-9 bg-white"
+                                                placeholder="e.g. 365"
+                                                value={formData.computed_config.arithmeticConfig?.operand || ""}
+                                                onChange={(e) => setFormData(prev => ({
+                                                    ...prev,
+                                                    computed_config: {
+                                                        ...prev.computed_config,
+                                                        arithmeticConfig: {
+                                                            ...prev.computed_config.arithmeticConfig,
+                                                            operand: e.target.value ? Number(e.target.value) : undefined
+                                                        }
+                                                    }
+                                                }))}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* DATE DIFFERENCE CONFIG */}
+                                {formData.computed_function === 'calculateDateDifference' && (
+                                    <div className="space-y-3 pt-3 border-t border-purple-200">
+                                        <Label className="text-xs font-bold text-purple-900 uppercase">Date Difference Configuration</Label>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="space-y-2">
+                                                <Label className="text-[10px] font-bold uppercase text-purple-700">Start Date Path</Label>
+                                                <SearchableSelect 
+                                                    value={formData.computed_config.arithmeticConfig?.field1Path || ""}
+                                                    onValueChange={(value) => setFormData(prev => ({
+                                                        ...prev,
+                                                        computed_config: {
+                                                            ...prev.computed_config,
+                                                            arithmeticConfig: {
+                                                                ...prev.computed_config.arithmeticConfig,
+                                                                field1Path: value
+                                                            }
+                                                        }
+                                                    }))}
+                                                    options={masterFields.map(field => ({ 
+                                                        value: field.field_key, 
+                                                        label: `${field.label} (${field.field_key})` 
+                                                    }))}
+                                                    loading={loadingMasterFields}
+                                                    placeholder="Select master field..."
+                                                    searchPlaceholder="Search fields..."
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="text-[10px] font-bold uppercase text-purple-700">End Date Path</Label>
+                                                <SearchableSelect 
+                                                    value={formData.computed_config.arithmeticConfig?.field2Path || ""}
+                                                    onValueChange={(value) => setFormData(prev => ({
+                                                        ...prev,
+                                                        computed_config: {
+                                                            ...prev.computed_config,
+                                                            arithmeticConfig: {
+                                                                ...prev.computed_config.arithmeticConfig,
+                                                                field2Path: value
+                                                            }
+                                                        }
+                                                    }))}
+                                                    options={masterFields.map(field => ({ 
+                                                        value: field.field_key, 
+                                                        label: `${field.label} (${field.field_key})` 
+                                                    }))}
+                                                    loading={loadingMasterFields}
+                                                    placeholder="Select master field..."
+                                                    searchPlaceholder="Search fields..."
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <Label className="text-[10px] font-bold uppercase text-purple-700">Unit</Label>
+                                            <Select 
+                                                value={formData.computed_config.arithmeticConfig?.unit || "days"} 
+                                                onValueChange={(v) => setFormData(prev => ({
+                                                    ...prev,
+                                                    computed_config: {
+                                                        ...prev.computed_config,
+                                                        arithmeticConfig: {
+                                                            ...prev.computed_config.arithmeticConfig,
+                                                            unit: v
+                                                        }
+                                                    }
+                                                }))}
+                                            >
+                                                <SelectTrigger className="bg-white">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {DATE_DIFF_UNITS.map(unit => (
+                                                        <SelectItem key={unit.value} value={unit.value}>{unit.label}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
 
-                        {/* B. Dropdown / Dependency Configuration */}
                         {!formData.is_computed && formData.fieldType === 'dropdown' && (
                             <Card className="border shadow-sm">
                                 <CardDescription className="p-4 space-y-4">
@@ -790,7 +1059,6 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
 
                                     {isDependent ? (
                                         <div className="space-y-4 animate-in slide-in-from-top-2 duration-200">
-                                            {/* 1. Parent Selection */}
                                             <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
                                                 <Label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Parent Field (The Trigger)</Label>
                                                 <Popover open={openParentCombo} onOpenChange={setOpenParentCombo}>
@@ -819,15 +1087,12 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                                                 </Popover>
                                             </div>
 
-                                            {/* 2. Manual Mapping Configuration */}
                                             {formData.dependentFieldId && (
                                                 <div className="space-y-4 pt-4">
                                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                            {/* LEFT: Builder */}
                                                             <div className="space-y-4 border p-4 rounded-lg bg-slate-50">
                                                                 <h4 className="text-xs font-bold text-slate-600 uppercase flex items-center gap-2"><Plus className="w-3 h-3" /> Add Mapping Set</h4>
                                                                 
-                                                                {/* Step 1: Select Parent Value */}
                                                                 <div className="space-y-2">
                                                                     <Label className="text-[10px] uppercase font-bold text-slate-500">1. Select Parent Value</Label>
                                                                     <div className="flex gap-2">
@@ -855,12 +1120,10 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                                                                                 </Command>
                                                                             </PopoverContent>
                                                                         </Popover>
-                                                                        {/* Fallback input if not in list */}
                                                                         <Input className="w-1/2 h-9 text-xs" placeholder="ID/Value" value={currentParentValue} onChange={e => setCurrentParentValue(e.target.value)} />
                                                                     </div>
                                                                 </div>
 
-                                                                {/* Step 2: Add Children (Textarea for Bulk) */}
                                                                 <div className="space-y-2">
                                                                     <div className="flex justify-between items-end">
                                                                         <Label className="text-[10px] uppercase font-bold text-slate-500">2. Bulk Add Dependents</Label>
@@ -870,7 +1133,6 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                                                                     <Textarea className="h-24 text-xs bg-white font-mono" placeholder="Item 1, Item 2&#10;Item 3&#10;Item 4" value={currentChildInput} onChange={e => setCurrentChildInput(e.target.value)} />
                                                                     <Button size="sm" onClick={addValuesToCurrentList} variant="secondary" className="w-full h-7 text-xs gap-2" type="button"><ArrowDown className="w-3 h-3" /> Process to List</Button>
                                                                     
-                                                                    {/* Preview Children */}
                                                                     <div className="flex flex-wrap gap-1 min-h-[40px] max-h-[100px] overflow-y-auto p-2 bg-white border rounded-md">
                                                                         {currentChildList.length === 0 && <span className="text-[10px] text-slate-300 italic">No items pending...</span>}
                                                                         {currentChildList.map(c => (
@@ -882,13 +1144,11 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                                                                     </div>
                                                                 </div>
 
-                                                                {/* Step 3: Save Set */}
                                                                 <Button onClick={saveMappingSet} className="w-full bg-slate-800 text-white h-9 text-xs" disabled={!currentParentValue || currentChildList.length === 0}>
                                                                     <Save className="w-3 h-3 mr-2" /> Save this Mapping Set
                                                                 </Button>
                                                             </div>
 
-                                                            {/* RIGHT: List of Mappings */}
                                                             <div className="border rounded-lg overflow-hidden flex flex-col h-[400px]">
                                                                 <div className="bg-slate-100 p-2 text-xs font-bold text-slate-600 border-b flex justify-between items-center">
                                                                     <span>Existing Mappings</span>
@@ -934,7 +1194,6 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                             </Card>
                         )}
 
-                        {/* C. Data Sources */}
                         <div className="space-y-2 pt-2">
                             <div className="flex items-center justify-between">
                                 <Label className="text-sm font-semibold text-slate-800">Data Sources</Label>
@@ -943,7 +1202,6 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
                             <DataSourceConfiguration sources={sources} onChange={setSources} documentTypes={formData.documentTypes} />
                         </div>
                         
-                        {/* D. Date Configuration */}
                         {!formData.is_computed && formData.type === 'date' && (
                             <div className="space-y-4 pt-4 border-t">
                                 <Label className="text-sm font-bold text-slate-700">Date Formatting</Label>
@@ -966,10 +1224,15 @@ export function EditFieldDialog({ open, onOpenChange, field, onSuccess, availabl
 
                     <DialogFooter className="pt-4 border-t bg-white sticky bottom-0 z-10 -m-6 p-6 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
                         <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={loading}>Cancel</Button>
-                        <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700">{loading ? "Saving..." : "Save Configuration"}</Button>
+                        <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700">
+                            {loading ? "Saving..." : (isEditMode ? "Save Configuration" : "Create Field")}
+                        </Button>
                     </DialogFooter>
                 </form>
             </DialogContent>
         </Dialog>
     )
 }
+
+export const EditFieldDialog = FieldDialog
+export const AddFieldDialog = FieldDialog

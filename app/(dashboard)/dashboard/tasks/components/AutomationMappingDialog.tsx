@@ -233,14 +233,23 @@ export const AutomationMappingDialog = ({
       // Get values for each array item column
       const columnValues: any = {};
       field.arrayItems?.forEach((item: any) => {
-        const value = getFieldValue(item.linkedMasterFieldId, String(entityId), 0, item.extractionMode || 'latest', true);
-        const columnKey = item.linkedMasterFieldId;
-        columnValues[columnKey] = value;
+        // Handle both linkedMasterFields (array) and linkedMasterFieldId (single value)
+        const fieldIds = item.linkedMasterFields || (item.linkedMasterFieldId ? [item.linkedMasterFieldId] : []);
+        const fieldId = String(fieldIds[0] || '');
+        
+        if (fieldId) {
+          const itemExtractionMode = item.extractionMode || 'latest';
+          const value = getFieldValue(fieldId, String(entityId), 0, itemExtractionMode, true);
+          // Use item.variableName as the key for storage
+          const columnKey = item.variableName || fieldId;
+          columnValues[columnKey] = value;
+        }
       });
 
-      // If we have array values, create multiple rows
+      // Calculate max rows - if any column has array values, we need multiple rows
       const maxRows = Math.max(1, ...Object.values(columnValues).map((v: any) => Array.isArray(v) ? v.length : 1));
       
+      // Create a row for each array element
       for (let i = 0; i < maxRows; i++) {
         const rowData: any = { 
           index: arrayData.length + 1, 
@@ -248,13 +257,15 @@ export const AutomationMappingDialog = ({
         };
         
         field.arrayItems?.forEach((item: any) => {
-          const columnKey = item.linkedMasterFieldId;
+          const columnKey = item.variableName || String((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId || '');
           let value = columnValues[columnKey];
           
+          // If value is an array (from extractionMode: 'all'), get the i-th element
           if (Array.isArray(value)) {
-            rowData[columnKey] = value[i] !== undefined ? value[i] : "";
+            rowData[columnKey] = value[i] !== undefined && value[i] !== '' ? value[i] : "";
           } else {
-            rowData[columnKey] = value !== undefined && value !== 'Computing...' ? value : "";
+            // Single value - repeat for all rows or only show on first row
+            rowData[columnKey] = (i === 0 && value !== undefined && value !== 'Computing...') ? value : "";
           }
         });
         
@@ -265,37 +276,47 @@ export const AutomationMappingDialog = ({
     return arrayData;
   };
 
-  const getMasterFieldDisplayName = (masterFieldId: string) => {
+  const getMasterFieldDisplayName = (masterFieldId: string | number, itemName?: string) => {
+    // If itemName is provided (from array item), use that first
+    if (itemName) {
+      return itemName;
+    }
+    
+    // Convert to string for consistent comparison
+    const fieldIdStr = String(masterFieldId);
+    
     // Look up the master field in jobFields to get its display name
-    const masterField = jobFields[masterFieldId];
+    const masterField = jobFields[fieldIdStr];
     if (masterField) {
-      // Use the correct property names from the API response
-      const displayName = masterField.label || masterField.field_key || masterField.table_header || masterFieldId;
+      const displayName = masterField.label || masterField.field_key || masterField.table_header || fieldIdStr;
       return displayName;
     }
 
     // If not found in jobFields, try to find it in the active web entry fields
     const activeWebEntry = webData.find(w => w.automationId === selectedAutomationId);
     if (activeWebEntry?.fields) {
-      const field = activeWebEntry.fields.find((f: any) =>
-        f.masterFieldIds?.includes(masterFieldId) || f.variableName === masterFieldId
-      );
+      const field = activeWebEntry.fields.find((f: any) => {
+        const linkedFields = f.linkedMasterFields || f.masterFieldIds || [];
+        return linkedFields.some((id: any) => String(id) === fieldIdStr) || 
+               f.variableName === fieldIdStr;
+      });
       if (field) {
-        const displayName = field.efnsDisplayName || field.variableName || masterFieldId;
+        const displayName = field.efnsDisplayName || field.variableName || fieldIdStr;
         return displayName;
       }
     }
 
-    // Try to find by searching through all jobFields for matching masterFieldIds
+    // Try to find by searching through all jobFields for matching linkedMasterFields
     for (const [key, field] of Object.entries(jobFields)) {
-      if (field.masterFieldIds?.includes(masterFieldId)) {
+      const linkedFields = field.linkedMasterFields || field.masterFieldIds || [];
+      if (linkedFields.some((id: any) => String(id) === fieldIdStr)) {
         const displayName = field.label || field.field_key || field.table_header || key;
         return displayName;
       }
     }
 
     // Fallback to the ID if no display name found
-    return masterFieldId;
+    return fieldIdStr;
   };
 
   const fetchSourceData = useCallback(async () => {
@@ -318,9 +339,12 @@ export const AutomationMappingDialog = ({
       const activeAutomation = webData.find(w => w.automationId === selectedAutomationId);
       const fieldsToProcess = activeAutomation?.fields || [];
       const computedMasterFields: any[] = [];
+      
       fieldsToProcess.forEach((field: any) => {
         const isArray = field.fieldType === 'array';
-        const cols = isArray ? (field.arrayItems || []) : [{ linkedMasterFieldId: field.masterFieldIds?.[0] }];
+        const cols = isArray 
+          ? (field.arrayItems || []) 
+          : [{ linkedMasterFieldId: field.linkedMasterFields?.[0] || field.masterFieldIds?.[0] }];
         let entityIds: string[] = [];
         if (isArray) {
           entityIds = resolveEntityIdsForArray(field, relationshipData);
@@ -330,8 +354,11 @@ export const AutomationMappingDialog = ({
         }
 
         cols.forEach((col: any) => {
-          if (!col.linkedMasterFieldId && !field.masterFieldIds) return;
-          const mid = col.linkedMasterFieldId || field.masterFieldIds?.[0];
+          // Handle both linkedMasterFields (array) and linkedMasterFieldId (single value)
+          const fieldIds = col.linkedMasterFields || (col.linkedMasterFieldId ? [col.linkedMasterFieldId] : []);
+          const mid = fieldIds[0] || field.linkedMasterFields?.[0] || field.masterFieldIds?.[0];
+          if (!mid) return;
+          
           const jobField = jobFields[mid];
           if (jobField) {
             if (jobField.is_computed || jobField.computed_config?.is_computed) {
@@ -459,10 +486,18 @@ export const AutomationMappingDialog = ({
           const docs = config.document_ids || [];
           const source = field.sources?.[0];
           let computedValue: any;
+          
           if (config.computed_function) {
-            // Only pass fieldPath to functions that support it
-            const functionsSupportingFieldPath = ['getLatestDocumentNumber', 'getLatestWorkPermit', 'extractFieldFromLatestDocument', 'extractFieldFromAllDocuments'];
-            const fieldPathToUse = functionsSupportingFieldPath.includes(config.computed_function) ? source?.path : undefined;
+            // Only pass fieldPath for functions that need document field extraction
+            const functionsNeedingFieldPath = [
+              'getLatestDocumentNumber', 
+              'getLatestWorkPermit', 
+              'extractFieldFromLatestDocument', 
+              'extractFieldFromAllDocuments'
+            ];
+            const fieldPathToUse = functionsNeedingFieldPath.includes(config.computed_function) && source?.path 
+              ? source.path 
+              : undefined;
             
             computedValue = await executeComputedField(
               config.computed_function,
@@ -491,7 +526,8 @@ export const AutomationMappingDialog = ({
           let storageValue = computedValue;
           if (typeof computedValue === 'object' && computedValue !== null && !Array.isArray(computedValue)) {
             storageValue = JSON.stringify(computedValue);
-          } newComputedValues[cacheKey] = storageValue;
+          } 
+          newComputedValues[cacheKey] = storageValue;
         }
         setMasterFieldComputedValues(newComputedValues);
       }
@@ -650,9 +686,13 @@ export const AutomationMappingDialog = ({
 
         const fieldIds = finalWebDataItems.flatMap(i => {
           const fields = i.fields || [];
-          const directIds = fields.flatMap((f: any) => f.masterFieldIds || []);
+          const directIds = fields.flatMap((f: any) => 
+            f.linkedMasterFields || f.masterFieldIds || []
+          );
           const arrayIds = fields.flatMap((f: any) =>
-            (f.arrayItems || []).map((item: any) => item.linkedMasterFieldId)
+            (f.arrayItems || []).flatMap((item: any) => 
+              item.linkedMasterFields || (item.linkedMasterFieldId ? [item.linkedMasterFieldId] : [])
+            )
           );
           return [...directIds, ...arrayIds];
         }).filter(Boolean);
@@ -730,8 +770,12 @@ export const AutomationMappingDialog = ({
           entityIds.forEach((id: string) => {
             const columnsData = (f.arrayItems || []).map((col: any) => {
               let val: any = '';
-              if (col.linkedMasterFieldId) {
-                const field = jobFields[col.linkedMasterFieldId];
+              // Handle both linkedMasterFields (array) and linkedMasterFieldId (single value)
+              const fieldIds = col.linkedMasterFields || (col.linkedMasterFieldId ? [col.linkedMasterFieldId] : []);
+              const fieldId = String(fieldIds[0] || '');
+              
+              if (fieldId) {
+                const field = jobFields[fieldId];
                 if (field?.is_computed || field?.computed_config?.is_computed) {
                   const itemExtractionMode = col.extractionMode || 'latest';
                   const key = `${field.id}_${id}_${itemExtractionMode}`;
@@ -741,7 +785,7 @@ export const AutomationMappingDialog = ({
                   if (val === 'Missing') val = '';
                 }
               }
-              return { ...col, value: val };
+              return { ...col, value: val, fieldId };
             });
 
             const maxRows = Math.max(
@@ -772,8 +816,9 @@ export const AutomationMappingDialog = ({
         }
 
         const targetId = resolveTargetEntityId(f);
-        const values = (f.masterFieldIds || []).map((mid: string) => {
-          let val = getFieldValue(mid, String(targetId), 0, f.extractionMode || 'latest');
+        const masterIds = f.linkedMasterFields || f.masterFieldIds || [];
+        const values = masterIds.map((mid: string | number) => {
+          let val = getFieldValue(String(mid), String(targetId), 0, f.extractionMode || 'latest');
           if (Array.isArray(val)) {
             val = val.join(', ');
           }
@@ -967,9 +1012,9 @@ export const AutomationMappingDialog = ({
         if (!targetId) {
           isMissing = true;
         } else {
-          const masterIds = field.masterFieldIds || [];
-          const mergedValue = masterIds.map(mid => {
-            const v = getFieldValue(mid, String(targetId), 0, field.extractionMode || 'latest');
+          const masterIds = field.linkedMasterFields || field.masterFieldIds || [];
+          const mergedValue = masterIds.map((mid: string | number) => {
+            const v = getFieldValue(String(mid), String(targetId), 0, field.extractionMode || 'latest');
             return Array.isArray(v) ? v.join(', ') : v;
           }).join(' ');
           if (!mergedValue || mergedValue === 'Missing' || mergedValue === '') isMissing = true;
@@ -1069,39 +1114,79 @@ export const AutomationMappingDialog = ({
 
                         {isExpanded && (
                           <tr>
-                            <td colSpan={4} className="p-0 bg-blue-50/10 border-b border-slate-200">
-                              <div className="p-4">
-                                <div className="mb-3 flex items-center gap-2">
-                                  <h4 className="text-sm font-semibold text-slate-700">Array Field Details</h4>
-                                  <Badge variant="outline" className="text-xs">
+                            <td colSpan={4} className="p-0 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 border-b-2 border-blue-300">
+                              <div className="p-6">
+                                <div className="mb-4 flex items-center gap-3 pb-3 border-b-2 border-blue-200">
+                                  <div className="h-8 w-1 bg-gradient-to-b from-blue-500 to-indigo-500 rounded-full"></div>
+                                  <h4 className="text-base font-bold text-slate-800">Array Field Details</h4>
+                                  <Badge variant="outline" className="text-xs border-blue-400 bg-blue-100 text-blue-700">
                                     {arrayData.length} {arrayData.length === 1 ? 'row' : 'rows'}
                                   </Badge>
                                 </div>
 
                                 {arrayData.length > 0 ? (
-                                  <div className="border border-slate-200 rounded-md overflow-hidden">
+                                  <div className="border-2 border-blue-300 rounded-lg overflow-hidden shadow-sm">
                                     <table className="w-full text-sm">
-                                      <thead className="bg-slate-100 border-b border-slate-200">
+                                      <thead className="bg-gradient-to-r from-blue-100 to-indigo-100 border-b-2 border-blue-300">
                                         <tr>
-                                          <th className="px-3 py-2 text-left text-xs font-semibold text-slate-700 border-r border-slate-200">#</th>
+                                          <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 border-r-2 border-blue-200 bg-blue-50/50">
+                                            #
+                                          </th>
                                           {field.arrayItems?.map((item: any, idx: number) => (
-                                            <th key={idx} className="px-3 py-2 text-left text-xs font-semibold text-slate-700 border-r border-slate-200">
-                                              {item.header || getMasterFieldDisplayName(item.linkedMasterFieldId)}
+                                            <th 
+                                              key={idx} 
+                                              className={cn(
+                                                "px-4 py-3 text-left text-xs font-bold text-slate-800",
+                                                idx < field.arrayItems.length - 1 && "border-r-2 border-blue-200"
+                                              )}
+                                            >
+                                              <div className="flex items-center gap-2">
+                                                <div className="h-2 w-2 rounded-full bg-blue-500"></div>
+                                                <span>{item.name || item.header || getMasterFieldDisplayName((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId)}</span>
+                                                {item.extractionMode === 'all' && (
+                                                  <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-purple-300 text-purple-600 bg-purple-50">
+                                                    MULTI
+                                                  </Badge>
+                                                )}
+                                              </div>
                                             </th>
                                           ))}
                                         </tr>
                                       </thead>
-                                      <tbody>
+                                      <tbody className="bg-white">
                                         {arrayData.map((row: any, rowIndex: number) => (
-                                          <tr key={rowIndex} className="border-b border-slate-100 last:border-b-0">
-                                            <td className="px-3 py-2 text-xs text-slate-600 border-r border-slate-100">
+                                          <tr 
+                                            key={rowIndex} 
+                                            className={cn(
+                                              "border-b border-blue-200 last:border-b-0 transition-colors hover:bg-blue-50/30",
+                                              rowIndex % 2 === 0 ? "bg-white" : "bg-blue-50/10"
+                                            )}
+                                          >
+                                            <td className="px-4 py-3 text-xs font-semibold text-slate-600 border-r-2 border-blue-200 bg-blue-50/30">
                                               {row.index}
                                             </td>
                                             {field.arrayItems?.map((item: any, colIndex: number) => {
-                                              const value = row[item.header || item.linkedMasterFieldId];
+                                              const columnKey = item.variableName || String((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId || '');
+                                              const value = row[columnKey];
+                                              const isMissing = !value || value === '' || value === 'Missing Config';
+                                              
                                               return (
-                                                <td key={colIndex} className="px-3 py-2 text-xs text-slate-700 border-r border-slate-100">
-                                                  {value || '-'}
+                                                <td 
+                                                  key={colIndex} 
+                                                  className={cn(
+                                                    "px-4 py-3 text-xs",
+                                                    colIndex < field.arrayItems.length - 1 && "border-r-2 border-blue-100",
+                                                    isMissing ? "text-red-600 font-medium" : "text-slate-800"
+                                                  )}
+                                                >
+                                                  {isMissing ? (
+                                                    <span className="italic flex items-center gap-1">
+                                                      <AlertCircle className="h-3 w-3" />
+                                                      Missing
+                                                    </span>
+                                                  ) : (
+                                                    value
+                                                  )}
                                                 </td>
                                               );
                                             })}
@@ -1111,7 +1196,8 @@ export const AutomationMappingDialog = ({
                                     </table>
                                   </div>
                                 ) : (
-                                  <div className="text-center py-8 text-slate-400 text-sm">
+                                  <div className="text-center py-12 text-slate-400 text-sm border-2 border-dashed border-blue-200 rounded-lg bg-blue-50/20">
+                                    <List className="h-8 w-8 mx-auto mb-2 opacity-30" />
                                     No data available for this array field
                                   </div>
                                 )}
@@ -1196,7 +1282,7 @@ export const AutomationMappingDialog = ({
                   // CASE: STANDARD FIELDS
                   const targetId = resolveTargetEntityId(field);
                   const isMissingEntity = !targetId;
-                  const masterIds = field.masterFieldIds || [];
+                  const masterIds = field.linkedMasterFields || field.masterFieldIds || [];
 
                   const linkedJobField = jobFields[masterIds[0]];
                   const isDropdown = linkedJobField?.type === 'select';
@@ -1211,7 +1297,7 @@ export const AutomationMappingDialog = ({
                     entityCategory = 'company';
                   }
 
-                  const sources = masterIds.map(mid => {
+                  const sources = masterIds.map((mid: string | number) => {
                     const f = jobFields[mid];
                     if (!f?.sources) return null;
                     let matchingSource = f.sources.find((s: any) => s.source_type === entityCategory);
@@ -1219,7 +1305,7 @@ export const AutomationMappingDialog = ({
                     return matchingSource ? { ...matchingSource, label: f.label } : null;
                   }).filter(Boolean);
 
-                  const sourcesDisplay = masterIds.map(mid => {
+                  const sourcesDisplay = masterIds.map((mid: string | number) => {
                     const jobField = jobFields[mid];
                     if (!jobField) return null;
                     if (jobField.is_computed || jobField.computed_config?.is_computed) {
@@ -1230,12 +1316,12 @@ export const AutomationMappingDialog = ({
                     return s ? { ...s, label: jobField.label, type: 'db' } : null;
                   }).filter(Boolean);
 
-                  const mergedValue = masterIds.map(mid => {
+                  const mergedValue = masterIds.map((mid: string | number) => {
                     const jobField = jobFields[mid];
                     if (!jobField) return 'Missing';
                     let sourceIdx = jobField.sources?.findIndex((s: any) => s.source_type === entityCategory);
                     if (sourceIdx === -1 || sourceIdx === undefined) sourceIdx = 0;
-                    const v = getFieldValue(mid, String(targetId), sourceIdx, field.extractionMode || 'latest');
+                    const v = getFieldValue(String(mid), String(targetId), sourceIdx, field.extractionMode || 'latest');
                     return Array.isArray(v) ? v.join(', ') : v;
                   }).join(' ');
 

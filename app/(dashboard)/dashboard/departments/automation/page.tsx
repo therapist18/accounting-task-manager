@@ -7,6 +7,17 @@ import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { supabase } from "@/lib/supabase/client"
 import { AutomationDialog } from "./components/AutomationDialog"
 import { Loader2, Edit, Trash2, Download, Plus, Search } from "lucide-react"
@@ -21,6 +32,9 @@ export default function AutomationPage() {
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [automationToDelete, setAutomationToDelete] = useState<any>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   useEffect(() => {
     fetchAutomations()
@@ -119,15 +133,20 @@ export default function AutomationPage() {
     setIsAutomationDialogOpen(true)
   }
 
-  const handleDeleteAutomation = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this automation? This action cannot be undone.')) return
+  const handleDeleteAutomation = (automation: any) => {
+    setAutomationToDelete(automation)
+    setDeleteDialogOpen(true)
+  }
+
+  const confirmDeleteAutomation = async () => {
+    if (!automationToDelete?.id) return
     
     try {
-      setLoading(true)
+      setIsDeleting(true)
       const { error } = await supabase
         .from('tm_automations')
         .delete()
-        .eq('id', id)
+        .eq('id', automationToDelete.id)
       
       if (error) throw error
       
@@ -142,6 +161,8 @@ export default function AutomationPage() {
         automation.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         automation.category?.toLowerCase().includes(searchTerm.toLowerCase())
       ))
+      setDeleteDialogOpen(false)
+      setAutomationToDelete(null)
     } catch (error) {
       console.error('Error deleting automation:', error)
       toast({
@@ -150,7 +171,7 @@ export default function AutomationPage() {
         variant: "destructive",
       })
     } finally {
-      setLoading(false)
+      setIsDeleting(false)
     }
   }
 
@@ -327,13 +348,32 @@ export default function AutomationPage() {
                           >
                             <Edit className="h-4 w-4" />
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDeleteAutomation(automation.id)}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
+                          <AlertDialog open={deleteDialogOpen && automationToDelete?.id === automation.id} onOpenChange={(open) => !open && setDeleteDialogOpen(false)}>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteAutomation(automation)}
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete Automation</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Are you sure you want to delete the automation "{automationToDelete?.name || 'Untitled'}"? This action cannot be undone and will remove all associated data mappings.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={confirmDeleteAutomation} disabled={isDeleting} className="bg-red-600 hover:bg-red-700">
+                                  {isDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
                         </div>
                       </TableCell>
                     </TableRow>
