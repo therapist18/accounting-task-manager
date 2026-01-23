@@ -91,6 +91,8 @@ const COMPUTED_FUNCTIONS = [
     { value: "determineImmigrationStatus", label: "Determine Immigration Status" },
     { value: "getLatestWorkPermit", label: "Get Latest Work Permit No" },
     { value: "getEducationalDetails", label: "Extract Educational History (Array)" },
+    { value: "calculateArithmetic", label: "Arithmetic Calculation (Plus, Minus, etc.)" },
+    { value: "calculateDateDifference", label: "Date Difference (Days, Months, Years)" },
 ]
 
 // --- HELPER COMPONENTS FOR DATA SOURCE CONFIG ---

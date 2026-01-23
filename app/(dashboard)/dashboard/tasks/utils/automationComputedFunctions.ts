@@ -412,42 +412,190 @@ export async function determineImmigrationStatus(individualId: string | number, 
     }
 }
 
+export async function calculateArithmetic(
+    individualId: string | number,
+    computedDocuments: string[],
+    operation: string,
+    field1Path: string,
+    field2Path?: string,
+    operand?: number,
+    cache?: DocumentCache
+): Promise<string> {
+    try {
+        // Get first field value
+        const value1 = await extractFieldFromLatestDocument(individualId, computedDocuments, field1Path, cache);
+        if (value1 === "Field Not Found" || value1 === "Missing Document") {
+            return "Field Not Found";
+        }
+
+        let result: number;
+        const num1 = parseFloat(String(value1));
+        
+        if (isNaN(num1)) {
+            return "Invalid Number";
+        }
+
+        // Handle operations with second field
+        if (field2Path) {
+            const value2 = await extractFieldFromLatestDocument(individualId, computedDocuments, field2Path, cache);
+            if (value2 === "Field Not Found" || value2 === "Missing Document") {
+                return "Field Not Found";
+            }
+            
+            const num2 = parseFloat(String(value2));
+            if (isNaN(num2)) {
+                return "Invalid Number";
+            }
+
+            switch (operation.toLowerCase()) {
+                case 'minus':
+                case 'subtract':
+                    result = num1 - num2;
+                    break;
+                case 'plus':
+                case 'add':
+                    result = num1 + num2;
+                    break;
+                case 'multiply':
+                case 'times':
+                    result = num1 * num2;
+                    break;
+                case 'divide':
+                    result = num2 !== 0 ? num1 / num2 : 0;
+                    break;
+                default:
+                    return "Invalid Operation";
+            }
+        } 
+        // Handle operations with direct operand
+        else if (operand !== undefined) {
+            switch (operation.toLowerCase()) {
+                case 'minus':
+                case 'subtract':
+                    result = num1 - operand;
+                    break;
+                case 'plus':
+                case 'add':
+                    result = num1 + operand;
+                    break;
+                case 'multiply':
+                case 'times':
+                    result = num1 * operand;
+                    break;
+                case 'divide':
+                    result = operand !== 0 ? num1 / operand : 0;
+                    break;
+                default:
+                    return "Invalid Operation";
+            }
+        } else {
+            return "Missing Second Field or Operand";
+        }
+
+        return String(result);
+    } catch (error) {
+        console.error("[Arithmetic Error]:", error);
+        return "Calculation Error";
+    }
+}
+
+export async function calculateDateDifference(
+    individualId: string | number,
+    computedDocuments: string[],
+    startDatePath: string,
+    endDatePath: string,
+    unit: 'days' | 'months' | 'years' = 'days',
+    cache?: DocumentCache
+): Promise<string> {
+    try {
+        // Get start date
+        const startDateStr = await extractFieldFromLatestDocument(individualId, computedDocuments, startDatePath, cache);
+        if (startDateStr === "Field Not Found" || startDateStr === "Missing Document") {
+            return "Start Date Not Found";
+        }
+
+        // Get end date
+        const endDateStr = await extractFieldFromLatestDocument(individualId, computedDocuments, endDatePath, cache);
+        if (endDateStr === "Field Not Found" || endDateStr === "Missing Document") {
+            return "End Date Not Found";
+        }
+
+        const startDate = parseDateString(startDateStr);
+        const endDate = parseDateString(endDateStr);
+
+        if (!startDate || !endDate) {
+            return "Invalid Date Format";
+        }
+
+        let difference: number;
+        
+        switch (unit) {
+            case 'days':
+                const diffTime = endDate.getTime() - startDate.getTime();
+                difference = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                break;
+            case 'months':
+                const months = (endDate.getFullYear() - startDate.getFullYear()) * 12 + 
+                              (endDate.getMonth() - startDate.getMonth());
+                difference = months;
+                break;
+            case 'years':
+                difference = endDate.getFullYear() - startDate.getFullYear();
+                break;
+            default:
+                difference = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+        }
+
+        return String(difference);
+    } catch (error) {
+        console.error("[Date Difference Error]:", error);
+        return "Date Calculation Error";
+    }
+}
+
 export async function getLatestWorkPermit(individualId: string | number, computedDocuments: string[], fieldPath?: string, cache?: DocumentCache): Promise<string> {
-    return await getLatestDocumentNumber(individualId, computedDocuments, fieldPath, cache);
+return await getLatestDocumentNumber(individualId, computedDocuments, fieldPath, cache);
 }
 
 export async function executeComputedField(
-    functionName: string,
-    individualId: number | string,
-    computedDocuments: string[],
-    fieldPath?: string,
-    extractionMode: 'latest' | 'all' = 'latest',
-    cache?: DocumentCache
+functionName: string,
+individualId: number | string,
+computedDocuments: string[],
+fieldPath?: string,
+extractionMode: 'latest' | 'all' = 'latest',
+cache?: DocumentCache,
+arithmeticConfig?: { operation?: string; field2Path?: string; operand?: number; unit?: string }
 ): Promise<any> {
-    const normalizedFunctionName = functionName.replace(/\(\)/g, '').trim();
-    if (fieldPath) {
-        if (extractionMode === 'all') {
-            return await extractFieldFromAllDocuments(individualId, computedDocuments, fieldPath, cache);
-        } else {
-            return await extractFieldFromLatestDocument(individualId, computedDocuments, fieldPath, cache);
-        }
-    }
-    switch (normalizedFunctionName) {
-        case 'determineImmigrationStatus':
-            const result = await determineImmigrationStatus(individualId, computedDocuments, cache);
-            return result;
-        case 'getLatestWorkPermit': return await getLatestWorkPermit(individualId, computedDocuments, fieldPath, cache);
-        case 'getLatestDocumentNumber': return await getLatestDocumentNumber(individualId, computedDocuments, fieldPath, cache);
-        case 'getLatestDocumentExpiryDate': return await getLatestDocumentExpiryDate(individualId, computedDocuments, cache);
-        case 'getLatestDocumentIssueDate': return await getLatestDocumentIssueDate(individualId, computedDocuments, cache);
-        case 'getEducationalDetails': return await getEducationalDetails(individualId, computedDocuments, cache);
-        case 'extractFieldFromLatestDocument':
-            return "Missing Path Parameter";
-        case 'extractFieldFromAllDocuments':
-            return [];
-        default:
-            return "Unknown Function";
-    }
+const normalizedFunctionName = functionName.replace(/\(\)/g, '').trim();
+if (fieldPath) {
+if (extractionMode === 'all') {
+return await extractFieldFromAllDocuments(individualId, computedDocuments, fieldPath, cache);
+} else {
+return await extractFieldFromLatestDocument(individualId, computedDocuments, fieldPath, cache);
+}
+}
+switch (normalizedFunctionName) {
+case 'determineImmigrationStatus':
+const result = await determineImmigrationStatus(individualId, computedDocuments, cache);
+return result;
+case 'getLatestWorkPermit': return await getLatestWorkPermit(individualId, computedDocuments, fieldPath, cache);
+case 'getLatestDocumentNumber': return await getLatestDocumentNumber(individualId, computedDocuments, fieldPath, cache);
+case 'getLatestDocumentExpiryDate': return await getLatestDocumentExpiryDate(individualId, computedDocuments, cache);
+case 'getLatestDocumentIssueDate': return await getLatestDocumentIssueDate(individualId, computedDocuments, cache);
+case 'getEducationalDetails': return await getEducationalDetails(individualId, computedDocuments, cache);
+case 'calculateArithmetic': 
+if (!arithmeticConfig?.operation || !fieldPath) return "Missing Arithmetic Config";
+return await calculateArithmetic(individualId, computedDocuments, arithmeticConfig.operation, fieldPath, arithmeticConfig.field2Path, arithmeticConfig.operand, cache);
+case 'calculateDateDifference':
+if (!arithmeticConfig?.field2Path || !fieldPath) return "Missing Date Config";
+return await calculateDateDifference(individualId, computedDocuments, fieldPath, arithmeticConfig.field2Path, arithmeticConfig.unit as any, cache);
+case 'extractFieldFromLatestDocument':
+return "Missing Path Parameter";
+case 'extractFieldFromAllDocuments':
+return [];
+default:
+return "Unknown Function";
+}
 }
 
 export async function processComputedFields(
@@ -462,7 +610,9 @@ export async function processComputedFields(
                 individualId,
                 config.computedDocuments || [],
                 config.fieldPath,
-                config.extractionMode || 'latest'
+                config.extractionMode || 'latest',
+                config.cache,
+                config.arithmeticConfig
             );
             results[config.variableName] = value;
         } catch (error) {

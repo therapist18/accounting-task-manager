@@ -230,16 +230,36 @@ export const AutomationMappingDialog = ({
     const arrayData = [];
 
     entityIds.forEach((entityId, index) => {
-      const rowData: any = { index: index + 1, entityId };
-
       // Get values for each array item column
+      const columnValues: any = {};
       field.arrayItems?.forEach((item: any) => {
-        const value = getFieldValue(item.linkedMasterFieldId, String(entityId), 0, field.extractionMode || 'latest');
+        const value = getFieldValue(item.linkedMasterFieldId, String(entityId), 0, item.extractionMode || 'latest', true);
         const columnKey = item.linkedMasterFieldId;
-        rowData[columnKey] = Array.isArray(value) ? value.join(', ') : value;
+        columnValues[columnKey] = value;
       });
 
-      arrayData.push(rowData);
+      // If we have array values, create multiple rows
+      const maxRows = Math.max(1, ...Object.values(columnValues).map((v: any) => Array.isArray(v) ? v.length : 1));
+      
+      for (let i = 0; i < maxRows; i++) {
+        const rowData: any = { 
+          index: arrayData.length + 1, 
+          entityId: String(entityId) 
+        };
+        
+        field.arrayItems?.forEach((item: any) => {
+          const columnKey = item.linkedMasterFieldId;
+          let value = columnValues[columnKey];
+          
+          if (Array.isArray(value)) {
+            rowData[columnKey] = value[i] !== undefined ? value[i] : "";
+          } else {
+            rowData[columnKey] = value !== undefined && value !== 'Computing...' ? value : "";
+          }
+        });
+        
+        arrayData.push(rowData);
+      }
     });
 
     return arrayData;
@@ -495,7 +515,7 @@ export const AutomationMappingDialog = ({
     return val !== undefined && val !== null ? String(val) : "Missing";
   };
 
-  const getFieldValue = (fieldId: string, entityId: string, sourceIdx: number = 0, extractionMode: string = 'latest') => {
+  const getFieldValue = (fieldId: string, entityId: string, sourceIdx: number = 0, extractionMode: string = 'latest', preserveArray: boolean = false) => {
     const field = jobFields[fieldId];
     if (!field) return "Missing Config";
     if (field.is_computed || field.computed_config?.is_computed) {
@@ -504,7 +524,7 @@ export const AutomationMappingDialog = ({
       if (val === undefined) return "Computing...";
       if (typeof val === 'object' && val !== null) {
         if (Array.isArray(val)) {
-          return val.join(', ');
+          return preserveArray ? val : val.join(', ');
         } else {
           return JSON.stringify(val);
         }
@@ -713,7 +733,8 @@ export const AutomationMappingDialog = ({
               if (col.linkedMasterFieldId) {
                 const field = jobFields[col.linkedMasterFieldId];
                 if (field?.is_computed || field?.computed_config?.is_computed) {
-                  const key = `${field.id}_${id}_${col.extractionMode || 'latest'}`;
+                  const itemExtractionMode = col.extractionMode || 'latest';
+                  const key = `${field.id}_${id}_${itemExtractionMode}`;
                   val = masterFieldComputedValues[key];
                 } else if (field?.sources?.[0]) {
                   val = getSourceValue(field.sources[0].table, field.sources[0].path, String(id));
@@ -1063,7 +1084,6 @@ export const AutomationMappingDialog = ({
                                       <thead className="bg-slate-100 border-b border-slate-200">
                                         <tr>
                                           <th className="px-3 py-2 text-left text-xs font-semibold text-slate-700 border-r border-slate-200">#</th>
-                                          <th className="px-3 py-2 text-left text-xs font-semibold text-slate-700 border-r border-slate-200">Entity ID</th>
                                           {field.arrayItems?.map((item: any, idx: number) => (
                                             <th key={idx} className="px-3 py-2 text-left text-xs font-semibold text-slate-700 border-r border-slate-200">
                                               {item.header || getMasterFieldDisplayName(item.linkedMasterFieldId)}
@@ -1076,9 +1096,6 @@ export const AutomationMappingDialog = ({
                                           <tr key={rowIndex} className="border-b border-slate-100 last:border-b-0">
                                             <td className="px-3 py-2 text-xs text-slate-600 border-r border-slate-100">
                                               {row.index}
-                                            </td>
-                                            <td className="px-3 py-2 text-xs font-mono text-slate-600 border-r border-slate-100">
-                                              {row.entityId}
                                             </td>
                                             {field.arrayItems?.map((item: any, colIndex: number) => {
                                               const value = row[item.header || item.linkedMasterFieldId];

@@ -96,10 +96,11 @@ interface WebDataGroup {
     variableName: string;
     type: 'text' | 'number' | 'boolean' | 'date' | 'select';
     linkedMasterFieldId?: number;
+    linkedMasterFieldIds?: number[];
     dateFormat?: 'iso' | 'object_split' | 'dd_mm_yyyy';
     extractionMode?: 'latest' | 'all';
   }>;
-  linkedMasterFields: JobField[];
+  masterFieldIds: number[];
   
   // Updated Document Logic
   kycDocumentId?: string; // Legacy support
@@ -139,11 +140,24 @@ function ArrayConfigurator({ group, masterFields, onUpdate }: { group: WebDataGr
 
   const linkMasterField = (idx: number, field: JobField) => {
     const newItems = [...items];
+    const currentLinkedFields = newItems[idx].linkedMasterFieldIds || [];
+    
+    if (!currentLinkedFields.includes(field.id)) {
+      newItems[idx] = {
+        ...newItems[idx],
+        linkedMasterFieldIds: [...currentLinkedFields, field.id]
+      };
+      onUpdate(newItems);
+    }
+  };
+
+  const unlinkMasterField = (idx: number, fieldId: number) => {
+    const newItems = [...items];
+    const currentLinkedFields = newItems[idx].linkedMasterFieldIds || [];
+    
     newItems[idx] = {
       ...newItems[idx],
-      name: field.label,
-      linkedMasterFieldId: field.id,
-      type: field.type || 'text'
+      linkedMasterFieldIds: currentLinkedFields.filter(id => id !== fieldId)
     };
     onUpdate(newItems);
   };
@@ -249,26 +263,60 @@ function ArrayConfigurator({ group, masterFields, onUpdate }: { group: WebDataGr
                         {/* 3. Source Mapping */}
                         <TableCell className="p-3">
                           <div className="space-y-2">
+                            {/* Display linked fields */}
+                            <div className="space-y-1">
+                              {item.linkedMasterFieldIds && item.linkedMasterFieldIds.length > 0 ? (
+                                item.linkedMasterFieldIds.map((fieldId) => {
+                                  const field = masterFields.find(f => f.id === fieldId);
+                                  if (!field) return null;
+                                  
+                                  const isComputed = field?.is_computed || field?.computed_config?.is_computed;
+                                  return (
+                                    <div key={field.id} className="flex items-center gap-2 p-2 bg-blue-50 border border-blue-200 rounded-md">
+                                      <Database className="h-3.5 w-3.5 text-blue-600" />
+                                      <span className="text-sm text-blue-700 font-medium truncate flex-1">
+                                        {field.label}
+                                      </span>
+                                      {isComputed && (
+                                        <Badge className="text-[9px] bg-purple-100 text-purple-700 border-purple-200">
+                                          Computed
+                                        </Badge>
+                                      )}
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-5 w-5 text-red-500 hover:bg-red-50"
+                                        onClick={() => unlinkMasterField(i, field.id)}
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                  );
+                                })
+                              ) : (
+                                <div className="flex items-center px-3 h-8 rounded-md border bg-slate-50 border-slate-200 text-slate-400 italic text-sm">
+                                  <Database className="h-3.5 w-3.5 mr-2 opacity-70" />
+                                  <span className="truncate font-medium">
+                                    No fields linked
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Multi-select field picker */}
                             <div className="flex gap-1">
-                              <div className={cn(
-                                "flex-1 flex items-center px-3 h-8 rounded-md border text-sm transition-colors",
-                                linkedField 
-                                  ? "bg-blue-50 border-blue-200 text-blue-700" 
-                                  : "bg-slate-50 border-slate-200 text-slate-400 italic"
-                              )}>
-                                <Database className="h-3.5 w-3.5 mr-2 opacity-70" />
-                                <span className="truncate font-medium">
-                                  {linkedField ? linkedField.label : "Manual Entry / None"}
-                                </span>
-                              </div>
-                              <MasterFieldPicker
+                              <MultiMasterFieldPicker
                                 availableFields={masterFields}
-                                onSelect={(f) => linkMasterField(i, f)}
+                                linkedFieldIds={item.linkedMasterFieldIds || []}
+                                onSelect={(field) => linkMasterField(i, field)}
                               />
                             </div>
 
-                            {/* Extraction Mode for Computed Fields inside Array */}
-                            {isComputed && (
+                            {/* Extraction Mode for Computed Fields */}
+                            {item.linkedMasterFieldIds?.some(fieldId => {
+                              const field = masterFields.find(f => f.id === fieldId);
+                              return field?.is_computed || field?.computed_config?.is_computed;
+                            }) && (
                                <div className="flex items-center gap-2 bg-purple-50 px-2 py-1.5 rounded border border-purple-100">
                                  <Label className="text-[9px] text-purple-700 font-bold uppercase whitespace-nowrap">
                                    Mode:
@@ -657,6 +705,80 @@ function MasterFieldPicker({ availableFields, onSelect }: { availableFields: Job
   )
 }
 
+// --- Helper: Multi-Select Master Field Picker ---
+function MultiMasterFieldPicker({ 
+  availableFields, 
+  linkedFieldIds, 
+  onSelect 
+}: { 
+  availableFields: JobField[]; 
+  linkedFieldIds: number[]; 
+  onSelect: (field: JobField) => void;
+}) {
+  const [open, setOpen] = useState(false)
+  const [searchTerm, setSearchTerm] = useState("")
+  
+  const filteredFields = availableFields.filter(field =>
+    field.label.toLowerCase().includes(searchTerm.toLowerCase())
+  )
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="sm" type="button" className="h-6 w-6 p-0 rounded-md hover:bg-blue-50 text-blue-500 transition-colors">
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[280px] p-0" align="start">
+        <div className="p-3 border-b">
+          <Input
+            placeholder="Search database fields..."
+            className="h-9 text-sm"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        <ScrollArea className="h-[200px]">
+          <div className="p-1">
+            {filteredFields.length === 0 ? (
+              <div className="py-6 text-center text-sm text-slate-500">
+                No fields found.
+              </div>
+            ) : (
+              filteredFields.map((field) => {
+                const isLinked = linkedFieldIds.includes(field.id);
+                return (
+                  <div
+                    key={field.id}
+                    className={cn(
+                      "flex items-center gap-2 p-2 rounded-sm cursor-pointer text-sm",
+                      isLinked ? "bg-slate-100 opacity-50 cursor-not-allowed" : "hover:bg-slate-100"
+                    )}
+                    onClick={() => {
+                      if (!isLinked) {
+                        onSelect(field);
+                        setOpen(false);
+                      }
+                    }}
+                  >
+                    <Database className="h-3 w-3 mr-2 text-slate-400" />
+                    <span className={cn("flex-1", isLinked && "line-through")}>
+                      {field.label}
+                    </span>
+                    {isLinked && (
+                      <Check className="h-3 w-3 text-green-600" />
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </ScrollArea>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 // --- NEW COMPONENT: Edit Dialog for WebDataGroup ---
 function WebDataGroupEditDialog({ 
   open, 
@@ -698,17 +820,17 @@ function WebDataGroupEditDialog({
     };
 
     const linkMasterField = (field: JobField) => {
-        setEditingGroup(prev => prev ? ({
+        setEditingGroup(prev => prev ? {
             ...prev,
-            linkedMasterFields: [...(prev.linkedMasterFields || []), field]
-        }) : null);
+            masterFieldIds: [...(prev.masterFieldIds || []), field.id]
+        } : null);
     };
 
     const unlinkMasterField = (fieldId: number) => {
-        setEditingGroup(prev => prev ? ({
+        setEditingGroup(prev => prev ? {
             ...prev,
-            linkedMasterFields: (prev.linkedMasterFields || []).filter(f => f.id !== fieldId)
-        }) : null);
+            masterFieldIds: (prev.masterFieldIds || []).filter(id => id !== fieldId)
+        } : null);
     };
 
     // --- Document Logic Helpers ---
@@ -742,7 +864,10 @@ function WebDataGroupEditDialog({
 
     const isDocument = editingGroup.fieldType === 'document';
     const isComputed = editingGroup.fieldType === 'computed';
-    const hasComputedMasterField = editingGroup.linkedMasterFields?.some(f => f.is_computed || f.computed_config?.is_computed);
+    const hasComputedMasterField = editingGroup.masterFieldIds?.some(fieldId => {
+        const field = masterFields.find(f => f.id === fieldId);
+        return field?.is_computed || field?.computed_config?.is_computed;
+    });
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -949,14 +1074,18 @@ function WebDataGroupEditDialog({
                         ) : (
                             <div className="flex flex-col gap-3">
                                 <div className="flex flex-wrap gap-2 p-2 bg-white border rounded min-h-[40px]">
-                                    {(editingGroup.linkedMasterFields || []).map(f => (
-                                        <Badge key={f.id} variant="secondary" className="pl-2 pr-1 h-7 flex items-center gap-1">
-                                            {f.label}
-                                            <Button variant="ghost" size="icon" className="h-4 w-4 rounded-full hover:bg-slate-200" onClick={() => unlinkMasterField(f.id)}>
-                                                <X className="h-3 w-3" />
-                                            </Button>
-                                        </Badge>
-                                    ))}
+                                    {(editingGroup.masterFieldIds || []).map(fieldId => {
+                                        const field = masterFields.find(f => f.id === fieldId);
+                                        if (!field) return null;
+                                        return (
+                                            <Badge key={field.id} variant="secondary" className="pl-2 pr-1 h-7 flex items-center gap-1">
+                                                {field.label}
+                                                <Button variant="ghost" size="icon" className="h-4 w-4 rounded-full hover:bg-slate-200" onClick={() => unlinkMasterField(field.id)}>
+                                                    <X className="h-3 w-3" />
+                                                </Button>
+                                            </Badge>
+                                        );
+                                    })}
                                     <MasterFieldPicker availableFields={masterFields} onSelect={linkMasterField} />
                                 </div>
                                 {hasComputedMasterField && (
@@ -1345,7 +1474,7 @@ export function AutomationDialog({
         setWebDataGroups(initialData.webdata.map((g: any) => ({
           ...g,
           id: g.id || crypto.randomUUID(),
-          linkedMasterFields: g.linkedMasterFields || [],
+          masterFieldIds: g.masterFieldIds || (g.linkedMasterFields ? g.linkedMasterFields.map((f: any) => f.id) : []),
           // Normalize legacy kycDocumentId to array
           linkedKycDocuments: g.linkedKycDocuments ? g.linkedKycDocuments : (g.kycDocumentId ? [g.kycDocumentId] : []),
           documentLogic: g.documentLogic || 'merge',
@@ -1450,7 +1579,10 @@ export function AutomationDialog({
             ? `Array with ${group.arrayItems?.length || 0} items`
             : group.fieldType === 'computed'
               ? `Function: ${group.computedFunction || 'Not configured'}`
-              : group.linkedMasterFields.map(f => f.label).join(', ') || 'None',
+              : group.masterFieldIds?.map(fieldId => {
+                  const field = masterFields.find(f => f.id === fieldId);
+                  return field?.label || 'Unknown Field';
+                }).join(', ') || 'None',
         'Extraction Mode': group.extractionMode || 'N/A'
       }));
 
@@ -1471,7 +1603,10 @@ export function AutomationDialog({
       const automationData = {
         ...data,
         id: automationId,
-        webdata: webDataGroups.map(g => ({ ...g, masterFieldIds: g.linkedMasterFields.map(f => f.id) })),
+        webdata: webDataGroups.map(g => ({ 
+          ...g, 
+          masterFieldIds: g.masterFieldIds || []
+        })),
         created_at: initialData?.created_at || new Date().toISOString(),
         updated_at: new Date().toISOString()
       }
@@ -1508,7 +1643,7 @@ export function AutomationDialog({
             variableName: data.field_key.toLowerCase().replace(/[^a-z0-9]+(.)/g, (_, chr) => chr.toUpperCase()),
             fieldType: 'text',
             entityTypes: ['principal'],
-            linkedMasterFields: [data]
+            masterFieldIds: [data.id]
         }]);
       } else if (type === 'document' && data) {
          setWebDataGroups(prev => [...prev, {
@@ -1517,7 +1652,7 @@ export function AutomationDialog({
             variableName: data.name,
             fieldType: 'document',
             entityTypes: ['principal'],
-            linkedMasterFields: [],
+            masterFieldIds: [],
             kycDocumentId: data.id,
             linkedKycDocuments: [data.id], // Initialize array
             documentLogic: 'merge'
@@ -1529,7 +1664,7 @@ export function AutomationDialog({
             variableName: '',
             fieldType: type === 'computed' ? 'computed' : 'text',
             entityTypes: ['principal'],
-            linkedMasterFields: [],
+            masterFieldIds: [],
             arrayItems: []
         };
         setWebDataGroups(prev => [...prev, newRow]);
@@ -1920,14 +2055,18 @@ export function AutomationDialog({
                                           </div>
                                         ) : (
                                           <div className="flex items-center flex-wrap gap-1.5">
-                                              {(group.linkedMasterFields || []).length > 0 ? (
-                                                group.linkedMasterFields.map(f => (
-                                                    <Badge key={f.id} variant="outline" className="text-[10px] bg-white text-slate-700">
-                                                    {f.label}
-                                                    </Badge>
-                                                ))
+                                              {(group.masterFieldIds || []).length > 0 ? (
+                                                group.masterFieldIds.map(fieldId => {
+                                                    const field = masterFields.find(f => f.id === fieldId);
+                                                    if (!field) return null;
+                                                    return (
+                                                        <Badge key={field.id} variant="outline" className="text-[10px] bg-white text-slate-700">
+                                                        {field.label}
+                                                        </Badge>
+                                                    );
+                                                })
                                               ) : (
-                                                  <span className="text-[10px] text-slate-400 italic">No fields linked</span>
+                                                <span className="text-xs text-slate-400 italic">No fields mapped</span>
                                               )}
                                           </div>
                                         )}
