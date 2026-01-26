@@ -42,6 +42,7 @@ import { Card, CardDescription, CardContent, CardHeader, CardTitle } from "@/com
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
+import { DataSourceConfiguration } from "./link-sources-dialog"
 
 // --- TYPES ---
 interface FieldDialogProps {
@@ -255,97 +256,6 @@ function fieldsReducer(state: Record<number, { fields: TableColumn[]; loading: b
   }
 }
 
-// --- DATA SOURCE COMPONENT (Integrated) ---
-function DataSourceConfiguration({ sources, onChange, documentTypes }: { sources: SourceCardState[], onChange: (s: SourceCardState[]) => void, documentTypes: any[] }) {
-  const [tables, setTables] = useState<Array<{ name: string; label: string }>>([])
-  const [loadingTables, setLoadingTables] = useState(false)
-  const [fieldState, dispatchField] = useReducer(fieldsReducer, {})
-  const fieldCacheRef = useRef<Record<string, TableColumn[]>>({})
-  const fetchInProgressRef = useRef<Record<string, boolean>>({})
-  
-  useEffect(() => {
-    const fetchTables = async () => {
-      try {
-        setLoadingTables(true)
-        const { data, error } = await supabase.rpc("get_all_tables")
-        if (error) throw error
-        setTables(data.filter((t: any) => !t.table_name.startsWith("pg_") && !t.table_name.startsWith("sql_")).map((t: any) => ({ name: t.table_name, label: t.table_name.split("_").map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ") })).sort((a: any, b: any) => a.label.localeCompare(b.label)))
-      } catch (error) { console.error("Error fetching tables:", error) } finally { setLoadingTables(false) }
-    }
-    fetchTables()
-  }, [])
-
-  const fetchFieldsForTable = useCallback(async (tableName: string, index: number) => {
-    if (!tableName) return
-    if (fieldCacheRef.current[tableName]) {
-      dispatchField({ type: 'SET_FIELDS', index, fields: fieldCacheRef.current[tableName] })
-      return
-    }
-    const fetchKey = `${tableName}-${index}`
-    if (fetchInProgressRef.current[fetchKey]) return
-    fetchInProgressRef.current[fetchKey] = true
-    dispatchField({ type: 'SET_LOADING', index })
-    try {
-      const { data, error } = await supabase.rpc("get_table_columns", { input_table_name: tableName })
-      if (error) throw error
-      fieldCacheRef.current[tableName] = data || []
-      dispatchField({ type: 'SET_FIELDS', index, fields: data || [] })
-    } catch (error) { console.error(`Error fetching columns:`, error); dispatchField({ type: 'CLEAR_LOADING', index }) } finally { delete fetchInProgressRef.current[fetchKey] }
-  }, []) 
-
-  useEffect(() => {
-    sources.forEach((source, index) => {
-        if (source.table && (!fieldState[index]?.fields || fieldState[index].fields.length === 0)) {
-            fetchFieldsForTable(source.table, index);
-        }
-    });
-  }, [sources, fetchFieldsForTable]);
-
-  const addSource = () => onChange([...sources, { id: crypto.randomUUID(), source_type: "individual", table: "", path: "", priority: sources.length + 1, fields: [], loadingFields: false, document_id: [], linking_variable: "id" }])
-  const updateSource = (index: number, updates: Partial<SourceCardState>) => {
-    const newSources = [...sources]; newSources[index] = { ...newSources[index], ...updates };
-    if (updates.table && updates.table !== sources[index]?.table) { newSources[index].path = ""; onChange(newSources); setTimeout(() => fetchFieldsForTable(updates.table!, index), 100); return; }
-    onChange(newSources)
-  }
-  const removeSource = (index: number) => onChange(sources.filter((_, i) => i !== index))
-  const getSelectedFieldFromPath = (path: string) => (path ? path.split("->")[0] : "")
-
-  return (
-    <div className="space-y-4">
-      {sources.map((source, index) => {
-        const internalFields = fieldState[index]?.fields || source.fields || [];
-        const loading = fieldState[index]?.loading || false;
-        const selectedField = getSelectedFieldFromPath(source.path)
-        const columnSpec = internalFields.find(f => f.column_name === selectedField)
-        const fieldIsJsonb = columnSpec?.is_jsonb
-
-        return (
-          <Card key={source.id || index} className="bg-slate-50 border-slate-200">
-            <CardHeader className="pb-2 pt-3 px-3"><div className="flex items-center justify-between"><CardTitle className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2"><Database className="h-3 w-3" /> Source {index + 1}</CardTitle><Button type="button" variant="ghost" size="icon" className="h-6 w-6 hover:bg-red-50 hover:text-red-500" onClick={() => removeSource(index)}><Trash2 className="h-3 w-3" /></Button></div></CardHeader>
-            <CardContent className="space-y-3 px-3 pb-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-[10px] text-slate-500 uppercase font-bold">Type</Label><SearchableSelect value={source.source_type} onValueChange={(v: any) => updateSource(index, { source_type: v })} options={[{ value: "individual", label: "Individual" }, { value: "document", label: "Document" }, { value: "company", label: "Company" }]} /></div>
-                <div className="space-y-1"><Label className="text-[10px] text-slate-500 uppercase font-bold">Priority</Label><Input type="number" className="h-9 bg-white" value={source.priority} onChange={e => updateSource(index, { priority: Number.parseInt(e.target.value) || 1 })} min="1" /></div>
-              </div>
-              {source.source_type === "document" && <div className="space-y-1 bg-white p-2 rounded border border-slate-100"><Label className="text-[10px] text-slate-500 uppercase font-bold mb-1 block">Required Documents</Label><MultiSelectBox options={documentTypes} selectedValues={source.document_id || []} onChange={(v) => updateSource(index, { document_id: v })} placeholder="Search & Select Documents..." /></div>}
-              <div className="space-y-1"><Label className="text-[10px] text-slate-500 uppercase font-bold">Linking Variable</Label><SearchableSelect value={source.linking_variable || ""} onValueChange={(v: any) => updateSource(index, { linking_variable: v })} options={[{ value: "id", label: "ID" }, { value: "individual_id", label: "Individual ID" }, { value: "director_id", label: "Director ID" }, { value: "kyc_document_id", label: "KYC Document ID" }, { value: "company_id", label: "Company ID" }]} placeholder="Select linking ID..." /></div>
-              <div className="space-y-1"><Label className="text-[10px] text-slate-500 uppercase font-bold">Database Table</Label><SearchableSelect value={source.table} onValueChange={(v: any) => v && v !== source.table && updateSource(index, { table: v })} loading={loadingTables} options={tables.map(t => ({ value: t.name, label: t.label }))} placeholder="Search table..." searchPlaceholder="Type to search tables..." /></div>
-              {source.table && <div className="space-y-1"><Label className="text-[10px] text-slate-500 uppercase font-bold">Column</Label><SearchableSelect value={selectedField} onValueChange={(v: any) => v !== selectedField && updateSource(index, { path: v })} loading={loading} options={internalFields.map(f => ({ value: f.column_name, label: f.column_name }))} placeholder={loading ? "Loading columns..." : "Search column..."} searchPlaceholder="Type to search columns..." /></div>}
-              {fieldIsJsonb && columnSpec && (
-                <div className="mt-2 p-2 bg-blue-50/50 rounded-md border border-blue-100">
-                  <div className="flex items-center gap-2 mb-1"><Settings2 className="w-3 h-3 text-blue-600"/><Label className="text-[10px] text-blue-600 uppercase font-bold">JSON Path Selection</Label></div>
-                  <div className="flex gap-2"><div className="flex-1"><Input value={source.path} onChange={(e) => updateSource(index, { path: e.target.value })} placeholder={`e.g. ${columnSpec.column_name}->>'key'`} className="bg-white h-9 text-xs" /></div></div>
-                  <p className="text-[10px] text-slate-500 mt-1">Type the full path (e.g. {columnSpec.column_name}-&gt;&gt;'sub_key')</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )
-      })}
-      <Button type="button" variant="outline" onClick={addSource} className="w-full border-dashed h-10 hover:bg-slate-50 hover:text-slate-900"><Plus className="mr-2 h-4 w-4" /> Add Data Source</Button>
-    </div>
-  )
-}
 
 // --- MAIN DIALOG COMPONENT ---
 

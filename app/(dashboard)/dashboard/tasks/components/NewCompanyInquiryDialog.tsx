@@ -88,7 +88,14 @@ export function NewCompanyInquiryDialog({
         officer_id: '',
         task_manager_id: '',
         task_assistant_id: '',
-        enquiry_date: new Date().toISOString().split('T')[0]
+        enquiry_date: new Date().toISOString().split('T')[0],
+        job_level: {
+            level: 1,
+            department_id: null,
+            subdepartment_id: null,
+            class_id: null,
+            subclass_id: null
+        }
     });
 
     // Populate form on Edit Mode
@@ -103,7 +110,14 @@ export function NewCompanyInquiryDialog({
                 officer_id: initialData.officer_id?.toString() || '',
                 task_manager_id: initialData.task_manager_id?.toString() || '',
                 task_assistant_id: initialData.task_assistant_id?.toString() || '',
-                enquiry_date: initialData.date_initiated ? new Date(initialData.date_initiated).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
+                enquiry_date: initialData.date_initiated ? new Date(initialData.date_initiated).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                job_level: initialData.job_level || {
+                    level: 1,
+                    department_id: null,
+                    subdepartment_id: null,
+                    class_id: null,
+                    subclass_id: null
+                }
             });
             setTaskType(initialData.renewal_status || 'new');
             setSelectedCompany({
@@ -392,7 +406,14 @@ export function NewCompanyInquiryDialog({
             officer_id: '',
             task_manager_id: '',
             task_assistant_id: '',
-            enquiry_date: new Date().toISOString().split('T')[0]
+            enquiry_date: new Date().toISOString().split('T')[0],
+            job_level: {
+                level: 1,
+                department_id: null,
+                subdepartment_id: null,
+                class_id: null,
+                subclass_id: null
+            }
         });
     };
 

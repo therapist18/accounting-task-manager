@@ -36,7 +36,7 @@ import { Switch } from "@/components/ui/switch"
 import { toast } from "@/hooks/use-toast"
 import {
   Loader2, Trash2, Save, Plus, Search, Check, X,
-  FileText, Database, Paperclip, Settings2, GripVertical,
+  FileText, Database, Paperclip, Settings2, GripVertical, // GripVertical is used for the drag handle
   Download, FileSpreadsheet,
   ChevronRight, FunctionSquare, Calculator, Table as TableIcon,
   Info, AlertCircle, Key, Globe, Shield, LayoutGrid, List,
@@ -394,7 +394,7 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
           <ChevronRight className="h-3 w-3 opacity-50" />
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-4xl max-h-[80vh] p-0">
+      <DialogContent className="max-w-6xl max-h-[85vh] p-0">
         <DialogHeader className="px-6 py-4 border-b bg-slate-50">
           <DialogTitle className="flex items-center gap-2 text-slate-800">
             <TableIcon className="h-4 w-4 text-blue-600" />
@@ -414,16 +414,17 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
             <Table>
               <TableHeader className="bg-slate-100/50 border-b border-slate-200 sticky top-0 z-10">
                 <TableRow>
-                  <TableHead className="w-[25%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Web Key (JSON Property)</TableHead>
-                  <TableHead className="w-[25%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Data Type & Format</TableHead>
-                  <TableHead className="w-[42%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Source Mapping</TableHead>
-                  <TableHead className="w-[8%] text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">Action</TableHead>
+                  <TableHead className="w-[20%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Web Key (JSON Property)</TableHead>
+                  <TableHead className="w-[20%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Data Type & Format</TableHead>
+                  <TableHead className="w-[30%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Source Mapping</TableHead>
+                  <TableHead className="w-[15%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Extraction Mode</TableHead>
+                  <TableHead className="w-[15%] text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {items.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="py-12">
+                    <TableCell colSpan={5} className="py-12">
                       <div className="flex flex-col items-center justify-center text-slate-300">
                         <TableIcon className="h-10 w-10 mb-2 opacity-20" />
                         <p className="text-sm">No columns defined yet.</p>
@@ -589,7 +590,46 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
                           )}
                         </TableCell>
 
-                        {/* 4. Action */}
+                        {/* 4. Extraction Mode */}
+                        <TableCell className="p-3">
+                          {(item.linkedKycDocuments && item.linkedKycDocuments.length > 0) || 
+                           (item.linkedMasterFields && item.linkedMasterFields.length > 0) ? (
+                            <div className="space-y-1">
+                              <Select 
+                                value={item.extractionMode || 'latest'} 
+                                onValueChange={(val) => handleItemChange(i, 'extractionMode', val)}
+                              >
+                                <SelectTrigger className={cn(
+                                  "h-7 text-[10px]",
+                                  item.type === 'document' 
+                                    ? "bg-amber-50 text-amber-700 border-amber-100" 
+                                    : "bg-blue-50 text-blue-700 border-blue-100"
+                                )}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {item.type === 'document' ? (
+                                    <>
+                                      <SelectItem value="latest">Latest Document</SelectItem>
+                                      <SelectItem value="all">All Documents</SelectItem>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <SelectItem value="latest">Latest Value</SelectItem>
+                                      <SelectItem value="all">All Values</SelectItem>
+                                    </>
+                                  )}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          ) : (
+                            <div className="text-center text-slate-400 italic text-xs">
+                              No sources linked
+                            </div>
+                          )}
+                        </TableCell>
+
+                        {/* 5. Action */}
                         <TableCell className="p-3 text-center">
                           <AlertDialog open={deleteItemDialogOpen && itemToDelete === i} onOpenChange={(open) => !open && setDeleteItemDialogOpen(false)}>
                             <AlertDialogTrigger asChild>
@@ -1555,7 +1595,7 @@ function AddDataFieldDialog({
   )
 }
 
-// ... rest of the code remains the same ...
+// --- rest of the code remains the same ...
 
 // --- Zod Schema ---
 const automationFormSchema = z.object({
@@ -1709,16 +1749,40 @@ export function AutomationDialog({
     }
   };
 
+  // --- Conceptual Drag-and-Drop Handler ---
+  // In a real implementation using a library like dnd-kit, this function would be the onDragEnd callback.
+  // It simulates the result of a row being dragged and dropped.
+  const handleDragEnd = (activeId: string, overId: string) => {
+    const oldIndex = webDataGroups.findIndex(g => g.id === activeId);
+    const newIndex = webDataGroups.findIndex(g => g.id === overId);
+
+    if (oldIndex !== newIndex && oldIndex !== -1 && newIndex !== -1) {
+      const newGroups = [...webDataGroups];
+      const [movedItem] = newGroups.splice(oldIndex, 1);
+      newGroups.splice(newIndex, 0, movedItem);
+      setWebDataGroups(newGroups);
+      toast({ title: "Order Updated", description: "Field order updated via drag and drop (conceptual)." });
+    }
+  };
+
+
   // --- Sorting & Reordering Logic ---
   const handleSort = (key: string) => {
     setSortConfig(current => {
       if (current.key === key) {
-        return { key, direction: current.direction === 'asc' ? 'desc' : 'asc' };
+        // If sorting by the same key, toggle direction. If asc, go to desc. If desc, clear sort.
+        if (current.direction === 'asc') {
+          return { key, direction: 'desc' };
+        } else {
+          // Clear sort on third click (desc -> null)
+          return { key: null, direction: 'asc' };
+        }
       }
       return { key, direction: 'asc' };
     });
   };
 
+  // --- Re-introduced for single-step reordering behind the drag handle/index ---
   const moveRow = (index: number, direction: 'up' | 'down') => {
     // Reordering is only allowed when NO sort is active to avoid index confusion
     if (sortConfig.key) {
@@ -1734,6 +1798,7 @@ export function AutomationDialog({
     [newGroups[index], newGroups[targetIndex]] = [newGroups[targetIndex], newGroups[index]];
     setWebDataGroups(newGroups);
   };
+  // --- End re-introduced moveRow ---
 
   const processedWebDataGroups = useMemo(() => {
     let groups = [...webDataGroups];
@@ -2157,7 +2222,7 @@ export function AutomationDialog({
                           <Table className="w-full border-collapse">
                             <TableHeader className="bg-blue-600 sticky top-0 z-10 backdrop-blur-sm border-b border-slate-200">
                               <TableRow className="hover:bg-transparent border-none">
-                                <TableHead className="w-[60px] text-center h-10 font-bold text-white border-r uppercase tracking-wider">
+                                <TableHead className="w-[80px] text-center h-10 font-bold text-white border-r uppercase tracking-wider">
                                   #
                                 </TableHead>
                                 <TableHead
@@ -2166,7 +2231,10 @@ export function AutomationDialog({
                                 >
                                   <div className="flex items-center justify-between">
                                     Target Key
-                                    {sortConfig.key === 'variableName' && <ArrowUpDown className="h-3 w-3 opacity-80" />}
+                                    {sortConfig.key === 'variableName' && (
+                                      sortConfig.direction === 'asc' ? <ArrowUp className="h-3 w-3 opacity-80" /> : <ArrowDown className="h-3 w-3 opacity-80" />
+                                    )}
+                                    {sortConfig.key !== 'variableName' && <ArrowUpDown className="h-3 w-3 opacity-30" />}
                                   </div>
                                 </TableHead>
                                 <TableHead
@@ -2175,7 +2243,10 @@ export function AutomationDialog({
                                 >
                                   <div className="flex items-center justify-between">
                                     Display Label
-                                    {sortConfig.key === 'efnsDisplayName' && <ArrowUpDown className="h-3 w-3 opacity-80" />}
+                                    {sortConfig.key === 'efnsDisplayName' && (
+                                      sortConfig.direction === 'asc' ? <ArrowUp className="h-3 w-3 opacity-80" /> : <ArrowDown className="h-3 w-3 opacity-80" />
+                                    )}
+                                    {sortConfig.key !== 'efnsDisplayName' && <ArrowUpDown className="h-3 w-3 opacity-30" />}
                                   </div>
                                 </TableHead>
                                 <TableHead
@@ -2184,7 +2255,10 @@ export function AutomationDialog({
                                 >
                                   <div className="flex items-center justify-between">
                                     Type
-                                    {sortConfig.key === 'fieldType' && <ArrowUpDown className="h-3 w-3 opacity-80" />}
+                                    {sortConfig.key === 'fieldType' && (
+                                      sortConfig.direction === 'asc' ? <ArrowUp className="h-3 w-3 opacity-80" /> : <ArrowDown className="h-3 w-3 opacity-80" />
+                                    )}
+                                    {sortConfig.key !== 'fieldType' && <ArrowUpDown className="h-3 w-3 opacity-30" />}
                                   </div>
                                 </TableHead>
                                 <TableHead className="w-[150px] h-10 font-bold text-white border-r uppercase tracking-wider pl-4">Entities</TableHead>
@@ -2200,37 +2274,49 @@ export function AutomationDialog({
                                 const rowBg = isDocument ? "bg-amber-50/30 hover:bg-amber-50/60" : isComputed ? "bg-purple-50/30 hover:bg-purple-50/60" : "hover:bg-slate-50";
 
                                 return (
-                                  <TableRow key={group.id} className={cn("h-10 border-b border-slate-100 group transition-all", rowBg)}>
+                                  <TableRow 
+                                    key={group.id} 
+                                    className={cn("h-10 border-b border-slate-100 group transition-all", rowBg)}
+                                  >
                                     <TableCell className="text-center text-sm border-r border-slate-100 p-0 relative">
-                                      <div className="flex flex-col items-center justify-center w-full h-full gap-0.5 py-1">
-                                        {!sortConfig.key && (
+                                      <div className="flex items-center justify-center w-full h-full gap-2 py-2">
+                                        {/* Drag Handle/Reorder Control */}
+                                        {!sortConfig.key ? (
                                           <>
-                                            <Button
-                                              variant="ghost"
-                                              size="icon"
-                                              type="button"
-                                              className="h-3 w-full rounded-none hover:bg-slate-200"
-                                              onClick={() => moveRow(index, 'up')}
-                                              disabled={index === 0}
-                                            >
-                                              <ArrowUp className="h-2 w-2 text-slate-500" />
-                                            </Button>
+                                            {/* Hidden Up/Down controls on hover */}
+                                            <div className="absolute left-0 top-0 bottom-0 w-[20px] bg-slate-100/70 border-r border-slate-200 flex-col items-center justify-center hidden group-hover:flex transition-opacity">
+                                              <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                type="button"
+                                                className="h-3 w-4 p-0 rounded-none hover:bg-slate-200"
+                                                onClick={() => moveRow(index, 'up')}
+                                                disabled={index === 0}
+                                              >
+                                                <ArrowUp className="h-2 w-2 text-slate-500" />
+                                              </Button>
+                                              <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                type="button"
+                                                className="h-3 w-4 p-0 rounded-none hover:bg-slate-200"
+                                                onClick={() => moveRow(index, 'down')}
+                                                disabled={index === processedWebDataGroups.length - 1}
+                                              >
+                                                <ArrowDown className="h-2 w-2 text-slate-500" />
+                                              </Button>
+                                            </div>
+                                            <div className="pl-[20px] flex items-center justify-center gap-2">
+                                              {/* Main Drag Handle Icon - cursor-grab is for visual DND cue */}
+                                              <div className="cursor-grab text-slate-400 hover:text-blue-600 transition-colors active:text-blue-700">
+                                                <GripVertical className="h-4 w-4" />
+                                              </div>
+                                              <span className="text-sm text-slate-500 font-medium">{index + 1}</span>
+                                            </div>
                                           </>
-                                        )}
-                                        <span className="text-[10px] text-slate-500 font-medium">{index + 1}</span>
-                                        {!sortConfig.key && (
-                                          <>
-                                            <Button
-                                              variant="ghost"
-                                              size="icon"
-                                              type="button"
-                                              className="h-3 w-full rounded-none hover:bg-slate-200"
-                                              onClick={() => moveRow(index, 'down')}
-                                              disabled={index === processedWebDataGroups.length - 1}
-                                            >
-                                              <ArrowDown className="h-2 w-2 text-slate-500" />
-                                            </Button>
-                                          </>
+                                        ) : (
+                                          // When sorted, only show index
+                                          <span className="text-sm text-slate-500 font-medium">{index + 1}</span>
                                         )}
                                       </div>
                                     </TableCell>

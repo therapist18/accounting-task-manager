@@ -95,20 +95,7 @@ async function fetchDocsAndTypes(
  * Sorts documents by 'Effective Date' (Newest First).
  */
 function sortDocsByRecency(docs: any[], docTypes: any[]) {
-    console.log('[DEBUG] sortDocsByRecency - Input:', {
-        totalDocs: docs.length,
-        totalTypes: docTypes.length,
-        docs: docs.map(d => ({
-            id: d.id,
-            document_id: d.document_id,
-            director_id: d.director_id,
-            created_at: d.created_at,
-            hasExtractedDetails: !!d.extracted_details,
-            extractedDetailsKeys: d.extracted_details ? Object.keys(d.extracted_details) : []
-        }))
-    });
-
-    const sorted = docs.map(doc => {
+       const sorted = docs.map(doc => {
         const type = docTypes.find((t: any) => t.id === doc.document_id);
         const details = doc.extracted_details || {};
 
@@ -147,19 +134,6 @@ function sortDocsByRecency(docs: any[], docTypes: any[]) {
 
         return { doc, type, sortDate, dateSource };
     }).sort((a, b) => b.sortDate.getTime() - a.sortDate.getTime());
-
-    console.log('[DEBUG] sortDocsByRecency - Sorted result:', {
-        totalSorted: sorted.length,
-        sortedDocs: sorted.map((s, index) => ({
-            index,
-            document_id: s.doc.document_id,
-            sortDate: s.sortDate,
-            dateSource: s.dateSource,
-            hasPermitNumber: !!s.doc.extracted_details?.Permit_Number,
-            permitNumber: s.doc.extracted_details?.Permit_Number
-        }))
-    });
-
     return sorted;
 }
 
@@ -236,65 +210,25 @@ export async function extractFieldFromLatestDocument(
     fieldPath: string,
     cache?: DocumentCache
 ): Promise<string> {
-    console.log('[DEBUG] extractFieldFromLatestDocument - Input:', {
-        individualId,
-        documentIds,
-        fieldPath,
-        hasCache: !!cache
-    });
-
     try {
         const { docs, types } = await fetchDocsAndTypes(individualId, documentIds, cache);
-        console.log('[DEBUG] extractFieldFromLatestDocument - Fetched data:', {
-            docsCount: docs.length,
-            typesCount: types.length,
-            docs: docs.map(d => ({
-                id: d.id,
-                document_id: d.document_id,
-                director_id: d.director_id,
-                hasExtractedDetails: !!d.extracted_details,
-                extractedDetailsKeys: d.extracted_details ? Object.keys(d.extracted_details) : []
-            }))
-        });
-
+     
         if (docs.length === 0) {
-            console.log('[DEBUG] No documents found, returning "Missing Document"');
             return "Missing Document";
         }
 
         const sorted = sortDocsByRecency(docs, types);
         const latest = sorted[0];
-        console.log('[DEBUG] Latest document selected:', {
-            document_id: latest.doc.document_id,
-            sortDate: latest.sortDate,
-            dateSource: latest.dateSource
-        });
-
-        const value = parseJsonPath(latest.doc, fieldPath);
-        console.log('[DEBUG] Parsed value from document:', {
-            fieldPath,
-            value,
-            valueType: typeof value,
-            documentData: latest.doc.extracted_details
-        });
-
-        if (value === null || value === undefined) {
-            console.log('[DEBUG] Value is null/undefined, returning "Field Not Found"');
+              const value = parseJsonPath(latest.doc, fieldPath);
+               if (value === null || value === undefined) {
             return "Field Not Found";
         }
 
         const result = String(value);
-        console.log('[DEBUG] Returning string result:', result);
         return result;
 
     } catch (error) {
-        console.error("[extractFieldFromLatestDocument] Error:", error);
-        console.log('[DEBUG] Extraction error details:', {
-            error,
-            errorMessage: error?.message,
-            errorStack: error?.stack
-        });
-        return "Extraction Error";
+               return "Extraction Error";
     }
 }
 
@@ -444,31 +378,37 @@ export async function determineImmigrationStatus(individualId: string | number, 
         const current = sorted[0];
         const now = new Date();
         if (current.expiryDate.getTime() > 0 && current.expiryDate < now) {
-            const displayName = current.type?.display_name;
-            let displayNameStr: string;
+            const immigrationStatus = current.type?.immigration_status;
+            let immigrationStatusStr: string;
 
-            if (typeof displayName === 'string') {
-                displayNameStr = displayName;
-            } else if (typeof displayName === 'object' && displayName !== null) {
-                displayNameStr = JSON.stringify(displayName);
+            if (typeof immigrationStatus === 'string') {
+                immigrationStatusStr = immigrationStatus;
+            } else if (typeof immigrationStatus === 'object' && immigrationStatus !== null) {
+                if ('en' in immigrationStatus) {
+                    immigrationStatusStr = String(immigrationStatus.en);
+                } else if ('name' in immigrationStatus) {
+                    immigrationStatusStr = String(immigrationStatus.name);
+                } else {
+                    immigrationStatusStr = "Unknown";
+                }
             } else {
-                displayNameStr = "Unknown";
+                immigrationStatusStr = "Unknown";
             }
-            const expiredResult = `Expired (${displayNameStr})`;
+            const expiredResult = `Expired (${immigrationStatusStr})`;
             return expiredResult;
         }
 
-        // CRITICAL FIX: Properly extract the display_name as a string
-        const displayName = current.type?.display_name;
+        // CRITICAL FIX: Properly extract the immigration_status as a string
+        const immigrationStatus = current.type?.immigration_status;
         let finalStatus: string;
 
-        if (typeof displayName === 'string') {
-            finalStatus = displayName;
-        } else if (typeof displayName === 'object' && displayName !== null) {
-            if ('en' in displayName) {
-                finalStatus = String(displayName.en);
-            } else if ('name' in displayName) {
-                finalStatus = String(displayName.name);
+        if (typeof immigrationStatus === 'string') {
+            finalStatus = immigrationStatus;
+        } else if (typeof immigrationStatus === 'object' && immigrationStatus !== null) {
+            if ('en' in immigrationStatus) {
+                finalStatus = String(immigrationStatus.en);
+            } else if ('name' in immigrationStatus) {
+                finalStatus = String(immigrationStatus.name);
             } else {
                 finalStatus = current.type?.name || current.type?.id || "Unknown Status";
             }

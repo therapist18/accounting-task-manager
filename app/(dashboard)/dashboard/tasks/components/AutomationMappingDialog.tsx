@@ -665,9 +665,13 @@ export const AutomationMappingDialog = ({
     return val !== undefined && val !== null ? String(val) : "Missing";
   };
 
+  // ============================================================
+  // FIXED: getFieldValue - Properly match entity types with data sources
+  // ============================================================
   const getFieldValue = (fieldId: string, entityId: string, sourceIdx: number = 0, extractionMode: string = 'latest', preserveArray: boolean = false) => {
     const field = jobFields[fieldId];
     if (!field) return "Missing Config";
+    
     if (field.is_computed || field.computed_config?.is_computed) {
       const key = `${field.id}_${entityId}_${extractionMode}`;
       const val = masterFieldComputedValues[key];
@@ -685,7 +689,25 @@ export const AutomationMappingDialog = ({
 
       return String(val);
     }
-    const source = field.sources?.[sourceIdx];
+
+    // ============================================================
+    // KEY FIX: Determine entity category based on actual entityId
+    // ============================================================
+    let entityCategory = 'individual';
+    
+    // Check if this entity is a company
+    if (entityId === String(relationshipData?.company?.id) || entityId === String(task?.company_id)) {
+      entityCategory = 'company';
+    }
+
+    // Find the correct source based on entity category
+    let source = field.sources?.find((s: any) => s.source_type === entityCategory);
+    
+    // If no matching source found, fallback to provided sourceIdx or first source
+    if (!source) {
+      source = field.sources?.[sourceIdx] || field.sources?.[0];
+    }
+
     if (!source) return "No Source";
 
     let lookupId = String(entityId);
@@ -868,6 +890,7 @@ export const AutomationMappingDialog = ({
       const activeWeb = webData.find(w => w.automationId === selectedAutomationId);
 
       activeWeb?.fields?.forEach((f: any) => {
+
         if (f.fieldType === 'document') {
           const targetId = resolveTargetEntityId(f);
           const doc = documentFiles.find(d => d.document_id === f.kycDocumentId && String(d.owner_id) === String(targetId));
@@ -895,8 +918,9 @@ export const AutomationMappingDialog = ({
                   const key = `${field.id}_${id}_${itemExtractionMode}`;
                   val = masterFieldComputedValues[key];
                 } else if (field?.sources?.[0]) {
-                  val = getSourceValue(field.sources[0].table, field.sources[0].path, String(id));
-                  if (val === 'Missing') val = '';
+                  // Use getFieldValue to properly match entity type with source
+                  val = getFieldValue(fieldId, String(id), 0, col.extractionMode || 'latest');
+                  if (val === 'Missing' || val === 'Missing Config' || val === 'No Source') val = '';
                 }
               }
               return { ...col, value: val, fieldId };
@@ -931,15 +955,29 @@ export const AutomationMappingDialog = ({
 
         const targetId = resolveTargetEntityId(f);
         const masterIds = f.linkedMasterFields || f.masterFieldIds || [];
+        
+        // ============================================================
+        // KEY FIX: Use getFieldValue which now properly matches entity types
+        // ============================================================
         const values = masterIds.map((mid: string | number) => {
           let val = getFieldValue(String(mid), String(targetId), 0, f.extractionMode || 'latest');
+          
+          // Handle Object values preventing [object Object]
+          if (typeof val === 'object' && val !== null) {
+            // If it's a date object, leave it for formatting
+            if (val.day && val.month && val.year) return val;
+
+            // If it's a generic object, try to find a 'name', 'label', or 'value' key
+            // Or simply JSON.stringify it so the backend can at least read it
+            return val.name || val.label || val.value || JSON.stringify(val);
+          }
           if (Array.isArray(val)) {
             val = val.join(', ');
           }
           if (f.fieldType === 'date' && val && val !== 'Missing' && val !== 'Computing...') {
             return formatDateValue(val, f.dateFormat);
           }
-          return (val === 'Missing' || val === 'Computing...') ? null : val;
+          return (val === 'Missing' || val === 'Computing...' || val === 'Missing Config' || val === 'No Source') ? null : val;
         }).filter(Boolean);
 
         if (values.length > 0) {
@@ -961,6 +999,8 @@ export const AutomationMappingDialog = ({
         login: { email: automationLogin.email || "", idNumber: automationLogin.idNumber || "", password: automationLogin.password || "" },
         formData: formData, step2Data: {}, step3Data: {}
       };
+
+      console.log('[handleRunAutomation] Final payload:', JSON.stringify(payload, null, 2));
 
       const res = await fetch(automation.webhook_url, { method: automation.webhook_method || 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (!res.ok) throw new Error("Trigger failed: " + res.status);
@@ -1131,7 +1171,7 @@ export const AutomationMappingDialog = ({
             const v = getFieldValue(String(mid), String(targetId), 0, field.extractionMode || 'latest');
             return Array.isArray(v) ? v.join(', ') : v;
           }).join(' ');
-          if (!mergedValue || mergedValue === 'Missing' || mergedValue === '') isMissing = true;
+          if (!mergedValue || mergedValue === 'Missing' || mergedValue === '' || mergedValue === 'Missing Config' || mergedValue === 'No Source') isMissing = true;
         }
       }
       return { ...field, isMissing };
@@ -1462,15 +1502,11 @@ export const AutomationMappingDialog = ({
                   }).filter(Boolean);
 
                   const mergedValue = masterIds.map((mid: string | number) => {
-                    const jobField = jobFields[mid];
-                    if (!jobField) return 'Missing';
-                    let sourceIdx = jobField.sources?.findIndex((s: any) => s.source_type === entityCategory);
-                    if (sourceIdx === -1 || sourceIdx === undefined) sourceIdx = 0;
-                    const v = getFieldValue(String(mid), String(targetId), sourceIdx, field.extractionMode || 'latest');
+                    const v = getFieldValue(String(mid), String(targetId), 0, field.extractionMode || 'latest');
                     return Array.isArray(v) ? v.join(', ') : v;
                   }).join(' ');
 
-                  const isValueMissing = !mergedValue || mergedValue === 'Missing' || mergedValue === '';
+                  const isValueMissing = !mergedValue || mergedValue === 'Missing' || mergedValue === '' || mergedValue === 'Missing Config' || mergedValue === 'No Source';
                   const primarySource = sources[0];
 
                   return (
