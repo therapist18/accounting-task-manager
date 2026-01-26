@@ -966,19 +966,19 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                             <div className="space-y-2">
                                                 <Label className="text-[10px] font-bold uppercase text-purple-700">Start Date Path</Label>
                                                 <SearchableSelect 
-                                                    value={formData.computed_config.arithmeticConfig?.field1Path || ""}
+                                                    value={formData.computed_config.arithmeticConfig?.startDatePath || ""}
                                                     onValueChange={(value) => setFormData(prev => ({
                                                         ...prev,
                                                         computed_config: {
                                                             ...prev.computed_config,
                                                             arithmeticConfig: {
                                                                 ...prev.computed_config.arithmeticConfig,
-                                                                field1Path: value
+                                                                startDatePath: value
                                                             }
                                                         }
                                                     }))}
                                                     options={masterFields.map(field => ({ 
-                                                        value: field.field_key, 
+                                                        value: field.id, 
                                                         label: `${field.label} (${field.field_key})` 
                                                     }))}
                                                     loading={loadingMasterFields}
@@ -989,19 +989,19 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                             <div className="space-y-2">
                                                 <Label className="text-[10px] font-bold uppercase text-purple-700">End Date Path</Label>
                                                 <SearchableSelect 
-                                                    value={formData.computed_config.arithmeticConfig?.field2Path || ""}
+                                                    value={formData.computed_config.arithmeticConfig?.endDatePath || ""}
                                                     onValueChange={(value) => setFormData(prev => ({
                                                         ...prev,
                                                         computed_config: {
                                                             ...prev.computed_config,
                                                             arithmeticConfig: {
                                                                 ...prev.computed_config.arithmeticConfig,
-                                                                field2Path: value
+                                                                endDatePath: value
                                                             }
                                                         }
                                                     }))}
                                                     options={masterFields.map(field => ({ 
-                                                        value: field.field_key, 
+                                                        value: field.id, 
                                                         label: `${field.label} (${field.field_key})` 
                                                     }))}
                                                     loading={loadingMasterFields}

@@ -10,7 +10,7 @@ import {
   Settings, Webhook, ChevronRight, AlertCircle,
   CheckCircle2, Edit3, X, Save, Calculator,
   FunctionSquare, ExternalLink, Paperclip, AlertTriangle,
-  ArrowUpDown, Filter, Check, List
+  ArrowUpDown, Filter, Check, List, ChevronDown
 } from 'lucide-react';
 import {
   Table,
@@ -145,29 +145,20 @@ export const AutomationMappingDialog = ({
   const [documentFiles, setDocumentFiles] = useState<any[]>([]);
   const [entityAutomationMappings, setEntityAutomationMappings] = useState<EntityAutomationMapping[]>([]);
   const [selectedAutomationId, setSelectedAutomationId] = useState<string>('');
-
-  // Editing State
   const [editingCell, setEditingCell] = useState<any>(null);
   const [editValue, setEditValue] = useState('');
-
   const [activeTab, setActiveTab] = useState('fields');
   const [currentIndividualId, setCurrentIndividualId] = useState(individualId || task?.individual_id?.toString() || '');
   const [computedFieldsPreview, setComputedFieldsPreview] = useState<Record<string, string>>({});
   const [isComputing, setIsComputing] = useState(false);
   const [sourceData, setSourceData] = useState<Record<string, Record<string, any>>>({});
   const [masterFieldComputedValues, setMasterFieldComputedValues] = useState<Record<string, any>>({});
-
-  // Sorting State
   const [sortMissingFirst, setSortMissingFirst] = useState(false);
-
-  // Expanded array rows state
   const [expandedArrayFields, setExpandedArrayFields] = useState<Set<string>>(new Set());
-
-  // Fetch tracking to prevent infinite loops
+  const [expandedSourceFields, setExpandedSourceFields] = useState<Set<string>>(new Set());
   const lastFetchKey = React.useRef<string>('');
   const isFetchingRef = React.useRef(false);
 
-  // --- HELPERS ---
   const buildFileUrl = (linkedDoc: any): string | null => {
     if (!linkedDoc?.file_path) return null;
     const bucketName = 'kyc-documents';
@@ -225,6 +216,18 @@ export const AutomationMappingDialog = ({
     });
   };
 
+  const toggleSourceFieldExpansion = (fieldId: string) => {
+    setExpandedSourceFields(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(fieldId)) {
+        newSet.delete(fieldId);
+      } else {
+        newSet.add(fieldId);
+      }
+      return newSet;
+    });
+  };
+
   const getArrayFieldData = (field: any) => {
     const entityIds = resolveEntityIdsForArray(field, relationshipData);
     const arrayData = [];
@@ -236,7 +239,7 @@ export const AutomationMappingDialog = ({
         // Handle both linkedMasterFields (array) and linkedMasterFieldId (single value)
         const fieldIds = item.linkedMasterFields || (item.linkedMasterFieldId ? [item.linkedMasterFieldId] : []);
         const fieldId = String(fieldIds[0] || '');
-        
+
         if (fieldId) {
           const itemExtractionMode = item.extractionMode || 'latest';
           const value = getFieldValue(fieldId, String(entityId), 0, itemExtractionMode, true);
@@ -248,18 +251,18 @@ export const AutomationMappingDialog = ({
 
       // Calculate max rows - if any column has array values, we need multiple rows
       const maxRows = Math.max(1, ...Object.values(columnValues).map((v: any) => Array.isArray(v) ? v.length : 1));
-      
+
       // Create a row for each array element
       for (let i = 0; i < maxRows; i++) {
-        const rowData: any = { 
-          index: arrayData.length + 1, 
-          entityId: String(entityId) 
+        const rowData: any = {
+          index: arrayData.length + 1,
+          entityId: String(entityId)
         };
-        
+
         field.arrayItems?.forEach((item: any) => {
           const columnKey = item.variableName || String((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId || '');
           let value = columnValues[columnKey];
-          
+
           // If value is an array (from extractionMode: 'all'), get the i-th element
           if (Array.isArray(value)) {
             rowData[columnKey] = value[i] !== undefined && value[i] !== '' ? value[i] : "";
@@ -268,7 +271,7 @@ export const AutomationMappingDialog = ({
             rowData[columnKey] = (i === 0 && value !== undefined && value !== 'Computing...') ? value : "";
           }
         });
-        
+
         arrayData.push(rowData);
       }
     });
@@ -281,10 +284,10 @@ export const AutomationMappingDialog = ({
     if (itemName) {
       return itemName;
     }
-    
+
     // Convert to string for consistent comparison
     const fieldIdStr = String(masterFieldId);
-    
+
     // Look up the master field in jobFields to get its display name
     const masterField = jobFields[fieldIdStr];
     if (masterField) {
@@ -297,8 +300,8 @@ export const AutomationMappingDialog = ({
     if (activeWebEntry?.fields) {
       const field = activeWebEntry.fields.find((f: any) => {
         const linkedFields = f.linkedMasterFields || f.masterFieldIds || [];
-        return linkedFields.some((id: any) => String(id) === fieldIdStr) || 
-               f.variableName === fieldIdStr;
+        return linkedFields.some((id: any) => String(id) === fieldIdStr) ||
+          f.variableName === fieldIdStr;
       });
       if (field) {
         const displayName = field.efnsDisplayName || field.variableName || fieldIdStr;
@@ -339,11 +342,11 @@ export const AutomationMappingDialog = ({
       const activeAutomation = webData.find(w => w.automationId === selectedAutomationId);
       const fieldsToProcess = activeAutomation?.fields || [];
       const computedMasterFields: any[] = [];
-      
+
       fieldsToProcess.forEach((field: any) => {
         const isArray = field.fieldType === 'array';
-        const cols = isArray 
-          ? (field.arrayItems || []) 
+        const cols = isArray
+          ? (field.arrayItems || [])
           : [{ linkedMasterFieldId: field.linkedMasterFields?.[0] || field.masterFieldIds?.[0] }];
         let entityIds: string[] = [];
         if (isArray) {
@@ -358,7 +361,7 @@ export const AutomationMappingDialog = ({
           const fieldIds = col.linkedMasterFields || (col.linkedMasterFieldId ? [col.linkedMasterFieldId] : []);
           const mid = fieldIds[0] || field.linkedMasterFields?.[0] || field.masterFieldIds?.[0];
           if (!mid) return;
-          
+
           const jobField = jobFields[mid];
           if (jobField) {
             if (jobField.is_computed || jobField.computed_config?.is_computed) {
@@ -486,27 +489,138 @@ export const AutomationMappingDialog = ({
           const docs = config.document_ids || [];
           const source = field.sources?.[0];
           let computedValue: any;
-          
+
           if (config.computed_function) {
             // Only pass fieldPath for functions that need document field extraction
             const functionsNeedingFieldPath = [
-              'getLatestDocumentNumber', 
-              'getLatestWorkPermit', 
-              'extractFieldFromLatestDocument', 
+              'getLatestDocumentNumber',
+              'getLatestWorkPermit',
+              'extractFieldFromLatestDocument',
               'extractFieldFromAllDocuments'
             ];
-            const fieldPathToUse = functionsNeedingFieldPath.includes(config.computed_function) && source?.path 
-              ? source.path 
+            const fieldPathToUse = functionsNeedingFieldPath.includes(config.computed_function) && source?.path
+              ? source.path
               : undefined;
-            
-            computedValue = await executeComputedField(
-              config.computed_function,
-              entityId,
-              docs,
-              fieldPathToUse,
-              extractionMode,
-              documentCache
-            );
+
+            // Check if this is an arithmetic or date calculation function
+            const arithmeticFunctions = ['calculateArithmetic', 'calculateDateDifference'];
+            const arithmeticConfig = config.arithmeticConfig;
+
+            if (arithmeticFunctions.includes(config.computed_function) && arithmeticConfig) {
+              // For arithmetic functions, we need to resolve field IDs to actual document paths
+              let resolvedArithmeticConfig: any = { ...arithmeticConfig };
+
+              // Handle startDatePath/endDatePath (for calculateDateDifference)
+              // or field1Path/field2Path (for calculateArithmetic)
+              const field1Key = arithmeticConfig.startDatePath || arithmeticConfig.field1Path;
+              const field2Key = arithmeticConfig.endDatePath || arithmeticConfig.field2Path;
+
+              if (field1Key) {
+                // Check if it's a field ID (number) or already a path (string with ->)
+                if (typeof field1Key === 'number' || !String(field1Key).includes('->')) {
+                  // It's a field ID, look up the field to get its path
+                  const field1 = jobFields[String(field1Key)];
+                  if (field1?.sources?.[0]?.path) {
+                    resolvedArithmeticConfig.field1Path = field1.sources[0].path;
+                  } else {
+                    // Assume it's in extracted_details
+                    resolvedArithmeticConfig.field1Path = `extracted_details->>'${field1?.field_key || field1Key}'`;
+                  }
+                } else {
+                  resolvedArithmeticConfig.field1Path = field1Key;
+                }
+              }
+
+              if (field2Key) {
+                if (typeof field2Key === 'number' || !String(field2Key).includes('->')) {
+                  const field2 = jobFields[String(field2Key)];
+                  if (field2?.sources?.[0]?.path) {
+                    resolvedArithmeticConfig.field2Path = field2.sources[0].path;
+                  } else {
+                    resolvedArithmeticConfig.field2Path = `extracted_details->>'${field2?.field_key || field2Key}'`;
+                  }
+                } else {
+                  resolvedArithmeticConfig.field2Path = field2Key;
+                }
+              }
+
+              // For calculateDateDifference, we need to pass startDatePath and endDatePath
+              if (config.computed_function === 'calculateDateDifference') {
+                console.log('[DEBUG] calculateDateDifference - Original config:', {
+                  arithmeticConfig,
+                  startDatePath: arithmeticConfig.startDatePath,
+                  endDatePath: arithmeticConfig.endDatePath,
+                  unit: arithmeticConfig.unit
+                });
+
+                console.log('[DEBUG] calculateDateDifference - Resolved paths:', {
+                  resolvedStartDatePath: resolvedArithmeticConfig.field1Path,
+                  resolvedEndDatePath: resolvedArithmeticConfig.field2Path,
+                  jobFieldsAvailable: Object.keys(jobFields).length
+                });
+
+                // Log field details for debugging
+                if (arithmeticConfig.startDatePath) {
+                  const startField = jobFields[String(arithmeticConfig.startDatePath)];
+                  console.log('[DEBUG] Start field details:', {
+                    fieldId: arithmeticConfig.startDatePath,
+                    fieldData: startField,
+                    sources: startField?.sources
+                  });
+                }
+
+                if (arithmeticConfig.endDatePath) {
+                  const endField = jobFields[String(arithmeticConfig.endDatePath)];
+                  console.log('[DEBUG] End field details:', {
+                    fieldId: arithmeticConfig.endDatePath,
+                    fieldData: endField,
+                    sources: endField?.sources
+                  });
+                }
+
+                computedValue = await executeComputedField(
+                  config.computed_function,
+                  entityId,
+                  docs,
+                  undefined, // fieldPath not needed for date difference
+                  extractionMode,
+                  documentCache,
+                  {
+                    startDatePath: resolvedArithmeticConfig.field1Path,
+                    endDatePath: resolvedArithmeticConfig.field2Path,
+                    unit: resolvedArithmeticConfig.unit
+                  }
+                );
+
+                console.log('[DEBUG] calculateDateDifference - Result:', computedValue);
+              } else {
+                // For other arithmetic functions, use field1Path and field2Path
+                computedValue = await executeComputedField(
+                  config.computed_function,
+                  entityId,
+                  docs,
+                  resolvedArithmeticConfig.field1Path,
+                  extractionMode,
+                  documentCache,
+                  {
+                    field2Path: resolvedArithmeticConfig.field2Path,
+                    operation: resolvedArithmeticConfig.operation,
+                    operand: resolvedArithmeticConfig.operand,
+                    unit: resolvedArithmeticConfig.unit
+                  }
+                );
+              }
+            } else {
+              computedValue = await executeComputedField(
+                config.computed_function,
+                entityId,
+                docs,
+                fieldPathToUse,
+                extractionMode,
+                documentCache
+              );
+            }
+
             if (typeof computedValue === 'string' && computedValue === '[object Object]') {
               console.error('[fetchSourceData] CRITICAL: Object was already converted to "[object Object]" before this point!');
             }
@@ -526,7 +640,7 @@ export const AutomationMappingDialog = ({
           let storageValue = computedValue;
           if (typeof computedValue === 'object' && computedValue !== null && !Array.isArray(computedValue)) {
             storageValue = JSON.stringify(computedValue);
-          } 
+          }
           newComputedValues[cacheKey] = storageValue;
         }
         setMasterFieldComputedValues(newComputedValues);
@@ -686,11 +800,11 @@ export const AutomationMappingDialog = ({
 
         const fieldIds = finalWebDataItems.flatMap(i => {
           const fields = i.fields || [];
-          const directIds = fields.flatMap((f: any) => 
+          const directIds = fields.flatMap((f: any) =>
             f.linkedMasterFields || f.masterFieldIds || []
           );
           const arrayIds = fields.flatMap((f: any) =>
-            (f.arrayItems || []).flatMap((item: any) => 
+            (f.arrayItems || []).flatMap((item: any) =>
               item.linkedMasterFields || (item.linkedMasterFieldId ? [item.linkedMasterFieldId] : [])
             )
           );
@@ -773,7 +887,7 @@ export const AutomationMappingDialog = ({
               // Handle both linkedMasterFields (array) and linkedMasterFieldId (single value)
               const fieldIds = col.linkedMasterFields || (col.linkedMasterFieldId ? [col.linkedMasterFieldId] : []);
               const fieldId = String(fieldIds[0] || '');
-              
+
               if (fieldId) {
                 const field = jobFields[fieldId];
                 if (field?.is_computed || field?.computed_config?.is_computed) {
@@ -1057,17 +1171,41 @@ export const AutomationMappingDialog = ({
         {/* EXCEL-LIKE TABLE */}
         <div className="flex-1 overflow-hidden bg-white">
           <ScrollArea className="h-full">
-            <table className="w-full border-collapse">
-              <thead className="sticky top-0 z-10 bg-slate-100 border-b-2 border-slate-300">
-                <tr>
-                  <th className="w-12 px-2 py-3 text-center text-xs font-bold text-slate-600 border-r border-slate-200">#</th>
-                  <th className="w-80 px-4 py-3 text-left text-xs font-bold text-slate-700 border-r border-slate-200">FIELD NAME</th>
-                  <th className="w-96 px-4 py-3 text-left text-xs font-bold text-slate-700 border-r border-slate-200">CURRENT VALUE</th>
-                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-700">SOURCE</th>
-                </tr>
-              </thead>
+            <Table>
+              <TableHeader className="sticky top-0 z-10 bg-slate-100 border-b-2 border-slate-300">
+                <TableRow>
+                  <TableHead className="w-12 px-2 py-3 text-center text-xs font-bold text-slate-600 border-r border-slate-200">#</TableHead>
+                  <TableHead className="w-80 px-4 py-3 text-left text-xs font-bold text-slate-700 border-r border-slate-200">
+                    <div className="flex items-center gap-2">
+                      FIELD NAME
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          // Toggle all source fields
+                          const allFieldIds = sortedFields.map(f => f.variableName).filter(Boolean);
+                          if (expandedSourceFields.size === allFieldIds.length) {
+                            setExpandedSourceFields(new Set());
+                          } else {
+                            setExpandedSourceFields(new Set(allFieldIds));
+                          }
+                        }}
+                        className="h-5 w-5 p-0 hover:bg-slate-200"
+                      >
+                        {expandedSourceFields.size > 0 ? (
+                          <ChevronDown className="h-3 w-3" />
+                        ) : (
+                          <ChevronRight className="h-3 w-3" />
+                        )}
+                      </Button>
+                    </div>
+                  </TableHead>
+                  <TableHead className="px-4 py-3 text-left text-xs font-bold text-slate-700">SOURCE</TableHead>
+                  <TableHead className="px-4 py-3 text-left text-xs font-bold text-slate-700 border-r border-slate-200">CURRENT VALUE</TableHead>
+                </TableRow>
+              </TableHeader>
 
-              <tbody>
+              <TableBody>
                 {sortedFields.map((field, fIdx) => {
                   const isEditing = editingCell?.fieldId === field.variableName;
 
@@ -1080,11 +1218,11 @@ export const AutomationMappingDialog = ({
 
                     return (
                       <React.Fragment key={fIdx}>
-                        <tr className="group border-b border-slate-200 bg-blue-50/20">
-                          <td className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">
+                        <TableRow className="group border-b border-slate-200 bg-blue-50/20">
+                          <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">
                             {fIdx + 1}
-                          </td>
-                          <td className="px-4 py-2 border-r border-slate-100">
+                          </TableCell>
+                          <TableCell className="px-4 py-2 border-r border-slate-100">
                             <div className="flex items-center gap-2">
                               <button
                                 onClick={() => toggleArrayFieldExpansion(field.variableName)}
@@ -1098,23 +1236,23 @@ export const AutomationMappingDialog = ({
                               <span className="text-sm font-semibold text-slate-900">{field.efnsDisplayName || field.variableName}</span>
                               <Badge variant="outline" className="text-[10px] border-blue-300 text-blue-700 bg-blue-50">Array</Badge>
                             </div>
-                          </td>
-                          <td className="px-4 py-2 border-r border-slate-100">
+                          </TableCell>
+                          <TableCell className="px-4 py-2 border-r border-slate-100">
                             <span className="text-xs text-slate-600">{arrayCount} entities • {field.arrayItems?.length || 0} columns</span>
-                          </td>
-                          <td className="px-4 py-2">
+                          </TableCell>
+                          <TableCell className="px-4 py-2">
                             <button
                               onClick={() => toggleArrayFieldExpansion(field.variableName)}
                               className="text-xs text-blue-600 hover:text-blue-800 hover:underline italic"
                             >
                               {isExpanded ? 'Hide details' : 'View in original layout for full details'}
                             </button>
-                          </td>
-                        </tr>
+                          </TableCell>
+                        </TableRow>
 
                         {isExpanded && (
-                          <tr>
-                            <td colSpan={4} className="p-0 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 border-b-2 border-blue-300">
+                          <TableRow>
+                            <TableCell colSpan={4} className="p-0 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 border-b-2 border-blue-300">
                               <div className="p-6">
                                 <div className="mb-4 flex items-center gap-3 pb-3 border-b-2 border-blue-200">
                                   <div className="h-8 w-1 bg-gradient-to-b from-blue-500 to-indigo-500 rounded-full"></div>
@@ -1126,53 +1264,61 @@ export const AutomationMappingDialog = ({
 
                                 {arrayData.length > 0 ? (
                                   <div className="border-2 border-blue-300 rounded-lg overflow-hidden shadow-sm">
-                                    <table className="w-full text-sm">
-                                      <thead className="bg-gradient-to-r from-blue-100 to-indigo-100 border-b-2 border-blue-300">
-                                        <tr>
-                                          <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 border-r-2 border-blue-200 bg-blue-50/50">
+                                    <Table>
+                                      <TableHeader className="bg-gradient-to-r from-blue-100 to-indigo-100 border-b-2 border-blue-300">
+                                        <TableRow>
+                                          <TableHead className="px-4 py-3 text-left text-xs font-bold text-slate-800 border-r-2 border-blue-200 bg-blue-50/50 w-16">
                                             #
-                                          </th>
+                                          </TableHead>
                                           {field.arrayItems?.map((item: any, idx: number) => (
-                                            <th 
-                                              key={idx} 
+                                            <TableHead
+                                              key={idx}
                                               className={cn(
                                                 "px-4 py-3 text-left text-xs font-bold text-slate-800",
                                                 idx < field.arrayItems.length - 1 && "border-r-2 border-blue-200"
                                               )}
                                             >
-                                              <div className="flex items-center gap-2">
-                                                <div className="h-2 w-2 rounded-full bg-blue-500"></div>
-                                                <span>{item.name || item.header || getMasterFieldDisplayName((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId)}</span>
-                                                {item.extractionMode === 'all' && (
-                                                  <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-purple-300 text-purple-600 bg-purple-50">
-                                                    MULTI
-                                                  </Badge>
+                                              <div className="flex flex-col gap-1">
+                                                <div className="flex items-center gap-2">
+                                                  <div className="h-2 w-2 rounded-full bg-blue-500"></div>
+                                                  <span>{item.name || item.header || getMasterFieldDisplayName((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId)}</span>
+                                                  {item.extractionMode === 'all' && (
+                                                    <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-purple-300 text-purple-600 bg-purple-50">
+                                                      MULTI
+                                                    </Badge>
+                                                  )}
+                                                </div>
+                                                {item.customFieldSource && (
+                                                  <div className="text-[10px] text-emerald-600 font-medium flex items-center gap-1">
+                                                    <span className="inline-block w-1 h-1 rounded-full bg-emerald-500"></span>
+                                                    {item.customFieldSource}
+                                                  </div>
                                                 )}
                                               </div>
-                                            </th>
+                                            </TableHead>
                                           ))}
-                                        </tr>
-                                      </thead>
-                                      <tbody className="bg-white">
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody className="bg-white">
                                         {arrayData.map((row: any, rowIndex: number) => (
-                                          <tr 
-                                            key={rowIndex} 
+                                          <TableRow
+                                            key={rowIndex}
                                             className={cn(
                                               "border-b border-blue-200 last:border-b-0 transition-colors hover:bg-blue-50/30",
                                               rowIndex % 2 === 0 ? "bg-white" : "bg-blue-50/10"
                                             )}
                                           >
-                                            <td className="px-4 py-3 text-xs font-semibold text-slate-600 border-r-2 border-blue-200 bg-blue-50/30">
+                                            <TableCell className="px-4 py-3 text-xs font-semibold text-slate-600 border-r-2 border-blue-200 bg-blue-50/30">
                                               {row.index}
-                                            </td>
+                                            </TableCell>
                                             {field.arrayItems?.map((item: any, colIndex: number) => {
                                               const columnKey = item.variableName || String((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId || '');
                                               const value = row[columnKey];
                                               const isMissing = !value || value === '' || value === 'Missing Config';
-                                              
+
                                               return (
-                                                <td 
-                                                  key={colIndex} 
+                                                <TableCell
+                                                  key={colIndex}
                                                   className={cn(
                                                     "px-4 py-3 text-xs",
                                                     colIndex < field.arrayItems.length - 1 && "border-r-2 border-blue-100",
@@ -1187,13 +1333,13 @@ export const AutomationMappingDialog = ({
                                                   ) : (
                                                     value
                                                   )}
-                                                </td>
+                                                </TableCell>
                                               );
                                             })}
-                                          </tr>
+                                          </TableRow>
                                         ))}
-                                      </tbody>
-                                    </table>
+                                      </TableBody>
+                                    </Table>
                                   </div>
                                 ) : (
                                   <div className="text-center py-12 text-slate-400 text-sm border-2 border-dashed border-blue-200 rounded-lg bg-blue-50/20">
@@ -1202,8 +1348,8 @@ export const AutomationMappingDialog = ({
                                   </div>
                                 )}
                               </div>
-                            </td>
-                          </tr>
+                            </TableCell>
+                          </TableRow>
                         )}
                       </React.Fragment>
                     );
@@ -1215,18 +1361,18 @@ export const AutomationMappingDialog = ({
                     const foundDoc = documentFiles.find(d => d.document_id === field.kycDocumentId && String(d.owner_id) === String(targetId));
 
                     return (
-                      <tr key={fIdx} className="group border-b border-slate-200">
-                        <td className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">
+                      <TableRow key={fIdx} className="group border-b border-slate-200">
+                        <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">
                           {fIdx + 1}
-                        </td>
-                        <td className="px-4 py-2 border-r border-slate-100">
+                        </TableCell>
+                        <TableCell className="px-4 py-2 border-r border-slate-100">
                           <div className="flex items-center gap-2">
                             <Paperclip className="h-4 w-4 text-amber-600" />
                             <span className="text-sm font-semibold text-slate-900">{field.efnsDisplayName || field.variableName}</span>
                             <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700 bg-amber-50">Document</Badge>
                           </div>
-                        </td>
-                        <td className="px-4 py-2 border-r border-slate-100">
+                        </TableCell>
+                        <TableCell className="px-4 py-2 border-r border-slate-100">
                           {foundDoc ? (
                             <div className="flex items-center gap-2">
                               <Badge className="bg-green-600 text-white h-6">Available</Badge>
@@ -1237,28 +1383,28 @@ export const AutomationMappingDialog = ({
                           ) : (
                             <Badge variant="destructive" className="h-6">Missing</Badge>
                           )}
-                        </td>
-                        <td className="px-4 py-2">
+                        </TableCell>
+                        <TableCell className="px-4 py-2">
                           <span className="text-xs text-slate-500">KYC: {field.kycDocumentId?.substring(0, 12)}...</span>
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     );
                   }
                   if (field.fieldType === 'computed') {
                     const computedValue = computedFieldsPreview[field.variableName];
                     return (
-                      <tr key={fIdx} className="group border-b border-slate-200 bg-purple-50/20">
-                        <td className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">
+                      <TableRow key={fIdx} className="group border-b border-slate-200 bg-purple-50/20">
+                        <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">
                           {fIdx + 1}
-                        </td>
-                        <td className="px-4 py-2 border-r border-slate-100">
+                        </TableCell>
+                        <TableCell className="px-4 py-2 border-r border-slate-100">
                           <div className="flex items-center gap-2">
                             <Calculator className="h-4 w-4 text-purple-600" />
                             <span className="text-sm font-semibold text-slate-900">{field.efnsDisplayName || field.variableName}</span>
                             <Badge variant="outline" className="text-[10px] border-purple-300 text-purple-700 bg-purple-50">Computed</Badge>
                           </div>
-                        </td>
-                        <td className="px-4 py-2 border-r border-slate-100">
+                        </TableCell>
+                        <TableCell className="px-4 py-2 border-r border-slate-100">
                           {isComputing ? (
                             <div className="flex items-center gap-2 text-xs text-slate-400">
                               <Loader2 className="h-3 w-3 animate-spin" /> Calculating...
@@ -1268,18 +1414,17 @@ export const AutomationMappingDialog = ({
                           ) : (
                             <span className="text-xs text-slate-400 italic">Pending...</span>
                           )}
-                        </td>
-                        <td className="px-4 py-2">
+                        </TableCell>
+                        <TableCell className="px-4 py-2">
                           <div className="flex items-center gap-2">
                             <FunctionSquare className="h-3 w-3 text-purple-500" />
                             <span className="text-xs font-mono text-purple-700">{field.computedFunction}</span>
                           </div>
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     );
                   }
 
-                  // CASE: STANDARD FIELDS
                   const targetId = resolveTargetEntityId(field);
                   const isMissingEntity = !targetId;
                   const masterIds = field.linkedMasterFields || field.masterFieldIds || [];
@@ -1329,18 +1474,18 @@ export const AutomationMappingDialog = ({
                   const primarySource = sources[0];
 
                   return (
-                    <tr
+                    <TableRow
                       key={fIdx}
                       className={cn(
                         "group border-b border-slate-200 hover:bg-blue-50 transition-colors",
                         isValueMissing && "bg-red-50/30"
                       )}
                     >
-                      <td className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">
+                      <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">
                         {fIdx + 1}
-                      </td>
+                      </TableCell>
 
-                      <td className="px-4 py-2 border-r border-slate-100">
+                      <TableCell className="px-4 py-2 border-r border-slate-100">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-semibold text-slate-900">
                             {field.efnsDisplayName || field.variableName}
@@ -1349,9 +1494,19 @@ export const AutomationMappingDialog = ({
                             <AlertCircle className="h-3.5 w-3.5 text-red-500" />
                           )}
                         </div>
-                      </td>
+                      </TableCell>
 
-                      <td className="px-4 py-2 border-r border-slate-100">
+                      <TableCell className="px-4 py-2">
+                        {field.customFieldSource ? (
+                          <div className="mb-1 font-medium flex items-center gap-1">
+                            {field.customFieldSource}
+                          </div>
+                        ) : (
+                          <div className="mb-1 text-xs text-red-600 font-medium">Missing</div>
+                        )}
+                      </TableCell>
+
+                      <TableCell className="px-4 py-2 border-r border-slate-100">
                         {isEditing ? (
                           <div className="flex items-center gap-2">
                             {isDropdown ? (
@@ -1427,34 +1582,12 @@ export const AutomationMappingDialog = ({
                             )}
                           </div>
                         )}
-                      </td>
-
-                      <td className="px-4 py-2">
-                        <div className="flex flex-col gap-1">
-                          {sourcesDisplay.map((source, idx) => (
-                            <div key={idx} className="flex items-center gap-2 text-xs text-slate-600">
-                              {source.type === 'computed' ? (
-                                <>
-                                  <FunctionSquare className="h-3 w-3 text-purple-500" />
-                                  <span className="font-mono text-purple-700">{source.info}</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Database className="h-3 w-3 text-blue-500" />
-                                  <span>{source.label}</span>
-                                  <span className="text-slate-400">•</span>
-                                  <span className="font-mono text-slate-400">{source.table}</span>
-                                </>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   );
                 })}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </ScrollArea>
         </div>
       </div>

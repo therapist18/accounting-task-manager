@@ -48,7 +48,9 @@ import {
   ArrowUp,
   ArrowDown,
   Files,
-  ArrowRight
+  ArrowRight,
+  Eye,
+  EyeOff
 } from "lucide-react"
 import * as z from "zod"
 import { useForm } from "react-hook-form"
@@ -107,7 +109,7 @@ interface WebDataGroup {
     variableName: string;
     type: 'text' | 'number' | 'boolean' | 'date' | 'select' | 'document';
     linkedMasterFieldId?: number;
-    linkedMasterFieldIds?: number[];
+    linkedMasterFields?: number[];
     linkedKycDocuments?: string[];
     documentLogic?: 'merge' | 'fallback';
     dateFormat?: 'iso' | 'object_split' | 'dd_mm_yyyy';
@@ -131,6 +133,166 @@ interface KYCDocument {
   document_type: string;
   max_file_size_mb: number;
   name: string;
+}
+// --- Helper: Entity Configuration ---
+function EntityConfigurator({
+  group,
+  onUpdate
+}: {
+  group: WebDataGroup;
+  onUpdate: (updates: Partial<WebDataGroup>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const toggleEntityType = (type: string) => {
+    const current = group.entityTypes || [];
+    const exists = current.includes(type);
+    let newTypes = exists
+      ? current.filter(t => t !== type)
+      : [...current, type];
+
+    let newRelationships = group.dependantRelationships;
+    if (type === 'dependant' && exists) {
+      newRelationships = [];
+    }
+
+    let newDirectorType = group.directorType;
+    if (type === 'director' && exists) {
+      newDirectorType = undefined;
+    }
+
+    onUpdate({
+      entityTypes: newTypes,
+      dependantRelationships: newRelationships,
+      directorType: newDirectorType as any
+    });
+  };
+
+  const toggleRelationship = (rel: string) => {
+    const current = group.dependantRelationships || [];
+    const exists = current.includes(rel);
+    const newRels = exists
+      ? current.filter(r => r !== rel)
+      : [...current, rel];
+    onUpdate({ dependantRelationships: newRels });
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="w-full justify-between px-3 text-sm bg-white border-slate-200 text-slate-700">
+          <div className="flex flex-col items-start truncate">
+            <span className={cn("truncate font-medium", group.entityTypes?.length ? "text-slate-700" : "text-slate-400 italic")}>
+              {group.entityTypes?.length > 0
+                ? `${group.entityTypes.length} Selected`
+                : "Select entities..."}
+            </span>
+            {group.entityTypes?.includes('dependant') && (
+              <span className="text-[9px] text-slate-400 truncate -mt-1">
+                {(group.dependantRelationships?.length || 0) > 0
+                  ? `${group.dependantRelationships?.length} rels`
+                  : 'All relations'}
+              </span>
+            )}
+          </div>
+          <ChevronRight className="h-3 w-3 text-slate-400 ml-2" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[320px] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search entities..." className="h-9 text-sm" />
+          <CommandList className="max-h-[300px]">
+            <CommandEmpty>No entity found.</CommandEmpty>
+            <CommandGroup heading="Entity Types">
+              {ENTITY_TYPES.map((type) => {
+                const isSelected = group.entityTypes?.includes(type.value);
+                return (
+                  <div key={type.value} className="flex flex-col border-b last:border-0">
+                    <CommandItem
+                      onSelect={() => toggleEntityType(type.value)}
+                      className="cursor-pointer flex items-center justify-between py-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className={cn(
+                          "flex h-4 w-4 items-center justify-center rounded-sm border border-primary",
+                          isSelected ? "bg-primary text-primary-foreground" : "opacity-50 [&_svg]:invisible"
+                        )}>
+                          <Check className="h-3 w-3" />
+                        </div>
+                        <span className="capitalize">{type.label}</span>
+                      </div>
+                    </CommandItem>
+                    {isSelected && type.value === 'dependant' && (
+                      <div className="pl-8 pr-2 pb-2 bg-slate-50/50 animate-in slide-in-from-top-1">
+                        <Label className="text-[10px] text-slate-500 font-bold uppercase mb-1.5 block">
+                          Applies to Relationships:
+                        </Label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {DEPENDANT_RELATIONSHIPS.map(rel => {
+                            const isRelSelected = group.dependantRelationships?.includes(rel.value);
+                            return (
+                              <Badge
+                                key={rel.value}
+                                variant={isRelSelected ? "default" : "outline"}
+                                className={cn(
+                                  "text-[9px] h-5 px-1.5 cursor-pointer hover:border-blue-400",
+                                  isRelSelected ? "bg-blue-600 hover:bg-blue-700" : "bg-white text-slate-600"
+                                )}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleRelationship(rel.value);
+                                }}
+                              >
+                                {rel.label}
+                              </Badge>
+                            )
+                          })}
+                        </div>
+                        {(!group.dependantRelationships || group.dependantRelationships.length === 0) && (
+                          <p className="text-[9px] text-amber-600 mt-1 italic">
+                            *If none selected, applies to ALL dependents.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {isSelected && type.value === 'director' && (
+                      <div className="pl-8 pr-2 pb-2 bg-slate-50/50 animate-in slide-in-from-top-1">
+                        <Label className="text-[10px] text-slate-500 font-bold uppercase mb-1 block">
+                          Director Scope:
+                        </Label>
+                        <div className="flex gap-2">
+                          <div
+                            className={cn(
+                              "flex items-center gap-1 text-[10px] cursor-pointer px-2 py-1 rounded border",
+                              group.directorType === 'primary' ? "bg-blue-50 border-blue-200 text-blue-700" : "bg-white border-slate-200"
+                            )}
+                            onClick={(e) => { e.stopPropagation(); onUpdate({ directorType: 'primary' }); }}
+                          >
+                            <div className={cn("h-2 w-2 rounded-full", group.directorType === 'primary' ? "bg-blue-600" : "bg-slate-300")} />
+                            Primary Only
+                          </div>
+                          <div
+                            className={cn(
+                              "flex items-center gap-1 text-[10px] cursor-pointer px-2 py-1 rounded border",
+                              group.directorType !== 'primary' ? "bg-blue-50 border-blue-200 text-blue-700" : "bg-white border-slate-200"
+                            )}
+                            onClick={(e) => { e.stopPropagation(); onUpdate({ directorType: 'all' }); }}
+                          >
+                            <div className={cn("h-2 w-2 rounded-full", group.directorType !== 'primary' ? "bg-blue-600" : "bg-slate-300")} />
+                            All Directors
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 // --- Updated Array Configurator ---
@@ -170,12 +332,12 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
 
   const linkMasterField = (idx: number, field: JobField) => {
     const newItems = [...items];
-    const currentLinkedFields = newItems[idx].linkedMasterFieldIds || [];
+    const currentLinkedFields = newItems[idx].linkedMasterFields || [];
 
     if (!currentLinkedFields.includes(field.id)) {
       newItems[idx] = {
         ...newItems[idx],
-        linkedMasterFieldIds: [...currentLinkedFields, field.id]
+        linkedMasterFields: [...currentLinkedFields, field.id]
       };
       onUpdate(newItems);
     }
@@ -183,11 +345,11 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
 
   const unlinkMasterField = (idx: number, fieldId: number) => {
     const newItems = [...items];
-    const currentLinkedFields = newItems[idx].linkedMasterFieldIds || [];
+    const currentLinkedFields = newItems[idx].linkedMasterFields || [];
 
     newItems[idx] = {
       ...newItems[idx],
-      linkedMasterFieldIds: currentLinkedFields.filter(id => id !== fieldId)
+      linkedMasterFields: currentLinkedFields.filter(id => id !== fieldId)
     };
     onUpdate(newItems);
   };
@@ -377,8 +539,8 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
 
                               {/* Display linked fields */}
                               <div className="space-y-1">
-                                {item.linkedMasterFieldIds && item.linkedMasterFieldIds.length > 0 ? (
-                                  item.linkedMasterFieldIds.map((fieldId) => {
+                                {item.linkedMasterFields && item.linkedMasterFields.length > 0 ? (
+                                  item.linkedMasterFields.map((fieldId) => {
                                     const field = masterFields.find(f => f.id === fieldId);
                                     if (!field) return null;
 
@@ -419,7 +581,7 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
                               <div className="flex gap-1">
                                 <MultiMasterFieldPicker
                                   availableFields={masterFields}
-                                  linkedFieldIds={item.linkedMasterFieldIds || []}
+                                  linkedFieldIds={item.linkedMasterFields || []}
                                   onSelect={(field) => linkMasterField(i, field)}
                                 />
                               </div>
@@ -811,7 +973,334 @@ function WebDataGroupEditDialog({
   )
 }
 
-// ... rest of the code remains the same ...
+function ComputedFieldConfig({
+  group,
+  kycDocuments,
+  onUpdate
+}: {
+  group: WebDataGroup;
+  kycDocuments: KYCDocument[];
+  onUpdate: (updates: Partial<WebDataGroup>) => void;
+}) {
+  const [selectedDocs, setSelectedDocs] = useState<string[]>(group.computedDocuments || []);
+  const [docSearch, setDocSearch] = useState("");
+
+  const filteredDocuments = kycDocuments.filter(doc =>
+  (doc.display_name?.toLowerCase().includes(docSearch.toLowerCase()) ||
+    doc.name?.toLowerCase().includes(docSearch.toLowerCase()))
+  );
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <div className="w-full h-full flex items-center px-3 py-2 border rounded-md cursor-pointer hover:bg-purple-50 group transition-colors bg-white">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <Calculator className="h-3.5 w-3.5 text-purple-600 flex-shrink-0" />
+              <span className={cn("text-sm  font-medium truncate", group.computedFunction ? "text-purple-700" : "text-slate-400 italic")}>
+                {group.computedFunction || "Configure function..."}
+              </span>
+            </div>
+            {group.computedDocuments && group.computedDocuments.length > 0 && (
+              <div className="text-[9px] text-slate-500 mt-1 truncate pl-5">
+                Uses {group.computedDocuments.length} document(s)
+              </div>
+            )}
+          </div>
+          <Settings2 className="h-3.5 w-3.5 text-slate-300 group-hover:text-purple-600 flex-shrink-0 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+        </div>
+      </PopoverTrigger>
+      <PopoverContent className="w-[500px] p-0 shadow-xl border-purple-100" align="start">
+        <div className="bg-gradient-to-r from-purple-600 to-purple-700 px-4 py-3 flex items-center gap-2 text-white rounded-t-md">
+          <FunctionSquare className="h-4 w-4" />
+          <span className="text-sm font-semibold">Computed Field Logic</span>
+        </div>
+
+        <div className="p-5 space-y-5">
+          <div className="space-y-2">
+            <Label className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+              Function Name
+            </Label>
+            <div className="relative">
+              <Calculator className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <Input
+                value={group.computedFunction || ''}
+                onChange={e => onUpdate({ computedFunction: e.target.value })}
+                placeholder="e.g. calculateAgeFromId()"
+                className="pl-9 h-9 text-sm  border-slate-200 focus:border-purple-400 focus:ring-purple-100"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-semibold text-slate-700">Required Documents</Label>
+              <Badge variant="secondary" className="h-5 text-[10px] bg-purple-50 text-purple-700 border-purple-100">
+                {selectedDocs.length} selected
+              </Badge>
+            </div>
+
+            <div className="border border-slate-200 rounded-lg overflow-hidden">
+              <div className="bg-slate-50 px-3 py-2 border-b border-slate-200 flex items-center gap-2">
+                <Search className="h-3.5 w-3.5 text-slate-400" />
+                <Input
+                  className="h-7 text-sm border-none shadow-none bg-transparent focus-visible:ring-0 p-0"
+                  placeholder="Search documents..."
+                  value={docSearch}
+                  onChange={(e) => setDocSearch(e.target.value)}
+                />
+              </div>
+
+              <ScrollArea className="h-[200px] bg-white">
+                <div className="divide-y divide-slate-100">
+                  {filteredDocuments.length === 0 ? (
+                    <div className="p-8 text-center">
+                      <FileText className="h-8 w-8 text-slate-200 mx-auto mb-2" />
+                      <p className="text-sm text-slate-400">No documents found matching "{docSearch}"</p>
+                    </div>
+                  ) : (
+                    filteredDocuments.map((doc) => {
+                      const isSelected = selectedDocs.includes(doc.id);
+                      return (
+                        <div
+                          key={doc.id}
+                          className={cn(
+                            "flex items-center px-3 py-2 hover:bg-slate-50 transition-colors cursor-pointer group",
+                            isSelected && "bg-purple-50/60"
+                          )}
+                          onClick={() => {
+                            const newDocs = isSelected
+                              ? selectedDocs.filter(id => id !== doc.id)
+                              : [...selectedDocs, doc.id];
+                            setSelectedDocs(newDocs);
+                            onUpdate({ computedDocuments: newDocs });
+                          }}
+                        >
+                          <Checkbox
+                            id={`doc-${doc.id}`}
+                            checked={isSelected}
+                            onCheckedChange={() => { }} // handled by div click
+                            className="mr-3 data-[state=checked]:bg-purple-600 data-[state=checked]:border-purple-600"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-slate-800 truncate group-hover:text-purple-700 transition-colors">
+                              {doc.display_name}
+                            </div>
+                            <div className="text-[9px] text-slate-400  truncate">
+                              {doc.name}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-slate-50 px-4 py-3 border-t flex justify-between items-center rounded-b-md">
+          <div className="flex items-center gap-2">
+            <Info className="h-3.5 w-3.5 text-slate-400" />
+            <span className="text-[10px] text-slate-500">Executes server-side before automation runs.</span>
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-sm text-slate-500 hover:text-red-600 hover:bg-red-50"
+            onClick={() => {
+              onUpdate({ computedFunction: '', computedDocuments: [] });
+              setSelectedDocs([]);
+            }}
+          >
+            Clear Config
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// --- Helper: Master Field Picker (Simplified) ---
+function MasterFieldPicker({ availableFields, onSelect }: { availableFields: JobField[]; onSelect: (field: JobField) => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="sm" type="button" className="h-6 w-6 p-0 rounded-md hover:bg-blue-50 text-blue-500 transition-colors">
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[280px] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search database fields..." className="h-9 text-sm" />
+          <CommandList>
+            <CommandEmpty>No fields found.</CommandEmpty>
+            <CommandGroup heading="Available Fields">
+              <ScrollArea className="h-[200px]">
+                {availableFields.map((field) => (
+                  <CommandItem key={field.id} onSelect={() => { onSelect(field); setOpen(false) }} className="text-sm cursor-pointer">
+                    <Database className="h-3 w-3 mr-2 text-slate-400" />
+                    {field.label}
+                  </CommandItem>
+                ))}
+              </ScrollArea>
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+// --- Helper: Multi-Select Master Field Picker ---
+function MultiMasterFieldPicker({
+  availableFields,
+  linkedFieldIds,
+  onSelect
+}: {
+  availableFields: JobField[];
+  linkedFieldIds: number[];
+  onSelect: (field: JobField) => void;
+}) {
+  const [open, setOpen] = useState(false)
+  const [searchTerm, setSearchTerm] = useState("")
+
+  const filteredFields = availableFields.filter(field =>
+    field.label.toLowerCase().includes(searchTerm.toLowerCase())
+  )
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="sm" type="button" className="h-6 w-6 p-0 rounded-md hover:bg-blue-50 text-blue-500 transition-colors">
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[280px] p-0" align="start">
+        <div className="p-3 border-b">
+          <Input
+            placeholder="Search database fields..."
+            className="h-9 text-sm"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        <ScrollArea className="h-[200px]">
+          <div className="p-1">
+            {filteredFields.length === 0 ? (
+              <div className="py-6 text-center text-sm text-slate-500">
+                No fields found.
+              </div>
+            ) : (
+              filteredFields.map((field) => {
+                const isLinked = linkedFieldIds.includes(field.id);
+                return (
+                  <div
+                    key={field.id}
+                    className={cn(
+                      "flex items-center gap-2 p-2 rounded-sm cursor-pointer text-sm",
+                      isLinked ? "bg-slate-100 opacity-50 cursor-not-allowed" : "hover:bg-slate-100"
+                    )}
+                    onClick={() => {
+                      if (!isLinked) {
+                        onSelect(field);
+                        setOpen(false);
+                      }
+                    }}
+                  >
+                    <Database className="h-3 w-3 mr-2 text-slate-400" />
+                    <span className={cn("flex-1", isLinked && "line-through")}>
+                      {field.label}
+                    </span>
+                    {isLinked && (
+                      <Check className="h-3 w-3 text-green-600" />
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </ScrollArea>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+// --- Helper: Multi-Select Document Picker ---
+function MultiDocumentPicker({
+  availableDocuments,
+  linkedDocumentIds,
+  onSelect
+}: {
+  availableDocuments: KYCDocument[];
+  linkedDocumentIds: string[];
+  onSelect: (doc: KYCDocument) => void;
+}) {
+  const [open, setOpen] = useState(false)
+  const [searchTerm, setSearchTerm] = useState("")
+
+  const filteredDocuments = availableDocuments.filter(doc =>
+    (doc.display_name || doc.name).toLowerCase().includes(searchTerm.toLowerCase())
+  )
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="sm" type="button" className="h-6 w-6 p-0 rounded-md hover:bg-amber-50 text-amber-500 transition-colors">
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[280px] p-0" align="start">
+        <div className="p-3 border-b">
+          <Input
+            placeholder="Search documents..."
+            className="h-9 text-sm"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        <ScrollArea className="h-[200px]">
+          <div className="p-1">
+            {filteredDocuments.length === 0 ? (
+              <div className="py-6 text-center text-sm text-slate-500">
+                No documents found.
+              </div>
+            ) : (
+              filteredDocuments.map((doc) => {
+                const isLinked = linkedDocumentIds.includes(doc.id);
+                return (
+                  <div
+                    key={doc.id}
+                    className={cn(
+                      "flex items-center gap-2 p-2 rounded-sm cursor-pointer text-sm",
+                      isLinked ? "bg-slate-100 opacity-50 cursor-not-allowed" : "hover:bg-slate-100"
+                    )}
+                    onClick={() => {
+                      if (!isLinked) {
+                        onSelect(doc);
+                        setOpen(false);
+                      }
+                    }}
+                  >
+                    <FileText className="h-3 w-3 mr-2 text-slate-400" />
+                    <span className={cn("flex-1", isLinked && "line-through")}>
+                      {doc.display_name || doc.name}
+                    </span>
+                    {isLinked && (
+                      <Check className="h-3 w-3 text-green-600" />
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </ScrollArea>
+      </PopoverContent>
+    </Popover>
+  )
+}
 
 // --- NEW COMPONENT: Simplified Add Data Field Dialog ---
 function AddDataFieldDialog({
@@ -1106,11 +1595,13 @@ export function AutomationDialog({
   const [activeTab, setActiveTab] = useState("general")
   const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
 
   const [webDataGroups, setWebDataGroups] = useState<WebDataGroup[]>([])
   const [masterFields, setMasterFields] = useState<JobField[]>([])
   const [kycDocuments, setKycDocuments] = useState<KYCDocument[]>([])
 
+  // ... rest of the code remains the same ...
   const [isAddFieldOpen, setIsAddFieldOpen] = useState(false)
   const [fieldSearch, setFieldSearch] = useState('')
   const [deleteGroupDialogOpen, setDeleteGroupDialogOpen] = useState(false);
@@ -1596,10 +2087,37 @@ export function AutomationDialog({
                               <FormField control={form.control} name="login.email" render={({ field }) => (
                                 <FormItem><FormLabel className="text-sm font-bold text-slate-500">Username/Email</FormLabel><FormControl><Input {...field} /></FormControl></FormItem>
                               )} />
-                              <FormField control={form.control} name="login.password" render={({ field }) => (
-                                <FormItem><FormLabel className="text-sm font-bold text-slate-500">Password</FormLabel><FormControl><Input type="password" {...field} /></FormControl></FormItem>
+                              <FormField control={form.control} name="login.idNumber" render={({ field }) => (
+                                <FormItem><FormLabel className="text-sm font-bold text-slate-500">Registration Document Number</FormLabel><FormControl><Input {...field} placeholder="e.g. Company Registration Number" /></FormControl></FormItem>
                               )} />
                             </div>
+                            <FormField control={form.control} name="login.password" render={({ field }) => (
+                              <FormItem>
+                                <FormLabel className="text-sm font-bold text-slate-500">Password</FormLabel>
+                                <FormControl>
+                                  <div className="relative">
+                                    <Input 
+                                      type={showPassword ? "text" : "password"} 
+                                      {...field} 
+                                      className="pr-10"
+                                    />
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                                      onClick={() => setShowPassword(!showPassword)}
+                                    >
+                                      {showPassword ? (
+                                        <EyeOff className="h-4 w-4 text-slate-400" />
+                                      ) : (
+                                        <Eye className="h-4 w-4 text-slate-400" />
+                                      )}
+                                    </Button>
+                                  </div>
+                                </FormControl>
+                              </FormItem>
+                            )} />
                           </CardContent>
                         </Card>
                       </div>
