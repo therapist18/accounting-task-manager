@@ -22,6 +22,7 @@ import TemplateGenerationDialog from "./TemplateGenerationDialog"
 import { StageUploadDialog } from "../tasks/components/StageUploadDialog"
 import { UploadModal } from "@/app/generic-components/UploadModal"
 import { toast } from "sonner"
+import { Badge } from "@/components/ui/badge"
 
 const generateDocxBlobFromHtml = async (html: string) => {
   if (!htmlDocx) {
@@ -31,6 +32,7 @@ const generateDocxBlobFromHtml = async (html: string) => {
 };
 
 const CLASS_D_ID = '1750687058159';
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function deepEqual(obj1, obj2) {
   if (obj1 === obj2) return true;
@@ -178,7 +180,10 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       }
 
       // 2. HANDLE COMPANY FROM PARTICIPANTS (if not already added as applicant)
-      const companyPart = participants.find(p => p.type === 'company');
+      const companyPart = participants.find(p => 
+        p.type === 'company' || 
+        (Array.isArray(p.role) ? p.role.includes('company') : p.role === 'company')
+      );
       if (companyPart && (!applicant || applicant.id !== companyPart.id)) {
         groupCols.push({
           type: 'company',
@@ -194,7 +199,9 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       // 3. HANDLE PRINCIPAL INDIVIDUAL FROM PARTICIPANTS (if not already added as applicant)
       const principalIndividual = participants.find(p =>
         p.type === 'individual' &&
-        (p.role === 'principal' || p.role === 'applicant' || (!p.role && !p.relationship))
+        (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal') ||
+        (Array.isArray(p.role) ? p.role.includes('applicant') : p.role === 'applicant') ||
+        (!p.role && !p.relationship)
       );
       if (principalIndividual && (!applicant || applicant.id !== principalIndividual.id)) {
         groupCols.push({
@@ -211,7 +218,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       // 4. FIND DIRECTORS / SHAREHOLDERS
       const directors = participants.filter(p =>
         p.type === 'individual' &&
-        (p.role === 'director' || p.role === 'shareholder' || (Array.isArray(p.role) && p.role.includes('director')))
+        (Array.isArray(p.role) ? p.role.includes('director') || p.role.includes('shareholder') : p.role === 'director' || p.role === 'shareholder')
       );
       directors.forEach(d => {
         // Avoid duplicates
@@ -231,7 +238,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       // 5. FIND DEPENDANTS (only show if expanded)
       const dependants = participants.filter(p =>
         p.type === 'individual' &&
-        (p.role === 'dependant' || p.relationship)
+        (Array.isArray(p.role) ? p.role.includes('dependant') : p.role === 'dependant')
       );
       if (expandedDependants.has(groupIndex)) {
         dependants.forEach(dep => {
@@ -252,7 +259,10 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       }
 
       // 6. FIND UNDERSTUDY (Looking in participants_details by role first)
-      const understudyParticipant = participants.find(p => p.type === 'individual' && p.role === 'understudy');
+      const understudyParticipant = participants.find(p => 
+        p.type === 'individual' && 
+        (Array.isArray(p.role) ? p.role.includes('understudy') : p.role === 'understudy')
+      );
       if (understudyParticipant) {
         // Avoid duplicates
         if (!groupCols.find(col => col.id === understudyParticipant.id && col.groupIndex === groupIndex)) {
@@ -342,7 +352,12 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       Object.values(organizedRequirements.documents).forEach((reqList: any[]) => {
         reqList.forEach(req => {
           if (req.kyc_document_ids) {
-            req.kyc_document_ids.forEach(id => allDocIds.add(id));
+            req.kyc_document_ids.forEach(id => {
+                // Ensure ID looks like a UUID
+                if (UUID_REGEX.test(id)) {
+                    allDocIds.add(id)
+                }
+            });
           }
         });
       });
@@ -419,13 +434,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   const handleOpenTemplateGenerator = async (docItem, task, colType, colId) => {
     setIsPreparingTemplate(true);
     try {
-      // 1. Find the specific participant for THIS column
+      // 1. Setup Context Variables
       const participant = task.participants_details?.find(p => p.id === colId);
 
-      // 2. Resolve Company ID and Name robustly
       let companyId = task.company_id;
       let companyName = task.company_name;
-
       if (!companyId && task.participants_details) {
         const companyPart = task.participants_details.find(p => p.type === 'company');
         companyId = companyPart?.id;
@@ -436,16 +449,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         companyName = task.applicant_details.name;
       }
 
-      // 3. Map all categories for context
-      const directorsIds = task.participants_details
-        ?.filter(p => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('director') : p.role === 'director'))
-        ?.map(d => d.id) || [];
-
-      const dependantsIds = task.participants_details
-        ?.filter(p => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('dependant') || p.role.includes('dependent') : p.role === 'dependant' || p.role === 'dependent'))
-        ?.map(d => d.id) || [];
-
-      // Get relationship data for the current company
       const companyRelationships = getRelationshipData()?.find(rel =>
         rel.company?.id === companyId || rel.company?.name === companyName
       );
@@ -457,28 +460,44 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         principal: colType === 'principal' ? colId : (companyRelationships?.principal?.id || null),
         dependants: companyRelationships?.dependants?.map(d => d.id) || [],
         understudy: companyRelationships?.understudy?.id || null
-      }
-      console.log("✅ Step 1: Entity ID Map created", entityIdMap);
+      };
 
+      // 2. Fetch Templates
       const templates = await fetchDocumentTemplates(docItem.document.id, task);
-      console.log(`✅ Step 2: Found ${templates.length} available templates.`);
       if (!templates || templates.length === 0) {
-        console.log('❌ No templates found, showing toast...');
-        toast.error(`No templates are available for: ${docItem.document.display_name}`, {
-          duration: 5000,
-          style: {
-            background: 'hsl(var(--destructive))',
-            color: 'hsl(var(--destructive-foreground))',
-          },
-        });
+        toast.error(`No templates are available for: ${docItem.document.display_name}`);
         setIsPreparingTemplate(false);
         return;
       }
 
+      // 3. Build Query Map
       const queriesToRun = new Map();
+
+      // Helper to add query
+      const addQuery = (tableName, docId, linkVar, entId) => {
+        if (!queriesToRun.has(tableName)) {
+          queriesToRun.set(tableName, { docIds: new Set(), links: new Map() });
+        }
+        const tq = queriesToRun.get(tableName);
+        if (docId) tq.docIds.add(docId);
+        if (linkVar && entId) {
+          if (!tq.links.has(linkVar)) tq.links.set(linkVar, new Set());
+
+          if (Array.isArray(entId)) {
+            entId.forEach(id => {
+              const val = (id && typeof id === 'object') ? (id.id || id.director_id || id.individual_id || id.company_id) : id;
+              if (val) tq.links.get(linkVar).add(val);
+            });
+          } else {
+            const val = (entId && typeof entId === 'object') ? (entId.id || entId.director_id || entId.individual_id || entId.company_id) : entId;
+            if (val) tq.links.get(linkVar).add(val);
+          }
+        }
+      };
 
       templates.forEach(template => {
         (template.placeholders || []).forEach(placeholder => {
+          // Standard Master Fields
           const pids = placeholder.master_field_ids || (placeholder.master_field_id ? [placeholder.master_field_id] : []);
           pids.forEach(id => {
             const masterField = masterFields.get(parseInt(id, 10));
@@ -488,234 +507,73 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                 masterField.sources.forEach(source => {
                   const { table, linking_variable, document_id } = source;
                   if (!table) return;
-
-                  if (!queriesToRun.has(table)) {
-                    queriesToRun.set(table, { docIds: new Set(), links: new Map() });
-                  }
-                  const tableQueries = queriesToRun.get(table);
-
-                  if (document_id) {
-                    parseAndCleanUUIDs(document_id).forEach(uuid => tableQueries.docIds.add(uuid));
-                  }
-
-                  const linkVar = linking_variable || 'id';
-                  if (!tableQueries.links.has(linkVar)) {
-                    tableQueries.links.set(linkVar, new Set());
-                  }
-                  if (Array.isArray(entityId)) {
-                    entityId.forEach(id => {
-                      if (id) {
-                        const idValue = id && typeof id === 'object' ? (id.id || id.director_id || id.individual_id || id.company_id) : id;
-                        if (idValue) tableQueries.links.get(linkVar).add(idValue);
-                      }
-                    });
+                  const validDocIds = document_id ? parseAndCleanUUIDs(document_id) : [];
+                  if (validDocIds.length > 0) {
+                    validDocIds.forEach(vid => addQuery(table, vid, linking_variable || 'id', entityId));
                   } else {
-                    if (entityId) {
-                      const idValue = entityId && typeof entityId === 'object' ?
-                        (entityId.id || entityId.director_id || entityId.individual_id || entityId.company_id) :
-                        entityId;
-                      if (idValue) tableQueries.links.get(linkVar).add(idValue);
-                    }
+                    addQuery(table, null, linking_variable || 'id', entityId);
                   }
                 });
               }
             }
           });
 
+          // Checklist Placeholders
           if (placeholder.type === 'document_checklist' && placeholder.linked_document_ids) {
-            const dataSource = placeholder.checklist_data_source || {
-              table: 'acc_portal_kyc_uploads',
-              linking_variable: 'company_id',
-              document_id_field: 'kyc_document_id'
-            };
-
-            const tableName = dataSource.table;
-
-            console.log('[Query Builder] Document checklist detected:', {
-              placeholder: placeholder.name,
-              dataSource,
-              linkedDocs: placeholder.linked_document_ids
-            });
-
-            if (!queriesToRun.has(tableName)) {
-              queriesToRun.set(tableName, { docIds: new Set(), links: new Map() });
-            }
-
-            const tableQueries = queriesToRun.get(tableName);
-
-            placeholder.linked_document_ids.forEach(docId => {
-              tableQueries.docIds.add(docId);
-            });
-
-            const entityType = Array.isArray(placeholder.entity_type)
-              ? placeholder.entity_type[0]
-              : placeholder.entity_type || 'company';
-
-            const entityId = entityIdMap[entityType] || entityIdMap.company;
-
+            const dataSource = placeholder.checklist_data_source || { table: 'acc_portal_kyc_uploads', linking_variable: 'company_id' };
+            const entityId = entityIdMap[Array.isArray(placeholder.entity_type) ? placeholder.entity_type[0] : (placeholder.entity_type || 'company')];
             if (entityId) {
-              const linkVar = dataSource.linking_variable;
-
-              if (!tableQueries.links.has(linkVar)) {
-                tableQueries.links.set(linkVar, new Set());
-              }
-
-              if (Array.isArray(entityId)) {
-                entityId.forEach(id => {
-                  const idValue = id && typeof id === 'object'
-                    ? (id.id || id.director_id || id.individual_id || id.company_id)
-                    : id;
-                  if (idValue) tableQueries.links.get(linkVar).add(idValue);
-                });
-              } else {
-                const idValue = entityId && typeof entityId === 'object'
-                  ? (entityId.id || entityId.director_id || entityId.individual_id || entityId.company_id)
-                  : entityId;
-                if (idValue) tableQueries.links.get(linkVar).add(idValue);
-              }
-
-              console.log('[Query Builder] Added queries:', {
-                table: tableName,
-                linkVar,
-                docIds: [...tableQueries.docIds],
-                entityIds: [...tableQueries.links.get(linkVar)]
-              });
+              placeholder.linked_document_ids.forEach(did => addQuery(dataSource.table, did, dataSource.linking_variable, entityId));
             }
           }
         });
       });
 
-      console.log("✅ Step 3: Analyzed templates. Required data sources:",
-        Object.fromEntries(Array.from(queriesToRun.entries()).map(([table, { docIds, links }]) =>
-          [table, { docIds: [...docIds], links: Object.fromEntries(Array.from(links.entries()).map(([lv, ids]) => [lv, [...ids]])) }]
-        ))
-      );
-
-      console.log("⏳ Step 4: Fetching data from Supabase...");
+      // 4. PARALLEL FETCH EXECUTION
+      console.log("⏳ Fetching template data sources in parallel...");
       const sourceDataCache: Record<string, Record<number, any>> = { 'tm_tasks': { [task.id]: task } };
 
-      for (const [table, { docIds, links }] of queriesToRun.entries()) {
+      const fetchPromises = Array.from(queriesToRun.entries()).map(async ([table, { docIds, links }]) => {
         const records = new Map();
-        console.log(`  - Querying table '${table}'...`);
+        const docIdField = (table === 'acc_portal_kyc_uploads') ? 'kyc_document_id' : 'document_id';
 
-        if (table === 'acc_portal_kyc_uploads' || table === 'acc_portal_directors_documents') {
-          const validDocIds = [...docIds].filter(id =>
-            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
-          );
-
+        // 4a. Fetch by Document IDs (if special tables)
+        if ((table === 'acc_portal_kyc_uploads' || table === 'acc_portal_directors_documents') && docIds.size > 0) {
+          const validDocIds = [...docIds].filter(id => UUID_REGEX.test(id));
           if (validDocIds.length > 0) {
-            console.log(`[Query Execution] Fetching from ${table}:`, validDocIds);
-
-            const docIdField = table === 'acc_portal_kyc_uploads' ? 'kyc_document_id' : 'document_id';
-
-            console.log(`[Query Execution] Using document ID field: ${docIdField}`);
-
-            let query = supabase
-              .from(table)
-              .select('*')
-              .in(docIdField, validDocIds);
-
-            const { data, error } = await query;
-
-            if (error) {
-              console.error(`[Query Execution] Error fetching from ${table}:`, error);
-            } else {
-              console.log(`[Query Execution] Found ${data?.length || 0} records in ${table}`);
-              (data || []).forEach(rec => records.set(rec.id, rec));
-            }
+            const { data } = await supabase.from(table).select('*').in(docIdField, validDocIds);
+            (data || []).forEach(rec => records.set(rec.id, rec));
           }
-
-          for (const [linkVar, entityIdsSet] of links.entries()) {
-            const entityIds = Array.from(entityIdsSet).map(id => {
-              if (id && typeof id === 'object') {
-                return id.id || id.director_id || id.individual_id || id.company_id;
-              }
-              return id;
-            }).filter(id => id != null && id !== '');
-
-            if (entityIds.length > 0) {
-              console.log(`[Query Execution] Fetching from ${table} by ${linkVar}:`, entityIds);
-
-              const { data, error } = await supabase
-                .from(table)
-                .select('*')
-                .in(linkVar, entityIds);
-
-              if (error) {
-                console.error(`[Query Execution] Error fetching by ${linkVar}:`, error);
-              } else {
-                console.log(`[Query Execution] Found ${data?.length || 0} additional records`);
-                (data || []).forEach(rec => records.set(rec.id, rec));
-              }
-            }
-          }
-        }
-        else {
-          if (docIds.size > 0) {
-            console.log(`    - by document_id:`, [...docIds]);
-            const { data, error } = await supabase
-              .from(table)
-              .select('*')
-              .in('document_id', [...docIds]);
-
-            if (error) {
-              console.error(`    - ❌ ERROR fetching by document_id:`, error);
-              toast({
-                title: `Failed to fetch from ${table}`,
-                description: error.message,
-                variant: "destructive"
-              });
-            } else {
-              (data || []).forEach(rec => records.set(rec.id, rec));
-            }
-          }
-
-          for (const [linkVar, entityIdsSet] of links.entries()) {
-            const entityIds = Array.from(entityIdsSet).map(id => {
-              if (id && typeof id === 'object') {
-                return id.id || id.director_id || id.individual_id || id.company_id;
-              }
-              return id;
-            }).filter(id => id != null && id !== '');
-
-            if (entityIds.length > 0) {
-              console.log(`    - by linking_variable '${linkVar}':`, entityIds);
-              const { data, error } = await supabase
-                .from(table)
-                .select('*')
-                .in(linkVar, entityIds);
-
-              if (error) {
-                console.error(`    - ❌ ERROR fetching by ${linkVar}:`, error);
-                toast({
-                  title: `Failed to fetch from ${table}`,
-                  description: error.message,
-                  variant: "destructive"
-                });
-              } else {
-                (data || []).forEach(rec => records.set(rec.id, rec));
-              }
-            }
-          }
+        } else if (docIds.size > 0) {
+          // Generic table document_id fetch
+          const { data } = await supabase.from(table).select('*').in('document_id', [...docIds]);
+          (data || []).forEach(rec => records.set(rec.id, rec));
         }
 
-        sourceDataCache[table] = Array.from(records.values()).reduce((acc, rec) => {
-          acc[rec.id] = rec;
-          return acc;
-        }, {});
-        console.log(`  - ✅ Success! Fetched and cached ${records.size} unique records from '${table}'.`);
-      }
+        // 4b. Fetch by Linking Variables (Parallelize internal link queries too)
+        const linkPromises = Array.from(links.entries()).map(async ([linkVar, entityIdsSet]) => {
+          const entityIds = Array.from(entityIdsSet).filter(Boolean);
+          if (entityIds.length > 0) {
+            const { data } = await supabase.from(table).select('*').in(linkVar, entityIds);
+            return data || [];
+          }
+          return [];
+        });
 
-      console.log("✅ Step 4: Data fetching complete. Final source data cache:", sourceDataCache);
+        const linkResults = await Promise.all(linkPromises);
+        linkResults.flat().forEach(rec => records.set(rec.id, rec));
 
-      console.log("🔍 Debug: task.participants_details:", task.participants_details);
-      console.log("🔍 Debug: Looking for director ID:", entityIdMap.director);
+        return { table, data: Object.fromEntries(records) };
+      });
 
+      const results = await Promise.all(fetchPromises);
+      results.forEach(({ table, data }) => {
+        sourceDataCache[table] = data;
+      });
+
+      // 5. Prepare Dialog Data (Rest of logic remains the same)
       const relationshipData = {
-        company: task.participants_details?.find(p => p.type === 'company') ||
-          (task.applicant_details?.type === 'company' ? task.applicant_details : null) ||
-          { id: task.company_id, name: task.company_name, type: 'company' },
-
+        company: task.participants_details?.find(p => p.type === 'company') || (task.applicant_details?.type === 'company' ? task.applicant_details : null) || { id: task.company_id, name: task.company_name, type: 'company' },
         directors: (() => {
           if (colType === 'director') {
             const directorId = colId;
@@ -726,39 +584,12 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             }
             return specificDirector ? [specificDirector] : [];
           }
-          return task.participants_details?.filter(p =>
-            p.type === 'individual' &&
-            (Array.isArray(p.role) ? p.role.includes('director') : p.role === 'director')
-          ) || [];
+          return task.participants_details?.filter(p => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('director') : p.role === 'director')) || [];
         })(),
-
-        principal: task.participants_details?.find(p =>
-          p.type === 'individual' &&
-          (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')
-        ) || (task.applicant_details?.type === 'individual' ? task.applicant_details : null),
-
-        dependants: task.participants_details?.filter(p =>
-          p.type === 'individual' &&
-          (Array.isArray(p.role) ? p.role.includes('dependant') || p.role.includes('dependent') : p.role === 'dependant' || p.role === 'dependent')
-        ) || [],
-
-        understudy: task.participants_details?.find(p =>
-          p.type === 'individual' && p.id === task.understudy_id
-        ),
+        principal: task.participants_details?.find(p => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')) || (task.applicant_details?.type === 'individual' ? task.applicant_details : null),
+        dependants: task.participants_details?.filter(p => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('dependant') || p.role.includes('dependent') : p.role === 'dependant' || p.role === 'dependent')) || [],
+        understudy: task.participants_details?.find(p => p.type === 'individual' && p.id === task.understudy_id),
       };
-
-      console.log("🔗 Relationship Data Extracted:", relationshipData);
-      console.log("🔗 Directors found:", relationshipData.directors.length, relationshipData.directors);
-
-      console.log("🔍 Debug: Full task object:", task);
-      console.log("🔍 Debug: task.applicant_details:", task.applicant_details);
-      console.log("🔍 Debug: Looking for company in participants_details:", task.participants_details?.find(p => p.type === 'company'));
-
-      const applicantDetails = task.applicant_details ||
-        task.participants_details?.find(p => p.type === 'company') ||
-        {};
-
-      console.log("🔍 Debug: Final applicantDetails:", applicantDetails);
 
       const letterInfo = {
         document: docItem.document,
@@ -768,20 +599,18 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         sourceDataCache: sourceDataCache,
         availableTemplates: templates,
         template: templates.length === 1 ? templates[0] : null,
-        personData: applicantDetails?.type === 'individual' ? applicantDetails : {},
-        companyData: applicantDetails?.type === 'company' ? applicantDetails : {},
-        extractedData: applicantDetails || {},
+        personData: task.applicant_details?.type === 'individual' ? task.applicant_details : {},
+        companyData: task.applicant_details?.type === 'company' ? task.applicant_details : {},
+        extractedData: task.applicant_details || {},
         relationshipData: relationshipData,
       };
-      console.log("✅ Step 5: Final data package prepared for dialog.");
 
       setSelectedLetterInfo(letterInfo);
       setShowTemplateGenerator(true);
-      console.log("🏁 Process complete. Opening template generation dialog.");
 
     } catch (error) {
-      console.error("❌FATAL ERROR during template data preparation:", error);
-      toast({ title: "Error preparing template data", description: error.message, variant: "destructive" });
+      console.error("❌FATAL ERROR:", error);
+      toast({ title: "Error preparing template", description: error.message, variant: "destructive" });
     } finally {
       setIsPreparingTemplate(false);
     }
@@ -831,21 +660,28 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
           role: applicant.role
         },
         directors: participants
-          .filter(p => p.type === 'individual' && (p.role === 'director' || p.role === 'shareholder'))
+          .filter(p => p.type === 'individual' && (
+            Array.isArray(p.role) ? (p.role.includes('director') || p.role.includes('shareholder')) : (p.role === 'director' || p.role === 'shareholder')
+          ))
           .map(d => ({
             id: d.id,
             name: d.name,
             role: d.role
           })),
         dependants: participants
-          .filter(p => p.type === 'individual' && (p.role === 'dependant' || p.relationship))
+          .filter(p => p.type === 'individual' && (
+            Array.isArray(p.role) ? p.role.includes('dependant') : p.role === 'dependant'
+          ))
           .map(dep => ({
             id: dep.id,
             name: dep.name,
             relationship: dep.relationship || 'dependant'
           })),
         understudy: (() => {
-          const understudyParticipant = participants.find(p => p.type === 'individual' && p.role === 'understudy');
+          const understudyParticipant = participants.find(p => 
+            p.type === 'individual' && 
+            (Array.isArray(p.role) ? p.role.includes('understudy') : p.role === 'understudy')
+          );
           if (understudyParticipant) {
             return {
               id: understudyParticipant.id,
@@ -1140,7 +976,21 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
               </TableCell>
               <TableCell className={`sticky left-16 border-r z-10 ${reqIndex % 2 === 0 ? 'bg-white group-hover:bg-gray-50' : 'bg-gray-50/30 group-hover:bg-gray-100'}`}>
                 <div className="flex flex-col">
-                  <div className="flex items-center gap-2">
+                  <div className="flex justify-between items-center gap-2">
+                    <span className="truncate max-w-[250px] font-medium text-slate-700">
+                      {reqItem.name}
+                    </span>
+                  <div className="flex">
+                      {isComposite && (
+                      <Badge variant="solid" color="blue" className="ml-2">
+                        {reqItem.documentCount}
+                      </Badge>
+                    )}
+                    {!isComposite && fieldsToRender.length > 0 && (
+                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => toggleDocumentExpansion(requirementId)}>
+                        {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                      </Button>
+                    )}
                     {isComposite && (
                       <Button
                         variant="ghost"
@@ -1151,19 +1001,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                         {isCompositeExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                       </Button>
                     )}
-                    <span className="truncate max-w-[250px] font-medium text-slate-700">
-                      {reqItem.name}
-                    </span>
-                    {isComposite && (
-                      <span className="text-xs text-blue-600 ml-2">
-                        ({reqItem.documentCount} types)
-                      </span>
-                    )}
-                    {!isComposite && fieldsToRender.length > 0 && (
-                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => toggleDocumentExpansion(requirementId)}>
-                        {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                      </Button>
-                    )}
+                  </div>
                   </div>
 
                   {/* Template and Automation Indicators */}
@@ -1472,12 +1310,12 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                       <div key={docId} className="group relative border rounded-2xl bg-white shadow-xl overflow-hidden transition-all hover:shadow-2xl">
                         <div className="p-4 bg-slate-50 border-b flex justify-between items-center sticky top-0 z-20">
                           <div className="flex items-center justify-between">
-                           <div className="flex items-center"> <div className="bg-white p-2 rounded-lg border shadow-sm">
+                            <div className="flex items-center"> <div className="bg-white p-2 rounded-lg border shadow-sm">
                               <FileText className="h-5 w-5 text-blue-600" />
                             </div>
-                            <div className="flex flex-col">
-                              <p className="text-sm font-bold text-slate-800 line-clamp-1">{previewingDocuments?.document_display_name || 'Document'}</p>
-                            </div></div>
+                              <div className="flex flex-col">
+                                <p className="text-sm font-bold text-slate-800 line-clamp-1">{previewingDocuments?.document_display_name || 'Document'}</p>
+                              </div></div>
                             <div className="text-xs text-slate-600">
                               {`${index + 1}/${previewingDocuments?.documents?.length || 0}`}
                             </div>
@@ -1565,7 +1403,9 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                           )}
                           {col.type === 'principal' && (() => {
                             const dependants = filteredGroupedTasks[col.groupIndex]?.tasks?.[0]?.participants_details?.filter(p =>
-                              p.type === 'individual' && (p.role === 'dependant' || p.relationship)
+                              p.type === 'individual' && (
+                                Array.isArray(p.role) ? p.role.includes('dependant') : p.role === 'dependant'
+                              )
                             ) || [];
                             if (dependants.length > 0) {
                               const isExpanded = expandedDependants.has(col.groupIndex);
@@ -1632,7 +1472,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                       </div>
                     </TableCell>
                   </TableRow>
-                  {expandedSections.templates && renderDocumentSection(organizedRequirements.documents.templates, 'templates')}
+                  {expandedSections.templates && renderDocumentSection([...organizedRequirements.documents.templates, ...organizedRequirements.documents.automations], 'templates')}
                 </>
               )}
             </TableBody>
@@ -1640,25 +1480,9 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         </div>
       </div>
 
-      {
-        showTemplateGenerator && selectedLetterInfo && (
-          <TemplateGenerationDialog
-            isOpen={showTemplateGenerator}
-            onClose={() => setShowTemplateGenerator(false)}
-            template={selectedLetterInfo.template}
-            availableTemplates={selectedLetterInfo.availableTemplates}
-            documentName={selectedLetterInfo.document.display_name}
-            onSave={handleSaveGeneratedLetter}
-            masterFields={selectedLetterInfo.masterFields}
-            entityIdMap={selectedLetterInfo.entityIdMap}
-            sourceDataCache={selectedLetterInfo.sourceDataCache}
-            extractedData={selectedLetterInfo.extractedData}
-            personData={selectedLetterInfo.personData}
-            companyData={selectedLetterInfo.companyData}
-            relationshipData={selectedLetterInfo.relationshipData}
-          />
-        )
-      }
+      {showTemplateGenerator && selectedLetterInfo && (
+        <TemplateGenerationDialog isOpen={showTemplateGenerator} onClose={() => setShowTemplateGenerator(false)} template={selectedLetterInfo.template} availableTemplates={selectedLetterInfo.availableTemplates} documentName={selectedLetterInfo.document.display_name} onSave={handleSaveGeneratedLetter} masterFields={selectedLetterInfo.masterFields} entityIdMap={selectedLetterInfo.entityIdMap} sourceDataCache={selectedLetterInfo.sourceDataCache} extractedData={selectedLetterInfo.extractedData} personData={selectedLetterInfo.personData} companyData={selectedLetterInfo.companyData} relationshipData={selectedLetterInfo.relationshipData} />
+      )}
     </div >
   );
 }

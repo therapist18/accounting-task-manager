@@ -324,7 +324,7 @@ export default function TasksPage() {
                 <p className="text-muted-foreground">Choose a department to view and manage tasks.</p>
               </CardContent>
             </Card>
-          ) : (selectedClass || selectedSubclass) ? (
+          ) : (enquiryTasks.length > 0 || wipTasks.length > 0 || completedTasks.length > 0) ? (
             <Tabs defaultValue="enquiries" className="space-y-4">
               <TabsList>
                 <TabsTrigger value="enquiries">
@@ -355,11 +355,11 @@ export default function TasksPage() {
             <Card>
               <CardHeader>
                 <CardTitle>{getDisplayTitle()}</CardTitle>
-                <CardDescription>Select a class or subclass from the sidebar to view tasks.</CardDescription>
+                <CardDescription>No tasks found for the current selection. Try selecting a class or subclass from the sidebar.</CardDescription>
               </CardHeader>
               <CardContent className="p-4 text-center py-8">
                 <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <p className="text-muted-foreground">No class selected.</p>
+                <p className="text-muted-foreground">No tasks available for the current selection.</p>
               </CardContent>
             </Card>
           )}

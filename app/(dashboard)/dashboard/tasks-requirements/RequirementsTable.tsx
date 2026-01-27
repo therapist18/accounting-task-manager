@@ -49,6 +49,11 @@ const LetterTemplateDialog = ({ open, onOpenChange, letterData, individualNames 
   );
 };
 
+interface DocumentStatus {
+  type: 'upload' | 'view' | 'na' | 'missing'
+  documents: any[]
+  count: number
+}
 interface RequirementsTableProps {
   tasks: any[]
   loading: boolean
@@ -58,13 +63,8 @@ interface RequirementsTableProps {
 
 type ApplicantType = 'principal' | 'dependant' | 'understudy' | 'company' | 'reference';
 
-interface DocumentStatus {
-  type: 'upload' | 'view' | 'na' | 'missing'
-  documents: any[]
-  count: number
-}
-
 const REFERENCE_SUBDEPARTMENT_IDS = [10, 5];
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function RequirementsTable({
   tasks,
@@ -320,107 +320,126 @@ export function RequirementsTable({
     }
   }, []);
 
-  // OPTIMIZED: Load all data in parallel with minimal queries
-  useEffect(() => {
+useEffect(() => {
+    let isMounted = true;
     const loadData = async () => {
       if (!filteredTasks.length) return;
-      
-      console.log('🚀 [loadData] Starting optimized data loading pipeline...');
-      const pipelineStartTime = performance.now();
-      
-      // Step 1: Fetch class requirements (unavoidable serial step)
-      console.log('📋 Step 1: Fetching class requirements...');
-      const reqMap = {};
-      const classReqPromises = filteredTasks.map(async task => {
-        const { data } = await supabase
-          .from('tm_class_requirements')
-          .select('*')
-          .eq('job_level->>class_id', task.class_id)
-          .maybeSingle();
-        if (data) reqMap[task.id] = data;
-      });
-      
-      await Promise.all(classReqPromises);
-      setTaskClassRequirements(reqMap);
-
-      // Step 2: Extract all required KYC IDs from requirements
-      const requiredKycIds = [];
-      Object.values(reqMap).forEach(cr => cr.requirements?.forEach(r => {
-        if(r.kyc_document_id) requiredKycIds.push(r.kyc_document_id);
-        if(r.kyc_document_ids) requiredKycIds.push(...r.kyc_document_ids);
-      }));
-
-      const uniqueKycIds = [...new Set(requiredKycIds)];
-      console.log(`📝 Identified ${uniqueKycIds.length} unique KYC document types needed`);
-
-      // Step 3: PARALLEL fetch all data with KYC filters
-      console.log('⚡ Step 2: Parallel fetching documents and metadata...');
       setDocumentsLoading(true);
-      
-      await Promise.all([
-        fetchAllIndividualData(filteredTasks, uniqueKycIds),
-        fetchCompanyData(filteredTasks),
-        fetchAllCompanyDocuments(filteredTasks, uniqueKycIds)
-      ]);
-      
-      setDocumentsLoading(false);
-      
-      const pipelineEndTime = performance.now();
-      console.log(`🎉 [loadData] Complete pipeline finished in ${Math.round(pipelineEndTime - pipelineStartTime)}ms`);
-    };
-    
-    loadData();
-  }, [filteredTasks, fetchAllIndividualData, fetchCompanyData, fetchAllCompanyDocuments]);
 
-  const hasReferencesColumn = useMemo(() => filteredTasks.some(task => REFERENCE_SUBDEPARTMENT_IDS.includes(task.subdepartment?.id) || REFERENCE_SUBDEPARTMENT_IDS.includes(task.subdepartment?.parent_id)), [filteredTasks]);
-
-  useEffect(() => {
-    let isMounted = true;
-    const fetchMetadata = async () => {
-      if (!isMounted || !filteredTasks.length) return;
       try {
-        const { data: docsRes, error: docsErr } = await supabase.from('acc_portal_kyc').select('*').order('display_name', { ascending: true, nullsLast: true });
+        // 1. Get unique IDs strictly excluding null/undefined/empty
+        const uniqueClassIds = [...new Set(filteredTasks.map(t => t.class_id).filter(id => id != null && id !== ''))];
+        const uniqueSubdepartmentIds = [...new Set(filteredTasks.map(t => t.subdepartment_id).filter(id => id != null && id !== ''))];
+        const uniqueDepartmentIds = [...new Set(filteredTasks.map(t => t.department_id).filter(id => id != null && id !== ''))];
+
+        // 2. Build Query Conditionally
+        let reqQuery = supabase.from('tm_class_requirements').select('*');
+        const conditions = [];
+
+        if (uniqueClassIds.length > 0) conditions.push(`job_level->>class_id.in.(${uniqueClassIds.join(',')})`);
+        if (uniqueSubdepartmentIds.length > 0) conditions.push(`job_level->>subdepartment_id.in.(${uniqueSubdepartmentIds.join(',')})`);
+        if (uniqueDepartmentIds.length > 0) conditions.push(`job_level->>department_id.in.(${uniqueDepartmentIds.join(',')})`);
+
+        // If no valid IDs exist, we shouldn't query requirements that won't match anything relevant
+        const reqPromise = conditions.length > 0 
+           ? reqQuery.or(conditions.join(',')) 
+           : Promise.resolve({ data: [], error: null });
+
+        const [metadataRes, classRequirementsRes] = await Promise.all([
+          supabase.from('acc_portal_kyc').select('*').order('display_name', { ascending: true, nullsLast: true }),
+          reqPromise
+        ]);
+
         if (!isMounted) return;
-        if (docsErr) throw docsErr;
-        setDocuments((docsRes || []).map(doc => ({ ...doc, display_name: doc.display_name || doc.name })));
+        if (metadataRes.error) throw metadataRes.error;
+        if (classRequirementsRes.error) throw classRequirementsRes.error;
 
-        const taskDataPromises = filteredTasks.map(async (task) => {
-          const jobLevel = task.job_level || {};
+        setDocuments((metadataRes.data || []).map(doc => ({ ...doc, display_name: doc.display_name || doc.name })));
 
-          let query = supabase
-            .from('tm_class_requirements')
-            .select('*');
-
-          if (jobLevel.department_id) {
-            query = query.eq('job_level->>department_id', jobLevel.department_id.toString());
-          }
-          if (jobLevel.subdepartment_id) {
-            query = query.eq('job_level->>subdepartment_id', jobLevel.subdepartment_id.toString());
-          }
-
-          query = query.eq('job_level->>class_id', jobLevel.class_id ? jobLevel.class_id.toString() : 'null');
-
-          if (jobLevel.subclass_id) {
-            query = query.eq('job_level->>subclass_id', jobLevel.subclass_id.toString());
-          } else {
-            query = query.is('job_level->>subclass_id', null);
-          }
-
-          const { data } = await query.maybeSingle();
-
-          return { taskId: task.id, classRequirements: data };
+        // 3. Map Requirements Logic (Hierarchy: Class > Subdept > Dept)
+        const classReqMap: Record<string, any> = {};
+        const reqs = classRequirementsRes.data || [];
+        
+        filteredTasks.forEach(task => {
+           let match = null;
+           // Priority 1: Exact Class Match
+           if (task.class_id) match = reqs.find(r => r.job_level?.class_id == task.class_id);
+           // Priority 2: Subdepartment Match (if no class ID in task)
+           if (!match && task.subdepartment_id) match = reqs.find(r => r.job_level?.subdepartment_id == task.subdepartment_id && !r.job_level?.class_id);
+           // Priority 3: Department Match
+           if (!match && task.department_id) match = reqs.find(r => r.job_level?.department_id == task.department_id && !r.job_level?.subdepartment_id && !r.job_level?.class_id);
+           
+           if(match) classReqMap[task.id] = match;
         });
-        const results = await Promise.all(taskDataPromises);
-        const requirementsMap = results.reduce((acc, res) => {
-          if (res.classRequirements) acc[res.taskId] = res.classRequirements;
-          return acc;
-        }, {});
-        setTaskClassRequirements(requirementsMap);
-      } catch (err) { console.error('Error fetching metadata:', err); }
+        setTaskClassRequirements(classReqMap);
+
+        // 4. Fetch Documents (Parallel)
+        const allIndividualIds = new Set<number>();
+        const allCompanyIds = new Set<number>();
+        const requiredKycIds = new Set<string>();
+
+        Object.values(classReqMap).forEach((cr: any) => {
+             const list = cr.requirements || cr.documents_and_fields || [];
+             list.forEach((r: any) => {
+                if(r.kyc_document_id && UUID_REGEX.test(r.kyc_document_id)) requiredKycIds.add(r.kyc_document_id);
+                if(r.kyc_document_ids) {
+                    r.kyc_document_ids.forEach((id: string) => {
+                        if(UUID_REGEX.test(id)) requiredKycIds.add(id);
+                    });
+                }
+                // Handle legacy documents_and_fields ID if necessary - BUT ensure it is UUID
+                if(cr.documents_and_fields && r.id && UUID_REGEX.test(r.id)) requiredKycIds.add(r.id);
+             });
+        });
+        
+        filteredTasks.forEach(task => {
+            if(task.applicant_details?.type === 'individual' && task.applicant_details?.id) allIndividualIds.add(task.applicant_details.id);
+            task.participants_details?.forEach(p => {
+                if(p.type === 'individual' && p.id) allIndividualIds.add(p.id);
+                if(p.type === 'company' && p.id) allCompanyIds.add(p.id);
+            });
+            if(task.company_id) allCompanyIds.add(task.company_id);
+            if(task.applicant_details?.type === 'company' && task.applicant_details?.id) allCompanyIds.add(task.applicant_details.id);
+        });
+
+        const indIds = Array.from(allIndividualIds);
+        const coIds = Array.from(allCompanyIds);
+        const kycIds = Array.from(requiredKycIds);
+
+        const promises = [];
+        if (indIds.length && kycIds.length) promises.push(supabase.from('acc_portal_directors_documents').select('*, acc_portal_kyc (id, name, display_name)').in('director_id', indIds).in('document_id', kycIds));
+        else promises.push(Promise.resolve({ data: [] }));
+
+        if (coIds.length && kycIds.length) promises.push(supabase.from('acc_portal_kyc_uploads').select('*, acc_portal_kyc (id, name, display_name)').in('company_id', coIds).in('kyc_document_id', kycIds));
+        else promises.push(Promise.resolve({ data: [] }));
+
+        if (coIds.length) promises.push(supabase.from('acc_portal_company_duplicate').select('id, company_name').in('id', coIds));
+        else promises.push(Promise.resolve({ data: [] }));
+
+        const [indDocs, coDocs, coMeta] = await Promise.all(promises);
+
+        if (indDocs.data) {
+             const map = {}; indDocs.data.forEach(d => { if(!map[d.director_id]) map[d.director_id] = []; map[d.director_id].push(d); });
+             setAllIndividualDocuments(map);
+        }
+        if (coDocs.data) {
+             const map = {}; coDocs.data.forEach(d => { if(!map[d.company_id]) map[d.company_id] = []; map[d.company_id].push(d); });
+             setAllCompanyDocuments(map);
+        }
+        if (coMeta.data) {
+             const map = {}; coMeta.data.forEach(c => map[c.id] = c);
+             setCompanyData(map);
+        }
+
+      } catch (err) { console.error(err); } 
+      finally { if (isMounted) setDocumentsLoading(false); }
     };
-    fetchMetadata();
+    loadData();
     return () => { isMounted = false; };
   }, [filteredTasks]);
+
+
+   const hasReferencesColumn = useMemo(() => filteredTasks.some(task => REFERENCE_SUBDEPARTMENT_IDS.includes(task.subdepartment?.id) || REFERENCE_SUBDEPARTMENT_IDS.includes(task.subdepartment?.parent_id)), [filteredTasks]);
 
   const groupedTasks = useMemo(() => {
     const groups = new Map<string, any[]>();
@@ -474,9 +493,31 @@ export function RequirementsTable({
 
     allTasks.forEach(task => {
       const classReqs = taskClassRequirements[task.id];
-      if (!classReqs?.requirements || !Array.isArray(classReqs.requirements)) return;
+      
+      // Handle both data structures: requirements array OR documents_and_fields
+      if (!classReqs) return;
+      
+      let requirementsToProcess = [];
+      
+      // Structure 1: requirements array with hasTemplate and web_automation
+      if (classReqs?.requirements && Array.isArray(classReqs.requirements)) {
+        requirementsToProcess = classReqs.requirements;
+      }
+      // Structure 2: documents_and_fields array (legacy structure)
+      else if (classReqs?.documents_and_fields && Array.isArray(classReqs.documents_and_fields)) {
+        requirementsToProcess = classReqs.documents_and_fields.map(doc => ({
+          id: doc.id,
+          name: doc.id, // Use document ID as name for legacy structure
+          kyc_document_ids: [doc.id],
+          hasTemplate: false,
+          web_automation: null,
+          applicantTypes: doc.Principal ? ['principal'] : doc.Company ? ['company'] : doc.Dependent ? ['dependent'] : []
+        }));
+      }
+      
+      if (requirementsToProcess.length === 0) return;
 
-      classReqs.requirements.forEach((req: any) => {
+      requirementsToProcess.forEach((req: any) => {
         const kycDocIds = req.kyc_document_ids || (req.kyc_document_id ? [req.kyc_document_id] : []);
         
         if (kycDocIds.length === 0) return;
@@ -512,6 +553,12 @@ export function RequirementsTable({
           documentCount: kycDocIds.length, // Total number of document types
           isMultiDocument: isComposite, // True if multiple different types
           category: (() => {
+            // Priority 1: Check for automation first
+            if (req.web_automation?.automationId) {
+              return 'automation';
+            }
+            
+            // Priority 2: Check for template
             if (req.hasTemplate) {
               return 'template';
             }
@@ -540,6 +587,7 @@ export function RequirementsTable({
         company: requirementRows.filter(r => r.category === 'company'),
         individual: requirementRows.filter(r => r.category === 'individual'),
         templates: requirementRows.filter(r => r.category === 'template'),
+        automations: requirementRows.filter(r => r.category === 'automation'),
       }
     };
   }, [filteredGroupedTasks, taskClassRequirements, documents]);

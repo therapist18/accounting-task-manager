@@ -485,7 +485,7 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
         description="Are you sure you want to delete this task? This action cannot be undone."
         confirmText="Delete Task"
         loading={loading}
-      />
+      />  
 
       <div className="flex items-center justify-end gap-4 px-4 py-2 bg-slate-50 border-b-2 border-slate-300">
         {totalColumns > columnsPerPage && (

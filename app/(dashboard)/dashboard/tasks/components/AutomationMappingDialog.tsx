@@ -1506,15 +1506,17 @@ export const AutomationMappingDialog = ({
                     return Array.isArray(v) ? v.join(', ') : v;
                   }).join(' ');
 
-                  const isValueMissing = !mergedValue || mergedValue === 'Missing' || mergedValue === '' || mergedValue === 'Missing Config' || mergedValue === 'No Source';
                   const primarySource = sources[0];
 
-                  return (
+                  const isSourceEditable = primarySource && sourcesDisplay.every(s => s.type !== 'computed');
+                  const isValueMissing = !mergedValue || mergedValue === 'Missing' || mergedValue === '' || mergedValue === 'Missing Config' || mergedValue === 'No Source';
+
+                 return (
                     <TableRow
                       key={fIdx}
                       className={cn(
-                        "group border-b border-slate-200 hover:bg-blue-50 transition-colors",
-                        isValueMissing && "bg-red-50/30"
+                        "group border-b border-slate-200 transition-colors",
+                        isEditing ? "bg-blue-50/50" : (isValueMissing ? "bg-red-50/30 hover:bg-red-100/30" : "hover:bg-blue-50")
                       )}
                     >
                       <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">
@@ -1532,19 +1534,44 @@ export const AutomationMappingDialog = ({
                         </div>
                       </TableCell>
 
-                      <TableCell className="px-4 py-2">
-                        {field.customFieldSource ? (
-                          <div className="mb-1 font-medium flex items-center gap-1">
+                      {/* --- MODIFIED SOURCE CELL: Show the DB Table and Path (The "Formula") --- */}
+                      <TableCell className="px-4 py-2 text-xs text-slate-600">
+                        {primarySource ? (
+                          <TooltipProvider delayDuration={150}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="font-mono text-[10px] bg-slate-100 p-1 rounded inline-flex items-center">
+                                  <Database className="h-3 w-3 mr-1 text-blue-500" />
+                                  {primarySource.table.replace('acc_portal_', '').substring(0, 15)}...
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent className="text-xs bg-slate-800 text-white">
+                                <p className="font-bold mb-1">{linkedJobField?.label || 'Master Field'}</p>
+                                <p>Table: {primarySource.table}</p>
+                                <p>Path: {primarySource.path}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        ) : (
+                          <div className="text-xs text-red-600 font-medium flex items-center gap-1">
+                            <AlertTriangle className="h-3 w-3" /> No Source
+                          </div>
+                        )}
+                        {field.customFieldSource && (
+                          <div className="mt-1 text-[10px] text-purple-600 font-medium flex items-center gap-1">
+                            <span className="inline-block w-1 h-1 rounded-full bg-purple-500"></span>
                             {field.customFieldSource}
                           </div>
-                        ) : (
-                          <div className="mb-1 text-xs text-red-600 font-medium">Missing</div>
                         )}
                       </TableCell>
+                      {/* --- END MODIFIED SOURCE CELL --- */}
 
-                      <TableCell className="px-4 py-2 border-r border-slate-100">
+
+                      {/* --- MODIFIED CURRENT VALUE CELL: Excel-like Editing Trigger --- */}
+                      <TableCell className="px-4 py-1 border-r border-slate-100 h-full">
                         {isEditing ? (
                           <div className="flex items-center gap-2">
+                            {/* ... (Keep Input/Select components as they are) ... */}
                             {isDropdown ? (
                               <Select value={editValue} onValueChange={setEditValue}>
                                 <SelectTrigger className="h-8 text-sm border-blue-400 focus:ring-1 focus:ring-blue-500">
@@ -1593,22 +1620,30 @@ export const AutomationMappingDialog = ({
                             </Button>
                           </div>
                         ) : (
+                          // Make the cell border and background change on hover to mimic a spreadsheet cell
                           <div
                             className={cn(
-                              "text-sm py-1 px-2 rounded cursor-pointer transition-colors",
+                              "text-sm h-7 flex items-center px-2 rounded -my-1 transition-colors relative",
+                              isSourceEditable && !isEditing
+                                ? "cursor-pointer border border-transparent hover:border-blue-400 hover:bg-blue-50"
+                                : "cursor-default",
                               isValueMissing
                                 ? "text-red-600 font-medium"
-                                : "text-slate-900 hover:bg-blue-100"
+                                : "text-slate-900"
                             )}
                             onClick={() => {
-                              if (!isMissingEntity && sources[0] && sourcesDisplay.every(s => s.type !== 'computed')) {
-                                startEditing(field.variableName, 0, sources[0]?.table, sources[0]?.path, mergedValue, String(targetId), sources[0]?.linking_variable);
+                              if (isSourceEditable && targetId) {
+                                startEditing(field.variableName, 0, primarySource.table, primarySource.path, mergedValue, String(targetId), primarySource.linking_variable);
                               }
                             }}
                           >
                             {isValueMissing ? (
-                              <span className="italic">Missing</span>
+                              <span className="italic flex items-center gap-1">
+                                <AlertCircle className="h-3 w-3" />
+                                Missing
+                              </span>
                             ) : (
+                              // Display the value or the dropdown label
                               isDropdown && dropdownOptions.length > 0
                                 ? (dropdownOptions.find(o => o.value === mergedValue)?.label || mergedValue)
                                 : mergedValue
@@ -1616,9 +1651,13 @@ export const AutomationMappingDialog = ({
                             {mergedValue === 'Computing...' && (
                               <Loader2 className="h-3 w-3 animate-spin inline ml-2" />
                             )}
+                            {isSourceEditable && !isEditing && (
+                              <Edit3 className="h-3 w-3 ml-auto text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2" />
+                            )}
                           </div>
                         )}
                       </TableCell>
+                      {/* --- END MODIFIED CURRENT VALUE CELL --- */}
                     </TableRow>
                   );
                 })}
