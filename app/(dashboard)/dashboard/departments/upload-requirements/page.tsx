@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import React, { useEffect, useState, useMemo } from "react"
 import { cn } from "@/lib/utils"
-import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff, Zap, FileType, Database, Code } from "lucide-react"
+import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff, Zap, FileType, Database, Code, HelpCircle } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -24,6 +24,7 @@ import { toast } from "@/hooks/use-toast"
 import { DepartmentSidebar } from "@/app/(dashboard)/dashboard/departments/main-shared-components/department-sidebar"
 import { EditRequirementDialog } from "./components/EditRequirementDialog"
 import { AddRequirementsDialog } from "./components/AddRequirementsDialog"
+import { EditJobQuestionDialog } from "./components/EditJobQuestionDialog"
 
 interface Department {
   id: string | number
@@ -38,6 +39,7 @@ interface Subdepartment {
   description?: string
   classes?: Class[]
   upload_requirements?: ApiRequirement[]
+  job_specific_questions?: JobQuestion[]
 }
 
 interface Class {
@@ -45,6 +47,7 @@ interface Class {
   name: string
   description?: string
   requirements?: ApiRequirement[]
+  job_specific_questions?: JobQuestion[]
   subClasses?: Subclass[]
 }
 
@@ -53,6 +56,7 @@ interface Subclass {
   name: string
   description?: string
   requirements?: ApiRequirement[]
+  job_specific_questions?: JobQuestion[]
 }
 
 interface EditingContext {
@@ -75,6 +79,18 @@ interface WebDataField {
   masterFieldIds?: string[];
 }
 
+interface JobQuestion {
+  id: string
+  label: string
+  type: string
+  required: boolean
+  options?: string[]
+  linked_field_id?: string
+  applicant_types?: string[]
+  default_value?: string // Matches DB column name
+  order: number
+}
+
 interface ApiRequirement {
   id?: string
   name: string
@@ -94,7 +110,7 @@ interface ApiRequirement {
   requirement_context?: any
   web_automation?: any
   category?: 'general' | 'processing' | 'issuance'
-  webdata?: WebDataField[] // New field
+  webdata?: WebDataField[]
 }
 
 interface RequirementTableEntry extends ApiRequirement {
@@ -113,26 +129,38 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const [expandedWebDataRows, setExpandedWebDataRows] = useState<Set<string>>(new Set())
 
   const [isSubmitting, setIsSubmitting] = useState(false)
+  
+  // Requirement Editing
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editingRequirement, setEditingRequirement] = useState<ApiRequirement | null>(null)
+  
+  // Question Editing
+  const [isEditQuestionDialogOpen, setIsEditQuestionDialogOpen] = useState(false)
+  const [editingQuestion, setEditingQuestion] = useState<JobQuestion | null>(null)
+
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [addContext, setAddContext] = useState<EditingContext | null>(null)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
-  const [deleteContext, setDeleteContext] = useState<{ type: string, index: number, requirementId?: string } | null>(null)
+  const [deleteContext, setDeleteContext] = useState<{ type: string, index: number, requirementId?: string, isQuestion?: boolean } | null>(null)
   const [editingContext, setEditingContext] = useState<EditingContext | null>(null)
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
+  const [masterFields, setMasterFields] = useState<any[]>([])
 
-  // Fetch KYC documents for display
+  // Fetch KYC documents and Master Fields for display
   useEffect(() => {
-    const fetchKycDocuments = async () => {
+    const fetchData = async () => {
       try {
-        const { data } = await supabase.from('acc_portal_kyc').select('id, name, display_name').order('name')
-        setKycDocuments(data || [])
+        const [kycRes, mfRes] = await Promise.all([
+          supabase.from('acc_portal_kyc').select('id, name, display_name').order('name'),
+          supabase.from('tm_job_fields').select('id, label')
+        ])
+        setKycDocuments(kycRes.data || [])
+        setMasterFields(mfRes.data || [])
       } catch (error) {
-        console.error('Error fetching KYC documents:', error)
+        console.error('Error fetching initial data:', error)
       }
     }
-    fetchKycDocuments()
+    fetchData()
   }, [])
 
   const toggleWebDataRow = (reqId: string) => {
@@ -252,13 +280,15 @@ export default function UploadRequirements({ departments: initialDepartments }: 
               const subClsRec = findRecord(String(cls.id), String(subCls.id))
               return { 
                 ...subCls, 
-                requirements: await mapRequirementsData(subClsRec || {}) 
+                requirements: await mapRequirementsData(subClsRec || {}),
+                job_specific_questions: subClsRec?.job_specific_questions || [] 
               }
             })
             const resolvedSubClasses = await Promise.all(subClasses)
             return { 
               ...cls, 
               requirements: await mapRequirementsData(classRec || {}), 
+              job_specific_questions: classRec?.job_specific_questions || [],
               subClasses: resolvedSubClasses
             }
           })
@@ -270,7 +300,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
           return {
             ...subdept,
             classes: resolvedClasses,
-            upload_requirements: await mapRequirementsData(subDeptRec || {})
+            upload_requirements: await mapRequirementsData(subDeptRec || {}),
+            job_specific_questions: subDeptRec?.job_specific_questions || []
           }
         }))
         
@@ -342,6 +373,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       : { type: 'subdepartment', departmentId: currentDept.id, subdepartmentId: currentSubdept.id, subdepartmentName: currentSubdept.name }
     
     const reqsToDisplay = (currentSubclass ? currentSubclass.requirements : currentClass ? currentClass.requirements : currentSubdept.upload_requirements) || []
+    const questionsToDisplay = (currentSubclass ? currentSubclass.job_specific_questions : currentClass ? currentClass.job_specific_questions : currentSubdept.job_specific_questions) || []
 
     const isDept1 = String(activeDept) === "1"
 
@@ -384,6 +416,110 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         ) : (
           renderRequirements(reqsToDisplay, targetContext)
         )}
+        
+        {/* Job Specific Questions Section */}
+        <section className="pt-8 border-t">
+           <div className="flex items-center gap-2 mb-4"><div className="h-8 w-1 bg-indigo-600 rounded-full" /><h3 className="text-lg font-semibold">Job Specific Questions</h3></div>
+           {renderQuestions(questionsToDisplay, targetContext)}
+        </section>
+      </div>
+    )
+  }
+
+ const renderQuestions = (questions: JobQuestion[], context: EditingContext) => {
+    return (
+      <div className="border rounded-lg overflow-hidden bg-white shadow-sm">
+        <div className="overflow-auto max-h-[600px]">
+           <Table>
+            <TableHeader className="bg-slate-50 sticky top-0 z-10">
+              <TableRow>
+                <TableHead className="w-12 text-center border-r">#</TableHead>
+                <TableHead className="min-w-[200px] border-r">Question Label</TableHead>
+                <TableHead className="border-r">Input Type</TableHead>
+                <TableHead className="border-r">Default Value</TableHead> {/* New Column */}
+                <TableHead className="border-r">Required</TableHead>
+                <TableHead className="border-r">Applies To</TableHead>
+                <TableHead className="border-r">Configuration</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {questions.length > 0 ? (
+                questions.map((q, idx) => {
+                    const linkedMasterField = q.linked_field_id 
+                        ? masterFields.find(mf => String(mf.id) === String(q.linked_field_id)) 
+                        : null;
+
+                    return (
+                        <TableRow key={q.id || idx} className="hover:bg-slate-50/50">
+                            <TableCell className="text-center font-mono text-xs text-muted-foreground border-r">{idx + 1}</TableCell>
+                            <TableCell className="border-r font-medium">{q.label}</TableCell>
+                            <TableCell className="border-r"><Badge variant="outline" className="capitalize bg-slate-100">{q.type}</Badge></TableCell>
+                            
+                            {/* New Default Value Cell */}
+                            <TableCell className="border-r">
+                                {q.default_value ? (
+                                    <span className="text-xs font-mono bg-slate-50 px-1.5 py-0.5 rounded border text-slate-600">
+                                        {q.default_value}
+                                    </span>
+                                ) : (
+                                    <span className="text-[10px] text-slate-400 italic">None</span>
+                                )}
+                            </TableCell>
+
+                            <TableCell className="border-r">
+                                {q.required ? <Badge className="bg-red-50 text-red-600 hover:bg-red-100">Required</Badge> : <span className="text-xs text-slate-400">Optional</span>}
+                            </TableCell>
+                            <TableCell className="border-r">
+                                <div className="flex flex-wrap gap-1">
+                                    {(q.applicant_types || []).length > 0 ? q.applicant_types?.map(t => (
+                                        <Badge key={t} variant="secondary" className="text-[10px] h-4 px-1 capitalize">{t}</Badge>
+                                    )) : <span className="text-xs text-slate-400">All</span>}
+                                </div>
+                            </TableCell>
+                            <TableCell className="border-r text-xs">
+                                {linkedMasterField ? (
+                                    <div className="flex items-center gap-1 text-blue-600">
+                                        <Database className="h-3 w-3" />
+                                        <span>Linked: {linkedMasterField.label}</span>
+                                    </div>
+                                ) : (q.options && q.options.length > 0) ? (
+                                    <span className="text-slate-600" title={q.options.join(', ')}>
+                                        {q.options.length} Manual Options
+                                    </span>
+                                ) : <span className="text-slate-400">-</span>}
+                            </TableCell>
+                            <TableCell className="text-right">
+                                <div className="flex justify-end gap-1">
+                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600" onClick={() => { 
+                                        setEditingQuestion(q); 
+                                        setEditingContext(context); 
+                                        setIsEditQuestionDialogOpen(true); 
+                                    }}>
+                                        <Pencil className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => { 
+                                        setEditingContext(context); 
+                                        setDeleteContext({ type: context.type, index: idx, requirementId: q.id, isQuestion: true }); 
+                                        setIsDeleteDialogOpen(true); 
+                                    }}>
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                </div>
+                            </TableCell>
+                        </TableRow>
+                    )
+                })
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground italic bg-slate-50/30">
+                     No job specific questions configured.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+           </Table>
+        </div>
       </div>
     )
   }
@@ -447,7 +583,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                             </Button>
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => { 
                               setEditingContext(context); 
-                              setDeleteContext({ type: context.type, index: idx, requirementId: req.id }); 
+                              setDeleteContext({ type: context.type, index: idx, requirementId: req.id, isQuestion: false }); 
                               setIsDeleteDialogOpen(true); 
                             }}>
                               <Trash2 className="h-3.5 w-3.5" />
@@ -587,7 +723,6 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     )
   }
 
-  // Handle Add/Save/Delete handlers as in original file...
   const handleAddRequirements = async (payload: any) => {
     try {
       setIsSubmitting(true);
@@ -597,10 +732,15 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         .eq('job_level', JSON.stringify(payload.job_level))
         .maybeSingle();
       if (fetchError) throw fetchError;
+      
       if (existing) {
+        const updateData: any = { updated_at: payload.updated_at };
+        if (payload.requirements) updateData.requirements = payload.requirements;
+        if (payload.job_specific_questions) updateData.job_specific_questions = payload.job_specific_questions;
+
         const { error: updateError } = await supabase
           .from('tm_class_requirements')
-          .update({ requirements: payload.requirements, updated_at: payload.updated_at })
+          .update(updateData)
           .eq('id', existing.id);
         if (updateError) throw updateError;
       } else {
@@ -655,6 +795,58 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     }
   };
 
+  const handleSaveQuestion = async (updatedQuestion: JobQuestion) => {
+    if (!editingContext) return;
+    try {
+        setIsSubmitting(true);
+        // Construct Job Level
+        const jobLevel = {
+            department_id: Number(editingContext.departmentId),
+            subdepartment_id: Number(editingContext.subdepartmentId),
+            class_id: editingContext.classId ? Number(editingContext.classId) : null,
+            subclass_id: editingContext.subclassId ? Number(editingContext.subclassId) : null,
+            level: editingContext.type === 'subdepartment' ? 2 : editingContext.type === 'class' ? 3 : 4
+        }
+        
+        // Fetch Existing
+        const { data: existing, error: fetchError } = await supabase
+            .from('tm_class_requirements')
+            .select('*')
+            .eq('job_level', JSON.stringify(jobLevel))
+            .maybeSingle();
+
+        if (fetchError) throw fetchError;
+        if (!existing) throw new Error('No existing record found');
+
+        // Update Question in Array
+        const existingQuestions = existing.job_specific_questions || [];
+        const updatedQuestions = existingQuestions.map((q: any) => 
+            q.id === updatedQuestion.id ? updatedQuestion : q
+        );
+
+        // Save
+        const { error: updateError } = await supabase
+            .from('tm_class_requirements')
+            .update({ 
+                job_specific_questions: updatedQuestions, 
+                updated_at: new Date().toISOString() 
+            })
+            .eq('id', existing.id);
+
+        if (updateError) throw updateError;
+
+        await refreshDepartments();
+        setIsEditQuestionDialogOpen(false);
+        toast({ title: "Success", description: "Question updated successfully" });
+
+    } catch (error) {
+        console.error(error);
+        toast({ title: "Error", description: "Failed to update question", variant: "destructive" });
+    } finally {
+        setIsSubmitting(false);
+    }
+  }
+
   const handleDeleteRequirement = async (requirementId: string) => {
     if (!editingContext) return;
     try {
@@ -672,20 +864,32 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         .maybeSingle();
       if (fetchError) throw fetchError;
       if (!existing) throw new Error('No existing record');
-      const updatedRequirements = existing.requirements.filter((req: any) => req.id !== requirementId);
-      const reorderedRequirements = updatedRequirements.map((req: any, index: number) => ({ ...req, order: index }));
+
+      let updatePayload: any = { updated_at: new Date().toISOString() };
+
+      if (deleteContext?.isQuestion) {
+          const updatedQuestions = (existing.job_specific_questions || []).filter((q: any) => q.id !== requirementId);
+          const reorderedQuestions = updatedQuestions.map((q: any, index: number) => ({ ...q, order: index }));
+          updatePayload.job_specific_questions = reorderedQuestions;
+      } else {
+          const updatedRequirements = (existing.requirements || []).filter((req: any) => req.id !== requirementId);
+          const reorderedRequirements = updatedRequirements.map((req: any, index: number) => ({ ...req, order: index }));
+          updatePayload.requirements = reorderedRequirements;
+      }
+
       const { error: updateError } = await supabase
         .from('tm_class_requirements')
-        .update({ requirements: reorderedRequirements, updated_at: new Date().toISOString() })
+        .update(updatePayload)
         .eq('id', existing.id);
+
       if (updateError) throw updateError;
       await refreshDepartments();
       setIsDeleteDialogOpen(false);
       setDeleteContext(null);
-      toast({ title: "Success", description: "Requirement deleted successfully" });
+      toast({ title: "Success", description: `${deleteContext?.isQuestion ? 'Question' : 'Requirement'} deleted successfully` });
     } catch (error) {
       console.error(error);
-      toast({ title: "Error", description: "Failed to delete requirement", variant: "destructive" });
+      toast({ title: "Error", description: "Failed to delete item", variant: "destructive" });
     } finally {
       setIsSubmitting(false);
     }
@@ -724,10 +928,21 @@ export default function UploadRequirements({ departments: initialDepartments }: 
             </Card>
           ) : renderMainContent()}
           <AddRequirementsDialog isOpen={isAddDialogOpen} onOpenChange={setIsAddDialogOpen} onSubmit={handleAddRequirements} isSubmitting={isSubmitting} context={addContext} />
+          
           <EditRequirementDialog isOpen={isEditDialogOpen} onOpenChange={setIsEditDialogOpen} requirement={editingRequirement} onSave={handleSaveRequirement} isSubmitting={isSubmitting} context={editingContext} />
+          
+          <EditJobQuestionDialog 
+             isOpen={isEditQuestionDialogOpen} 
+             onOpenChange={setIsEditQuestionDialogOpen} 
+             question={editingQuestion} 
+             onSave={handleSaveQuestion} 
+             isSubmitting={isSubmitting} 
+             masterFields={masterFields}
+          />
+
           <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
             <DialogContent>
-              <DialogHeader><DialogTitle>Delete Requirement</DialogTitle><DialogDescription>Are you sure?</DialogDescription></DialogHeader>
+              <DialogHeader><DialogTitle>Delete {deleteContext?.isQuestion ? 'Question' : 'Requirement'}</DialogTitle><DialogDescription>Are you sure?</DialogDescription></DialogHeader>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>Cancel</Button>
                 <Button variant="destructive" onClick={() => deleteContext?.requirementId && handleDeleteRequirement(deleteContext.requirementId)} disabled={isSubmitting}>{isSubmitting ? 'Deleting...' : 'Delete'}</Button>

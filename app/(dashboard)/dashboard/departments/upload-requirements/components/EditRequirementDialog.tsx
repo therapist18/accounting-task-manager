@@ -18,6 +18,15 @@ import supabase from "@/lib/supabase/client"
 import { Checkbox } from '@/components/ui/checkbox'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { 
+  NATIONALITY_TYPES, 
+  QUALIFICATION_TYPES, 
+  AGE_RANGE_TYPES, 
+  DEPENDANT_RELATIONSHIPS,
+  type NationalityType,
+  type QualificationType,
+  type AgeRangeType
+} from "@/lib/constants/entity-types"
 
 export type ApplicantType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependent' | 'employee' | 'understudy';
 
@@ -199,7 +208,7 @@ export function EditRequirementDialog({
         id: formData.id,
         name: formData.name.trim(),
         description: formData.description || '',
-        type: formData.type,
+        type: 'document', // Always submit as 'document' type
         isVisible: formData.isVisible,
         isRequired: formData.isRequired,
         is_mandatory: formData.isRequired,
@@ -210,7 +219,11 @@ export function EditRequirementDialog({
         isStageDocument: formData.isStageDocument || false,
         category: formData.category || 'processing', 
         hasTemplate: formData.hasTemplate || false,
-        web_automation: web_automation, 
+        web_automation: web_automation,
+        linked_master_field_id: formData.linked_master_field_id,
+        nationality: formData.nationality,
+        ageRange: formData.ageRange,
+        dependantRelationships: formData.dependantRelationships,
         updated_at: new Date().toISOString()
       }
       await onSave(updatedRequirement)
@@ -346,6 +359,52 @@ export function EditRequirementDialog({
                   </Popover>
                 </div>
 
+                {/* Master Field Linking */}
+                <div className="space-y-3 bg-slate-50 p-4 rounded-lg border">
+                  <Label className="flex items-center gap-2 text-primary font-semibold"><Database className="h-4 w-4" /> Master Field Linking</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className="w-full justify-between bg-white"
+                      >
+                        {formData.linked_master_field_id 
+                          ? masterFields.find(mf => String(mf.id) === String(formData.linked_master_field_id))?.label || "Selected Field"
+                          : "Link Master Field..."
+                        }
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[400px] p-0">
+                      <Command>
+                        <CommandInput placeholder="Search master fields..." />
+                        <CommandList>
+                          <CommandEmpty>No master field found.</CommandEmpty>
+                          <CommandGroup>
+                            <CommandItem
+                              value="none"
+                              onSelect={() => updateField('linked_master_field_id', null)}
+                            >
+                              <Check className={cn("mr-2 h-4 w-4", !formData.linked_master_field_id ? "opacity-100" : "opacity-0")} />
+                              -- None --
+                            </CommandItem>
+                            {masterFields.map((mf) => (
+                              <CommandItem
+                                key={mf.id}
+                                value={mf.label}
+                                onSelect={() => updateField('linked_master_field_id', String(mf.id))}
+                              >
+                                <Check className={cn("mr-2 h-4 w-4", String(formData.linked_master_field_id) === String(mf.id) ? "opacity-100" : "opacity-0")} />
+                                {mf.label}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+
                 {/* Toggles */}
                 <div className="flex gap-6">
                   <div className="flex items-center space-x-2">
@@ -355,6 +414,84 @@ export function EditRequirementDialog({
                   <div className="flex items-center space-x-2">
                     <Checkbox id="has-template" checked={formData.hasTemplate || false} onCheckedChange={(checked) => updateField('hasTemplate', checked)} />
                     <Label htmlFor="has-template" className="cursor-pointer">Has Template</Label>
+                  </div>
+                </div>
+
+                {/* Additional Requirement Fields */}
+                <div className="border-t pt-4">
+                  <Label className="flex items-center gap-2 text-primary font-semibold mb-3">
+                    <Users className="h-4 w-4" /> Applicant Criteria
+                  </Label>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold">Nationality</Label>
+                      <Select value={formData.nationality || 'any'} onValueChange={(v: NationalityType | 'any') => updateField('nationality', v === 'any' ? undefined : v)}>
+                        <SelectTrigger className="bg-white h-9 text-xs"><SelectValue placeholder="Any nationality..." /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="any">Any Nationality</SelectItem>
+                          {NATIONALITY_TYPES.map(type => (
+                            <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold">Age Range</Label>
+                      <Select value={formData.ageRange || 'any'} onValueChange={(v: AgeRangeType | 'any') => updateField('ageRange', v === 'any' ? undefined : v)}>
+                        <SelectTrigger className="bg-white h-9 text-xs"><SelectValue placeholder="Any age..." /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="any">Any Age</SelectItem>
+                          {AGE_RANGE_TYPES.map(type => (
+                            <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    {(formData.applicantTypes || []).includes('dependent') && (
+                      <div className="space-y-2">
+                        <Label className="text-xs font-semibold">Dependant Relationship</Label>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button variant="outline" className="w-full justify-between bg-white h-9 text-xs">
+                              <div className="flex gap-1 flex-wrap">
+                                {(formData.dependantRelationships && formData.dependantRelationships.length > 0) 
+                                  ? formData.dependantRelationships.map(r => (
+                                      <Badge key={r} variant="secondary" className="text-[10px]">{DEPENDANT_RELATIONSHIPS.find(dr => dr.value === r)?.label || r}</Badge>
+                                    )) 
+                                  : <span className="text-muted-foreground">Select relationships...</span>}
+                              </div>
+                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[300px] p-0" align="start">
+                            <Command>
+                              <CommandInput placeholder="Search relationships..." />
+                              <CommandList>
+                                <CommandGroup>
+                                  {DEPENDANT_RELATIONSHIPS.map((rel) => (
+                                    <CommandItem
+                                      key={rel.value}
+                                      onSelect={() => {
+                                        const current = formData.dependantRelationships || []
+                                        const updated = current.includes(rel.value) 
+                                          ? current.filter(r => r !== rel.value) 
+                                          : [...current, rel.value]
+                                        updateField('dependantRelationships', updated)
+                                      }}
+                                    >
+                                      <Check className={cn("mr-2 h-4 w-4", (formData.dependantRelationships || []).includes(rel.value) ? "opacity-100" : "opacity-0")} />
+                                      {rel.label}
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                    )}
                   </div>
                 </div>
 
