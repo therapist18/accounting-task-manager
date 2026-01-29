@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { AlertTriangle, Briefcase, Users, Plus, Minus, UserCheck, Loader2, Download, FileText, FileUp, Trash2, RefreshCw, Wand2, Save, ChevronDown, ChevronRight, Users2, User, Building2, Zap, FileType, UploadCloud, Eye } from "lucide-react"
+import { AlertTriangle, Briefcase, Users, Plus, Minus, UserCheck, Loader2, Download, FileText, FileUp, Trash2, RefreshCw, Wand2, Save, ChevronDown, ChevronRight, Users2, User, Building2, Zap, FileType, UploadCloud, Eye, Calendar, CheckCircle2, XCircle, AlertCircle } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import * as XLSX from 'xlsx'
@@ -12,12 +12,12 @@ import { saveAs } from 'file-saver'
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import supabase from "@/lib/supabase/client"
 import { COMPUTED_FUNCTIONS } from "@/lib/constants/computed-functions"
-import { 
-  getLatestDocument, 
-  getAllDocuments, 
+import {
+  getLatestDocument,
+  getAllDocuments,
   determineImmigrationStatus,
   getLatestDocumentExpiryDate,
-  type DocumentCache 
+  type DocumentCache
 } from "../tasks/utils/automationComputedFunctions"
 let htmlDocx: any = null;
 import('html-docx-js/dist/html-docx')
@@ -126,7 +126,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
   // New state for document metadata cache
   const [documentMetadataCache, setDocumentMetadataCache] = useState<Map<string, any>>(new Map());
-  
+
   // New state for document status cache
   const [documentStatusCache, setDocumentStatusCache] = useState<Map<string, any>>(new Map());
 
@@ -136,7 +136,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   // Function to get document status with caching - now inside component
   const getDocumentStatus = async (task: any, docId: string, personType: string, personId: string) => {
     const cacheKey = `${task.id}-${docId}-${personType}-${personId}`;
-    
+
     // Check cache first
     if (documentStatusCache.has(cacheKey)) {
       return documentStatusCache.get(cacheKey);
@@ -147,17 +147,17 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       const docMetadata = documentMetadataCache.get(docId);
       if (!docMetadata) {
         console.log('No document metadata found for:', docId);
-        const result = { status: 'unknown', label: 'Unknown', color: 'text-gray-400' };
+        const result = { status: 'unknown', label: 'Unknown', color: 'text-gray-400', bgColor: 'bg-gray-50' };
         setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)));
         return result;
       }
 
       // Check if document type has isEffectiveTo field
       const hasEffectiveToDate = docMetadata.fields?.some((field: any) => field.isEffectiveTo);
-      
+
       if (!hasEffectiveToDate) {
         console.log('Document has no effective to field:', docId);
-        const result = { status: 'valid', label: 'Valid', color: 'text-green-600' };
+        const result = { status: 'valid', label: 'Valid', color: 'text-green-600', bgColor: 'bg-green-50' };
         setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)));
         return result;
       }
@@ -166,10 +166,10 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       // Get expiry date using computed function
       const expiryDate = await getLatestDocumentExpiryDate(personId, [docId]);
       console.log('Expiry date result:', expiryDate);
-      
+
       if (expiryDate.includes('Not Found')) {
         console.log('No expiry date found for:', docId);
-        const result = { status: 'unknown', label: 'No Expiry', color: 'text-gray-400' };
+        const result = { status: 'unknown', label: 'No Expiry', color: 'text-gray-400', bgColor: 'bg-gray-50' };
         setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)));
         return result;
       }
@@ -179,32 +179,40 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       const thirtyDaysFromNow = new Date();
       thirtyDaysFromNow.setDate(now.getDate() + 30);
 
-      let status, label, color;
-      
+      let status, label, color, bgColor;
+
       if (expiry < now) {
         status = 'expired';
         label = 'Expired';
         color = 'text-red-600';
+        bgColor = 'bg-red-50';
       } else if (expiry < thirtyDaysFromNow) {
         status = 'expiring';
         label = 'Expiring Soon';
         color = 'text-amber-600';
+        bgColor = 'bg-amber-50';
       } else {
         status = 'valid';
         label = 'Valid';
         color = 'text-green-600';
+        bgColor = 'bg-green-50';
       }
+      const day = String(expiry.getDate()).padStart(2, '0');
+      const month = String(expiry.getMonth() + 1).padStart(2, '0');
+      const year = expiry.getFullYear();
+      const formattedDate = `${day}/${month}/${year}`;
 
-      const result = { status, label, color, expiryDate: expiryDate };
+      const result = { status, label, color, bgColor, expiryDate: formattedDate };
+
       console.log('Final status result:', result);
-      
+
       // Cache the result
       setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)));
-      
+
       return result;
     } catch (error) {
       console.error('Error getting document status:', error);
-      const result = { status: 'error', label: 'Error', color: 'text-red-400' };
+      const result = { status: 'error', label: 'Error', color: 'text-red-400', bgColor: 'bg-red-50' };
       setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)));
       return result;
     }
@@ -217,7 +225,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       // Clear composite cache to force recalculation
       setCompositeStatusCache(new Map());
     };
-    
+
     if (documentStatusCache.size > 0) {
       updateCompositeStatuses();
     }
@@ -226,21 +234,21 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   // Filter requirements based on computed functions
   const filteredRequirements = useMemo(() => {
     if (!organizedRequirements.documents) return {};
-    
+
     const filtered: any = {};
-    
+
     Object.entries(organizedRequirements.documents).forEach(([key, reqList]: [string, any[]]) => {
       filtered[key] = reqList.filter(req => {
         // If no computed function or it's 'none', include it
         if (!req.computed_function || req.computed_function === 'none') {
           return true;
         }
-        
+
         // For now, include all requirements - we can add filtering logic later
         return true;
       });
     });
-    
+
     return filtered;
   }, [organizedRequirements]);
 
@@ -305,8 +313,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       }
 
       // 2. HANDLE COMPANY FROM PARTICIPANTS (if not already added as applicant)
-      const companyPart = participants.find(p => 
-        p.type === 'company' || 
+      const companyPart = participants.find(p =>
+        p.type === 'company' ||
         (Array.isArray(p.role) ? p.role.includes('company') : p.role === 'company')
       );
       if (companyPart && (!applicant || applicant.id !== companyPart.id)) {
@@ -384,8 +392,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       }
 
       // 6. FIND UNDERSTUDY (Looking in participants_details by role first)
-      const understudyParticipant = participants.find(p => 
-        p.type === 'individual' && 
+      const understudyParticipant = participants.find(p =>
+        p.type === 'individual' &&
         (Array.isArray(p.role) ? p.role.includes('understudy') : p.role === 'understudy')
       );
       if (understudyParticipant) {
@@ -426,6 +434,43 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
     return cols;
   }, [filteredGroupedTasks, individualNames, expandedDependants]);
+
+  useEffect(() => {
+    const calculateAllStatuses = async () => {
+      // Wait for metadata and tasks to be ready
+      if (documentMetadataCache.size === 0 || !columnDefinitions.length) return;
+
+      const newStatuses = new Map(documentStatusCache);
+      let changed = false;
+
+      for (const col of columnDefinitions) {
+        // Logic for Company vs Individual IDs
+        const personId = col.type === 'company' ? col.id : (col.id || col.task.individual_id);
+
+        const docsToCheck = col.type === 'company'
+          ? (allCompanyDocuments[personId] || [])
+          : (allIndividualDocuments[personId] || []);
+
+        for (const doc of docsToCheck) {
+          const docId = doc.kyc_document_id || doc.document_id;
+          const cacheKey = `${col.task.id}-${docId}-${col.type}-${personId}`;
+
+          // Only fetch if not already in cache and we have the metadata definition
+          if (!newStatuses.has(cacheKey) && documentMetadataCache.has(docId)) {
+            const status = await getDocumentStatus(col.task, docId, col.type, personId);
+            newStatuses.set(cacheKey, status);
+            changed = true;
+          }
+        }
+      }
+
+      if (changed) {
+        setDocumentStatusCache(new Map(newStatuses));
+      }
+    };
+
+    calculateAllStatuses();
+  }, [documentMetadataCache, allCompanyDocuments, allIndividualDocuments, columnDefinitions]);
 
   const companySpans = useMemo(() => {
     const spans = [];
@@ -468,24 +513,28 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     fetchMasterFields();
   }, []);
 
-  // Fetch document metadata in batch
+  // Replace your current fetchDocumentMetadata useEffect (around line 500)
   useEffect(() => {
     const fetchDocumentMetadata = async () => {
-      // Collect all unique document IDs from requirements
       const allDocIds = new Set<string>();
 
-      Object.values(organizedRequirements.documents).forEach((reqList: any[]) => {
+      // Helper to extract IDs from requirements
+      const extractIds = (reqList: any[]) => {
         reqList.forEach(req => {
           if (req.kyc_document_ids) {
             req.kyc_document_ids.forEach(id => {
-                // Ensure ID looks like a UUID
-                if (UUID_REGEX.test(id)) {
-                    allDocIds.add(id)
-                }
+              if (UUID_REGEX.test(id)) allDocIds.add(id);
             });
           }
+          if (req.kyc_document_id && UUID_REGEX.test(req.kyc_document_id)) {
+            allDocIds.add(req.kyc_document_id);
+          }
         });
-      });
+      };
+
+      if (organizedRequirements.documents) {
+        Object.values(organizedRequirements.documents).forEach((list: any) => extractIds(list));
+      }
 
       if (allDocIds.size === 0) return;
 
@@ -499,6 +548,9 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
         const metadataMap = new Map(data.map(doc => [doc.id, doc]));
         setDocumentMetadataCache(metadataMap);
+
+        // LOG TO VERIFY:
+        console.log('✅ Metadata Cache Populated with:', data.length, 'items');
       } catch (error) {
         console.error('Error fetching document metadata:', error);
       }
@@ -803,8 +855,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             relationship: dep.relationship || 'dependant'
           })),
         understudy: (() => {
-          const understudyParticipant = participants.find(p => 
-            p.type === 'individual' && 
+          const understudyParticipant = participants.find(p =>
+            p.type === 'individual' &&
             (Array.isArray(p.role) ? p.role.includes('understudy') : p.role === 'understudy')
           );
           if (understudyParticipant) {
@@ -1032,126 +1084,71 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     return docData ? 'Uploaded' : 'Missing';
   }, [getDocumentDataForPreview]);
 
-  // NEW: Get composite requirement status with latest document status
-  const getCompositeRequirementStatus = useCallback(async (reqItem: any, task: any, columnType: string, entityId?: number) => {
+  const getCompositeRequirementStatus = useCallback((reqItem: any, task: any, columnType: string, entityId?: number) => {
     const cacheKey = `${task.id}-${reqItem.id || reqItem.uniqueId}-${columnType}-${entityId}`;
-    console.log('Getting composite status for:', cacheKey);
-    
-    // Check cache first
+
+    // 1. Check cache first
     if (compositeStatusCache.has(cacheKey)) {
-      console.log('Found cached composite status:', compositeStatusCache.get(cacheKey));
       return compositeStatusCache.get(cacheKey);
     }
 
     const kycDocIds = reqItem.kyc_document_ids || [];
-    console.log('KYC Doc IDs:', kycDocIds);
-    
-    if (kycDocIds.length === 0) {
-      const result = { type: 'missing', count: 0, total: kycDocIds.length, latestStatus: null };
-      setCompositeStatusCache(prev => new Map(prev.set(cacheKey, result)));
-      return result;
-    }
+    if (kycDocIds.length === 0) return { type: 'missing', count: 0, total: 0, latestStatus: null };
 
-    let foundCount = 0;
+    const personId = columnType === 'company' ? (task.company_id || task.participants_details?.find(p => p.type === 'company')?.id) :
+      (columnType === 'principal' || columnType === 'director') ? (task.individual_id || task.applicant_details?.id) :
+        entityId;
+
     let latestDoc = null;
     let latestDocId = null;
 
-    if (columnType === 'company') {
-      const companyId = task.participants_details?.find(p => p.type === 'company')?.id || task.company_id;
-      const companyDocs = allCompanyDocuments[companyId] || [];
-      console.log('Company docs for', companyId, ':', companyDocs.length);
+    const docsToSearch = columnType === 'company'
+      ? (allCompanyDocuments[personId] || [])
+      : (allIndividualDocuments[personId] || []);
 
-      kycDocIds.forEach(docId => {
-        const docs = companyDocs.filter(doc => doc.kyc_document_id === docId);
-        if (docs.length > 0) {
-          foundCount++;
-          // Find the most recent document
-          const mostRecent = docs.reduce((latest, doc) => {
-            return (!latest || new Date(doc.created_at) > new Date(latest.created_at)) ? doc : latest;
-          }, null);
-          if (mostRecent && (!latestDoc || new Date(mostRecent.created_at) > new Date(latestDoc.created_at))) {
-            latestDoc = mostRecent;
-            latestDocId = docId;
-          }
+    kycDocIds.forEach(docId => {
+      const matchingDocs = docsToSearch.filter(d => (d.kyc_document_id === docId || d.document_id === docId));
+      if (matchingDocs.length > 0) {
+        const mostRecent = matchingDocs.reduce((prev, curr) =>
+          (new Date(curr.created_at) > new Date(prev.created_at)) ? curr : prev
+        );
+        if (!latestDoc || new Date(mostRecent.created_at) > new Date(latestDoc.created_at)) {
+          latestDoc = mostRecent;
+          latestDocId = docId;
         }
-      });
-    } else {
-      const individualId = entityId || task.applicant_details?.id || task.individual_id;
-      const indDocs = allIndividualDocuments[individualId] || [];
-      console.log('Individual docs for', individualId, ':', indDocs.length);
+      }
+    });
 
-      kycDocIds.forEach(docId => {
-        const docs = indDocs.filter(doc => doc.document_id === docId);
-        if (docs.length > 0) {
-          foundCount++;
-          // Find the most recent document
-          const mostRecent = docs.reduce((latest, doc) => {
-            return (!latest || new Date(doc.created_at) > new Date(latest.created_at)) ? doc : latest;
-          }, null);
-          if (mostRecent && (!latestDoc || new Date(mostRecent.created_at) > new Date(latestDoc.created_at))) {
-            latestDoc = mostRecent;
-            latestDocId = docId;
-          }
-        }
-      });
-    }
+    const foundCount = kycDocIds.filter(docId =>
+      docsToSearch.some(d => (d.kyc_document_id === docId || d.document_id === docId))
+    ).length;
 
-    console.log('Found count:', foundCount, 'Latest doc ID:', latestDocId);
-
-    // Get status for the latest document
     let latestStatus = null;
     if (latestDocId) {
-      const personId = columnType === 'company' ? task.company_id : 
-                     (columnType === 'principal' || columnType === 'director') ? (task.individual_id || task.applicant_details?.id) : 
-                     entityId;
-      
-      console.log('Extracted personId:', personId, 'for columnType:', columnType, 'task:', task);
-      
-      // Get status synchronously from cache or trigger calculation
       const statusKey = `${task.id}-${latestDocId}-${columnType}-${personId}`;
-      console.log('Status key for latest doc:', statusKey);
-      
-      // Check if status is already cached
-      if (documentStatusCache.has(statusKey)) {
-        latestStatus = documentStatusCache.get(statusKey);
-        console.log('Found cached status:', latestStatus);
-      } else {
-        // Trigger status calculation and use a temporary status
-        console.log('Triggering status calculation for:', latestDocId);
-        getDocumentStatus(task, latestDocId, columnType, personId).then(() => {
-          // After status is calculated, update composite cache
-          setTimeout(() => {
-            const updatedStatus = documentStatusCache.get(statusKey);
-            if (updatedStatus) {
-              const updatedResult = {
-                type: foundCount > 0 ? 'uploaded' : 'missing',
-                count: foundCount,
-                total: kycDocIds.length,
-                latestStatus: updatedStatus
-              };
-              setCompositeStatusCache(prev => new Map(prev.set(cacheKey, updatedResult)));
-            }
-          }, 100);
-        });
-        latestStatus = { status: 'calculating', label: 'Checking...', color: 'text-gray-400' };
-      }
+      latestStatus = documentStatusCache.get(statusKey);
     }
 
     const result = {
       type: foundCount > 0 ? 'uploaded' : 'missing',
       count: foundCount,
       total: kycDocIds.length,
-      latestStatus: latestStatus
+      latestStatus: latestStatus || (latestDocId ? { status: 'loading', label: 'Loading...', color: 'text-gray-400', bgColor: 'bg-gray-50' } : null)
     };
-    
-    console.log('Final composite result:', result);
-    
-    // Cache the result
-    setCompositeStatusCache(prev => new Map(prev.set(cacheKey, result)));
-    
-    return result;
-  }, [allCompanyDocuments, allIndividualDocuments, documentStatusCache, compositeStatusCache, getDocumentStatus]);
 
+    // Cache the result for the next render if we have meaningful data
+    if (result.latestStatus?.status !== 'loading') {
+      setTimeout(() => {
+        setCompositeStatusCache(prev => {
+          // Prevent unnecessary state updates if already cached correctly
+          if (prev.get(cacheKey)?.latestStatus?.status === result.latestStatus?.status) return prev;
+          return new Map(prev.set(cacheKey, result));
+        });
+      }, 0);
+    }
+
+    return result;
+  }, [allCompanyDocuments, allIndividualDocuments, documentStatusCache, compositeStatusCache]);
   // NEW: Get documents by type for composite requirements
   const getDocumentsByType = useCallback((docTypeId: string, task: any, columnType: string, entityId?: number) => {
     if (columnType === 'company') {
@@ -1164,6 +1161,45 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       return indDocs.filter(doc => doc.document_id === docTypeId);
     }
   }, [allCompanyDocuments, allIndividualDocuments]);
+
+  // Helper function to render status icon and badge
+  const renderStatusBadge = (status: any) => {
+    if (!status) return null;
+
+    let Icon;
+    switch (status.status) {
+      case 'valid':
+        Icon = CheckCircle2;
+        break;
+      case 'expiring':
+        Icon = AlertCircle;
+        break;
+      case 'expired':
+        Icon = XCircle;
+        break;
+      default:
+        Icon = Calendar;
+    }
+
+    return (
+      <div className="flex flex-col items-center gap-1">
+        <div className={`flex items-center gap-1 px-2 py-1 rounded-md ${status.bgColor}`}>
+          <Icon className={`h-3 w-3 ${status.color}`} />
+          <span className={`text-[10px] font-semibold ${status.color}`}>
+            {status.label}
+          </span>
+        </div>
+        {status.expiryDate && (
+          <div className={`flex items-center gap-1 px-2 py-0.5 rounded ${status.bgColor}`}>
+            <Calendar className={`h-2.5 w-2.5 ${status.color}`} />
+            <span className={`text-[9px] ${status.color}`}>
+              {status.expiryDate}
+            </span>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const renderDocumentSection = (requirementsList: any[], sectionName: string) => {
     // Group requirements by category
@@ -1186,17 +1222,14 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             <TableCell colSpan={totalColumns} className="py-2 px-4 font-semibold text-blue-700 text-xs uppercase tracking-wider">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                {category === 'processing' && 'Processing Requirements'}
-                {category === 'issuance' && 'Issuance Requirements'}
-                {category === 'general' && 'General Requirements'}
-                {category === 'job-specific' && 'Job-Specific Requirements'}
-                {category !== 'processing' && category !== 'issuance' && category !== 'general' && category !== 'job-specific' && category.charAt(0).toUpperCase() + category.slice(1) + ' Requirements'}
-                <span className="text-blue-500 font-normal">({categoryReqs.length})</span>
+                {/* Clean up labels dynamically */}
+                {category.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())} Requirements
+                <span className="text-blue-500 font-normal ml-1">({categoryReqs.length})</span>
               </div>
             </TableCell>
           </TableRow>
         )}
-        
+
         {/* Category Requirements */}
         {categoryReqs.map((reqItem, reqIndex) => {
           const requirementId = reqItem.uniqueId || reqItem.id;
@@ -1232,84 +1265,144 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                           ) : null;
                         })()
                       )}
-                    <div className="flex">
+                      <div className="flex">
                         {isComposite && (
-                        <Badge variant="solid" color="blue" className="ml-2">
-                          {reqItem.documentCount}
-                        </Badge>
+                          <Badge variant="solid" color="blue" className="ml-2">
+                            {reqItem.documentCount}
+                          </Badge>
+                        )}
+                        {!isComposite && fieldsToRender.length > 0 && (
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => toggleDocumentExpansion(requirementId)}>
+                            {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                          </Button>
+                        )}
+                        {isComposite && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0"
+                            onClick={() => toggleCompositeRequirement(requirementId)}
+                          >
+                            {isCompositeExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Template and Automation Indicators */}
+                    <div className="flex items-center gap-2 mt-1">
+                      {reqItem.hasTemplate && (
+                        <div className="flex items-center gap-1 text-orange-600" title="Has Template">
+                          <FileType className="h-3 w-3 fill-current" />
+                          <span className="text-[9px] font-medium">Template</span>
+                        </div>
                       )}
-                      {!isComposite && fieldsToRender.length > 0 && (
-                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => toggleDocumentExpansion(requirementId)}>
-                          {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                        </Button>
-                      )}
-                      {isComposite && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0"
-                          onClick={() => toggleCompositeRequirement(requirementId)}
-                        >
-                          {isCompositeExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                        </Button>
+
+                      {reqItem.web_automation?.automationId && (
+                        <div className="flex items-center gap-1 text-blue-600" title={`Web Form: ${reqItem.web_automation.automationName}`}>
+                          <Zap className="h-3 w-3 fill-current" />
+                          <span className="text-[9px] font-medium truncate max-w-[100px]">{reqItem.web_automation.automationName}</span>
+                        </div>
                       )}
                     </div>
                   </div>
+                </TableCell>
 
-                  {/* Template and Automation Indicators */}
-                  <div className="flex items-center gap-2 mt-1">
-                    {reqItem.hasTemplate && (
-                      <div className="flex items-center gap-1 text-orange-600" title="Has Template">
-                        <FileType className="h-3 w-3 fill-current" />
-                        <span className="text-[9px] font-medium">Template</span>
-                      </div>
-                    )}
+                {columnDefinitions.map((col, colIdx) => {
+                  const isApplicable = checkApplicability(col.type, reqItem);
+                  const groupRelationshipData = relationshipData[col.groupIndex];
 
-                    {reqItem.web_automation?.automationId && (
-                      <div className="flex items-center gap-1 text-blue-600" title={`Web Form: ${reqItem.web_automation.automationName}`}>
-                        <Zap className="h-3 w-3 fill-current" />
-                        <span className="text-[9px] font-medium truncate max-w-[100px]">{reqItem.web_automation.automationName}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </TableCell>
-
-              {columnDefinitions.map((col, colIdx) => {
-                const isApplicable = checkApplicability(col.type, reqItem);
-                const groupRelationshipData = relationshipData[col.groupIndex];
-
-                if (!isApplicable) {
-                  return (
-                    <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-2">
-                      <span className="text-[10px] text-gray-300 font-medium italic">N/A</span>
-                    </TableCell>
-                  );
-                }
-
-                // For composite requirements, show aggregated status
-                if (isComposite) {
-                  const cacheKey = `${col.task.id}-${reqItem.id || reqItem.uniqueId}-${col.type}-${col.id}`;
-                  const compositeStatus = compositeStatusCache.get(cacheKey);
-                  
-                  // Trigger status calculation if not cached
-                  if (!compositeStatus) {
-                    getCompositeRequirementStatus(reqItem, col.task, col.type, col.id).then(status => {
-                      // Force re-render by updating cache
-                      setCompositeStatusCache(prev => new Map(prev.set(cacheKey, status)));
-                    });
+                  if (!isApplicable) {
+                    return (
+                      <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-2">
+                        <span className="text-[10px] text-gray-300 font-medium italic">N/A</span>
+                      </TableCell>
+                    );
                   }
 
+                  // For composite requirements, show aggregated status
+                  if (isComposite) {
+                    const cacheKey = `${col.task.id}-${reqItem.id || reqItem.uniqueId}-${col.type}-${col.id}`;
+                    const compositeStatus = compositeStatusCache.get(cacheKey);
+
+                    // Get status (this will return a loading state if not yet in cache)
+                    const statusToDisplay = compositeStatus || getCompositeRequirementStatus(reqItem, col.task, col.type, col.id);
+
+                    return (
+                      <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-2">
+                        <div className="flex flex-col items-center justify-center gap-1">
+                          {reqItem.hasTemplate && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                              onClick={() => handleGenerateTemplate(reqItem, col.task, col.type, col.id)}
+                              title={`Generate ${reqItem.name} Template`}
+                              disabled={isPreparingTemplate}
+                            >
+                              {isPreparingTemplate ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3 mr-1" />}
+                              <span className="text-[10px] font-bold uppercase">Generate</span>
+                            </Button>
+                          )}
+
+                          <div className="flex items-center gap-3">
+                            {statusToDisplay ? (
+                              <>
+                                {statusToDisplay.latestStatus ? (
+                                  <div className="flex items-center gap-2">
+                                    {renderStatusBadge(statusToDisplay.latestStatus)}
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-8 w-8 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                                      onClick={() => {
+                                        const latestDocId = reqItem.kyc_document_ids?.find((docId: string) => {
+                                          const docs = col.type === 'company'
+                                            ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.kyc_document_id === docId)
+                                            : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === docId);
+                                          return docs && docs.length > 0;
+                                        });
+                                        if (latestDocId) {
+                                          const docs = col.type === 'company'
+                                            ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.kyc_document_id === latestDocId)
+                                            : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === latestDocId);
+                                          if (docs && docs.length > 0) {
+                                            setPreviewingDocuments(docs);
+                                            setShowPreviewModal(true);
+                                          }
+                                        }
+                                      }}
+                                      title="Preview Latest Document"
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-amber-600 font-bold uppercase">
+                                    {statusToDisplay.type === 'missing' ? 'Missing' : 'No Status'}
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              <div className="w-4 h-4 bg-gray-300 rounded-full animate-pulse" title="Checking status..." />
+                            )}
+                          </div>
+                        </div>
+                      </TableCell>
+                    );
+                  }
+
+                  // For non-composite requirements, use existing logic
                   return (
                     <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-2">
-                      <div className="flex flex-col items-center justify-center gap-1">
+                      <div className="flex items-center justify-center gap-1">
                         {reqItem.hasTemplate && (
                           <Button
                             variant="ghost"
                             size="sm"
                             className="h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
                             onClick={() => handleGenerateTemplate(reqItem, col.task, col.type, col.id)}
-                            title={`Generate ${reqItem.name} Template`}
+                            title={`Generate ${reqItem.documentDefinition?.display_name || reqItem.name} Template`}
                             disabled={isPreparingTemplate}
                           >
                             {isPreparingTemplate ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3 mr-1" />}
@@ -1317,186 +1410,140 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                           </Button>
                         )}
 
-                        <div className="flex items-center gap-3">
-                          {compositeStatus ? (
-                            <>
-                              {compositeStatus.latestStatus ? (
-                                <div className="flex flex-col items-center">
-                                  <span className={`text-[12px] font-bold px-3 py-1.5 rounded-lg ${compositeStatus.latestStatus.color} bg-opacity-15 ${compositeStatus.latestStatus.color.replace('text', 'bg')}`} title={compositeStatus.latestStatus.label}>
-                                    {compositeStatus.latestStatus.label}
-                                  </span>
-                                  {compositeStatus.latestStatus.expiryDate && (
-                                    <span className="text-[10px] text-gray-700 font-semibold">
-                                      {compositeStatus.latestStatus.expiryDate}
-                                    </span>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-sm text-amber-600 font-bold">
-                                  No Status
-                                </span>
-                              )}
-                              <span className="text-[10px] text-gray-600 font-semibold">
-                                ({compositeStatus.count}/{compositeStatus.total})
-                              </span>
-                            </>
-                          ) : (
-                            <div className="w-4 h-4 bg-gray-300 rounded-full animate-pulse" title="Checking status..." />
-                          )}
-                        </div>
+                        {renderDocumentStatus(col.task, reqItem, col.type, col.id, groupRelationshipData)}
                       </div>
-                    </TableCell>
-                  );
-                }
-
-                // For non-composite requirements, use existing logic
-                return (
-                  <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-2">
-                    <div className="flex items-center justify-center gap-1">
-                      {reqItem.hasTemplate && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
-                          onClick={() => handleGenerateTemplate(reqItem, col.task, col.type, col.id)}
-                          title={`Generate ${reqItem.documentDefinition?.display_name || reqItem.name} Template`}
-                          disabled={isPreparingTemplate}
-                        >
-                          {isPreparingTemplate ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3 mr-1" />}
-                          <span className="text-[10px] font-bold uppercase">Generate</span>
-                        </Button>
-                      )}
-
-                      {renderDocumentStatus(col.task, reqItem, col.type, col.id, groupRelationshipData)}
-                    </div>
-                  </TableCell>
-                );
-              })}
-            </TableRow>
-
-            {/* Expanded view for composite requirements showing individual document types */}
-            {isComposite && isCompositeExpanded && reqItem.kyc_document_ids?.map((docId: string, docIdx: number) => {
-              const docMetadata = documentMetadataCache.get(docId);
-              if (!docMetadata) return null;
-
-              return (
-                <TableRow key={`${requirementId}-doctype-${docIdx}`} className="bg-blue-50/30">
-                  <TableCell className="sticky left-0 border-r text-center text-[10px] text-gray-400 bg-blue-50/30">
-                    {reqIndex + 1}.{docIdx + 1}
-                  </TableCell>
-                  <TableCell className="sticky left-16 bg-blue-50/50 border-r pl-8">
-                    <div className="flex items-center gap-2">
-                      <FileText className="h-3 w-3 text-blue-600" />
-                      <span className="text-[11px] text-slate-700 font-medium">
-                        {docMetadata.display_name || docMetadata.name}
-                      </span>
-                    </div>
-                  </TableCell>
-                  {columnDefinitions.map((col, colIdx) => {
-                    const isApplicable = checkApplicability(col.type, reqItem);
-                    if (!isApplicable) {
-                      return (
-                        <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-1">
-                          <span className="text-[10px] text-gray-300">-</span>
-                        </TableCell>
-                      );
-                    }
-
-                    const docs = getDocumentsByType(docId, col.task, col.type, col.id);
-
-                    return (
-                      <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-1">
-                        <div className="flex items-center justify-center gap-1">
-                          {docs.length > 0 ? (
-                            <div className="flex items-center gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 w-6 p-0 text-green-600 hover:bg-green-100"
-                                onClick={() => handleViewDocuments(docs, docMetadata, col)}
-                                title={`View ${docs.length} document(s)`}
-                              >
-                                <Eye className="h-3 w-3" />
-                              </Button>
-                              {/* Document Status Badge */}
-                              {(() => {
-                                const personId = col.type === 'company' ? col.task.company_id : 
-                                               (col.type === 'principal' || col.type === 'director') ? col.task.individual_id : 
-                                               col.id;
-                                const statusKey = `${col.task.id}-${docId}-${col.type}-${personId}`;
-                                
-                                // Trigger status calculation and show loading state initially
-                                if (!documentStatusCache.has(statusKey)) {
-                                  getDocumentStatus(col.task, docId, col.type, personId);
-                                  return (
-                                    <div className="w-2 h-2 bg-gray-300 rounded-full animate-pulse" title="Checking status..." />
-                                  );
-                                }
-                                
-                                const status = documentStatusCache.get(statusKey);
-                                return status ? (
-                                  <span className={`text-[8px] font-medium px-1.5 py-0.5 rounded ${status.color} bg-opacity-10 ${status.color.replace('text', 'bg')}`} title={status.label}>
-                                    {status.label}
-                                  </span>
-                                ) : null;
-                              })()}
-                              {docs.length > 1 && (
-                                <span className="text-[9px] text-green-600 font-bold">{docs.length}</span>
-                              )}
-                            </div>
-                          ) : (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 w-6 p-0 text-amber-600 hover:bg-amber-50"
-                              onClick={() => {
-                                // Trigger upload for this specific document type
-                                setSelectedDocForUpload({
-                                  doc: docMetadata,
-                                  fields: docMetadata.fields,
-                                  person: { full_name: col.label },
-                                  task: col.task,
-                                  columnType: col.type,
-                                  columnId: col.id
-                                });
-                                setShowUploadModal(true);
-                              }}
-                              title={`Upload ${docMetadata.display_name || docMetadata.name}`}
-                            >
-                              <UploadCloud className="h-3 w-3" />
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                    );
-                  })}
-                </TableRow>
-              );
-            })}
-
-            {/* Expanded Field Data Rows (for non-composite or when not showing document types) */}
-            {!isComposite && isExpanded && fieldsToRender.map((field, fIdx) => (
-              <TableRow key={`${requirementId}-field-${field.id}`} className={`${reqIndex % 2 === 0 ? 'bg-slate-50/50' : 'bg-slate-100/50'}`}>
-                <TableCell className={`sticky left-0 border-r text-center text-[10px] text-gray-400 ${reqIndex % 2 === 0 ? 'bg-slate-50/50' : 'bg-slate-100/50'}`}>
-                  {reqIndex + 1}.{fIdx + 1}
-                </TableCell>
-                <TableCell className="sticky left-16 bg-slate-50 border-r pl-8 text-[11px] text-slate-500 italic">
-                  {field.name}
-                </TableCell>
-                {columnDefinitions.map((col, colIdx) => {
-                  const isApplicable = checkApplicability(col.type, reqItem);
-                  const docData = isApplicable ? getDocumentDataForPreview(col.task, reqItem, col.type, col.id) : null;
-                  return (
-                    <TableCell key={`${field.id}-val-${colIdx}`} className="text-center border p-1 text-[11px] text-slate-600">
-                      {isApplicable ? (docData?.extracted_details?.[field.name] || '-') : '-'}
                     </TableCell>
                   );
                 })}
               </TableRow>
-            ))}
-          </React.Fragment>
-        );
-      })}
+
+              {/* Expanded view for composite requirements showing individual document types */}
+              {isComposite && isCompositeExpanded && reqItem.kyc_document_ids?.map((docId: string, docIdx: number) => {
+                const docMetadata = documentMetadataCache.get(docId);
+                if (!docMetadata) return null;
+
+                return (
+                  <TableRow key={`${requirementId}-doctype-${docIdx}`} className="bg-blue-50/30">
+                    <TableCell className="sticky left-0 border-r text-center text-[10px] text-gray-400 bg-blue-50/30">
+                      {reqIndex + 1}.{docIdx + 1}
+                    </TableCell>
+                    <TableCell className="sticky left-16 bg-blue-50/50 border-r pl-8">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-3 w-3 text-blue-600" />
+                        <span className="text-[11px] text-slate-700 font-medium">
+                          {docMetadata.display_name || docMetadata.name}
+                        </span>
+                      </div>
+                    </TableCell>
+                    {columnDefinitions.map((col, colIdx) => {
+                      const isApplicable = checkApplicability(col.type, reqItem);
+                      if (!isApplicable) {
+                        return (
+                          <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-1">
+                            <span className="text-[10px] text-gray-300">-</span>
+                          </TableCell>
+                        );
+                      }
+
+                      const docs = getDocumentsByType(docId, col.task, col.type, col.id);
+
+                      return (
+                        <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-1">
+                          <div className="flex items-center justify-center gap-1">
+                            {docs.length > 0 ? (
+                              <div className="flex flex-col items-center gap-1">
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 w-6 p-0 text-green-600 hover:bg-green-100"
+                                    onClick={() => handleViewDocuments(docs, docMetadata, col)}
+                                    title={`View ${docs.length} document(s)`}
+                                  >
+                                    <Eye className="h-3 w-3" />
+                                  </Button>
+                                  {docs.length > 1 && (
+                                    <span className="text-[9px] text-green-600 font-bold">{docs.length}</span>
+                                  )}
+                                </div>
+
+                                {/* Document Status Badge */}
+                                {(() => {
+                                  const personId = col.type === 'company' ? col.task.company_id :
+                                    (col.type === 'principal' || col.type === 'director') ? col.task.individual_id :
+                                      col.id;
+                                  const statusKey = `${col.task.id}-${docId}-${col.type}-${personId}`;
+
+                                  // Trigger status calculation and show loading state initially
+                                  if (!documentStatusCache.has(statusKey)) {
+                                    getDocumentStatus(col.task, docId, col.type, personId);
+                                    return (
+                                      <div className="w-2 h-2 bg-gray-300 rounded-full animate-pulse" title="Checking status..." />
+                                    );
+                                  }
+
+                                  const status = documentStatusCache.get(statusKey);
+                                  return status ? renderStatusBadge(status) : null;
+                                })()}
+                              </div>
+                            ) : (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0 text-amber-600 hover:bg-amber-50"
+                                onClick={() => {
+                                  // Trigger upload for this specific document type
+                                  setSelectedDocForUpload({
+                                    doc: docMetadata,
+                                    fields: docMetadata.fields,
+                                    person: { full_name: col.label },
+                                    task: col.task,
+                                    columnType: col.type,
+                                    columnId: col.id
+                                  });
+                                  setShowUploadModal(true);
+                                }}
+                                title={`Upload ${docMetadata.display_name || docMetadata.name}`}
+                              >
+                                <UploadCloud className="h-3 w-3" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      );
+                    })}
+                  </TableRow>
+                );
+              })}
+
+              {/* Expanded Field Data Rows (for non-composite or when not showing document types) */}
+              {!isComposite && isExpanded && fieldsToRender.map((field, fIdx) => (
+                <TableRow key={`${requirementId}-field-${field.id}`} className={`${reqIndex % 2 === 0 ? 'bg-slate-50/50' : 'bg-slate-100/50'}`}>
+                  <TableCell className={`sticky left-0 border-r text-center text-[10px] text-gray-400 ${reqIndex % 2 === 0 ? 'bg-slate-50/50' : 'bg-slate-100/50'}`}>
+                    {reqIndex + 1}.{fIdx + 1}
+                  </TableCell>
+                  <TableCell className="sticky left-16 bg-slate-50 border-r pl-8 text-[11px] text-slate-500 italic">
+                    {field.name}
+                  </TableCell>
+                  {columnDefinitions.map((col, colIdx) => {
+                    const isApplicable = checkApplicability(col.type, reqItem);
+                    const docData = isApplicable ? getDocumentDataForPreview(col.task, reqItem, col.type, col.id) : null;
+                    return (
+                      <TableCell key={`${field.id}-val-${colIdx}`} className="text-center border p-1 text-[11px] text-slate-600">
+                        {isApplicable ? (() => {
+                          const val = docData?.extracted_details?.[field.name];
+                          if (val === null || val === undefined) return '-';
+                          if (typeof val === 'object') return JSON.stringify(val); // Prevents "Objects are not valid as React child"
+                          return String(val);
+                        })() : '-'}
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              ))}
+            </React.Fragment>
+          );
+        })}
       </React.Fragment>
     ));
   };

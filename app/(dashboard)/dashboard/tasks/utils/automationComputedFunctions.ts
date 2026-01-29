@@ -360,29 +360,42 @@ export async function getLatestDocumentNumber(individualId: string | number, com
     return "Number Not Found";
 }
 
-export async function getLatestDocumentExpiryDate(individualId: string | number, computedDocuments: string[], cache?: DocumentCache): Promise<string> {
-    console.log('getLatestDocumentExpiryDate called with individualId:', individualId, 'computedDocuments:', computedDocuments);
+export async function getLatestDocumentExpiryDate(
+    individualId: string | number, 
+    computedDocuments: string[], 
+    cache?: DocumentCache
+): Promise<string> {
+    if (!individualId) return "Expiry Not Found";
     
-    if (!individualId) {
-        console.log('individualId is null/undefined, returning Expiry Not Found');
-        return "Expiry Not Found";
-    }
-    
-    const commonPaths = ["extracted_details->>'Date_of_Expiry'", "extracted_details->>'Expiry_Date'", "extracted_details->>'Valid_Until'", "extracted_details->>'Expiration_Date'"];
-    for (const path of commonPaths) {
-        console.log('Checking path:', path);
-        const result = await extractFieldFromLatestDocument(individualId, computedDocuments, path, cache);
-        console.log('Result for path', path, ':', result);
-        if (result !== "Field Not Found" && result !== "Missing Document") {
-            const parsed = parseDateString(result);
-            if (parsed) {
-                console.log('Parsed expiry date:', parsed.toISOString().split('T')[0]);
-                return parsed.toISOString().split('T')[0];
-            }
-            return result;
+    // 1. Fetch doc and its metadata (using batch cache if provided)
+    const { docs, types } = await fetchDocsAndTypes(individualId, computedDocuments, cache);
+    if (docs.length === 0) return "Missing Document";
+
+    // 2. Sort by recency to get the latest one
+    const sorted = sortDocsByRecency(docs, types);
+    const latest = sorted[0];
+    const details = latest.doc.extracted_details || {};
+    const docType = latest.type;
+
+    // 3. DYNAMIC SEARCH: Find the field marked 'isEffectiveTo' in the KYC metadata
+    if (docType?.fields && Array.isArray(docType.fields)) {
+        const effectiveToField = docType.fields.find((f: any) => f.isEffectiveTo === true);
+        if (effectiveToField && details[effectiveToField.name]) {
+            const parsed = parseDateString(details[effectiveToField.name]);
+            if (parsed) return parsed.toISOString().split('T')[0];
         }
     }
-    console.log('No expiry date found in any path');
+
+    // 4. FALLBACK: Check common hardcoded paths if metadata search failed
+    const commonPaths = ["Date_of_Expiry", "Expiry_Date", "Valid_Until", "Expiration_Date", "Certificate Date"];
+    for (const path of commonPaths) {
+        const val = details[path];
+        if (val) {
+            const parsed = parseDateString(val);
+            if (parsed) return parsed.toISOString().split('T')[0];
+        }
+    }
+
     return "Expiry Not Found";
 }
 

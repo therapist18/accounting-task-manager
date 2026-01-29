@@ -2,7 +2,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect, useCallback, useReducer, useRef } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import {
     Dialog,
@@ -43,6 +43,7 @@ import { Card, CardDescription, CardContent, CardHeader, CardTitle } from "@/com
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
+import { useTableData, type TableColumn, type TableOption } from "@/lib/tableUtils"
 import { DataSourceConfiguration } from "./link-sources-dialog"
 
 // --- TYPES ---
@@ -65,16 +66,6 @@ interface ParentOptionItem {
     value: string;
 }
 
-interface JsonbArrayConfig {
-    fields: Array<{ id: string; name: string; type: string; parentField: string }>
-    maxItems: number
-}
-interface JsonbProperty {
-    id: string; name: string; type: string; isArray?: boolean; arrayConfig?: JsonbArrayConfig
-}
-interface TableColumn {
-    column_name: string; data_type: string; is_jsonb: boolean; jsonb_properties?: JsonbProperty[] | null
-}
 export type SourceCardState = {
     id: string
     source_type: "individual" | "document" | "company" | "field"
@@ -321,6 +312,9 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
     const [bulkInput, setBulkInput] = useState("")
     const [bulkProcessing, setBulkProcessing] = useState(false)
     const [fieldCards, setFieldCards] = useState<Array<{ id: string; data: any }>>([])
+
+    // Table data hook for fetching tables and fields
+    const { tables, loadingTables, fetchFieldsForTable, getFieldsForTable, getLoadingForTable } = useTableData()
 
     const processBulkInput = (input: string) => {
         const fieldNames = input.split(/[\n,]+/).map(name => name.trim()).filter(Boolean);
@@ -1141,6 +1135,11 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                             sources={card.data.sources || []}
                                             onChange={(newSources) => updateFieldCard(card.id, { sources: newSources })}
                                             documentTypes={formData.documentTypes}
+                                            tables={tables}
+                                            loadingTables={loadingTables}
+                                            fetchFieldsForTable={fetchFieldsForTable}
+                                            getFieldsForTable={getFieldsForTable}
+                                            getLoadingForTable={getLoadingForTable}
                                         />
                                     </div>
                                 </Card>
@@ -1563,7 +1562,16 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                 {isDependent && <span className="text-xs text-blue-600 italic bg-blue-50 px-2 py-0.5 rounded">Source Table for Children (Manual Mapping)</span>}
                             </div>
                             {fieldCards.length === 0 && (
-                                <DataSourceConfiguration sources={sources} onChange={setSources} documentTypes={formData.documentTypes} />
+                                <DataSourceConfiguration 
+                                    sources={sources} 
+                                    onChange={setSources} 
+                                    documentTypes={formData.documentTypes}
+                                    tables={tables}
+                                    loadingTables={loadingTables}
+                                    fetchFieldsForTable={fetchFieldsForTable}
+                                    getFieldsForTable={getFieldsForTable}
+                                    getLoadingForTable={getLoadingForTable}
+                                />
                             )}
                         </div>
 

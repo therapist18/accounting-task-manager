@@ -64,6 +64,11 @@ interface DataSourceConfigurationProps {
   sources: SourceCardState[]
   onChange: (sources: SourceCardState[]) => void
   documentTypes: Array<{ value: string; label: string }>
+  tables?: TableOption[]
+  loadingTables?: boolean
+  fetchFieldsForTable?: (tableName: string, index?: number) => void
+  getFieldsForTable?: (tableName: string, index?: number) => TableColumn[]
+  getLoadingForTable?: (tableName: string, index?: number) => boolean
 }
 
 // --- 1. MultiSelect Component ---
@@ -233,86 +238,47 @@ const getJsonPathOptions = (field: TableColumn) => {
   return options;
 };
 
-export function DataSourceConfiguration({ sources, onChange, documentTypes }: DataSourceConfigurationProps) {
-  const [tables, setTables] = useState<Array<{ name: string; label: string }>>([])
-  const [loadingTables, setLoadingTables] = useState(false)
-  
-  const [fieldState, dispatchField] = useReducer(fieldsReducer, {})
-  const fieldCacheRef = useRef<Record<string, TableColumn[]>>({})
-  const fetchInProgressRef = useRef<Record<string, boolean>>({})
+export function DataSourceConfiguration({ 
+  sources, 
+  onChange, 
+  documentTypes, 
+  tables = [], 
+  loadingTables = false, 
+  fetchFieldsForTable, 
+  getFieldsForTable, 
+  getLoadingForTable 
+}: DataSourceConfigurationProps) {
 
-  // Fetch Tables
-  useEffect(() => {
-    const fetchTables = async () => {
-      setLoadingTables(true)
-      const { data } = await supabase.rpc("get_all_tables")
-      if (data) {
-        setTables(data
-          .filter((t: any) => !t.table_name.startsWith("pg_") && !t.table_name.startsWith("sql_"))
-          .map((t: any) => ({ name: t.table_name, label: t.table_name }))
-          .sort((a: any, b: any) => a.label.localeCompare(b.label))
-        )
-      }
-      setLoadingTables(false)
-    }
-    fetchTables()
-  }, [])
-
-  // Fetch Fields
-  const fetchFieldsForTable = useCallback(async (tableName: string, index: number) => {
-    if (!tableName) return
-    
-    if (fieldCacheRef.current[tableName]) {
-      dispatchField({ type: 'SET_FIELDS', index, tableName, fields: fieldCacheRef.current[tableName] })
-      return
-    }
-
-    const fetchKey = `${tableName}-${index}`
-    if (fetchInProgressRef.current[fetchKey]) return
-    fetchInProgressRef.current[fetchKey] = true
-    
-    dispatchField({ type: 'SET_LOADING', index, tableName })
-
-    try {
-      const { data, error } = await supabase.rpc("get_table_columns", { input_table_name: tableName })
-      if (error) throw error
-      fieldCacheRef.current[tableName] = data || []
-      dispatchField({ type: 'SET_FIELDS', index, tableName, fields: data || [] })
-    } catch (error) {
-      console.error(`Error fetching columns:`, error)
-      toast({ title: "Error", description: "Failed to fetch columns", variant: "destructive" })
-      dispatchField({ type: 'SET_FIELDS', index, tableName, fields: [] })
-    } finally {
-      delete fetchInProgressRef.current[fetchKey]
-    }
-  }, [])
-
-  // Watcher
+  // Watcher - fetch fields when tables change
   useEffect(() => {
     sources.forEach((source, index) => {
-        if (!source.table) return;
-        const localState = fieldState[index];
-        const isMismatch = localState && localState.tableName !== source.table;
-        const needsFetch = !localState || (localState.fields.length === 0 && !localState.loading);
+        if (!source.table || !fetchFieldsForTable) return;
+        const currentFields = getFieldsForTable?.(source.table, index) || [];
+        const isLoading = getLoadingForTable?.(source.table, index) || false;
+        const needsFetch = currentFields.length === 0 && !isLoading;
 
-        if (isMismatch || needsFetch) {
+        if (needsFetch) {
            fetchFieldsForTable(source.table, index);
         }
     });
-  }, [sources, fieldState, fetchFieldsForTable]);
+  }, [sources, fetchFieldsForTable, getFieldsForTable, getLoadingForTable]);
 
-  // Sync
+  // Sync - update sources when fields are loaded
   useEffect(() => {
+    if (!getFieldsForTable || !getLoadingForTable) return;
+    
     let hasChanges = false;
     const updatedSources = sources.map((source, index) => {
-        const local = fieldState[index];
-        if (local && local.tableName === source.table) {
-            const currentFieldCount = source.fields?.length || 0;
-            const currentLoading = source.loadingFields;
-            if (currentFieldCount !== local.fields.length || currentLoading !== local.loading) {
-                hasChanges = true;
-                return { ...source, fields: local.fields, loadingFields: local.loading };
-            }
+        if (!source.table) return source;
+        
+        const currentFields = getFieldsForTable(source.table, index);
+        const isLoading = getLoadingForTable(source.table, index);
+        const currentFieldCount = source.fields?.length || 0;
+        const currentLoading = source.loadingFields;
+
+        if (currentFieldCount !== currentFields.length || currentLoading !== isLoading) {
+            hasChanges = true;
+            return { ...source, fields: currentFields, loadingFields: isLoading };
         }
         return source;
     });
@@ -320,21 +286,19 @@ export function DataSourceConfiguration({ sources, onChange, documentTypes }: Da
     if (hasChanges) {
         onChange(updatedSources);
     }
-  }, [fieldState, sources, onChange]);
-
+  }, [sources, onChange, getFieldsForTable, getLoadingForTable]);
 
   const addSource = () => onChange([...sources, { id: crypto.randomUUID(), source_type: "individual", table: "", path: "", priority: sources.length + 1, fields: [], linking_variable: "id" }])
   
   const removeSource = (index: number) => {
-     dispatchField({ type: 'RESET', index }); 
      onChange(sources.filter((_, i) => i !== index));
   }
   
   const updateSource = (index: number, updates: Partial<SourceCardState>) => {
     const newSources = [...sources];
-    if (updates.table && updates.table !== newSources[index].table) {
+    if (updates.table && updates.table !== newSources[index].table && fetchFieldsForTable) {
         newSources[index] = { ...newSources[index], ...updates, fields: [], path: "" };
-        dispatchField({ type: 'RESET', index }); 
+        fetchFieldsForTable(updates.table, index);
     } else {
         newSources[index] = { ...newSources[index], ...updates };
     }

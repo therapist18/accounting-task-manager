@@ -26,7 +26,7 @@ import {
   type AgeRangeType
 } from "@/lib/constants/entity-types"
 import { COMPUTED_FUNCTIONS, EXECUTION_MODES } from "@/lib/constants/computed-functions"
-import { Card } from '@/components/ui/card'
+import { useTableData, type TableOption } from "@/lib/tableUtils"
 
 export type ApplicantType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependent' | 'employee' | 'understudy';
 
@@ -78,7 +78,8 @@ export function EditRequirementDialog({
     hasTemplate: false,
     webdata: [],
     executionMode: 'latest',
-    computedFunction: 'none'
+    computedFunction: 'none',
+    sourceTable: ''
   })
   
   const [templates, setTemplates] = useState<any[]>([]);
@@ -86,6 +87,9 @@ export function EditRequirementDialog({
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
   const [automationTypes, setAutomationTypes] = useState<any[]>([])
   const [loadingKycDocs, setLoadingKycDocs] = useState(false)
+
+  // Table data hook for fetching available tables
+  const { tables, loadingTables } = useTableData()
 
   useEffect(() => {
     if (requirement && isOpen) {
@@ -365,6 +369,28 @@ export function EditRequirementDialog({
                         </Command>
                       </PopoverContent>
                     </Popover>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold text-slate-500">Source Table</Label>
+                    <Select value={formData.sourceTable || ''} onValueChange={(value) => updateField('sourceTable', value)}>
+                      <SelectTrigger className="bg-white h-9">
+                        <SelectValue placeholder="Select source table..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {loadingTables ? (
+                          <div className="px-2 py-1 text-sm text-slate-500">Loading tables...</div>
+                        ) : tables.length > 0 ? (
+                          tables.map(table => (
+                            <SelectItem key={table.name} value={table.name}>
+                              {table.label}
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <div className="px-2 py-1 text-sm text-slate-500">No tables available</div>
+                        )}
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   <div className="pt-4 border-t">

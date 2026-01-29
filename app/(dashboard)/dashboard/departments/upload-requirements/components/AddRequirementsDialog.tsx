@@ -26,6 +26,7 @@ import {
   type AgeRangeType
 } from "@/lib/constants/entity-types"
 import { COMPUTED_FUNCTIONS, EXECUTION_MODES } from "@/lib/constants/computed-functions"
+import { useTableData, type TableOption } from "@/lib/tableUtils"
 import { Card } from "@/components/ui/card"
 
 export type ApplicantType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependent' | 'employee' | 'understudy';
@@ -57,6 +58,7 @@ export interface RequirementForm {
   nationality?: NationalityType
   ageRange?: AgeRangeType
   dependantRelationships?: string[]
+  sourceTable?: string // Table where document data comes from
 }
 
 const DEFAULT_REQUIREMENT = (category: RequirementCategory): RequirementForm => ({
@@ -79,7 +81,8 @@ const DEFAULT_REQUIREMENT = (category: RequirementCategory): RequirementForm => 
   computedFunction: 'none',
   nationality: undefined,
   ageRange: undefined,
-  dependantRelationships: []
+  dependantRelationships: [],
+  sourceTable: ''
 })
 
 interface AddRequirementsDialogProps {
@@ -129,6 +132,9 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
   const [bulkInput, setBulkInput] = useState('')
   const [automationTypes, setAutomationTypes] = useState<any[]>([])
   const [masterFields, setMasterFields] = useState<any[]>([])
+
+  // Table data hook for fetching available tables
+  const { tables, loadingTables } = useTableData()
 
   useEffect(() => {
     if (isOpen) fetchInitialData()
@@ -507,6 +513,28 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                                 </PopoverContent>
                               </Popover>
                             </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label className="text-xs font-bold text-slate-500">Source Table</Label>
+                            <Select value={req.sourceTable || ''} onValueChange={(value) => updateCurrentReq(idx, { sourceTable: value })}>
+                              <SelectTrigger className="bg-white h-9">
+                                <SelectValue placeholder="Select source table..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {loadingTables ? (
+                                  <div className="px-2 py-1 text-sm text-slate-500">Loading tables...</div>
+                                ) : tables.length > 0 ? (
+                                  tables.map(table => (
+                                    <SelectItem key={table.name} value={table.name}>
+                                      {table.label}
+                                    </SelectItem>
+                                  ))
+                                ) : (
+                                  <div className="px-2 py-1 text-sm text-slate-500">No tables available</div>
+                                )}
+                              </SelectContent>
+                            </Select>
                           </div>
 
                           <div className="pt-4 border-t">
