@@ -11,6 +11,14 @@ import * as XLSX from 'xlsx'
 import { saveAs } from 'file-saver'
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import supabase from "@/lib/supabase/client"
+import { COMPUTED_FUNCTIONS } from "@/lib/constants/computed-functions"
+import { 
+  getLatestDocument, 
+  getAllDocuments, 
+  determineImmigrationStatus,
+  getLatestDocumentExpiryDate,
+  type DocumentCache 
+} from "../tasks/utils/automationComputedFunctions"
 let htmlDocx: any = null;
 import('html-docx-js/dist/html-docx')
   .then(module => {
@@ -118,6 +126,123 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
   // New state for document metadata cache
   const [documentMetadataCache, setDocumentMetadataCache] = useState<Map<string, any>>(new Map());
+  
+  // New state for document status cache
+  const [documentStatusCache, setDocumentStatusCache] = useState<Map<string, any>>(new Map());
+
+  // New state for composite status cache
+  const [compositeStatusCache, setCompositeStatusCache] = useState<Map<string, any>>(new Map());
+
+  // Function to get document status with caching - now inside component
+  const getDocumentStatus = async (task: any, docId: string, personType: string, personId: string) => {
+    const cacheKey = `${task.id}-${docId}-${personType}-${personId}`;
+    
+    // Check cache first
+    if (documentStatusCache.has(cacheKey)) {
+      return documentStatusCache.get(cacheKey);
+    }
+
+    try {
+      // Get the document metadata to check if it has isEffectiveTo field
+      const docMetadata = documentMetadataCache.get(docId);
+      if (!docMetadata) {
+        console.log('No document metadata found for:', docId);
+        const result = { status: 'unknown', label: 'Unknown', color: 'text-gray-400' };
+        setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)));
+        return result;
+      }
+
+      // Check if document type has isEffectiveTo field
+      const hasEffectiveToDate = docMetadata.fields?.some((field: any) => field.isEffectiveTo);
+      
+      if (!hasEffectiveToDate) {
+        console.log('Document has no effective to field:', docId);
+        const result = { status: 'valid', label: 'Valid', color: 'text-green-600' };
+        setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)));
+        return result;
+      }
+
+      console.log('Getting expiry date for:', docId, 'personId:', personId);
+      // Get expiry date using computed function
+      const expiryDate = await getLatestDocumentExpiryDate(personId, [docId]);
+      console.log('Expiry date result:', expiryDate);
+      
+      if (expiryDate.includes('Not Found')) {
+        console.log('No expiry date found for:', docId);
+        const result = { status: 'unknown', label: 'No Expiry', color: 'text-gray-400' };
+        setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)));
+        return result;
+      }
+
+      const expiry = new Date(expiryDate);
+      const now = new Date();
+      const thirtyDaysFromNow = new Date();
+      thirtyDaysFromNow.setDate(now.getDate() + 30);
+
+      let status, label, color;
+      
+      if (expiry < now) {
+        status = 'expired';
+        label = 'Expired';
+        color = 'text-red-600';
+      } else if (expiry < thirtyDaysFromNow) {
+        status = 'expiring';
+        label = 'Expiring Soon';
+        color = 'text-amber-600';
+      } else {
+        status = 'valid';
+        label = 'Valid';
+        color = 'text-green-600';
+      }
+
+      const result = { status, label, color, expiryDate: expiryDate };
+      console.log('Final status result:', result);
+      
+      // Cache the result
+      setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)));
+      
+      return result;
+    } catch (error) {
+      console.error('Error getting document status:', error);
+      const result = { status: 'error', label: 'Error', color: 'text-red-400' };
+      setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)));
+      return result;
+    }
+  };
+
+  // Update composite statuses when document statuses change
+  useEffect(() => {
+    // Trigger re-calculation of composite statuses when document cache changes
+    const updateCompositeStatuses = async () => {
+      // Clear composite cache to force recalculation
+      setCompositeStatusCache(new Map());
+    };
+    
+    if (documentStatusCache.size > 0) {
+      updateCompositeStatuses();
+    }
+  }, [documentStatusCache]);
+
+  // Filter requirements based on computed functions
+  const filteredRequirements = useMemo(() => {
+    if (!organizedRequirements.documents) return {};
+    
+    const filtered: any = {};
+    
+    Object.entries(organizedRequirements.documents).forEach(([key, reqList]: [string, any[]]) => {
+      filtered[key] = reqList.filter(req => {
+        // If no computed function or it's 'none', include it
+        if (!req.computed_function || req.computed_function === 'none') {
+          return true;
+        }
+        
+        // For now, include all requirements - we can add filtering logic later
+        return true;
+      });
+    });
+    
+    return filtered;
+  }, [organizedRequirements]);
 
   // RequirementsTableCombined.tsx - Around line 105
   const classDocsAndFields = useMemo(() => { return classRequirements?.[0]?.documents_and_fields || []; }, [classRequirements]);
@@ -907,39 +1032,125 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     return docData ? 'Uploaded' : 'Missing';
   }, [getDocumentDataForPreview]);
 
-  // NEW: Get composite requirement status
-  const getCompositeRequirementStatus = useCallback((reqItem: any, task: any, columnType: string, entityId?: number) => {
+  // NEW: Get composite requirement status with latest document status
+  const getCompositeRequirementStatus = useCallback(async (reqItem: any, task: any, columnType: string, entityId?: number) => {
+    const cacheKey = `${task.id}-${reqItem.id || reqItem.uniqueId}-${columnType}-${entityId}`;
+    console.log('Getting composite status for:', cacheKey);
+    
+    // Check cache first
+    if (compositeStatusCache.has(cacheKey)) {
+      console.log('Found cached composite status:', compositeStatusCache.get(cacheKey));
+      return compositeStatusCache.get(cacheKey);
+    }
+
     const kycDocIds = reqItem.kyc_document_ids || [];
-    if (kycDocIds.length === 0) return { type: 'missing', count: 0, total: kycDocIds.length };
+    console.log('KYC Doc IDs:', kycDocIds);
+    
+    if (kycDocIds.length === 0) {
+      const result = { type: 'missing', count: 0, total: kycDocIds.length, latestStatus: null };
+      setCompositeStatusCache(prev => new Map(prev.set(cacheKey, result)));
+      return result;
+    }
 
     let foundCount = 0;
+    let latestDoc = null;
+    let latestDocId = null;
 
     if (columnType === 'company') {
       const companyId = task.participants_details?.find(p => p.type === 'company')?.id || task.company_id;
       const companyDocs = allCompanyDocuments[companyId] || [];
+      console.log('Company docs for', companyId, ':', companyDocs.length);
 
       kycDocIds.forEach(docId => {
-        if (companyDocs.some(doc => doc.kyc_document_id === docId)) {
+        const docs = companyDocs.filter(doc => doc.kyc_document_id === docId);
+        if (docs.length > 0) {
           foundCount++;
+          // Find the most recent document
+          const mostRecent = docs.reduce((latest, doc) => {
+            return (!latest || new Date(doc.created_at) > new Date(latest.created_at)) ? doc : latest;
+          }, null);
+          if (mostRecent && (!latestDoc || new Date(mostRecent.created_at) > new Date(latestDoc.created_at))) {
+            latestDoc = mostRecent;
+            latestDocId = docId;
+          }
         }
       });
     } else {
       const individualId = entityId || task.applicant_details?.id || task.individual_id;
       const indDocs = allIndividualDocuments[individualId] || [];
+      console.log('Individual docs for', individualId, ':', indDocs.length);
 
       kycDocIds.forEach(docId => {
-        if (indDocs.some(doc => doc.document_id === docId)) {
+        const docs = indDocs.filter(doc => doc.document_id === docId);
+        if (docs.length > 0) {
           foundCount++;
+          // Find the most recent document
+          const mostRecent = docs.reduce((latest, doc) => {
+            return (!latest || new Date(doc.created_at) > new Date(latest.created_at)) ? doc : latest;
+          }, null);
+          if (mostRecent && (!latestDoc || new Date(mostRecent.created_at) > new Date(latestDoc.created_at))) {
+            latestDoc = mostRecent;
+            latestDocId = docId;
+          }
         }
       });
     }
 
-    return {
+    console.log('Found count:', foundCount, 'Latest doc ID:', latestDocId);
+
+    // Get status for the latest document
+    let latestStatus = null;
+    if (latestDocId) {
+      const personId = columnType === 'company' ? task.company_id : 
+                     (columnType === 'principal' || columnType === 'director') ? (task.individual_id || task.applicant_details?.id) : 
+                     entityId;
+      
+      console.log('Extracted personId:', personId, 'for columnType:', columnType, 'task:', task);
+      
+      // Get status synchronously from cache or trigger calculation
+      const statusKey = `${task.id}-${latestDocId}-${columnType}-${personId}`;
+      console.log('Status key for latest doc:', statusKey);
+      
+      // Check if status is already cached
+      if (documentStatusCache.has(statusKey)) {
+        latestStatus = documentStatusCache.get(statusKey);
+        console.log('Found cached status:', latestStatus);
+      } else {
+        // Trigger status calculation and use a temporary status
+        console.log('Triggering status calculation for:', latestDocId);
+        getDocumentStatus(task, latestDocId, columnType, personId).then(() => {
+          // After status is calculated, update composite cache
+          setTimeout(() => {
+            const updatedStatus = documentStatusCache.get(statusKey);
+            if (updatedStatus) {
+              const updatedResult = {
+                type: foundCount > 0 ? 'uploaded' : 'missing',
+                count: foundCount,
+                total: kycDocIds.length,
+                latestStatus: updatedStatus
+              };
+              setCompositeStatusCache(prev => new Map(prev.set(cacheKey, updatedResult)));
+            }
+          }, 100);
+        });
+        latestStatus = { status: 'calculating', label: 'Checking...', color: 'text-gray-400' };
+      }
+    }
+
+    const result = {
       type: foundCount > 0 ? 'uploaded' : 'missing',
       count: foundCount,
-      total: kycDocIds.length
+      total: kycDocIds.length,
+      latestStatus: latestStatus
     };
-  }, [allCompanyDocuments, allIndividualDocuments]);
+    
+    console.log('Final composite result:', result);
+    
+    // Cache the result
+    setCompositeStatusCache(prev => new Map(prev.set(cacheKey, result)));
+    
+    return result;
+  }, [allCompanyDocuments, allIndividualDocuments, documentStatusCache, compositeStatusCache, getDocumentStatus]);
 
   // NEW: Get documents by type for composite requirements
   const getDocumentsByType = useCallback((docTypeId: string, task: any, columnType: string, entityId?: number) => {
@@ -955,53 +1166,94 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   }, [allCompanyDocuments, allIndividualDocuments]);
 
   const renderDocumentSection = (requirementsList: any[], sectionName: string) => {
-    return requirementsList
+    // Group requirements by category
+    const groupedByCategory = requirementsList
       .sort((a, b) => (a.order || 0) - (b.order || 0))
-      .map((reqItem, reqIndex) => {
-        const requirementId = reqItem.uniqueId || reqItem.id;
-        const isExpanded = expandedDocuments.has(requirementId);
-        const isCompositeExpanded = expandedCompositeRequirements.has(requirementId);
+      .reduce((groups, reqItem) => {
+        const category = reqItem.category || 'general';
+        if (!groups[category]) {
+          groups[category] = [];
+        }
+        groups[category].push(reqItem);
+        return groups;
+      }, {} as Record<string, any[]>);
 
-        const docDef = reqItem.documentDefinition;
-        const fieldsToRender = docDef?.fields || [];
+    return Object.entries(groupedByCategory).map(([category, categoryReqs], categoryIndex) => (
+      <React.Fragment key={`${sectionName}-${category}`}>
+        {/* Category Header */}
+        {Object.keys(groupedByCategory).length > 1 && (
+          <TableRow className="bg-blue-50/50 border-b">
+            <TableCell colSpan={totalColumns} className="py-2 px-4 font-semibold text-blue-700 text-xs uppercase tracking-wider">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                {category === 'processing' && 'Processing Requirements'}
+                {category === 'issuance' && 'Issuance Requirements'}
+                {category === 'general' && 'General Requirements'}
+                {category === 'job-specific' && 'Job-Specific Requirements'}
+                {category !== 'processing' && category !== 'issuance' && category !== 'general' && category !== 'job-specific' && category.charAt(0).toUpperCase() + category.slice(1) + ' Requirements'}
+                <span className="text-blue-500 font-normal">({categoryReqs.length})</span>
+              </div>
+            </TableCell>
+          </TableRow>
+        )}
+        
+        {/* Category Requirements */}
+        {categoryReqs.map((reqItem, reqIndex) => {
+          const requirementId = reqItem.uniqueId || reqItem.id;
+          const isExpanded = expandedDocuments.has(requirementId);
+          const isCompositeExpanded = expandedCompositeRequirements.has(requirementId);
 
-        // Check if this is a composite requirement (multiple document types)
-        const isComposite = reqItem.isMultiDocument && reqItem.kyc_document_ids?.length > 1;
+          const docDef = reqItem.documentDefinition;
+          const fieldsToRender = docDef?.fields || [];
 
-        return (
-          <React.Fragment key={`${sectionName}-${requirementId}`}>
-            <TableRow className={`group hover:bg-gray-50 ${reqIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
-              <TableCell className={`sticky left-0 border-r z-10 text-center ${reqIndex % 2 === 0 ? 'bg-white group-hover:bg-gray-50' : 'bg-gray-50/30 group-hover:bg-gray-100'}`}>
-                {reqIndex + 1}
-              </TableCell>
-              <TableCell className={`sticky left-16 border-r z-10 ${reqIndex % 2 === 0 ? 'bg-white group-hover:bg-gray-50' : 'bg-gray-50/30 group-hover:bg-gray-100'}`}>
-                <div className="flex flex-col">
-                  <div className="flex justify-between items-center gap-2">
-                    <span className="truncate max-w-[250px] font-medium text-slate-700">
-                      {reqItem.name}
-                    </span>
-                  <div className="flex">
+          // Check if this is a composite requirement (multiple document types)
+          const isComposite = reqItem.isMultiDocument && reqItem.kyc_document_ids?.length > 1;
+
+          return (
+            <React.Fragment key={`${sectionName}-${category}-${requirementId}`}>
+              <TableRow className={`group hover:bg-gray-50 ${reqIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
+                <TableCell className={`sticky left-0 border-r z-10 text-center ${reqIndex % 2 === 0 ? 'bg-white group-hover:bg-gray-50' : 'bg-gray-50/30 group-hover:bg-gray-100'}`}>
+                  {reqIndex + 1}
+                </TableCell>
+                <TableCell className={`sticky left-16 border-r z-10 ${reqIndex % 2 === 0 ? 'bg-white group-hover:bg-gray-50' : 'bg-gray-50/30 group-hover:bg-gray-100'}`}>
+                  <div className="flex flex-col">
+                    <div className="flex justify-between items-center gap-2">
+                      <span className="truncate max-w-[250px] font-medium text-slate-700">
+                        {reqItem.name}
+                      </span>
+                      {/* Computed Function Badge */}
+                      {reqItem.computed_function && reqItem.computed_function !== 'none' && (
+                        (() => {
+                          const functionItem = COMPUTED_FUNCTIONS.find(fn => fn.value === reqItem.computed_function);
+                          return functionItem ? (
+                            <Badge variant="outline" className="text-[8px] px-1.5 py-0.5 ml-2" title={`Function: ${functionItem.label}`}>
+                              {functionItem.label}
+                            </Badge>
+                          ) : null;
+                        })()
+                      )}
+                    <div className="flex">
+                        {isComposite && (
+                        <Badge variant="solid" color="blue" className="ml-2">
+                          {reqItem.documentCount}
+                        </Badge>
+                      )}
+                      {!isComposite && fieldsToRender.length > 0 && (
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => toggleDocumentExpansion(requirementId)}>
+                          {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                        </Button>
+                      )}
                       {isComposite && (
-                      <Badge variant="solid" color="blue" className="ml-2">
-                        {reqItem.documentCount}
-                      </Badge>
-                    )}
-                    {!isComposite && fieldsToRender.length > 0 && (
-                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => toggleDocumentExpansion(requirementId)}>
-                        {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                      </Button>
-                    )}
-                    {isComposite && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0"
-                        onClick={() => toggleCompositeRequirement(requirementId)}
-                      >
-                        {isCompositeExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                      </Button>
-                    )}
-                  </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={() => toggleCompositeRequirement(requirementId)}
+                        >
+                          {isCompositeExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                        </Button>
+                      )}
+                    </div>
                   </div>
 
                   {/* Template and Automation Indicators */}
@@ -1037,7 +1289,16 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
                 // For composite requirements, show aggregated status
                 if (isComposite) {
-                  const status = getCompositeRequirementStatus(reqItem, col.task, col.type, col.id);
+                  const cacheKey = `${col.task.id}-${reqItem.id || reqItem.uniqueId}-${col.type}-${col.id}`;
+                  const compositeStatus = compositeStatusCache.get(cacheKey);
+                  
+                  // Trigger status calculation if not cached
+                  if (!compositeStatus) {
+                    getCompositeRequirementStatus(reqItem, col.task, col.type, col.id).then(status => {
+                      // Force re-render by updating cache
+                      setCompositeStatusCache(prev => new Map(prev.set(cacheKey, status)));
+                    });
+                  }
 
                   return (
                     <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-2">
@@ -1056,25 +1317,31 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                           </Button>
                         )}
 
-                        <div className="flex items-center gap-1">
-                          {status.type === 'uploaded' ? (
-                            <div className="flex flex-col items-center">
-                              <span className="text-xs text-green-600 font-bold">
-                                {status.count}/{status.total}
+                        <div className="flex items-center gap-3">
+                          {compositeStatus ? (
+                            <>
+                              {compositeStatus.latestStatus ? (
+                                <div className="flex flex-col items-center">
+                                  <span className={`text-[12px] font-bold px-3 py-1.5 rounded-lg ${compositeStatus.latestStatus.color} bg-opacity-15 ${compositeStatus.latestStatus.color.replace('text', 'bg')}`} title={compositeStatus.latestStatus.label}>
+                                    {compositeStatus.latestStatus.label}
+                                  </span>
+                                  {compositeStatus.latestStatus.expiryDate && (
+                                    <span className="text-[10px] text-gray-700 font-semibold">
+                                      {compositeStatus.latestStatus.expiryDate}
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-sm text-amber-600 font-bold">
+                                  No Status
+                                </span>
+                              )}
+                              <span className="text-[10px] text-gray-600 font-semibold">
+                                ({compositeStatus.count}/{compositeStatus.total})
                               </span>
-                              <span className="text-[8px] text-gray-500">
-                                types
-                              </span>
-                            </div>
+                            </>
                           ) : (
-                            <div className="flex flex-col items-center">
-                              <span className="text-xs text-amber-600 font-bold">
-                                0/{status.total}
-                              </span>
-                              <span className="text-[8px] text-gray-500">
-                                types
-                              </span>
-                            </div>
+                            <div className="w-4 h-4 bg-gray-300 rounded-full animate-pulse" title="Checking status..." />
                           )}
                         </div>
                       </div>
@@ -1151,6 +1418,28 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                               >
                                 <Eye className="h-3 w-3" />
                               </Button>
+                              {/* Document Status Badge */}
+                              {(() => {
+                                const personId = col.type === 'company' ? col.task.company_id : 
+                                               (col.type === 'principal' || col.type === 'director') ? col.task.individual_id : 
+                                               col.id;
+                                const statusKey = `${col.task.id}-${docId}-${col.type}-${personId}`;
+                                
+                                // Trigger status calculation and show loading state initially
+                                if (!documentStatusCache.has(statusKey)) {
+                                  getDocumentStatus(col.task, docId, col.type, personId);
+                                  return (
+                                    <div className="w-2 h-2 bg-gray-300 rounded-full animate-pulse" title="Checking status..." />
+                                  );
+                                }
+                                
+                                const status = documentStatusCache.get(statusKey);
+                                return status ? (
+                                  <span className={`text-[8px] font-medium px-1.5 py-0.5 rounded ${status.color} bg-opacity-10 ${status.color.replace('text', 'bg')}`} title={status.label}>
+                                    {status.label}
+                                  </span>
+                                ) : null;
+                              })()}
                               {docs.length > 1 && (
                                 <span className="text-[9px] text-green-600 font-bold">{docs.length}</span>
                               )}
@@ -1207,7 +1496,9 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             ))}
           </React.Fragment>
         );
-      });
+      })}
+      </React.Fragment>
+    ));
   };
 
   const checkForDraft = useCallback((docItem: any, task: any, colType: string, colId?: number): any => {

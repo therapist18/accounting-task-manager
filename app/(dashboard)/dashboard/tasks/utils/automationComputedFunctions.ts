@@ -361,15 +361,28 @@ export async function getLatestDocumentNumber(individualId: string | number, com
 }
 
 export async function getLatestDocumentExpiryDate(individualId: string | number, computedDocuments: string[], cache?: DocumentCache): Promise<string> {
+    console.log('getLatestDocumentExpiryDate called with individualId:', individualId, 'computedDocuments:', computedDocuments);
+    
+    if (!individualId) {
+        console.log('individualId is null/undefined, returning Expiry Not Found');
+        return "Expiry Not Found";
+    }
+    
     const commonPaths = ["extracted_details->>'Date_of_Expiry'", "extracted_details->>'Expiry_Date'", "extracted_details->>'Valid_Until'", "extracted_details->>'Expiration_Date'"];
     for (const path of commonPaths) {
+        console.log('Checking path:', path);
         const result = await extractFieldFromLatestDocument(individualId, computedDocuments, path, cache);
+        console.log('Result for path', path, ':', result);
         if (result !== "Field Not Found" && result !== "Missing Document") {
             const parsed = parseDateString(result);
-            if (parsed) return parsed.toISOString().split('T')[0];
+            if (parsed) {
+                console.log('Parsed expiry date:', parsed.toISOString().split('T')[0]);
+                return parsed.toISOString().split('T')[0];
+            }
             return result;
         }
     }
+    console.log('No expiry date found in any path');
     return "Expiry Not Found";
 }
 

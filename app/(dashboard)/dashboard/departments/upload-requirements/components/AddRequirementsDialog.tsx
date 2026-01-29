@@ -76,7 +76,7 @@ const DEFAULT_REQUIREMENT = (category: RequirementCategory): RequirementForm => 
   inputType: 'text',
   defaultValue: '',
   executionMode: 'latest',
-  computedFunction: 'getLatestDocument',
+  computedFunction: 'none',
   nationality: undefined,
   ageRange: undefined,
   dependantRelationships: []
@@ -451,33 +451,91 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                        </div>
                     ) : (
                       <div className="space-y-6">
-                        <div className="bg-slate-50 p-4 rounded-xl border space-y-4">
-                          <div className="grid grid-cols-3 gap-4">
+                        <div className="p-4 bg-white border rounded-xl shadow-sm space-y-4">
+                          <div className="space-y-2">
+                            <Label className="text-xs font-bold text-slate-500">Document Links</Label>
                             <div className="space-y-2">
-                              <Label className="text-[10px] uppercase font-bold text-slate-500">Doc Definitions</Label>
+                              {req.kycDocumentIds.length > 0 && (
+                                <div className="flex flex-wrap gap-1">
+                                  {req.kycDocumentIds.map(docId => {
+                                    const doc = kycDocuments.find(d => String(d.id) === String(docId))
+                                    return doc ? (
+                                      <Badge key={docId} variant="secondary" className="text-xs px-2 py-1">
+                                        {doc.display_name || doc.name}
+                                        <button
+                                          onClick={() => {
+                                            const current = req.kycDocumentIds;
+                                            const updated = current.filter(id => id !== String(docId));
+                                            updateCurrentReq(idx, { kycDocumentIds: updated });
+                                          }}
+                                          className="ml-1 hover:text-red-600"
+                                        >
+                                          <X className="h-3 w-3" />
+                                        </button>
+                                      </Badge>
+                                    ) : null
+                                  })}
+                                </div>
+                              )}
                               <Popover>
-                                <PopoverTrigger asChild><Button variant="outline" className="w-full justify-between h-9 text-xs bg-white">{req.kycDocumentIds.length > 0 ? `${req.kycDocumentIds.length} Linked` : "Link KYC..."}</Button></PopoverTrigger>
-                                <PopoverContent className="w-[300px] p-0"><Command><CommandInput placeholder="Search documents..." /><CommandList className="max-h-[200px]">{kycDocuments.map(doc => (
-                                  <CommandItem key={doc.id} onSelect={() => {
-                                    const current = req.kycDocumentIds;
-                                    const updated = current.includes(String(doc.id)) ? current.filter(id => id !== String(doc.id)) : [...current, String(doc.id)];
-                                    updateCurrentReq(idx, { kycDocumentIds: updated });
-                                  }}><Check className={cn("mr-2 h-3 w-3", req.kycDocumentIds.includes(String(doc.id)) ? "opacity-100" : "opacity-0")} />{doc.display_name || doc.name}</CommandItem>
-                                ))}</CommandList></Command></PopoverContent>
+                                <PopoverTrigger asChild>
+                                  <Button variant="outline" className="w-full justify-between border-dashed border-2 hover:border-primary hover:bg-slate-50 transition-all">
+                                    <span className="text-slate-400">Add document links...</span>
+                                    <Search className="h-4 w-4 opacity-50" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-[450px] p-0" align="start">
+                                  <Command>
+                                    <CommandInput placeholder="Search documents..." />
+                                    <CommandList>
+                                      <CommandGroup className="max-h-[300px] overflow-y-auto">
+                                        {kycDocuments.map(doc => (
+                                          <CommandItem key={doc.id} onSelect={() => {
+                                            const current = req.kycDocumentIds;
+                                            const updated = current.includes(String(doc.id)) 
+                                              ? current.filter(id => id !== String(doc.id)) 
+                                              : [...current, String(doc.id)];
+                                            updateCurrentReq(idx, { kycDocumentIds: updated });
+                                          }}>
+                                            <Check className={cn("mr-2 h-4 w-4", req.kycDocumentIds.includes(String(doc.id)) ? "opacity-100" : "opacity-0")} />
+                                            {doc.display_name || doc.name}
+                                          </CommandItem>
+                                        ))}
+                                      </CommandGroup>
+                                    </CommandList>
+                                  </Command>
+                                </PopoverContent>
                               </Popover>
                             </div>
+                          </div>
+
+                          <div className="pt-4 border-t">
                             <div className="space-y-2">
-                              <Label className="text-[10px] uppercase font-bold text-slate-500">Execution Mode</Label>
-                              <Select value={req.executionMode} onValueChange={(v: any) => updateCurrentReq(idx, { executionMode: v })}>
-                                <SelectTrigger className="bg-white h-9 text-xs"><SelectValue /></SelectTrigger>
-                                <SelectContent>{EXECUTION_MODES.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}</SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-2">
-                              <Label className="text-[10px] uppercase font-bold text-slate-500">Extraction Function</Label>
-                              <Select value={req.computedFunction} onValueChange={(v) => updateCurrentReq(idx, { computedFunction: v })}>
-                                <SelectTrigger className="bg-white h-9 text-xs"><SelectValue /></SelectTrigger>
-                                <SelectContent>{COMPUTED_FUNCTIONS.map(f => <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>)}</SelectContent>
+                              <Label className="text-xs font-bold text-slate-500">Extraction / Computed Function</Label>
+                              <Select value={req.computedFunction} onValueChange={(v) => {
+                                updateCurrentReq(idx, { computedFunction: v })
+                                // Auto-derive execution mode from function (only if not None)
+                                if (v === 'none') {
+                                  updateCurrentReq(idx, { executionMode: '' })
+                                } else if (v.includes('Latest')) {
+                                  updateCurrentReq(idx, { executionMode: 'latest' })
+                                } else {
+                                  updateCurrentReq(idx, { executionMode: 'all' })
+                                }
+                              }}>
+                                <SelectTrigger className="bg-slate-50 border-slate-200 h-10">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {COMPUTED_FUNCTIONS.map(fn => (
+                                    <SelectItem key={fn.value} value={fn.value} className="text-sm">
+                                      <div className="flex flex-col py-0.5">
+                                        <span className="font-medium">{fn.label}</span>
+                                        <span className="text-[10px] text-slate-500">{fn.value === 'getLatestDocument' ? 'Returns the full document object.' : 'Returns specific field from document metadata.'}</span>
+                                      </div>
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
                               </Select>
                             </div>
                           </div>
