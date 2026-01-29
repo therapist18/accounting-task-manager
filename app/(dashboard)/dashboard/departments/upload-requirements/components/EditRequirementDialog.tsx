@@ -27,6 +27,7 @@ import {
 } from "@/lib/constants/entity-types"
 import { COMPUTED_FUNCTIONS, EXECUTION_MODES } from "@/lib/constants/computed-functions"
 import { useTableData, type TableOption } from "@/lib/tableUtils"
+import { Card } from '@/components/ui/card'
 
 export type ApplicantType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependent' | 'employee' | 'understudy';
 
