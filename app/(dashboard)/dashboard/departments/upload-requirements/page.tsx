@@ -25,6 +25,7 @@ import { DepartmentSidebar } from "@/app/(dashboard)/dashboard/departments/main-
 import { EditRequirementDialog } from "./components/EditRequirementDialog"
 import { AddRequirementsDialog } from "./components/AddRequirementsDialog"
 import { EditJobQuestionDialog } from "./components/EditJobQuestionDialog"
+import { COMPUTED_FUNCTIONS } from "@/lib/constants/computed-functions"
 
 interface Department {
   id: string | number
@@ -536,6 +537,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                 <TableHead className="border-r">Type</TableHead>
                 <TableHead className="border-r">Applies To</TableHead>
                 <TableHead className="border-r">Documents</TableHead>
+                <TableHead className="border-r">Function</TableHead>
                 <TableHead className="border-r">Web Data</TableHead>
                 <TableHead className="border-r">Automation</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -558,6 +560,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                         <TableCell className="border-r">{getTypeDisplay(req)}</TableCell>
                         <TableCell className="border-r">{getContextDisplay(req)}</TableCell>
                         <TableCell className="border-r">{getDocumentsDisplay(req)}</TableCell>
+                        <TableCell className="border-r">{getFunctionDisplay(req)}</TableCell>
                         <TableCell className="border-r">
                           {(() => {
                             const hasWebData = req.webdata && req.webdata.length > 0;
@@ -595,7 +598,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                       {/* EXPANDED WEB DATA ROW */}
                       {isExpanded && hasWebData && (
                         <TableRow className="bg-slate-50 hover:bg-slate-50">
-                          <TableCell colSpan={8} className="p-0 border-b border-t shadow-inner">
+                          <TableCell colSpan={9} className="p-0 border-b border-t shadow-inner">
                             <div className="p-4 pl-12">
                               <div className="flex items-center gap-2 mb-3 text-blue-600">
                                 <Database className="h-4 w-4" />
@@ -689,6 +692,28 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     }
     if (indicators.length === 0) return <span className="text-gray-400 text-[11px]">None</span>
     return <div className="flex flex-col gap-1">{indicators}</div>
+  }
+
+  const getFunctionDisplay = (req: RequirementTableEntry) => {
+    const computedFunction = req.computed_function || req.computedFunction || 'none'
+    const functionItem = COMPUTED_FUNCTIONS.find(fn => fn.value === computedFunction)
+    
+    if (!functionItem || computedFunction === 'none') {
+      return <span className="text-gray-400 text-[11px]">None</span>
+    }
+    
+    return (
+      <div className="flex items-center gap-1">
+        <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">
+          {functionItem.label}
+        </Badge>
+        {req.execution_mode && (
+          <span className="text-[9px] text-slate-500">
+            ({req.execution_mode === 'latest' ? 'Latest' : 'All'})
+          </span>
+        )}
+      </div>
+    )
   }
 
   const getDocumentsDisplay = (req: RequirementTableEntry) => {

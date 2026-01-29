@@ -32,6 +32,7 @@ import {
     PopoverTrigger
 } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
+import { COMPUTED_FUNCTIONS, ARITHMETIC_OPERATIONS, DATE_DIFF_UNITS, LINKING_VARIABLES, SOURCE_TYPES } from "@/lib/constants/computed-functions"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
 import { supabase } from "@/lib/supabase/client"
@@ -65,203 +66,197 @@ interface ParentOptionItem {
 }
 
 interface JsonbArrayConfig {
-  fields: Array<{ id: string; name: string; type: string; parentField: string }>
-  maxItems: number
+    fields: Array<{ id: string; name: string; type: string; parentField: string }>
+    maxItems: number
 }
 interface JsonbProperty {
-  id: string; name: string; type: string; isArray?: boolean; arrayConfig?: JsonbArrayConfig
+    id: string; name: string; type: string; isArray?: boolean; arrayConfig?: JsonbArrayConfig
 }
 interface TableColumn {
-  column_name: string; data_type: string; is_jsonb: boolean; jsonb_properties?: JsonbProperty[] | null
+    column_name: string; data_type: string; is_jsonb: boolean; jsonb_properties?: JsonbProperty[] | null
 }
 export type SourceCardState = {
-  id: string
-  source_type: "individual" | "document" | "company" | "field"
-  table: string
-  path: string
-  priority: number
-  linking_variable?: "id" | "individual_id" | "director_id" | "kyc_document_id" | "company_id" | null
-  document_id?: string[] | null
-  fields?: TableColumn[]
-  loadingFields?: boolean
+    id: string
+    source_type: "individual" | "document" | "company" | "field"
+    table: string
+    path: string
+    priority: number
+    linking_variable?: "id" | "individual_id" | "director_id" | "kyc_document_id" | "company_id" | null
+    document_id?: string[] | null
+    fields?: TableColumn[]
+    loadingFields?: boolean
 }
 
-const COMPUTED_FUNCTIONS = [
-    { value: "getLatestDocumentNumber", label: "Get Document Number (e.g. Passport No)" },
-    { value: "getLatestDocumentExpiryDate", label: "Get Expiry Date" },
-    { value: "getLatestDocumentIssueDate", label: "Get Issue Date" },
-    { value: "determineImmigrationStatus", label: "Determine Immigration Status" },
-    { value: "getLatestWorkPermit", label: "Get Latest Work Permit No" },
-    { value: "getEducationalDetails", label: "Extract Educational History (Array)" },
-    { value: "calculateArithmetic", label: "Arithmetic Calculation (Plus, Minus, etc.)" },
-    { value: "calculateDateDifference", label: "Date Difference (Days, Months, Years)" },
-]
-
-const ARITHMETIC_OPERATIONS = [
-    { value: "plus", label: "Addition (+)" },
-    { value: "minus", label: "Subtraction (-)" },
-    { value: "multiply", label: "Multiplication (×)" },
-    { value: "divide", label: "Division (÷)" },
-]
-
-const DATE_DIFF_UNITS = [
-    { value: "days", label: "Days" },
-    { value: "months", label: "Months" },
-    { value: "years", label: "Years" },
-]
+const DEFAULT_CARD_DATA = (name = "", category = "General") => ({
+    field_key: name.toLowerCase().replace(/[^a-z0-9]/g, '_'),
+    label: name,
+    type: 'text',
+    is_required: false,
+    category: category,
+    is_computed: false,
+    computed_function: "",
+    computed_config: {
+        document_ids: [],
+        arithmeticConfig: {}
+    },
+    sources: [],
+    fieldType: 'normal',
+    optionsText: "",
+    isDependent: false,
+    dependentFieldId: undefined,
+    dependencyConfig: { mode: 'db_filter', valueKey: "name", label_key: "name", parentOptionKey: "parent_id" },
+    manualMapping: {}
+})
 
 // --- HELPER COMPONENTS FOR DATA SOURCE CONFIG ---
 
 function MultiSelectBox({ options, selectedValues, onChange, placeholder = "Select items..." }: { options: Array<{ value: string; label: string }>, selectedValues: string[], onChange: (values: string[]) => void, placeholder?: string }) {
-  const [open, setOpen] = useState(false)
-  const [searchTerm, setSearchTerm] = useState("")
-  
-  const handleSelect = (value: string) => {
-    if (selectedValues.includes(value)) onChange(selectedValues.filter((item) => item !== value))
-    else onChange([...selectedValues, value])
-  }
-  const handleRemove = (value: string) => onChange(selectedValues.filter((item) => item !== value))
+    const [open, setOpen] = useState(false)
+    const [searchTerm, setSearchTerm] = useState("")
 
-  const filteredOptions = options.filter(option =>
-    option.label.toLowerCase().includes(searchTerm.toLowerCase())
-  )
+    const handleSelect = (value: string) => {
+        if (selectedValues.includes(value)) onChange(selectedValues.filter((item) => item !== value))
+        else onChange([...selectedValues, value])
+    }
+    const handleRemove = (value: string) => onChange(selectedValues.filter((item) => item !== value))
 
-  return (
-    <div className="space-y-2">
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between bg-white h-auto min-h-[40px] py-2">
-            <span className="text-muted-foreground text-sm font-normal">{selectedValues.length > 0 ? `${selectedValues.length} selected` : placeholder}</span>
-            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-[350px] p-0" align="start">
-          <div className="p-3 border-b">
-            <Input
-              placeholder="Search..."
-              className="h-9 text-sm"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-          <ScrollArea className="h-[200px]">
-            <div className="p-1">
-              {filteredOptions.length === 0 ? (
-                <div className="py-6 text-center text-sm text-slate-500">
-                  No results found.
-                </div>
-              ) : (
-                filteredOptions.map((option) => {
-                  const isSelected = selectedValues.includes(option.value)
-                  return (
-                    <div
-                      key={option.value}
-                      className="flex items-center gap-2 p-2 rounded-sm hover:bg-slate-100 cursor-pointer"
-                      onClick={() => handleSelect(option.value)}
-                    >
-                      <div className={cn("mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary", isSelected ? "bg-primary text-primary-foreground" : "opacity-50 [&_svg]:invisible")}>
-                        <Check className={cn("h-4 w-4")} />
-                      </div>
-                      <span>{option.label}</span>
+    const filteredOptions = options.filter(option =>
+        option.label.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+
+    return (
+        <div className="space-y-2">
+            <Popover open={open} onOpenChange={setOpen}>
+                <PopoverTrigger asChild>
+                    <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between bg-white h-auto min-h-[40px] py-2">
+                        <span className="text-muted-foreground text-sm font-normal">{selectedValues.length > 0 ? `${selectedValues.length} selected` : placeholder}</span>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[350px] p-0" align="start">
+                    <div className="p-3 border-b">
+                        <Input
+                            placeholder="Search..."
+                            className="h-9 text-sm"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
                     </div>
-                  )
-                })
-              )}
-            </div>
-          </ScrollArea>
-        </PopoverContent>
-      </Popover>
-      {selectedValues.length > 0 && (
-        <div className="flex flex-wrap gap-2 mt-2">
-          {selectedValues.map((val) => {
-            const label = options.find(o => o.value === val)?.label || val
-            return (
-              <Badge key={val} variant="secondary" className="flex items-center gap-1 pr-1 py-1">
-                <span className="truncate max-w-[200px]">{label}</span>
-                <Button variant="ghost" size="icon" className="h-4 w-4 rounded-full hover:bg-slate-200" onClick={() => handleRemove(val)}><X className="h-3 w-3" /></Button>
-              </Badge>
-            )
-          })}
+                    <ScrollArea className="h-[200px]">
+                        <div className="p-1">
+                            {filteredOptions.length === 0 ? (
+                                <div className="py-6 text-center text-sm text-slate-500">
+                                    No results found.
+                                </div>
+                            ) : (
+                                filteredOptions.map((option) => {
+                                    const isSelected = selectedValues.includes(option.value)
+                                    return (
+                                        <div
+                                            key={option.value}
+                                            className="flex items-center gap-2 p-2 rounded-sm hover:bg-slate-100 cursor-pointer"
+                                            onClick={() => handleSelect(option.value)}
+                                        >
+                                            <div className={cn("mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary", isSelected ? "bg-primary text-primary-foreground" : "opacity-50 [&_svg]:invisible")}>
+                                                <Check className={cn("h-4 w-4")} />
+                                            </div>
+                                            <span>{option.label}</span>
+                                        </div>
+                                    )
+                                })
+                            )}
+                        </div>
+                    </ScrollArea>
+                </PopoverContent>
+            </Popover>
+            {selectedValues.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                    {selectedValues.map((val) => {
+                        const label = options.find(o => o.value === val)?.label || val
+                        return (
+                            <Badge key={val} variant="secondary" className="flex items-center gap-1 pr-1 py-1">
+                                <span className="truncate max-w-[200px]">{label}</span>
+                                <Button variant="ghost" size="icon" className="h-4 w-4 rounded-full hover:bg-slate-200" onClick={() => handleRemove(val)}><X className="h-3 w-3" /></Button>
+                            </Badge>
+                        )
+                    })}
+                </div>
+            )}
         </div>
-      )}
-    </div>
-  )
+    )
 }
 
 function SearchableSelect({ value, onValueChange, options, placeholder = "Select...", searchPlaceholder = "Search...", loading = false, emptyMessage = "No results found." }: any) {
-  const [open, setOpen] = useState(false)
-  const [searchTerm, setSearchTerm] = useState("")
-  
-  const filteredOptions = options.filter((option: any) =>
-    option.label.toLowerCase().includes(searchTerm.toLowerCase())
-  )
-  
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between font-normal text-slate-900 bg-white">
-          <span className="truncate">{value ? options.find((f: any) => f.value === value)?.label || value : <span className="text-muted-foreground">{loading ? "Loading..." : placeholder}</span>}</span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[300px] p-0" align="start">
-        <div className="p-3 border-b">
-          <Input
-            placeholder={searchPlaceholder}
-            className="h-9 text-sm"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-        <ScrollArea className="h-[200px]">
-          <div className="p-1">
-            {loading ? (
-              <div className="py-6 text-center text-sm text-slate-500">
-                Loading...
-              </div>
-            ) : filteredOptions.length === 0 ? (
-              <div className="py-6 text-center text-sm text-slate-500">
-                {emptyMessage}
-              </div>
-            ) : (
-              filteredOptions.map((framework: any) => (
-                <div
-                  key={framework.value}
-                  className="flex items-center gap-2 p-2 rounded-sm hover:bg-slate-100 cursor-pointer"
-                  onClick={() => {
-                    onValueChange(framework.value)
-                    setOpen(false)
-                  }}
-                >
-                  <Check className={cn("mr-2 h-4 w-4", value === framework.value ? "opacity-100" : "opacity-0")} />
-                  {framework.label}
+    const [open, setOpen] = useState(false)
+    const [searchTerm, setSearchTerm] = useState("")
+
+    const filteredOptions = options.filter((option: any) =>
+        option.label.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+
+    return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between font-normal text-slate-900 bg-white">
+                    <span className="truncate">{value ? options.find((f: any) => f.value === value)?.label || value : <span className="text-muted-foreground">{loading ? "Loading..." : placeholder}</span>}</span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[300px] p-0" align="start">
+                <div className="p-3 border-b">
+                    <Input
+                        placeholder={searchPlaceholder}
+                        className="h-9 text-sm"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                    />
                 </div>
-              ))
-            )}
-          </div>
-        </ScrollArea>
-      </PopoverContent>
-    </Popover>
-  )
+                <ScrollArea className="h-[200px]">
+                    <div className="p-1">
+                        {loading ? (
+                            <div className="py-6 text-center text-sm text-slate-500">
+                                Loading...
+                            </div>
+                        ) : filteredOptions.length === 0 ? (
+                            <div className="py-6 text-center text-sm text-slate-500">
+                                {emptyMessage}
+                            </div>
+                        ) : (
+                            filteredOptions.map((framework: any) => (
+                                <div
+                                    key={framework.value}
+                                    className="flex items-center gap-2 p-2 rounded-sm hover:bg-slate-100 cursor-pointer"
+                                    onClick={() => {
+                                        onValueChange(framework.value)
+                                        setOpen(false)
+                                    }}
+                                >
+                                    <Check className={cn("mr-2 h-4 w-4", value === framework.value ? "opacity-100" : "opacity-0")} />
+                                    {framework.label}
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </ScrollArea>
+            </PopoverContent>
+        </Popover>
+    )
 }
 
 // Reducer for DataSource fields
 type FieldAction = { type: 'SET_LOADING'; index: number } | { type: 'SET_FIELDS'; index: number; fields: TableColumn[] } | { type: 'CLEAR_LOADING'; index: number }
 function fieldsReducer(state: Record<number, { fields: TableColumn[]; loading: boolean }>, action: FieldAction) {
-  switch (action.type) {
-    case 'SET_LOADING': return { ...state, [action.index]: { fields: state[action.index]?.fields || [], loading: true } }
-    case 'SET_FIELDS': return { ...state, [action.index]: { fields: action.fields, loading: false } }
-    case 'CLEAR_LOADING': return { ...state, [action.index]: { ...state[action.index], loading: false } }
-    default: return state
-  }
+    switch (action.type) {
+        case 'SET_LOADING': return { ...state, [action.index]: { fields: state[action.index]?.fields || [], loading: true } }
+        case 'SET_FIELDS': return { ...state, [action.index]: { fields: action.fields, loading: false } }
+        case 'CLEAR_LOADING': return { ...state, [action.index]: { ...state[action.index], loading: false } }
+        default: return state
+    }
 }
-
-
-// --- MAIN DIALOG COMPONENT ---
 
 export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFields = [], mode }: FieldDialogProps) {
     const isEditMode = mode === 'edit' || (field !== null && field !== undefined)
-    
+
     const [formData, setFormData] = useState<Partial<JobFieldUpdate> & {
         fieldType: 'normal' | 'dropdown';
         dependentFieldId?: string;
@@ -280,7 +275,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
         documentTypes: Array<{ value: string; label: string }>;
         is_computed: boolean;
         computed_function: string;
-        computed_config: { 
+        computed_config: {
             document_ids?: string[];
             arithmeticConfig?: {
                 operation?: string;
@@ -308,22 +303,66 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
     const [loading, setLoading] = useState(false)
     const [isDependent, setIsDependent] = useState(false)
     const [existingCategories, setExistingCategories] = useState<string[]>([])
-    
+
     const [openCategoryCombo, setOpenCategoryCombo] = useState(false)
     const [openParentCombo, setOpenParentCombo] = useState(false)
     const [openFunctionCombo, setOpenFunctionCombo] = useState(false)
 
-    const [parentFieldOptions, setParentFieldOptions] = useState<ParentOptionItem[]>([]) 
+    const [parentFieldOptions, setParentFieldOptions] = useState<ParentOptionItem[]>([])
     const [loadingParentOptions, setLoadingParentOptions] = useState(false)
-    const [currentParentValue, setCurrentParentValue] = useState("") 
-    const [currentChildInput, setCurrentChildInput] = useState("") 
-    const [currentChildList, setCurrentChildList] = useState<DropdownOption[]>([]) 
+    const [currentParentValue, setCurrentParentValue] = useState("")
+    const [currentChildInput, setCurrentChildInput] = useState("")
+    const [currentChildList, setCurrentChildList] = useState<DropdownOption[]>([])
     const [openParentValueCombo, setOpenParentValueCombo] = useState(false)
     const [masterFields, setMasterFields] = useState<Array<{ id: string; label: string; field_key: string }>>([])
     const [loadingMasterFields, setLoadingMasterFields] = useState(false)
 
     // Bulk input for add mode
     const [bulkInput, setBulkInput] = useState("")
+    const [bulkProcessing, setBulkProcessing] = useState(false)
+    const [fieldCards, setFieldCards] = useState<Array<{ id: string; data: any }>>([])
+
+    const processBulkInput = (input: string) => {
+        const fieldNames = input.split(/[\n,]+/).map(name => name.trim()).filter(Boolean);
+        const newCards = fieldNames.map((name, index) => ({
+            id: `field-${Date.now()}-${index}`,
+            data: DEFAULT_CARD_DATA(name, formData.category)
+        }));
+        setFieldCards(prev => [...prev, ...newCards]);
+        setBulkInput("");
+    };
+
+    const addSingleFieldCard = () => {
+        setFieldCards(prev => [...prev, {
+            id: `field-${Date.now()}`,
+            data: DEFAULT_CARD_DATA("", formData.category)
+        }]);
+    };
+
+    const handleBulkInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const newValue = e.target.value
+        setBulkInput(newValue)
+
+        // Auto-process if it looks like user pasted content (contains newlines or multiple commas)
+        if (newValue.includes('\n') || (newValue.match(/,/g) || []).length > 2) {
+            // Small delay to ensure the textarea value is updated
+            setTimeout(() => processBulkInput(newValue), 100)
+        }
+    }
+
+    const handleBulkAdd = () => {
+        processBulkInput(bulkInput)
+    }
+
+    const updateFieldCard = (cardId: string, fieldData: any) => {
+        setFieldCards(prev => prev.map(card =>
+            card.id === cardId ? { ...card, data: { ...card.data, ...fieldData } } : card
+        ))
+    }
+
+    const removeFieldCard = (cardId: string) => {
+        setFieldCards(prev => prev.filter(card => card.id !== cardId))
+    }
 
     const dropdownFields = availableFields.filter(f => f.type === 'select' && f.id !== field?.id)
 
@@ -339,7 +378,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                         if (typeof opt === 'string') {
                             if (opt.includes('\n') || opt.includes(',')) {
                                 const splits = opt.split(/[\n,]+/).map((s: string) => s.trim()).filter(Boolean);
-                                splits.forEach(s => results.push({ label: s, value: s })); 
+                                splits.forEach(s => results.push({ label: s, value: s }));
                             } else {
                                 results.push({ label: opt.trim(), value: opt.trim() });
                             }
@@ -347,11 +386,11 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                             results.push(opt as ParentOptionItem);
                         }
                     });
-                } 
+                }
                 else if (parentField.sources && parentField.sources.length > 0) {
                     const source = parentField.sources[0];
                     if (source.table) {
-                        const labelCol = source.path || 'name'; 
+                        const labelCol = source.path || 'name';
                         const { data: dbOptions } = await supabase.from(source.table).select('*').limit(100);
                         if (dbOptions) {
                             dbOptions.forEach((row: any) => {
@@ -365,7 +404,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                 const uniqueResults = Array.from(new Map(results.map(item => [item.value, item])).values());
                 const sorted = uniqueResults.sort((a, b) => a.label.localeCompare(b.label));
                 setParentFieldOptions(sorted);
-                return sorted; 
+                return sorted;
             }
         } catch (e) { console.error("Error fetching parent options", e); } finally { setLoadingParentOptions(false); }
         return [];
@@ -380,7 +419,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                 }
             } catch (error) { console.error(error) }
         }
-        
+
         const fetchMasterFields = async () => {
             setLoadingMasterFields(true)
             try {
@@ -390,7 +429,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                 }
             } catch (error) { console.error(error) } finally { setLoadingMasterFields(false) }
         }
-        
+
         if (open) {
             fetchDocumentTypes()
             fetchMasterFields()
@@ -406,14 +445,14 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                 const isDep = !!depConfig.dependentFieldId || !!dependentSource;
                 const parentId = depConfig.dependentFieldId || dependentSource?.table;
                 const computedConfig = field.computed_config || {}
-                
+
                 let currentDepConfig = { mode: 'db_filter', valueKey: "name", labelKey: "name", parentOptionKey: "parent_id", dependentFieldId: parentId };
                 let currentManualMapping: Record<string, DropdownOption[]> = {};
 
                 if (field.options && !Array.isArray(field.options) && (field.options as any).dependencyConfig) {
                     currentDepConfig = { ...currentDepConfig, ...(field.options as any).dependencyConfig };
                 }
-                
+
                 if (field.options && !Array.isArray(field.options) && (field.options as any).manualMapping) {
                     currentManualMapping = (field.options as any).manualMapping;
                 }
@@ -432,24 +471,51 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                     date_config: field.date_config || { useCurrentDate: true, format: 'YYYY-MM-DD' },
                     is_computed: computedConfig.is_computed || false,
                     computed_function: computedConfig.computed_function || "",
-                    computed_config: { 
+                    computed_config: {
                         document_ids: computedConfig.document_ids || [],
-                        arithmeticConfig: computedConfig.arithmeticConfig || {}
+                        arithmeticConfig: computedConfig.arithmeticConfig || {},
+                        dateDiffConfig: computedConfig.dateDiffConfig || {}
                     },
                     category: field.category || "General",
                     documentTypes: formData.documentTypes
                 })
 
                 if (field.sources && field.sources.length > 0) {
+                    console.log("🔧 EDIT MODE - Loading sources:", field.sources)
                     const validSources = field.sources.filter(s => s.source_type !== 'field');
                     if (validSources.length > 0) {
-                        setSources(validSources.map(s => ({ ...s, id: crypto.randomUUID(), fields: [], loadingFields: false })));
-                    } else { setSources([]); }
-                } else { setSources([]); }
+                        const processedSources = validSources.map(s => { 
+                            let sourceData = { 
+                                ...s, 
+                                id: crypto.randomUUID(), 
+                                fields: [], 
+                                loadingFields: false,
+                                document_id: s.document_id || []
+                            };
+                            
+                            // If this is a document source and has no document_id, 
+                            // copy from computed_config.document_ids
+                            if (s.source_type === 'document' && (!s.document_id || s.document_id.length === 0)) {
+                                console.log("📄 Copying document IDs from computed_config to source:", computedConfig.document_ids)
+                                sourceData.document_id = computedConfig.document_ids || [];
+                            }
+                            
+                            return sourceData;
+                        });
+                        console.log("✅ EDIT MODE - Processed sources:", processedSources)
+                        setSources(processedSources);
+                    } else { 
+                        console.log("📝 EDIT MODE - No valid sources found")
+                        setSources([]); 
+                    }
+                } else {
+                    console.log("📝 EDIT MODE - No sources in field data")
+                    setSources([]); 
+                }
 
                 setIsDependent(isDep)
-                
-                if(isDropdown && !isDep && Array.isArray(field.options)) {
+
+                if (isDropdown && !isDep && Array.isArray(field.options)) {
                     if (field.options.length === 1 && typeof field.options[0] === 'string' && field.options[0].includes('\n')) {
                         setOptionsText(field.options[0]);
                     } else { setOptionsText(JSON.stringify(field.options, null, 2)) }
@@ -513,7 +579,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
     }, [parentFieldOptions])
 
     const addValuesToCurrentList = () => {
-        if(!currentChildInput.trim()) return;
+        if (!currentChildInput.trim()) return;
         const rawLabels = currentChildInput.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
         const newOptions: DropdownOption[] = rawLabels.map(label => ({
             label: label,
@@ -528,7 +594,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
     }
 
     const saveMappingSet = () => {
-        if(!currentParentValue || currentChildList.length === 0) return;
+        if (!currentParentValue || currentChildList.length === 0) return;
         const matchedOption = parentFieldOptions.find(opt => opt.value === currentParentValue || opt.label.toLowerCase() === currentParentValue.toLowerCase());
         const finalKey = matchedOption ? matchedOption.value : currentParentValue;
         setFormData(prev => ({ ...prev, manualMapping: { ...prev.manualMapping, [finalKey]: currentChildList } }));
@@ -574,6 +640,105 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
         setLoading(true)
 
         try {
+            // Handle field cards submission (new mode)
+            if (fieldCards.length > 0) {
+                console.log("🔥 FIELD CARDS SUBMISSION STARTED")
+                console.log("📋 Field Cards Data:", fieldCards)
+                
+                const fieldsToInsert = fieldCards.map(card => {
+                    const fieldData = {
+                        field_key: card.data.field_key,
+                        label: card.data.label,
+                        type: card.data.type === 'dropdown' ? 'select' : card.data.type,
+                        is_required: card.data.is_required,
+                        category: card.data.category,
+                        options: [],
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                        section_id: null,
+                        order_index: 0,
+                        placeholder: null,
+                        show_in_table: true,
+                        show_in_dialog: true,
+                        table_header: null,
+                        class_name: null,
+                        col_span: 1,
+                        callback: null,
+                        data_source: null,
+                        depends_on: null,
+                        has_dependent: false,
+                        static_options: null,
+                        date_config: null
+                    }
+                    
+                    // Add computed configuration if present
+                    if (card.data.is_computed) {
+                        console.log("🧮 Adding computed config for card:", card.data.label)
+                        
+                        // Extract document IDs from sources
+                        const documentIdsFromSources = card.data.sources
+                            .filter(source => source.source_type === 'document' && source.document_id && source.document_id.length > 0)
+                            .flatMap(source => source.document_id || [])
+                        
+                        console.log("📄 Document IDs for card:", documentIdsFromSources)
+                        
+                        fieldData.computed_config = {
+                            is_computed: true,
+                            document_ids: documentIdsFromSources,
+                            computed_function: card.data.computed_function
+                        }
+                        
+                        // Add arithmetic config if present
+                        if (card.data.computed_config?.arithmeticConfig && Object.keys(card.data.computed_config.arithmeticConfig).length > 0) {
+                            fieldData.computed_config.arithmeticConfig = card.data.computed_config.arithmeticConfig
+                        }
+                        
+                        // Add date diff config if present
+                        if (card.data.computed_config?.dateDiffConfig && Object.keys(card.data.computed_config.dateDiffConfig).length > 0) {
+                            fieldData.computed_config.dateDiffConfig = card.data.computed_config.dateDiffConfig
+                        }
+                    } else {
+                        fieldData.computed_config = null
+                    }
+                    
+                    // Add data sources if present
+                    if (card.data.sources && card.data.sources.length > 0) {
+                        console.log("🔗 Adding data sources for card:", card.data.label)
+                        console.log("📋 Raw sources data:", card.data.sources)
+                        fieldData.sources = card.data.sources.map(source => ({
+                            path: source.path || "",
+                            table: source.table || "",
+                            priority: source.priority || 1,
+                            source_type: source.source_type || "individual",
+                            linking_variable: source.linking_variable || "id"  // Use linking_variable from source
+                        }))
+                        console.log("✅ Processed sources for", card.data.label, ":", fieldData.sources)
+                    } else {
+                        fieldData.sources = []
+                    }
+                    
+                    console.log("✅ Final field data for", card.data.label, ":", fieldData)
+                    return fieldData
+                })
+
+                console.log("🚀 About to insert fields:", fieldsToInsert)
+                const { error } = await supabase.from('tm_job_fields').insert(fieldsToInsert)
+                if (error) {
+                    console.error("❌ Insert error:", error)
+                    throw error
+                }
+
+                console.log("✅ Successfully inserted fields")
+                toast({
+                    title: "Success",
+                    description: `Successfully created ${fieldCards.length} fields`
+                })
+
+                onSuccess()
+                onOpenChange(false)
+                return
+            }
+
             let options: any = []
             if (formData.fieldType === 'dropdown') {
                 if (isDependent) {
@@ -583,9 +748,9 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                         manualMapping: formData.dependencyConfig?.mode === 'manual_mapping' ? formData.manualMapping : null
                     }
                 } else {
-                    try { 
+                    try {
                         const parsed = JSON.parse(optionsText);
-                        options = Array.isArray(parsed) ? parsed : [parsed]; 
+                        options = Array.isArray(parsed) ? parsed : [parsed];
                     } catch { options = optionsText.split(/[\n,]+/).map(opt => opt.trim()).filter(Boolean) }
                 }
             } else if (isEditMode && field?.options) {
@@ -657,10 +822,10 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
             onOpenChange(false)
         } catch (error) {
             console.error(error)
-            toast({ 
-                title: "Error", 
-                description: isEditMode ? "Failed to update field" : "Failed to create field", 
-                variant: "destructive" 
+            toast({
+                title: "Error",
+                description: isEditMode ? "Failed to update field" : "Failed to create field",
+                variant: "destructive"
             })
         } finally { setLoading(false) }
     }
@@ -675,8 +840,8 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                         {isEditMode ? `Edit Field: ${field?.label}` : "Add New Field"}
                     </DialogTitle>
                     <DialogDescription>
-                        {isEditMode 
-                            ? "Configure field settings and data mapping." 
+                        {isEditMode
+                            ? "Configure field settings and data mapping."
                             : "Create a new job field with custom configuration."}
                     </DialogDescription>
                 </DialogHeader>
@@ -686,11 +851,13 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                     {!isEditMode && (
                         <Card className="border-2 border-dashed border-blue-300 bg-blue-50/30">
                             <CardContent className="p-4">
-                                <Label className="text-sm font-bold text-blue-900 mb-2 block">Quick Create Multiple Fields (Bulk Input)</Label>
+                                <div className="mb-2">
+                                    <Label className="text-sm font-bold text-blue-900">Quick Create Multiple Fields (Bulk Input)</Label>
+                                </div>
                                 <Textarea
                                     value={bulkInput}
-                                    onChange={(e) => setBulkInput(e.target.value)}
-                                    placeholder="Paste field names here (one per line or comma-separated)&#10;Example:&#10;First Name&#10;Last Name&#10;Email Address"
+                                    onChange={handleBulkInputChange}
+                                    placeholder="Paste field names here (one per line or comma-separated)&#10;Auto-detects and populates fields when you paste multiple names&#10;Example:&#10;First Name&#10;Last Name&#10;Email Address"
                                     className="min-h-[120px] font-mono text-sm bg-white"
                                 />
                                 <p className="text-xs text-slate-500 mt-2">Fields will be created with default settings. You can edit them individually afterward.</p>
@@ -698,72 +865,358 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                         </Card>
                     )}
 
+                    {/* FIELD CARDS SECTION */}
+                    {fieldCards.length > 0 && (
+                        <div className="space-y-6 pb-6">
+                            <div className="flex items-center justify-between">
+                                <Label className="text-sm font-semibold text-slate-700">Field Cards ({fieldCards.length})</Label>
+                                <div className="flex gap-2">
+                                    <Button
+                                        type="button"
+                                        onClick={addSingleFieldCard}
+                                        variant="outline"
+                                        size="sm"
+                                    >
+                                        <Plus className="h-4 w-4 mr-2" />
+                                        Add Field
+                                    </Button>
+                                </div>
+                            </div>
+
+                            {fieldCards.map((card, idx) => (
+                                <Card key={card.id} className="group relative border p-5 rounded-xl bg-card hover:shadow-md transition-all space-y-4">
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100"
+                                        onClick={() => removeFieldCard(card.id)}
+                                    >
+                                        <Trash2 className="h-4 w-4" />
+                                    </Button>
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <Label className="text-xs font-bold uppercase text-slate-500">Variable Name</Label>
+                                            <Input
+                                                className="font-mono text-sm bg-slate-50"
+                                                value={card.data.field_key || ''}
+                                                onChange={(e) => updateFieldCard(card.id, { field_key: e.target.value })}
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label className="text-xs font-bold uppercase text-slate-500">Label</Label>
+                                            <Input
+                                                className="text-sm font-medium"
+                                                value={card.data.label || ''}
+                                                onChange={(e) => updateFieldCard(card.id, { label: e.target.value })}
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label className="text-xs font-bold uppercase text-slate-500">Input Type</Label>
+                                            <Select
+                                                value={card.data.type || 'text'}
+                                                onValueChange={(value) => updateFieldCard(card.id, { type: value })}
+                                            >
+                                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="text">Text Input</SelectItem>
+                                                    <SelectItem value="number">Number Input</SelectItem>
+                                                    <SelectItem value="date">Date Picker</SelectItem>
+                                                    <SelectItem value="select">Dropdown Select</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label className="text-xs font-bold uppercase text-slate-500">Category</Label>
+                                            <Popover open={openCategoryCombo} onOpenChange={setOpenCategoryCombo}>
+                                                <PopoverTrigger asChild>
+                                                    <Button variant="outline" role="combobox" aria-expanded={openCategoryCombo} className="w-full justify-between bg-white text-left font-normal">
+                                                        {card.data.category || "Select category..."}
+                                                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                                    </Button>
+                                                </PopoverTrigger>
+                                                <PopoverContent className="w-[300px] p-0">
+                                                    <Command>
+                                                        <CommandInput placeholder="Search category..." />
+                                                        <CommandList>
+                                                            <CommandEmpty className="py-2 px-4"><Button variant="secondary" size="sm" className="w-full h-8 text-xs" onClick={() => { updateFieldCard(card.id, { category: "New Category" }); setOpenCategoryCombo(false); }}>Create New</Button></CommandEmpty>
+                                                            <CommandGroup>
+                                                                {existingCategories.map((cat) => (
+                                                                    <CommandItem key={cat} value={cat} onSelect={(val) => { updateFieldCard(card.id, { category: val }); setOpenCategoryCombo(false) }}><Check className={cn("mr-2 h-4 w-4", card.data.category === cat ? "opacity-100" : "opacity-0")} />{cat}</CommandItem>
+                                                                ))}
+                                                            </CommandGroup>
+                                                        </CommandList>
+                                                    </Command>
+                                                </PopoverContent>
+                                            </Popover>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center space-x-2">
+                                        <Checkbox
+                                            id={`required-${card.id}`}
+                                            checked={card.data.is_required || false}
+                                            onCheckedChange={(checked) => updateFieldCard(card.id, { is_required: checked })}
+                                        />
+                                        <Label htmlFor={`required-${card.id}`} className="cursor-pointer text-sm">Required Field</Label>
+                                    </div>
+
+                                    {/* DATA & LOGIC SECTION FOR CARD */}
+                                    <div className="space-y-4 pt-4 border-t border-slate-200">
+                                        <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                                            <div className="flex items-center gap-2">
+                                                <Database className="w-4 h-4 text-slate-500" />
+                                                <h4 className="font-semibold text-slate-800 text-sm uppercase tracking-wide">Data & Logic</h4>
+                                            </div>
+                                            <div className="flex items-center gap-2 bg-purple-50 px-3 py-1 rounded-full border border-purple-100">
+                                                <Label htmlFor={`computed_toggle-${card.id}`} className="text-xs font-bold text-purple-700 cursor-pointer">Computed?</Label>
+                                                <Switch
+                                                    id={`computed_toggle-${card.id}`}
+                                                    checked={card.data.is_computed || false}
+                                                    onCheckedChange={(checked) => updateFieldCard(card.id, { is_computed: checked })}
+                                                />
+                                            </div>
+                                        </div>
+
+                                        {card.data.is_computed && (
+                                            <div className="space-y-4 pt-2">
+                                                <div className="space-y-2">
+                                                    <Label className="text-xs font-bold text-purple-900 uppercase">Computed Function</Label>
+                                                    <Select
+                                                        value={card.data.computed_function || ""}
+                                                        onValueChange={(value) => updateFieldCard(card.id, { computed_function: value })}
+                                                    >
+                                                        <SelectTrigger className="bg-white">
+                                                            <SelectValue placeholder="Select function" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {COMPUTED_FUNCTIONS.map((fn) => (
+                                                                <SelectItem key={fn.value} value={fn.value}>{fn.label}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+
+                                                {/* ARITHMETIC CONFIG FOR CARD */}
+                                                {card.data.computed_function === 'calculateArithmetic' && (
+                                                    <div className="space-y-3 pt-3 border-t border-purple-200">
+                                                        <Label className="text-xs font-bold text-purple-900 uppercase">Arithmetic Configuration</Label>
+                                                        <Select
+                                                            value={card.data.computed_config?.arithmeticConfig?.operation || ""}
+                                                            onValueChange={(v) => updateFieldCard(card.id, {
+                                                                computed_config: {
+                                                                    ...card.data.computed_config,
+                                                                    arithmeticConfig: {
+                                                                        ...card.data.computed_config?.arithmeticConfig,
+                                                                        operation: v
+                                                                    }
+                                                                }
+                                                            })}
+                                                        >
+                                                            <SelectTrigger className="bg-white">
+                                                                <SelectValue placeholder="Select operation" />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                {ARITHMETIC_OPERATIONS.map(op => (
+                                                                    <SelectItem key={op.value} value={op.value}>{op.label}</SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            <div className="space-y-2">
+                                                                <Label className="text-[10px] font-bold uppercase text-purple-700">Field 1 Path</Label>
+                                                                <Input
+                                                                    className="h-9 bg-white text-xs font-mono"
+                                                                    placeholder="e.g. extracted_details->>'permit_wef'"
+                                                                    value={card.data.computed_config?.arithmeticConfig?.field1Path || ""}
+                                                                    onChange={(e) => updateFieldCard(card.id, {
+                                                                        computed_config: {
+                                                                            ...card.data.computed_config,
+                                                                            arithmeticConfig: {
+                                                                                ...card.data.computed_config?.arithmeticConfig,
+                                                                                field1Path: e.target.value
+                                                                            }
+                                                                        }
+                                                                    })}
+                                                                />
+                                                            </div>
+                                                            <div className="space-y-2">
+                                                                <Label className="text-[10px] font-bold uppercase text-purple-700">Field 2 Path</Label>
+                                                                <Input
+                                                                    className="h-9 bg-white text-xs font-mono"
+                                                                    placeholder="e.g. extracted_details->>'permit_wet'"
+                                                                    value={card.data.computed_config?.arithmeticConfig?.field2Path || ""}
+                                                                    onChange={(e) => updateFieldCard(card.id, {
+                                                                        computed_config: {
+                                                                            ...card.data.computed_config,
+                                                                            arithmeticConfig: {
+                                                                                ...card.data.computed_config?.arithmeticConfig,
+                                                                                field2Path: e.target.value
+                                                                            }
+                                                                        }
+                                                                    })}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* DATE DIFF CONFIG FOR CARD */}
+                                                {card.data.computed_function === 'calculateDateDifference' && (
+                                                    <div className="space-y-3 pt-3 border-t border-purple-200">
+                                                        <Label className="text-xs font-bold text-purple-900 uppercase">Date Difference Configuration</Label>
+                                                        <Select
+                                                            value={card.data.computed_config?.dateDiffConfig?.unit || ""}
+                                                            onValueChange={(v) => updateFieldCard(card.id, {
+                                                                computed_config: {
+                                                                    ...card.data.computed_config,
+                                                                    dateDiffConfig: {
+                                                                        ...card.data.computed_config?.dateDiffConfig,
+                                                                        unit: v
+                                                                    }
+                                                                }
+                                                            })}
+                                                        >
+                                                            <SelectTrigger className="bg-white">
+                                                                <SelectValue placeholder="Select unit" />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                {DATE_DIFF_UNITS.map(unit => (
+                                                                    <SelectItem key={unit.value} value={unit.value}>{unit.label}</SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            <div className="space-y-2">
+                                                                <Label className="text-[10px] font-bold uppercase text-purple-700">Start Date Path</Label>
+                                                                <Input
+                                                                    className="h-9 bg-white text-xs font-mono"
+                                                                    placeholder="e.g. extracted_details->>'permit_wef'"
+                                                                    value={card.data.computed_config?.dateDiffConfig?.startDatePath || ""}
+                                                                    onChange={(e) => updateFieldCard(card.id, {
+                                                                        computed_config: {
+                                                                            ...card.data.computed_config,
+                                                                            dateDiffConfig: {
+                                                                                ...card.data.computed_config?.dateDiffConfig,
+                                                                                startDatePath: e.target.value
+                                                                            }
+                                                                        }
+                                                                    })}
+                                                                />
+                                                            </div>
+                                                            <div className="space-y-2">
+                                                                <Label className="text-[10px] font-bold uppercase text-purple-700">End Date Path</Label>
+                                                                <Input
+                                                                    className="h-9 bg-white text-xs font-mono"
+                                                                    placeholder="e.g. extracted_details->>'permit_wet'"
+                                                                    value={card.data.computed_config?.dateDiffConfig?.endDatePath || ""}
+                                                                    onChange={(e) => updateFieldCard(card.id, {
+                                                                        computed_config: {
+                                                                            ...card.data.computed_config,
+                                                                            dateDiffConfig: {
+                                                                                ...card.data.computed_config?.dateDiffConfig,
+                                                                                endDatePath: e.target.value
+                                                                            }
+                                                                        }
+                                                                    })}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* DATA SOURCES SECTION FOR CARD */}
+                                    <div className="space-y-4 pt-4 border-t border-slate-200">
+                                        <div className="flex items-center gap-2 pb-2 border-b border-slate-200">
+                                            <Link2 className="w-4 h-4 text-slate-500" />
+                                            <h4 className="font-semibold text-slate-800 text-sm uppercase tracking-wide">Data Sources</h4>
+                                        </div>
+                                        
+                                        <DataSourceConfiguration
+                                            sources={card.data.sources || []}
+                                            onChange={(newSources) => updateFieldCard(card.id, { sources: newSources })}
+                                            documentTypes={formData.documentTypes}
+                                        />
+                                    </div>
+                                </Card>
+                            ))}
+                        </div>
+                    )}
+
                     {/* REST OF THE FORM... */}
-                    <Card className="space-y-4 border shadow-sm bg-white p-5 rounded-xl">
-                        <div className="flex items-center gap-2 pb-2 mb-2 border-b">
-                            <Settings2 className="w-4 h-4 text-slate-500" />
-                            <h3 className="font-semibold text-slate-800 text-sm uppercase tracking-wide">General Settings</h3>
-                        </div>
-                        <div className="grid grid-cols-2 gap-6">
-                            <div className="space-y-2">
-                                <Label htmlFor="field-key" className="text-xs font-bold uppercase text-slate-500">Variable Name</Label>
-                                <Input id="field-key" className="font-mono text-sm bg-slate-50" value={formData.field_key || ''} onChange={(e) => setFormData({ ...formData, field_key: e.target.value })} required />
+                    {fieldCards.length === 0 && (
+                        <Card className="space-y-4 border shadow-sm bg-white p-5 rounded-xl">
+                            <div className="flex items-center gap-2 pb-2 mb-2 border-b">
+                                <Settings2 className="w-4 h-4 text-slate-500" />
+                                <h3 className="font-semibold text-slate-800 text-sm uppercase tracking-wide">General Settings</h3>
                             </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="label" className="text-xs font-bold uppercase text-slate-500">Label</Label>
-                                <Input id="label" className="text-sm font-medium" value={formData.label || ''} onChange={(e) => setFormData({ ...formData, label: e.target.value })} required />
+                            <div className="grid grid-cols-2 gap-6">
+                                <div className="space-y-2">
+                                    <Label htmlFor="field-key" className="text-xs font-bold uppercase text-slate-500">Variable Name</Label>
+                                    <Input id="field-key" className="font-mono text-sm bg-slate-50" value={formData.field_key || ''} onChange={(e) => setFormData({ ...formData, field_key: e.target.value })} required />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="label" className="text-xs font-bold uppercase text-slate-500">Label</Label>
+                                    <Input id="label" className="text-sm font-medium" value={formData.label || ''} onChange={(e) => setFormData({ ...formData, label: e.target.value })} required />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label className="text-xs font-bold uppercase text-slate-500">Input Type</Label>
+                                    <Select value={formData.type || ''} onValueChange={(value) => setFormData({ ...formData, type: value as any, fieldType: value === 'select' ? 'dropdown' : 'normal' })}>
+                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="text">Text Input</SelectItem>
+                                            <SelectItem value="number">Number Input</SelectItem>
+                                            <SelectItem value="date">Date Picker</SelectItem>
+                                            <SelectItem value="select">Dropdown Select</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label className="text-xs font-bold uppercase text-slate-500">Category</Label>
+                                    <Popover open={openCategoryCombo} onOpenChange={setOpenCategoryCombo}>
+                                        <PopoverTrigger asChild>
+                                            <Button variant="outline" role="combobox" aria-expanded={openCategoryCombo} className="w-full justify-between bg-white text-left font-normal">
+                                                {formData.category || "Select category..."}
+                                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-[300px] p-0">
+                                            <Command>
+                                                <CommandInput placeholder="Search category..." />
+                                                <CommandList>
+                                                    <CommandEmpty className="py-2 px-4"><Button variant="secondary" size="sm" className="w-full h-8 text-xs" onClick={() => { setFormData({ ...formData, category: "New Category" }); setOpenCategoryCombo(false); }}>Create New</Button></CommandEmpty>
+                                                    <CommandGroup>
+                                                        {existingCategories.map((cat) => (
+                                                            <CommandItem key={cat} value={cat} onSelect={(val) => { setFormData({ ...formData, category: val }); setOpenCategoryCombo(false) }}><Check className={cn("mr-2 h-4 w-4", formData.category === cat ? "opacity-100" : "opacity-0")} />{cat}</CommandItem>
+                                                        ))}
+                                                    </CommandGroup>
+                                                </CommandList>
+                                            </Command>
+                                        </PopoverContent>
+                                    </Popover>
+                                </div>
                             </div>
-                            <div className="space-y-2">
-                                <Label className="text-xs font-bold uppercase text-slate-500">Input Type</Label>
-                                <Select value={formData.type || ''} onValueChange={(value) => setFormData({ ...formData, type: value as any, fieldType: value === 'select' ? 'dropdown' : 'normal' })}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="text">Text Input</SelectItem>
-                                        <SelectItem value="number">Number Input</SelectItem>
-                                        <SelectItem value="date">Date Picker</SelectItem>
-                                        <SelectItem value="select">Dropdown Select</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-2">
-                                <Label className="text-xs font-bold uppercase text-slate-500">Category</Label>
-                                <Popover open={openCategoryCombo} onOpenChange={setOpenCategoryCombo}>
-                                    <PopoverTrigger asChild>
-                                        <Button variant="outline" role="combobox" aria-expanded={openCategoryCombo} className="w-full justify-between bg-white text-left font-normal">
-                                            {formData.category || "Select category..."}
-                                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                        </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-[300px] p-0">
-                                        <Command>
-                                            <CommandInput placeholder="Search category..." />
-                                            <CommandList>
-                                                <CommandEmpty className="py-2 px-4"><Button variant="secondary" size="sm" className="w-full h-8 text-xs" onClick={() => { setFormData({ ...formData, category: "New Category" }); setOpenCategoryCombo(false); }}>Create New</Button></CommandEmpty>
-                                                <CommandGroup>
-                                                    {existingCategories.map((cat) => (
-                                                        <CommandItem key={cat} value={cat} onSelect={(val) => { setFormData({ ...formData, category: val }); setOpenCategoryCombo(false) }}><Check className={cn("mr-2 h-4 w-4", formData.category === cat ? "opacity-100" : "opacity-0")} />{cat}</CommandItem>
-                                                    ))}
-                                                </CommandGroup>
-                                            </CommandList>
-                                        </Command>
-                                    </PopoverContent>
-                                </Popover>
-                            </div>
-                        </div>
-                    </Card>
+                        </Card>
+                    )}
 
                     {/* DATA LOGIC SECTION */}
-                    <div className="space-y-4">
-                        <div className="flex items-center justify-between pb-2 border-b border-slate-200">
-                            <div className="flex items-center gap-2">
-                                <Database className="w-4 h-4 text-slate-500" />
-                                <h3 className="font-semibold text-slate-800 text-sm uppercase tracking-wide">Data & Logic</h3>
+                    {fieldCards.length === 0 && (
+                        <div className="space-y-4">
+                            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                                <div className="flex items-center gap-2">
+                                    <Database className="w-4 h-4 text-slate-500" />
+                                    <h3 className="font-semibold text-slate-800 text-sm uppercase tracking-wide">Data & Logic</h3>
+                                </div>
+                                <div className="flex items-center gap-2 bg-purple-50 px-3 py-1 rounded-full border border-purple-100">
+                                    <Label htmlFor="computed_toggle" className="text-xs font-bold text-purple-700 cursor-pointer">Computed?</Label>
+                                    <Switch id="computed_toggle" checked={formData.is_computed} onCheckedChange={(c) => setFormData({ ...formData, is_computed: c })} className="data-[state=checked]:bg-purple-600" />
+                                </div>
                             </div>
-                            <div className="flex items-center gap-2 bg-purple-50 px-3 py-1 rounded-full border border-purple-100">
-                                <Label htmlFor="computed_toggle" className="text-xs font-bold text-purple-700 cursor-pointer">Computed?</Label>
-                                <Switch id="computed_toggle" checked={formData.is_computed} onCheckedChange={(c) => setFormData({ ...formData, is_computed: c })} className="data-[state=checked]:bg-purple-600" />
-                            </div>
-                        </div>
 
                         {formData.is_computed && (
                             <div className="p-5 border border-purple-200 bg-purple-50/30 rounded-xl space-y-4">
@@ -784,8 +1237,8 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                 {formData.computed_function === 'calculateArithmetic' && (
                                     <div className="space-y-3 pt-3 border-t border-purple-200">
                                         <Label className="text-xs font-bold text-purple-900 uppercase">Arithmetic Configuration</Label>
-                                        <Select 
-                                            value={formData.computed_config.arithmeticConfig?.operation || ""} 
+                                        <Select
+                                            value={formData.computed_config.arithmeticConfig?.operation || ""}
                                             onValueChange={(v) => setFormData(prev => ({
                                                 ...prev,
                                                 computed_config: {
@@ -810,7 +1263,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                         <div className="grid grid-cols-2 gap-3">
                                             <div className="space-y-2">
                                                 <Label className="text-[10px] font-bold uppercase text-purple-700">Field 1 Path</Label>
-                                                <Input 
+                                                <Input
                                                     className="h-9 bg-white text-xs font-mono"
                                                     placeholder="e.g. extracted_details->>'permit_wef'"
                                                     value={formData.computed_config.arithmeticConfig?.field1Path || ""}
@@ -828,7 +1281,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                             </div>
                                             <div className="space-y-2">
                                                 <Label className="text-[10px] font-bold uppercase text-purple-700">Field 2 Path (Optional)</Label>
-                                                <Input 
+                                                <Input
                                                     className="h-9 bg-white text-xs font-mono"
                                                     placeholder="e.g. extracted_details->>'permit_expiry_date'"
                                                     value={formData.computed_config.arithmeticConfig?.field2Path || ""}
@@ -848,7 +1301,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
 
                                         <div className="space-y-2">
                                             <Label className="text-[10px] font-bold uppercase text-purple-700">Or Use Fixed Operand</Label>
-                                            <Input 
+                                            <Input
                                                 type="number"
                                                 className="h-9 bg-white"
                                                 placeholder="e.g. 365"
@@ -875,7 +1328,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                         <div className="grid grid-cols-2 gap-3">
                                             <div className="space-y-2">
                                                 <Label className="text-[10px] font-bold uppercase text-purple-700">Start Date Path</Label>
-                                                <SearchableSelect 
+                                                <SearchableSelect
                                                     value={formData.computed_config.arithmeticConfig?.startDatePath || ""}
                                                     onValueChange={(value) => setFormData(prev => ({
                                                         ...prev,
@@ -887,9 +1340,9 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                                             }
                                                         }
                                                     }))}
-                                                    options={masterFields.map(field => ({ 
-                                                        value: field.id, 
-                                                        label: `${field.label} (${field.field_key})` 
+                                                    options={masterFields.map(field => ({
+                                                        value: field.id,
+                                                        label: `${field.label} (${field.field_key})`
                                                     }))}
                                                     loading={loadingMasterFields}
                                                     placeholder="Select master field..."
@@ -898,7 +1351,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                             </div>
                                             <div className="space-y-2">
                                                 <Label className="text-[10px] font-bold uppercase text-purple-700">End Date Path</Label>
-                                                <SearchableSelect 
+                                                <SearchableSelect
                                                     value={formData.computed_config.arithmeticConfig?.endDatePath || ""}
                                                     onValueChange={(value) => setFormData(prev => ({
                                                         ...prev,
@@ -910,9 +1363,9 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                                             }
                                                         }
                                                     }))}
-                                                    options={masterFields.map(field => ({ 
-                                                        value: field.id, 
-                                                        label: `${field.label} (${field.field_key})` 
+                                                    options={masterFields.map(field => ({
+                                                        value: field.id,
+                                                        label: `${field.label} (${field.field_key})`
                                                     }))}
                                                     loading={loadingMasterFields}
                                                     placeholder="Select master field..."
@@ -923,8 +1376,8 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
 
                                         <div className="space-y-2">
                                             <Label className="text-[10px] font-bold uppercase text-purple-700">Unit</Label>
-                                            <Select 
-                                                value={formData.computed_config.arithmeticConfig?.unit || "days"} 
+                                            <Select
+                                                value={formData.computed_config.arithmeticConfig?.unit || "days"}
                                                 onValueChange={(v) => setFormData(prev => ({
                                                     ...prev,
                                                     computed_config: {
@@ -964,7 +1417,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                             <Label htmlFor="isDependent" className="text-xs font-bold text-slate-600">Dependent Field?</Label>
                                         </div>
                                     </div>
-                                    
+
                                     <Separator />
 
                                     {isDependent ? (
@@ -999,97 +1452,97 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
 
                                             {formData.dependentFieldId && (
                                                 <div className="space-y-4 pt-4">
-                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                            <div className="space-y-4 border p-4 rounded-lg bg-slate-50">
-                                                                <h4 className="text-xs font-bold text-slate-600 uppercase flex items-center gap-2"><Plus className="w-3 h-3" /> Add Mapping Set</h4>
-                                                                
-                                                                <div className="space-y-2">
-                                                                    <Label className="text-[10px] uppercase font-bold text-slate-500">1. Select Parent Value</Label>
-                                                                    <div className="flex gap-2">
-                                                                        <Popover open={openParentValueCombo} onOpenChange={setOpenParentValueCombo}>
-                                                                            <PopoverTrigger asChild>
-                                                                                <Button variant="outline" role="combobox" aria-expanded={openParentValueCombo} className="w-full justify-between bg-white text-xs truncate">
-                                                                                    {currentParentValue ? getParentLabel(currentParentValue) : "Select from list..."}
-                                                                                    <ChevronsUpDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
-                                                                                </Button>
-                                                                            </PopoverTrigger>
-                                                                            <PopoverContent className="w-[200px] p-0">
-                                                                                <Command>
-                                                                                    <CommandInput placeholder="Search parent option..." />
-                                                                                    <CommandList>
-                                                                                        <ScrollArea className="h-[200px]">
-                                                                                            <CommandGroup>
-                                                                                                {parentFieldOptions.map((opt) => (
-                                                                                                    <CommandItem key={opt.value} value={opt.value} onSelect={() => { setCurrentParentValue(opt.value); setOpenParentValueCombo(false); }}>
-                                                                                                        {opt.label}
-                                                                                                    </CommandItem>
-                                                                                                ))}
-                                                                                            </CommandGroup>
-                                                                                        </ScrollArea>
-                                                                                    </CommandList>
-                                                                                </Command>
-                                                                            </PopoverContent>
-                                                                        </Popover>
-                                                                        <Input className="w-1/2 h-9 text-xs" placeholder="ID/Value" value={currentParentValue} onChange={e => setCurrentParentValue(e.target.value)} />
-                                                                    </div>
-                                                                </div>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                        <div className="space-y-4 border p-4 rounded-lg bg-slate-50">
+                                                            <h4 className="text-xs font-bold text-slate-600 uppercase flex items-center gap-2"><Plus className="w-3 h-3" /> Add Mapping Set</h4>
 
-                                                                <div className="space-y-2">
-                                                                    <div className="flex justify-between items-end">
-                                                                        <Label className="text-[10px] uppercase font-bold text-slate-500">2. Bulk Add Dependents</Label>
-                                                                        <span className="text-[9px] text-slate-400">Separate by comma or newline</span>
-                                                                    </div>
-                                                                    
-                                                                    <Textarea className="h-24 text-xs bg-white font-mono" placeholder="Item 1, Item 2&#10;Item 3&#10;Item 4" value={currentChildInput} onChange={e => setCurrentChildInput(e.target.value)} />
-                                                                    <Button size="sm" onClick={addValuesToCurrentList} variant="secondary" className="w-full h-7 text-xs gap-2" type="button"><ArrowDown className="w-3 h-3" /> Process to List</Button>
-                                                                    
-                                                                    <div className="flex flex-wrap gap-1 min-h-[40px] max-h-[100px] overflow-y-auto p-2 bg-white border rounded-md">
-                                                                        {currentChildList.length === 0 && <span className="text-[10px] text-slate-300 italic">No items pending...</span>}
-                                                                        {currentChildList.map(c => (
-                                                                            <Badge key={c.value} variant="outline" className="text-[10px] bg-slate-50 h-5 px-1 pr-0 gap-1">
-                                                                                <span title={c.value}>{c.label}</span>
-                                                                                <div className="h-full border-l px-1 hover:bg-red-100 cursor-pointer rounded-r" onClick={() => removeChildFromList(c.value)}><X className="w-3 h-3 text-slate-400 hover:text-red-500" /></div>
-                                                                            </Badge>
-                                                                        ))}
-                                                                    </div>
+                                                            <div className="space-y-2">
+                                                                <Label className="text-[10px] uppercase font-bold text-slate-500">1. Select Parent Value</Label>
+                                                                <div className="flex gap-2">
+                                                                    <Popover open={openParentValueCombo} onOpenChange={setOpenParentValueCombo}>
+                                                                        <PopoverTrigger asChild>
+                                                                            <Button variant="outline" role="combobox" aria-expanded={openParentValueCombo} className="w-full justify-between bg-white text-xs truncate">
+                                                                                {currentParentValue ? getParentLabel(currentParentValue) : "Select from list..."}
+                                                                                <ChevronsUpDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
+                                                                            </Button>
+                                                                        </PopoverTrigger>
+                                                                        <PopoverContent className="w-[200px] p-0">
+                                                                            <Command>
+                                                                                <CommandInput placeholder="Search parent option..." />
+                                                                                <CommandList>
+                                                                                    <ScrollArea className="h-[200px]">
+                                                                                        <CommandGroup>
+                                                                                            {parentFieldOptions.map((opt) => (
+                                                                                                <CommandItem key={opt.value} value={opt.value} onSelect={() => { setCurrentParentValue(opt.value); setOpenParentValueCombo(false); }}>
+                                                                                                    {opt.label}
+                                                                                                </CommandItem>
+                                                                                            ))}
+                                                                                        </CommandGroup>
+                                                                                    </ScrollArea>
+                                                                                </CommandList>
+                                                                            </Command>
+                                                                        </PopoverContent>
+                                                                    </Popover>
+                                                                    <Input className="w-1/2 h-9 text-xs" placeholder="ID/Value" value={currentParentValue} onChange={e => setCurrentParentValue(e.target.value)} />
                                                                 </div>
-
-                                                                <Button onClick={saveMappingSet} className="w-full bg-slate-800 text-white h-9 text-xs" disabled={!currentParentValue || currentChildList.length === 0}>
-                                                                    <Save className="w-3 h-3 mr-2" /> Save this Mapping Set
-                                                                </Button>
                                                             </div>
 
-                                                            <div className="border rounded-lg overflow-hidden flex flex-col h-[400px]">
-                                                                <div className="bg-slate-100 p-2 text-xs font-bold text-slate-600 border-b flex justify-between items-center">
-                                                                    <span>Existing Mappings</span>
-                                                                    <Badge variant="secondary" className="text-[10px]">{Object.keys(formData.manualMapping || {}).length} Sets</Badge>
+                                                            <div className="space-y-2">
+                                                                <div className="flex justify-between items-end">
+                                                                    <Label className="text-[10px] uppercase font-bold text-slate-500">2. Bulk Add Dependents</Label>
+                                                                    <span className="text-[9px] text-slate-400">Separate by comma or newline</span>
                                                                 </div>
-                                                                <ScrollArea className="flex-1 bg-white">
-                                                                    <div className="p-2 space-y-2">
-                                                                        {Object.entries(formData.manualMapping || {}).length === 0 && <div className="text-center p-8 text-slate-300 text-xs">No mappings configured yet.</div>}
-                                                                        {Object.entries(formData.manualMapping || {}).map(([parentVal, children]) => (
-                                                                            <div key={parentVal} className="border rounded p-2 text-xs group hover:border-blue-200 transition-colors bg-slate-50/50">
-                                                                                <div className="flex justify-between items-start mb-1">
-                                                                                    <div className="flex flex-col">
-                                                                                        <span className="font-bold text-slate-700">{getParentLabel(parentVal)}</span>
-                                                                                        <span className="text-[9px] text-slate-400 font-mono">{parentVal}</span>
-                                                                                    </div>
-                                                                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                                        <Edit2 className="w-3 h-3 text-blue-500 cursor-pointer" onClick={() => editMappingSet(parentVal)} />
-                                                                                        <Trash2 className="w-3 h-3 text-red-500 cursor-pointer" onClick={() => deleteMappingSet(parentVal)} />
-                                                                                    </div>
+
+                                                                <Textarea className="h-24 text-xs bg-white font-mono" placeholder="Item 1, Item 2&#10;Item 3&#10;Item 4" value={currentChildInput} onChange={e => setCurrentChildInput(e.target.value)} />
+                                                                <Button size="sm" onClick={addValuesToCurrentList} variant="secondary" className="w-full h-7 text-xs gap-2" type="button"><ArrowDown className="w-3 h-3" /> Process to List</Button>
+
+                                                                <div className="flex flex-wrap gap-1 min-h-[40px] max-h-[100px] overflow-y-auto p-2 bg-white border rounded-md">
+                                                                    {currentChildList.length === 0 && <span className="text-[10px] text-slate-300 italic">No items pending...</span>}
+                                                                    {currentChildList.map(c => (
+                                                                        <Badge key={c.value} variant="outline" className="text-[10px] bg-slate-50 h-5 px-1 pr-0 gap-1">
+                                                                            <span title={c.value}>{c.label}</span>
+                                                                            <div className="h-full border-l px-1 hover:bg-red-100 cursor-pointer rounded-r" onClick={() => removeChildFromList(c.value)}><X className="w-3 h-3 text-slate-400 hover:text-red-500" /></div>
+                                                                        </Badge>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+
+                                                            <Button onClick={saveMappingSet} className="w-full bg-slate-800 text-white h-9 text-xs" disabled={!currentParentValue || currentChildList.length === 0}>
+                                                                <Save className="w-3 h-3 mr-2" /> Save this Mapping Set
+                                                            </Button>
+                                                        </div>
+
+                                                        <div className="border rounded-lg overflow-hidden flex flex-col h-[400px]">
+                                                            <div className="bg-slate-100 p-2 text-xs font-bold text-slate-600 border-b flex justify-between items-center">
+                                                                <span>Existing Mappings</span>
+                                                                <Badge variant="secondary" className="text-[10px]">{Object.keys(formData.manualMapping || {}).length} Sets</Badge>
+                                                            </div>
+                                                            <ScrollArea className="flex-1 bg-white">
+                                                                <div className="p-2 space-y-2">
+                                                                    {Object.entries(formData.manualMapping || {}).length === 0 && <div className="text-center p-8 text-slate-300 text-xs">No mappings configured yet.</div>}
+                                                                    {Object.entries(formData.manualMapping || {}).map(([parentVal, children]) => (
+                                                                        <div key={parentVal} className="border rounded p-2 text-xs group hover:border-blue-200 transition-colors bg-slate-50/50">
+                                                                            <div className="flex justify-between items-start mb-1">
+                                                                                <div className="flex flex-col">
+                                                                                    <span className="font-bold text-slate-700">{getParentLabel(parentVal)}</span>
+                                                                                    <span className="text-[9px] text-slate-400 font-mono">{parentVal}</span>
                                                                                 </div>
-                                                                                <div className="text-slate-500 leading-relaxed pl-1 border-l-2 border-slate-200 flex flex-wrap gap-1 mt-2">
-                                                                                    {children.map(c => (
-                                                                                        <span key={c.value} className="bg-white border px-1 rounded text-[10px]" title={c.value}>{c.label}</span>
-                                                                                    ))}
+                                                                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                                    <Edit2 className="w-3 h-3 text-blue-500 cursor-pointer" onClick={() => editMappingSet(parentVal)} />
+                                                                                    <Trash2 className="w-3 h-3 text-red-500 cursor-pointer" onClick={() => deleteMappingSet(parentVal)} />
                                                                                 </div>
                                                                             </div>
-                                                                        ))}
-                                                                    </div>
-                                                                </ScrollArea>
-                                                            </div>
+                                                                            <div className="text-slate-500 leading-relaxed pl-1 border-l-2 border-slate-200 flex flex-wrap gap-1 mt-2">
+                                                                                {children.map(c => (
+                                                                                    <span key={c.value} className="bg-white border px-1 rounded text-[10px]" title={c.value}>{c.label}</span>
+                                                                                ))}
+                                                                            </div>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </ScrollArea>
                                                         </div>
+                                                    </div>
                                                 </div>
                                             )}
                                         </div>
@@ -1109,9 +1562,11 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                 <Label className="text-sm font-semibold text-slate-800">Data Sources</Label>
                                 {isDependent && <span className="text-xs text-blue-600 italic bg-blue-50 px-2 py-0.5 rounded">Source Table for Children (Manual Mapping)</span>}
                             </div>
-                            <DataSourceConfiguration sources={sources} onChange={setSources} documentTypes={formData.documentTypes} />
+                            {fieldCards.length === 0 && (
+                                <DataSourceConfiguration sources={sources} onChange={setSources} documentTypes={formData.documentTypes} />
+                            )}
                         </div>
-                        
+
                         {!formData.is_computed && formData.type === 'date' && (
                             <div className="space-y-4 pt-4 border-t">
                                 <Label className="text-sm font-bold text-slate-700">Date Formatting</Label>
@@ -1131,11 +1586,17 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                             </div>
                         )}
                     </div>
+                    )}
 
                     <DialogFooter className="pt-4 border-t bg-white sticky bottom-0 z-10 -m-6 p-6 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
                         <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={loading}>Cancel</Button>
-                        <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700">
-                            {loading ? "Saving..." : (isEditMode ? "Save Configuration" : "Create Field")}
+                        <Button
+                            type="button"
+                            onClick={handleFormSubmit}
+                            disabled={loading}
+                            className="bg-green-600 hover:bg-green-700"
+                        >
+                            {loading ? "Creating..." : `Create ${fieldCards.length} Fields`}
                         </Button>
                     </DialogFooter>
                 </form>

@@ -11,22 +11,22 @@ import { Textarea } from "@/components/ui/textarea"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command"
 import { Badge } from "@/components/ui/badge"
-import { FileText, Zap, Webhook, Users, Check, ChevronsUpDown, Search, Eraser, Trash2, Loader2, Database } from "lucide-react"
+import { FileText, Zap, Users, Check, ChevronsUpDown, Search, Eraser, Trash2, Loader2, Database, X, Settings2, Calculator } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "@/hooks/use-toast"
 import supabase from "@/lib/supabase/client"
 import { Checkbox } from '@/components/ui/checkbox'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { 
-  NATIONALITY_TYPES, 
-  QUALIFICATION_TYPES, 
-  AGE_RANGE_TYPES, 
+import {
+  NATIONALITY_TYPES,
+  AGE_RANGE_TYPES,
   DEPENDANT_RELATIONSHIPS,
   type NationalityType,
-  type QualificationType,
   type AgeRangeType
 } from "@/lib/constants/entity-types"
+import { COMPUTED_FUNCTIONS, EXECUTION_MODES } from "@/lib/constants/computed-functions"
+import { Card } from '@/components/ui/card'
 
 export type ApplicantType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependent' | 'employee' | 'understudy';
 
@@ -63,7 +63,7 @@ export function EditRequirementDialog({
     id: '',
     name: '',
     description: '',
-    type: 'standard',
+    type: 'document',
     isVisible: true,
     isRequired: true,
     kycDocumentIds: [],
@@ -73,11 +73,14 @@ export function EditRequirementDialog({
     applicantTypes: ['principal'],
     requiredDocumentCount: 1,
     instructions: '',
-    isStageDocument: false, 
+    isStageDocument: false,
     category: 'general',
     hasTemplate: false,
-    webdata: [] // Added webdata
+    webdata: [],
+    executionMode: 'latest',
+    computedFunction: 'none'
   })
+  
   const [templates, setTemplates] = useState<any[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
@@ -89,17 +92,16 @@ export function EditRequirementDialog({
       const webAuto = requirement.web_automation || {};
       const automationId = webAuto.automationId || webAuto.automation_id || requirement.automationId || requirement.automation_id || '';
       const webFormName = webAuto.webFormName || webAuto.web_form_name || requirement.webFormName || requirement.web_form_name || '';
-      const hasWebForm = !!automationId || requirement.hasWebForm === true;
-
+      
       setFormData({
         ...requirement,
         name: requirement.name || '',
         description: requirement.description || '',
-        type: requirement.type || 'standard',
+        type: requirement.type || 'document',
         isVisible: requirement.isVisible !== false,
-        isRequired: requirement.isRequired !== false,
+        isRequired: requirement.isRequired !== false || requirement.is_mandatory !== false,
         kycDocumentIds: requirement.kyc_document_ids || (requirement.kyc_document_id ? [requirement.kyc_document_id] : []),
-        hasWebForm: hasWebForm,
+        hasWebForm: !!automationId || requirement.hasWebForm === true,
         webFormName: webFormName,
         automationId: automationId ? String(automationId) : '',
         applicantTypes: requirement.applicantTypes || (requirement.applicantType ? [requirement.applicantType] : ['principal']),
@@ -108,7 +110,9 @@ export function EditRequirementDialog({
         isStageDocument: requirement.isStageDocument || false,
         category: requirement.category || 'general',
         hasTemplate: requirement.hasTemplate || false,
-        webdata: requirement.webdata || [] // Populate webdata from the requirement object passed by parent
+        webdata: requirement.webdata || [],
+        executionMode: requirement.execution_mode || 'latest',
+        computedFunction: requirement.computed_function || 'getLatestDocument'
       });
 
       fetchKycDocuments();
@@ -140,9 +144,7 @@ export function EditRequirementDialog({
         setLoadingTemplates(false);
       }
     };
-    if (isOpen) {
-      fetchTemplates();
-    }
+    if (isOpen) fetchTemplates();
   }, [formData.kycDocumentIds, formData.hasTemplate, isOpen]);
 
   const fetchKycDocuments = async () => {
@@ -157,17 +159,13 @@ export function EditRequirementDialog({
 
   const fetchAutomationTypes = async () => {
     try {
-      const { data, error } = await supabase.from('tm_automations').select('*').eq('is_active', true).order('name');
-      if (error) throw error;
-      if (data) {
-        setAutomationTypes(data);
-        setFormData(prev => ({ ...prev })); 
-      }
+      const { data } = await supabase.from('tm_automations').select('*').eq('is_active', true).order('name');
+      if (data) setAutomationTypes(data);
     } catch (err) { console.error(err); }
   };
 
   const updateField = (field: string, value: any) => setFormData(prev => ({ ...prev, [field]: value }))
-  
+
   const toggleApplicantType = (type: ApplicantType) => {
     const current = formData.applicantTypes || []
     const updated = current.includes(type) ? current.filter(t => t !== type) : [...current, type]
@@ -180,12 +178,16 @@ export function EditRequirementDialog({
     updateField('kycDocumentIds', updated)
   }
 
+  const removeKycDoc = (docId: string) => {
+    const current = formData.kycDocumentIds || []
+    updateField('kycDocumentIds', current.filter(id => id !== String(docId)))
+  }
+
   const getSelectedDocumentNames = () => {
     const selectedIds = formData.kycDocumentIds || []
-    if (selectedIds.length === 0) return []
     return selectedIds.map(id => {
-      const doc = kycDocuments.find(d => d.id.toString() === id)
-      return doc?.display_name || doc?.name || `Document ${id}`
+      const doc = kycDocuments.find(d => String(d.id) === String(id))
+      return { id, name: doc?.display_name || doc?.name || `Document ${id}` }
     })
   }
 
@@ -205,10 +207,9 @@ export function EditRequirementDialog({
       }
       const updatedRequirement = {
         ...requirement,
-        id: formData.id,
         name: formData.name.trim(),
         description: formData.description || '',
-        type: 'document', // Always submit as 'document' type
+        type: 'document',
         isVisible: formData.isVisible,
         isRequired: formData.isRequired,
         is_mandatory: formData.isRequired,
@@ -217,10 +218,11 @@ export function EditRequirementDialog({
         requiredDocumentCount: formData.requiredDocumentCount || 1,
         instructions: formData.instructions || '',
         isStageDocument: formData.isStageDocument || false,
-        category: formData.category || 'processing', 
+        category: formData.category || 'processing',
         hasTemplate: formData.hasTemplate || false,
         web_automation: web_automation,
-        linked_master_field_id: formData.linked_master_field_id,
+        execution_mode: formData.executionMode, 
+        computed_function: formData.computedFunction,
         nationality: formData.nationality,
         ageRange: formData.ageRange,
         dependantRelationships: formData.dependantRelationships,
@@ -239,54 +241,123 @@ export function EditRequirementDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl h-[90vh] flex flex-col p-0 overflow-hidden">
-        <DialogHeader className="p-6 pb-2 border-b bg-white">
-          <DialogTitle>Edit Requirement</DialogTitle>
-          <DialogDescription>Modify requirement properties and mappings</DialogDescription>
+      <DialogContent className="max-w-5xl h-[92vh] flex flex-col p-0 overflow-hidden bg-slate-50">
+        <DialogHeader className="p-6 pb-4 border-b bg-white">
+          <div className="flex justify-between items-center">
+            <div>
+              <DialogTitle className="text-xl">Requirement Configuration</DialogTitle>
+              <DialogDescription>Setup how this document requirement behaves and pulls data.</DialogDescription>
+            </div>
+            <Badge variant="secondary" className="px-3 py-1 uppercase tracking-wider text-[10px]">
+              {formData.category}
+            </Badge>
+          </div>
         </DialogHeader>
 
         <div className="flex-1 overflow-hidden flex flex-col">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
-            <div className="px-6 pt-4 bg-white border-b">
-              <TabsList className="bg-slate-100">
-                <TabsTrigger value="general">General</TabsTrigger>
-                <TabsTrigger value="webdata">Web Data ({formData.webdata?.length || 0})</TabsTrigger>
+            <div className="px-6 bg-white border-b">
+              <TabsList className="bg-transparent gap-6 h-12 p-0">
+                <TabsTrigger value="general" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 border-primary rounded-none h-full px-0">General Settings</TabsTrigger>
+                <TabsTrigger value="webdata" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 border-primary rounded-none h-full px-0">Web Data Mapping ({formData.webdata?.length || 0})</TabsTrigger>
               </TabsList>
             </div>
 
-            {/* TAB 1: GENERAL */}
             <TabsContent value="general" className="flex-1 overflow-y-auto p-6 m-0 space-y-6">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Requirement Name</Label>
-                    <Input value={formData.name} onChange={e => updateField('name', e.target.value)} />
-                  </div>
+              {/* TOP SECTION: IDENTITY */}
+              <div className="grid grid-cols-3 gap-6">
+                <div className="col-span-2 space-y-2">
+                  <Label className="text-xs font-bold uppercase text-slate-500">Requirement Display Name</Label>
+                  <Input 
+                    value={formData.name} 
+                    onChange={e => updateField('name', e.target.value)} 
+                    placeholder="e.g. Current Valid Passport"
+                    className="h-10 text-base font-medium"
+                  />
+                </div>
 
-                  <div className="space-y-2">
-                    <Label className="flex justify-between items-center">
-                      Applies To
-                      <Button variant="link" size="sm" className="h-auto p-0 text-[10px]" onClick={() => updateField('applicantTypes', [])}>Clear</Button>
-                    </Label>
+                <div className="space-y-2">
+                  <Label className="text-xs font-bold uppercase text-slate-500">Required Count</Label>
+                  <Input 
+                    type="number" 
+                    min="1" 
+                    value={formData.requiredDocumentCount} 
+                    onChange={e => updateField('requiredDocumentCount', parseInt(e.target.value))} 
+                    className="h-10"
+                  />
+                </div>
+              </div>
+
+              {/* APPLICANT TYPES POPOVER */}
+              <div className="space-y-2">
+                  <Label className="flex justify-between items-center text-xs font-bold uppercase text-slate-500">
+                    Target Applicants
+                    <Button variant="link" size="sm" className="h-auto p-0 text-[10px]" onClick={() => updateField('applicantTypes', [])}>Reset Selection</Button>
+                  </Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="w-full justify-between h-10 bg-white">
+                        <div className="flex gap-1.5 flex-wrap">
+                          {(formData.applicantTypes || []).length > 0 ? formData.applicantTypes.map(t => (
+                            <Badge key={t} variant="secondary" className="capitalize text-[10px] px-2">{t}</Badge>
+                          )) : <span className="text-slate-400 font-normal">Who needs to provide this?</span>}
+                        </div>
+                        <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[350px] p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Search roles..." />
+                        <CommandList>
+                          <CommandGroup>
+                            {APPLICANT_OPTIONS.map(opt => (
+                              <CommandItem key={opt.value} onSelect={() => toggleApplicantType(opt.value as ApplicantType)}>
+                                <Check className={cn("mr-2 h-4 w-4", (formData.applicantTypes || []).includes(opt.value) ? "opacity-100" : "opacity-0")} />
+                                {opt.label}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+              </div>
+
+              {/* EXECUTION & DOCUMENT LOGIC SECTION */}
+              <Card className="p-0 overflow-hidden border-slate-200 shadow-sm">
+                <div className="bg-slate-100/80 px-4 py-2 border-b flex items-center gap-2">
+                   <Settings2 className="h-4 w-4 text-slate-600" />
+                   <span className="text-xs font-bold uppercase text-slate-700">Document Logic & Mapping</span>
+                </div>
+                <div className="p-6 space-y-6 bg-white">
+                  <div className="space-y-3">
+                    <Label className="text-xs font-bold text-slate-500">Linked KYC Definitions</Label>
+                    <div className="flex flex-wrap gap-2 mb-3">
+                        {getSelectedDocumentNames().map((doc) => (
+                          <Badge key={doc.id} variant="blue" className="pl-3 pr-1 py-1 flex items-center gap-2 text-xs border-blue-200 bg-blue-50 text-blue-700">
+                            {doc.name}
+                            <button onClick={() => removeKycDoc(doc.id)} className="hover:bg-blue-200 rounded-full p-0.5 transition-colors">
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </Badge>
+                        ))}
+                    </div>
                     <Popover>
                       <PopoverTrigger asChild>
-                        <Button variant="outline" className="w-full justify-between">
-                          <div className="flex gap-1 truncate">
-                            {(formData.applicantTypes || []).length > 0 ? formData.applicantTypes.map(t => (
-                              <Badge key={t} variant="secondary" className="capitalize text-[10px]">{t}</Badge>
-                            )) : "Select..."}
-                          </div>
-                          <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                        <Button variant="outline" className="w-full justify-between border-dashed border-2 hover:border-primary hover:bg-slate-50 transition-all">
+                          <span className="text-slate-400">Add document links...</span>
+                          <Search className="h-4 w-4 opacity-50" />
                         </Button>
                       </PopoverTrigger>
-                      <PopoverContent className="w-[300px] p-0" align="start">
+                      <PopoverContent className="w-[450px] p-0" align="start">
                         <Command>
-                          <CommandInput placeholder="Search roles..." />
+                          <CommandInput placeholder="Search documents..." />
                           <CommandList>
-                            <CommandGroup>
-                              {APPLICANT_OPTIONS.map(opt => (
-                                <CommandItem key={opt.value} onSelect={() => toggleApplicantType(opt.value as ApplicantType)}>
-                                  <Check className={cn("mr-2 h-4 w-4", (formData.applicantTypes || []).includes(opt.value) ? "opacity-100" : "opacity-0")} />
-                                  {opt.label}
+                            <CommandGroup className="max-h-[300px] overflow-y-auto">
+                              {kycDocuments.map(doc => (
+                                <CommandItem key={doc.id} onSelect={() => toggleKycDoc(doc.id.toString())}>
+                                  <Check className={cn("mr-2 h-4 w-4", (formData.kycDocumentIds || []).includes(doc.id.toString()) ? "opacity-100" : "opacity-0")} />
+                                  {doc.display_name || doc.name}
                                 </CommandItem>
                               ))}
                             </CommandGroup>
@@ -295,138 +366,51 @@ export function EditRequirementDialog({
                       </PopoverContent>
                     </Popover>
                   </div>
-                </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Requirement Type</Label>
-                    <Select value={formData.type} onValueChange={v => updateField('type', v)}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="standard">Standard</SelectItem>
-                        <SelectItem value="conditional">Conditional</SelectItem>
-                        <SelectItem value="optional">Optional</SelectItem>
-                        <SelectItem value="multi-document">Multi-Document</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Required Doc Count</Label>
-                    <Input type="number" min="1" value={formData.requiredDocumentCount} onChange={e => updateField('requiredDocumentCount', parseInt(e.target.value))} />
-                  </div>
-                </div>
-
-                <div className="space-y-3 bg-slate-50 p-4 rounded-lg border">
-                  <Label className="flex items-center gap-2 text-primary font-semibold"><FileText className="h-4 w-4" /> Document Mapping</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full justify-between bg-white">
-                        <div className="flex gap-1 truncate">
-                          {(formData.kycDocumentIds || []).length > 0 ? (
-                            <div className="flex gap-1 truncate">
-                              {getSelectedDocumentNames().map((name, index) => (
-                                <Badge key={index} variant="secondary" className="text-[10px] truncate max-w-[150px]">
-                                  {name}
-                                </Badge>
-                              ))}
-                            </div>
-                          ) : "Select documents..."}
-                        </div>
-                        <Search className="h-4 w-4 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[400px] p-0" align="start">
-                      <Command>
-                        <CommandInput placeholder="Search documents..." />
-                        <CommandList>
-                          <CommandGroup>
-                            {kycDocuments.map(doc => (
-                              <CommandItem key={doc.id} onSelect={() => toggleKycDoc(doc.id.toString())}>
-                                <Check className={cn("mr-2 h-4 w-4", (formData.kycDocumentIds || []).includes(doc.id.toString()) ? "opacity-100" : "opacity-0")} />
-                                {doc.display_name || doc.name}
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                          <CommandSeparator />
-                          <CommandGroup>
-                            <CommandItem onSelect={() => updateField('kycDocumentIds', [])} className="justify-center text-destructive font-medium cursor-pointer">
-                              <Eraser className="mr-2 h-4 w-4" /> Clear Links
-                            </CommandItem>
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                </div>
-
-                {/* Master Field Linking */}
-                <div className="space-y-3 bg-slate-50 p-4 rounded-lg border">
-                  <Label className="flex items-center gap-2 text-primary font-semibold"><Database className="h-4 w-4" /> Master Field Linking</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className="w-full justify-between bg-white"
-                      >
-                        {formData.linked_master_field_id 
-                          ? masterFields.find(mf => String(mf.id) === String(formData.linked_master_field_id))?.label || "Selected Field"
-                          : "Link Master Field..."
+                  <div className="pt-4 border-t">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-slate-500">Extraction / Computed Function</Label>
+                      <Select value={formData.computedFunction} onValueChange={v => {
+                        updateField('computedFunction', v)
+                        // Auto-derive execution mode from function (only if not None)
+                        if (v === 'none') {
+                          updateField('executionMode', '')
+                        } else if (v.includes('Latest')) {
+                          updateField('executionMode', 'latest')
+                        } else {
+                          updateField('executionMode', 'all')
                         }
-                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[400px] p-0">
-                      <Command>
-                        <CommandInput placeholder="Search master fields..." />
-                        <CommandList>
-                          <CommandEmpty>No master field found.</CommandEmpty>
-                          <CommandGroup>
-                            <CommandItem
-                              value="none"
-                              onSelect={() => updateField('linked_master_field_id', null)}
-                            >
-                              <Check className={cn("mr-2 h-4 w-4", !formData.linked_master_field_id ? "opacity-100" : "opacity-0")} />
-                              -- None --
-                            </CommandItem>
-                            {masterFields.map((mf) => (
-                              <CommandItem
-                                key={mf.id}
-                                value={mf.label}
-                                onSelect={() => updateField('linked_master_field_id', String(mf.id))}
-                              >
-                                <Check className={cn("mr-2 h-4 w-4", String(formData.linked_master_field_id) === String(mf.id) ? "opacity-100" : "opacity-0")} />
-                                {mf.label}
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                </div>
-
-                {/* Toggles */}
-                <div className="flex gap-6">
-                  <div className="flex items-center space-x-2">
-                    <Checkbox id="stage-document" checked={formData.isStageDocument || false} onCheckedChange={(checked) => updateField('isStageDocument', checked)} />
-                    <Label htmlFor="stage-document" className="cursor-pointer">Stage Document</Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox id="has-template" checked={formData.hasTemplate || false} onCheckedChange={(checked) => updateField('hasTemplate', checked)} />
-                    <Label htmlFor="has-template" className="cursor-pointer">Has Template</Label>
+                      }}>
+                        <SelectTrigger className="bg-slate-50 border-slate-200 h-10">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {COMPUTED_FUNCTIONS.map(fn => (
+                            <SelectItem key={fn.value} value={fn.value} className="text-sm">
+                              <div className="flex flex-col py-0.5">
+                                <span className="font-medium">{fn.label}</span>
+                                <span className="text-[10px] text-slate-500">{fn.value === 'getLatestDocument' ? 'Returns the full document object.' : 'Returns specific field from document metadata.'}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 </div>
+              </Card>
 
-                {/* Additional Requirement Fields */}
-                <div className="border-t pt-4">
-                  <Label className="flex items-center gap-2 text-primary font-semibold mb-3">
+              {/* CRITERIA & TEMPLATES */}
+              <div className="grid grid-cols-2 gap-8">
+                <div className="space-y-4">
+                  <Label className="flex items-center gap-2 text-primary font-bold uppercase text-xs tracking-wide">
                     <Users className="h-4 w-4" /> Applicant Criteria
                   </Label>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label className="text-xs font-semibold">Nationality</Label>
+                  <div className="grid grid-cols-1 gap-4 p-4 bg-white border rounded-xl shadow-sm">
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] uppercase font-bold text-slate-400">Nationality</Label>
                       <Select value={formData.nationality || 'any'} onValueChange={(v: NationalityType | 'any') => updateField('nationality', v === 'any' ? undefined : v)}>
-                        <SelectTrigger className="bg-white h-9 text-xs"><SelectValue placeholder="Any nationality..." /></SelectTrigger>
+                        <SelectTrigger className="h-9"><SelectValue placeholder="Any nationality..." /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="any">Any Nationality</SelectItem>
                           {NATIONALITY_TYPES.map(type => (
@@ -435,11 +419,11 @@ export function EditRequirementDialog({
                         </SelectContent>
                       </Select>
                     </div>
-                    
-                    <div className="space-y-2">
-                      <Label className="text-xs font-semibold">Age Range</Label>
+
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] uppercase font-bold text-slate-400">Age Range</Label>
                       <Select value={formData.ageRange || 'any'} onValueChange={(v: AgeRangeType | 'any') => updateField('ageRange', v === 'any' ? undefined : v)}>
-                        <SelectTrigger className="bg-white h-9 text-xs"><SelectValue placeholder="Any age..." /></SelectTrigger>
+                        <SelectTrigger className="h-9"><SelectValue placeholder="Any age..." /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="any">Any Age</SelectItem>
                           {AGE_RANGE_TYPES.map(type => (
@@ -448,151 +432,116 @@ export function EditRequirementDialog({
                         </SelectContent>
                       </Select>
                     </div>
-                    
-                    {(formData.applicantTypes || []).includes('dependent') && (
-                      <div className="space-y-2">
-                        <Label className="text-xs font-semibold">Dependant Relationship</Label>
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <Button variant="outline" className="w-full justify-between bg-white h-9 text-xs">
-                              <div className="flex gap-1 flex-wrap">
-                                {(formData.dependantRelationships && formData.dependantRelationships.length > 0) 
-                                  ? formData.dependantRelationships.map(r => (
-                                      <Badge key={r} variant="secondary" className="text-[10px]">{DEPENDANT_RELATIONSHIPS.find(dr => dr.value === r)?.label || r}</Badge>
-                                    )) 
-                                  : <span className="text-muted-foreground">Select relationships...</span>}
-                              </div>
-                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-[300px] p-0" align="start">
-                            <Command>
-                              <CommandInput placeholder="Search relationships..." />
-                              <CommandList>
-                                <CommandGroup>
-                                  {DEPENDANT_RELATIONSHIPS.map((rel) => (
-                                    <CommandItem
-                                      key={rel.value}
-                                      onSelect={() => {
-                                        const current = formData.dependantRelationships || []
-                                        const updated = current.includes(rel.value) 
-                                          ? current.filter(r => r !== rel.value) 
-                                          : [...current, rel.value]
-                                        updateField('dependantRelationships', updated)
-                                      }}
-                                    >
-                                      <Check className={cn("mr-2 h-4 w-4", (formData.dependantRelationships || []).includes(rel.value) ? "opacity-100" : "opacity-0")} />
-                                      {rel.label}
-                                    </CommandItem>
-                                  ))}
-                                </CommandGroup>
-                              </CommandList>
-                            </Command>
-                          </PopoverContent>
-                        </Popover>
-                      </div>
-                    )}
                   </div>
                 </div>
 
-                {formData.hasTemplate && (
-                  <div className="border-t pt-4 space-y-3">
-                    <Label className="flex items-center gap-2 text-blue-600 font-semibold"><FileText className="h-4 w-4" /> Linked Letter Templates</Label>
-                    <div className="bg-slate-50 rounded-lg border p-3">
-                      {loadingTemplates ? (
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground p-2"><Loader2 className="h-3 w-3 animate-spin" /> Fetching templates...</div>
-                      ) : templates.length > 0 ? (
-                        <div className="grid grid-cols-1 gap-2">
-                          {templates.map((template) => (
-                            <div key={template.id} className="flex items-center justify-between bg-white p-2 rounded border shadow-sm">
-                              <div className="flex flex-col overflow-hidden">
-                                <span className="text-sm font-medium truncate">{template.file_name}</span>
-                                <span className="text-[10px] text-muted-foreground truncate opacity-70">{template.subject || "No subject defined"}</span>
-                              </div>
-                              <Popover>
-                                <PopoverTrigger asChild><Button variant="ghost" size="sm" className="h-7 text-[10px]">Preview</Button></PopoverTrigger>
-                                <PopoverContent className="w-80 max-h-60 overflow-y-auto">
-                                  <div className="space-y-2"><h4 className="font-medium text-xs border-b pb-1">Content Preview</h4><div className="text-[10px] text-slate-600 leading-relaxed" dangerouslySetInnerHTML={{ __html: template.content?.substring(0, 500) + (template.content?.length > 500 ? '...' : '') }} /></div>
-                                </PopoverContent>
-                              </Popover>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-center py-4 bg-white rounded border border-dashed"><FileText className="h-8 w-8 text-slate-300 mx-auto mb-1" /><p className="text-xs text-slate-500">No generic templates found.</p></div>
-                      )}
+                <div className="space-y-4">
+                   <Label className="flex items-center gap-2 text-primary font-bold uppercase text-xs tracking-wide">
+                    <Settings2 className="h-4 w-4" /> Workflow & Templates
+                  </Label>
+                  <div className="space-y-4 p-4 bg-white border rounded-xl shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label className="text-sm">Stage Document</Label>
+                        <p className="text-[10px] text-slate-500">Block workflow until this is verified.</p>
+                      </div>
+                      <Switch checked={formData.isStageDocument || false} onCheckedChange={(v) => updateField('isStageDocument', v)} />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label className="text-sm">System Template</Label>
+                        <p className="text-[10px] text-slate-500">Attach a fillable PDF/Word template.</p>
+                      </div>
+                      <Switch checked={formData.hasTemplate || false} onCheckedChange={(v) => updateField('hasTemplate', v)} />
                     </div>
                   </div>
-                )}
+                </div>
+              </div>
 
-                <div className="border-t pt-4">
-                  <div className="flex items-center justify-between mb-4">
-                    <Label className="flex items-center gap-2"><Zap className="h-4 w-4" /> Web Form Automation</Label>
+              {/* AUTOMATION & INSTRUCTIONS */}
+              <div className="space-y-4 pt-4 border-t">
+                  <div className="flex items-center justify-between">
+                    <Label className="flex items-center gap-2 text-purple-600 font-bold uppercase text-xs tracking-wide">
+                      <Zap className="h-4 w-4" /> Web Form Automation
+                    </Label>
                     <Switch checked={formData.hasWebForm} onCheckedChange={v => updateField('hasWebForm', v)} />
                   </div>
                   {formData.hasWebForm && (
-                    <div className="grid grid-cols-2 gap-4 animate-in slide-in-from-top-2">
-                      <div className="space-y-2"><Label>Form Name</Label><Input value={formData.webFormName} onChange={e => updateField('webFormName', e.target.value)} /></div>
-                      <div className="space-y-2"><Label>Automation</Label><Select value={formData.automationId} onValueChange={v => updateField('automationId', v)}><SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger><SelectContent>{automationTypes.map(a => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>)}</SelectContent></Select></div>
+                    <div className="grid grid-cols-2 gap-4 p-4 bg-purple-50/50 border border-purple-100 rounded-xl animate-in slide-in-from-top-2">
+                      <div className="space-y-2">
+                        <Label className="text-[10px] uppercase font-bold text-purple-700">Web Form Header</Label>
+                        <Input value={formData.webFormName} onChange={e => updateField('webFormName', e.target.value)} className="bg-white border-purple-200" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[10px] uppercase font-bold text-purple-700">Automation Logic</Label>
+                        <Select value={formData.automationId} onValueChange={v => updateField('automationId', v)}>
+                          <SelectTrigger className="bg-white border-purple-200"><SelectValue placeholder="Select logic..." /></SelectTrigger>
+                          <SelectContent>
+                            {automationTypes.map(a => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
                   )}
-                </div>
 
-                <div className="space-y-2">
-                  <Label>Instructions</Label>
-                  <Textarea value={formData.instructions} onChange={e => updateField('instructions', e.target.value)} placeholder="Display instructions to users..." rows={2} />
-                </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold text-slate-500 uppercase">Submission Instructions</Label>
+                    <Textarea 
+                      value={formData.instructions} 
+                      onChange={e => updateField('instructions', e.target.value)} 
+                      placeholder="Give users specific guidance on how to provide this document..." 
+                      rows={3} 
+                    />
+                  </div>
+              </div>
             </TabsContent>
-            
-            {/* TAB 2: WEB DATA */}
+
             <TabsContent value="webdata" className="flex-1 overflow-y-auto m-0 p-6 bg-slate-50">
-               {formData.webdata && formData.webdata.length > 0 ? (
-                 <div className="space-y-4">
-                   <div className="flex items-center justify-between">
-                     <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2"><Database className="h-4 w-4 text-blue-600"/> Configured Fields</h3>
-                     <Badge variant="outline" className="bg-white">{formData.webdata.length} fields</Badge>
-                   </div>
-                   <div className="border rounded-lg bg-white overflow-hidden shadow-sm">
-                      <Table>
-                        <TableHeader>
-                           <TableRow className="bg-slate-100/50">
-                             <TableHead className="h-9">Variable ID</TableHead>
-                             <TableHead className="h-9">Display Name</TableHead>
-                             <TableHead className="h-9">Type</TableHead>
-                             <TableHead className="h-9">Entity</TableHead>
-                           </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {formData.webdata.map((field: any, idx: number) => (
-                            <TableRow key={idx}>
-                               <TableCell className="font-mono text-xs text-blue-600">{field.variableName}</TableCell>
-                               <TableCell className="text-xs font-medium">{field.efnsDisplayName || field.name}</TableCell>
-                               <TableCell><Badge variant="secondary" className="text-[10px]">{field.fieldType}</Badge></TableCell>
-                               <TableCell className="text-xs capitalize text-slate-500">{field.entityType}</TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                   </div>
-                   <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-700">
-                      <p className="font-semibold mb-1">Note:</p>
-                      <p>Web Data fields are configured via the "Add Requirements" automation tool. To modify these fields, please update the configuration in the main requirements table.</p>
-                   </div>
-                 </div>
-               ) : (
-                 <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-2">
-                    <Database className="h-10 w-10 opacity-20" />
-                    <p className="text-sm font-medium">No Web Data Configured</p>
-                    <p className="text-xs max-w-[200px] text-center opacity-70">This requirement does not have any web form data fields attached.</p>
-                 </div>
-               )}
+              {formData.webdata && formData.webdata.length > 0 ? (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2"><Database className="h-4 w-4 text-blue-600" /> Configured Fields</h3>
+                    <Badge variant="outline" className="bg-white">{formData.webdata.length} fields</Badge>
+                  </div>
+                  <div className="border rounded-lg bg-white overflow-hidden shadow-sm">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-slate-100/50">
+                          <TableHead className="h-9">Variable ID</TableHead>
+                          <TableHead className="h-9">Display Name</TableHead>
+                          <TableHead className="h-9">Type</TableHead>
+                          <TableHead className="h-9">Entity</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {formData.webdata.map((field: any, idx: number) => (
+                          <TableRow key={idx}>
+                            <TableCell className="font-mono text-xs text-blue-600">{field.variableName}</TableCell>
+                            <TableCell className="text-xs font-medium">{field.efnsDisplayName || field.name}</TableCell>
+                            <TableCell><Badge variant="secondary" className="text-[10px]">{field.fieldType}</Badge></TableCell>
+                            <TableCell className="text-xs capitalize text-slate-500">{field.entityType}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-2">
+                  <Database className="h-10 w-10 opacity-20" />
+                  <p className="text-sm font-medium">No Web Data Configured</p>
+                  <p className="text-xs max-w-[200px] text-center opacity-70">This requirement does not have any web form data fields attached.</p>
+                </div>
+              )}
             </TabsContent>
           </Tabs>
         </div>
 
-        <DialogFooter className="p-4 border-t bg-white">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={isSubmitting}>{isSubmitting ? "Saving..." : "Save Changes"}</Button>
+        <DialogFooter className="p-4 border-t bg-white gap-3">
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={isSubmitting} className="min-w-[140px]">
+            {isSubmitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving...</> : "Save Changes"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

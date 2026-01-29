@@ -21,7 +21,6 @@ export const DEPENDANT_RELATIONSHIPS = [
   { value: 'father_in_law', label: 'Father-in-law' },
 ];
 
-// Additional requirement fields
 export type NationalityType = 'kenyan' | 'foreigner';
 
 export const NATIONALITY_TYPES: { value: NationalityType; label: string }[] = [
@@ -42,7 +41,6 @@ export const QUALIFICATION_TYPES: { value: QualificationType; label: string }[] 
   { value: 'professional', label: 'Professional Certification' },
 ];
 
-// Age ranges for requirements
 export type AgeRangeType = 'any' | 'minor' | 'adult';
 
 export const AGE_RANGE_TYPES: { value: AgeRangeType; label: string }[] = [

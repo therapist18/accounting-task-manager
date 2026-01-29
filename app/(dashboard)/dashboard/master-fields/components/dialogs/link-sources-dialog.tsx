@@ -380,6 +380,23 @@ export function DataSourceConfiguration({ sources, onChange, documentTypes }: Da
                 </div>
               </div>
               
+              <div className="space-y-1">
+                <Label className="text-[10px] font-bold uppercase text-slate-500">Linking Variable</Label>
+                <SearchableSelect 
+                    value={source.linking_variable || "id"} 
+                    onValueChange={(v:any)=>updateSource(index, {linking_variable: v})} 
+                    options={[
+                        {value: "id", label: "ID"},
+                        {value: "individual_id", label: "Individual ID"},
+                        {value: "kyc_document_id", label: "KYC Document ID"},
+                        {value: "document_id", label: "Document ID"},
+                        {value: "director_id", label: "Director ID"},
+                        {value: "company_id", label: "Company ID"}
+                    ]} 
+                    placeholder="Select linking variable..." 
+                />
+              </div>
+              
               {source.source_type === "document" && (
                   <div className="space-y-1 bg-white p-2 border rounded"><Label className="text-[10px] font-bold uppercase text-slate-500">Documents</Label>
                   <MultiSelectBox options={documentTypes} selectedValues={source.document_id||[]} onChange={(v:any)=>updateSource(index, {document_id:v})} /></div>
@@ -464,7 +481,7 @@ export function DataSourceConfiguration({ sources, onChange, documentTypes }: Da
                     </div>
                     <p className="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
                         <Code className="w-3 h-3"/> 
-                        Type <code>->'key'</code> for arrays/objects, or <code>->>'key'</code> for text.
+                        Type {'->'}{'key'} for arrays/objects, or {'->>'}{'key'} for text.
                     </p>
                  </div>
               )}
@@ -472,7 +489,7 @@ export function DataSourceConfiguration({ sources, onChange, documentTypes }: Da
           </Card>
         )
       })}
-      <Button variant="outline" onClick={addSource} className="w-full border-dashed"><Plus className="mr-2 h-4 w-4"/> Add Source</Button>
+      <Button type="button" variant="outline" onClick={addSource} className="w-full border-dashed"><Plus className="mr-2 h-4 w-4"/> Add Source</Button>
     </div>
   )
 } 

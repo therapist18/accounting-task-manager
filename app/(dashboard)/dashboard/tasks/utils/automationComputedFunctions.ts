@@ -204,6 +204,53 @@ export async function extractFieldFromAllDocuments(
 
 // --- SINGLE VALUE EXTRACTION ---
 
+export async function getLatestDocument(
+    individualId: string | number,
+    documentIds: string[],
+    cache?: DocumentCache
+): Promise<any> {
+    try {
+        const { docs, types } = await fetchDocsAndTypes(individualId, documentIds, cache);
+        if (docs.length === 0) return null;
+
+        const sorted = sortDocsByRecency(docs, types);
+        const latest = sorted[0];
+        
+        return {
+            document: latest.doc,
+            documentType: latest.type,
+            sortDate: latest.sortDate,
+            dateSource: latest.dateSource
+        };
+    } catch (error) {
+        console.error("[Get Latest Document Error]:", error);
+        return null;
+    }
+}
+
+export async function getAllDocuments(
+    individualId: string | number,
+    documentIds: string[],
+    cache?: DocumentCache
+): Promise<any[]> {
+    try {
+        const { docs, types } = await fetchDocsAndTypes(individualId, documentIds, cache);
+        if (docs.length === 0) return [];
+
+        const sorted = sortDocsByRecency(docs, types);
+        
+        return sorted.map(item => ({
+            document: item.doc,
+            documentType: item.type,
+            sortDate: item.sortDate,
+            dateSource: item.dateSource
+        }));
+    } catch (error) {
+        console.error("[Get All Documents Error]:", error);
+        return [];
+    }
+}
+
 export async function extractFieldFromLatestDocument(
     individualId: string | number,
     documentIds: string[],
@@ -592,6 +639,8 @@ export async function executeComputedField(
         }
     }
     switch (normalizedFunctionName) {
+        case 'getLatestDocument':
+            return await getLatestDocument(individualId, computedDocuments, cache);
         case 'determineImmigrationStatus':
             return await determineImmigrationStatus(individualId, computedDocuments, cache);
         case 'getLatestWorkPermit':
