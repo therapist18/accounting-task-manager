@@ -358,7 +358,6 @@ const fetchSourceData = useCallback(async () => {
 
       fieldsToProcess.forEach((field: any) => {
         if (field.linkedJobQuestionId) {
-          console.log('[fetchSourceData] Queuing Job Question lookup for Task:', taskId);
           if (taskId) addToQueue('tm_tasks', 'id', String(taskId));
           return; 
         }
@@ -422,14 +421,12 @@ const fetchSourceData = useCallback(async () => {
         const idArray = Array.from(ids);
         if (idArray.length === 0) continue;
 
-        console.log(`[fetchSourceData] Fetching from ${table} with ${linkingVariable} IN (${idArray.join(',')})`);
 
         fetchPromises.push(
           supabase.from(table)
             .select('*')
             .in(linkingVariable, idArray)
             .then(({ data, error }) => {
-              console.log(`[fetchSourceData] Response from ${table}:`, { data: data?.length || 0, error });
               if (!error && data) {
                 if (!newSourceData[table]) newSourceData[table] = {};
                 data.forEach(record => {
@@ -452,7 +449,6 @@ const fetchSourceData = useCallback(async () => {
 
       await Promise.all(fetchPromises);
       
-      console.log('[fetchSourceData] COMPLETED. Current sourceData state:', newSourceData);
 
       // Handle remaining computed logic (Documents/Functions)
       const neededDocTypes = Array.from(computedRequirements.documentIds);
@@ -524,7 +520,6 @@ const getFieldValue = (fieldIdOrVariable: string, entityId: string, sourceIdx: n
 
     // --- JOB QUESTION LOGIC ---
     if (fieldDef?.linkedJobQuestionId) {
-      console.log(`[getFieldValue] Resolving Job Question: ${fieldIdOrVariable} (ID: ${fieldDef.linkedJobQuestionId})`);
       
       const taskRecord = sourceData['tm_tasks']?.[String(taskId)];
       
@@ -542,7 +537,6 @@ const getFieldValue = (fieldIdOrVariable: string, entityId: string, sourceIdx: n
         answer = answers[Number(questionId)];
       }
 
-      console.log(`[getFieldValue] Found answer for ${questionId}:`, answer);
       return (answer !== undefined && answer !== null) ? String(answer) : "Missing";
     }
 
@@ -862,7 +856,6 @@ setRequirementJobQuestions(requirement.job_specific_questions || []);
         formData: formData, step2Data: {}, step3Data: {}
       };
 
-      console.log('[handleRunAutomation] Final payload:', JSON.stringify(payload, null, 2));
 
       const res = await fetch(automation.webhook_url, { method: automation.webhook_method || 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (!res.ok) throw new Error("Trigger failed: " + res.status);
