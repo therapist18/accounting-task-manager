@@ -21,7 +21,8 @@ import { toast } from "@/hooks/use-toast"
 import { format } from "date-fns"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
-// --- Types ---
+const CLASS_D_ID = '1750687058159';
+
 interface JobQuestion {
     id: string
     label: string
@@ -86,8 +87,7 @@ export function EnquiryDialog({
     const [includeReferences, setIncludeReferences] = useState(false)
     const [availableReferences, setAvailableReferences] = useState<any[]>([])
     const [selectedReferences, setSelectedReferences] = useState<string[]>([])
-
-    const [formData, setFormData] = useState({
+const [formData, setFormData] = useState({
         job_description: '',
         department_id: '',
         subdepartment_id: '',
@@ -99,7 +99,52 @@ export function EnquiryDialog({
     })
     const [isIndividualPopoverOpen, setIsIndividualPopoverOpen] = useState(false)
 
-    // --- Classification Helpers ---
+    // --- Form Reset Logic ---
+    const resetForm = useCallback(() => {
+        setFormData({
+            job_description: '',
+            department_id: '',
+            subdepartment_id: '',
+            class_id: '',
+            subclass_id: '',
+            officer_id: '',
+            task_manager_id: '',
+            enquiry_date: new Date().toISOString().split('T')[0]
+        })
+        setSelectedIndividual(null)
+        setSelectedCompany('')
+        setSelectedUnderstudy('')
+        setUnderstudies([])
+        setCompanies([])
+        setJobAnswers({})
+        setJobQuestions([])
+        setSelectedDependants([])
+        setIncludeDependants(false)
+        setSelectedReferences([])
+        setIncludeReferences(false)
+    }, [])
+
+   useEffect(() => {
+        if (!open) {
+            setFormData({
+                job_description: '',
+                department_id: '',
+                subdepartment_id: '',
+                class_id: '',
+                subclass_id: '',
+                officer_id: '',
+                task_manager_id: '',
+                enquiry_date: new Date().toISOString().split('T')[0]
+            })
+            setSelectedIndividual(null)
+            setSelectedCompany('')
+            setSelectedUnderstudy('')
+            setJobAnswers({})
+            setIncludeDependants(false)
+            setIncludeReferences(false)
+        }
+    }, [open])
+
     const availableSubdepartments = useMemo(() => {
         const dept = departments.find(d => d.id.toString() === formData.department_id)
         return dept?.tm_subdepartments || []
@@ -110,11 +155,9 @@ export function EnquiryDialog({
         return sub?.classes || []
     }, [availableSubdepartments, formData.subdepartment_id])
 
-    // --- RESTORED: Robust Question Fetching (JSONB fix) ---
     const fetchJobQuestions = useCallback(async (levelObj: any) => {
         setLoadingQuestions(true)
         try {
-            // FIX: Use .contains instead of .eq for JSONB to avoid key-order mismatch issues
             const { data, error } = await supabase
                 .from('tm_class_requirements')
                 .select('job_specific_questions')
@@ -145,7 +188,6 @@ export function EnquiryDialog({
 
     useEffect(() => {
         if (!formData.department_id) return
-        // Create the subset object for .contains()
         const levelObj = {
             department_id: Number(formData.department_id),
             subdepartment_id: formData.subdepartment_id ? Number(formData.subdepartment_id) : null,
@@ -155,7 +197,6 @@ export function EnquiryDialog({
         fetchJobQuestions(levelObj)
     }, [formData.department_id, formData.subdepartment_id, formData.class_id, fetchJobQuestions])
 
-    // --- Fetch Individuals ---
     useEffect(() => {
         if (open) {
             setSearchLoading(true)
@@ -170,7 +211,6 @@ export function EnquiryDialog({
         }
     }, [open, applicantType])
 
-    // --- Understudies ---
     const fetchUnderstudies = useCallback(async (companyId: string) => {
         if (!companyId) { setUnderstudies([]); return }
         const { data: companyData } = await supabase.from('acc_portal_company_duplicate').select('understudy').eq('id', companyId).single()
@@ -181,7 +221,6 @@ export function EnquiryDialog({
         }
     }, [])
 
-    // --- RESTORED: Company and Principal Auto-detection Logic ---
     const handleIndividualSelect = useCallback(async (ind: Individual) => {
         setLoadingRelations(true)
         setSelectedIndividual(ind)
@@ -192,8 +231,6 @@ export function EnquiryDialog({
         setPrincipalForDependant(null)
 
         const promises = []
-
-        // 1. References
         promises.push(
             supabase.from('registry_individuals').select('references').eq('id', ind.id).single()
                 .then(({ data }) => {
@@ -202,14 +239,12 @@ export function EnquiryDialog({
                 })
         )
 
-        // 2. Company Detection Helper
         const getCompaniesForInd = (target: Individual) => {
             const associations = target.employment_data?.associations || []
             const validIds = associations.filter(a => a.individual_type === 'Principal' && a.company_id).map(a => a.company_id)
             return validIds.length ? supabase.from('acc_portal_company_duplicate').select('id, company_name, understudy').in('id', validIds) : Promise.resolve({ data: [] })
         }
 
-        // 3. Principal/Dependant Smart Logic
         if (ind.individual_type === 'principal') {
             promises.push(getCompaniesForInd(ind).then(res => ({ type: 'companies', data: res.data })))
             if (ind.relationships?.length) {
@@ -217,7 +252,6 @@ export function EnquiryDialog({
                 promises.push(supabase.from('registry_individuals').select('id, full_name').in('id', familyIds).then(res => ({ type: 'family', data: res.data })))
             }
         } else {
-            // Auto-select Principal for Dependant
             const principalRel = ind.relationships?.find(r => r.isPrincipal === 'Yes' || ['principal', 'husband', 'wife', 'father', 'mother'].includes(r.relationship?.toLowerCase()))
             if (principalRel) {
                 promises.push(
@@ -264,14 +298,20 @@ export function EnquiryDialog({
         fetchUnderstudies(value)
     }
 
-    const handleSubmit = async (e: React.FormEvent) => {
+   const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!selectedIndividual || !formData.department_id) return
 
         setLoading(true)
         try {
             const participants = [
-                { id: selectedIndividual.id, name: selectedIndividual.full_name, role: [applicantType], type: "individual", is_primary: true }
+                { 
+                    id: selectedIndividual.id, 
+                    name: selectedIndividual.full_name, 
+                    role: [applicantType], 
+                    type: "individual", 
+                    is_primary: true 
+                }
             ]
 
             if (selectedCompany) {
@@ -279,28 +319,35 @@ export function EnquiryDialog({
                 participants.push({ id: c.id, name: c.company_name, role: ['company'], type: "company" })
             }
 
-            if (selectedUnderstudy) {
+            // Only include understudy if the specific class is selected
+            if (selectedUnderstudy && formData.class_id === CLASS_D_ID) {
                 const u = understudies.find(x => x.id.toString() === selectedUnderstudy)
                 participants.push({ id: u.id, name: u.full_name, role: ['understudy'], type: "individual" })
-            }
-
-            if (includeDependants) {
-                availableDependants.filter(d => selectedDependants.includes(d.id.toString())).forEach(d => {
-                    participants.push({ id: d.id, name: d.full_name, role: [d.relationship_type?.toLowerCase() === 'principal member' ? 'principal' : 'dependant'], type: "individual" })
-                })
             }
 
             const payload = {
                 status: 'enquiry',
                 date_initiated: new Date(formData.enquiry_date).toISOString(),
                 job_description: formData.job_description,
+                // --- ADDED: Root level IDs ---
+                individual_id: selectedIndividual.id,
+                company_id: selectedCompany ? Number(selectedCompany) : null,
+                officer_id: formData.officer_id ? Number(formData.officer_id) : null,
+                task_manager_id: formData.task_manager_id ? Number(formData.task_manager_id) : null,
+                
                 job_level: {
                     level: formData.class_id ? 3 : formData.subdepartment_id ? 2 : 1,
                     department_id: Number(formData.department_id),
                     subdepartment_id: Number(formData.subdepartment_id),
                     class_id: formData.class_id ? Number(formData.class_id) : null
                 },
-                applicant_details: { id: selectedIndividual.id, name: selectedIndividual.full_name, type: "individual" },
+                // --- UPDATED: Include role in applicant_details ---
+                applicant_details: { 
+                    id: selectedIndividual.id, 
+                    name: selectedIndividual.full_name, 
+                    type: "individual",
+                    role: applicantType 
+                },
                 participants_details: participants,
                 job_specific_answers: jobAnswers,
                 applied_by: "11",
@@ -309,7 +356,8 @@ export function EnquiryDialog({
 
             const { data, error } = await supabase.from('tm_tasks').insert([payload]).select().single()
             if (error) throw error
-            onEnquiryCreated(data)
+            
+            onEnquiryCreated(data) // This updates state in TasksPage
             onOpenChange(false)
         } catch (error) {
             console.error(error)
@@ -322,7 +370,6 @@ export function EnquiryDialog({
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-w-[1200px] max-h-[95vh] p-0 flex flex-col border-none shadow-2xl overflow-hidden">
-                {/* RESTORED: Professional Light Blue Header */}
                 <DialogHeader className="p-6 bg-blue-600 text-white shrink-0">
                     <div className="flex items-center gap-4">
                         <div className="bg-white/20 p-2.5 rounded-xl"><ListTodo className="h-6 w-6" /></div>
@@ -337,7 +384,6 @@ export function EnquiryDialog({
                     <form id="enquiry-form" onSubmit={handleSubmit} className="p-8 space-y-8">
                         <div className="grid grid-cols-12 gap-8">
                             
-                            {/* LEFT COLUMN: CLIENT & RELATIONS */}
                             <div className="col-span-12 lg:col-span-4 space-y-6">
                                 <h3 className="text-xs font-bold uppercase tracking-wider text-blue-600 flex items-center gap-2">
                                     <User className="h-4 w-4" /> Client Identification
@@ -389,30 +435,32 @@ export function EnquiryDialog({
                                         </div>
 
                                         <div className="space-y-3 pt-2">
-                                            <Label className="text-[11px] font-bold text-slate-500 uppercase">Employment Entity</Label>
-                                            <Select value={selectedCompany} onValueChange={handleCompanyChange}>
-                                                <SelectTrigger className="h-11 border-blue-100 bg-blue-50/20"><SelectValue placeholder="Linked Company..." /></SelectTrigger>
-                                                <SelectContent>
-                                                    {companies.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.company_name}</SelectItem>)}
-                                                </SelectContent>
-                                            </Select>
+                                        <Label className="text-[11px] font-bold text-slate-500 uppercase">Employment Entity</Label>
+                                        <Select value={selectedCompany} onValueChange={handleCompanyChange}>
+                                            <SelectTrigger className="h-11 border-blue-100 bg-blue-50/20"><SelectValue placeholder="Linked Company..." /></SelectTrigger>
+                                            <SelectContent>
+                                                {companies.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.company_name}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
 
-                                            {understudies.length > 0 && (
-                                                <div className="space-y-2">
-                                                    <Label className="text-[11px] font-bold text-slate-500 uppercase">Related Understudy</Label>
-                                                    <Select value={selectedUnderstudy} onValueChange={setSelectedUnderstudy}>
-                                                        <SelectTrigger className="h-11"><SelectValue placeholder="Select understudy..." /></SelectTrigger>
-                                                        <SelectContent>
-                                                            {understudies.map(u => <SelectItem key={u.id} value={u.id.toString()}>{u.full_name}</SelectItem>)}
-                                                        </SelectContent>
-                                                    </Select>
-                                                </div>
-                                            )}
+                                            {/* Logic Update: Only show if class matches Class D ID */}
+                                           {formData.class_id === CLASS_D_ID && understudies.length > 0 && (
+                                            <div className="space-y-2 mt-4 animate-in fade-in slide-in-from-top-1">
+                                                <Label className="text-[11px] font-bold text-slate-500 uppercase">Related Understudy</Label>
+                                                <Select value={selectedUnderstudy} onValueChange={setSelectedUnderstudy}>
+                                                    <SelectTrigger className="h-11 border-amber-200 bg-amber-50/20">
+                                                        <SelectValue placeholder="Select understudy..." />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {understudies.map(u => <SelectItem key={u.id} value={u.id.toString()}>{u.full_name}</SelectItem>)}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        )}
                                         </div>
                                     </CardContent>
                                 </Card>
 
-                                {/* RELATIONS CARD */}
                                 {(availableDependants.length > 0 || availableReferences.length > 0) && (
                                     <div className="space-y-4">
                                         <h3 className="text-xs font-bold uppercase tracking-wider text-blue-600 flex items-center gap-2">
@@ -462,7 +510,6 @@ export function EnquiryDialog({
                                 )}
                             </div>
 
-                            {/* RIGHT COLUMN: JOB & QUESTIONS */}
                             <div className="col-span-12 lg:col-span-8 space-y-8">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="space-y-4">
@@ -478,21 +525,38 @@ export function EnquiryDialog({
                                         </Card>
                                     </div>
 
-                                    <div className="space-y-4">
-                                        <h3 className="text-xs font-bold uppercase tracking-wider text-blue-600 flex items-center gap-2">
-                                            <UserCheck className="h-4 w-4" /> Internal Processing
-                                        </h3>
-                                        <Card className="border-blue-100 shadow-sm bg-white">
-                                            <CardContent className="p-5 space-y-4">
-                                                <div className="space-y-1.5"><Label className="text-[10px] font-bold text-slate-400">ASSIGNED MANAGER</Label><Select value={formData.task_manager_id} onValueChange={id => setFormData(prev => ({ ...prev, task_manager_id: id }))}><SelectTrigger className="h-10 border-blue-50 bg-blue-50/10"><SelectValue placeholder="Select Staff" /></SelectTrigger><SelectContent>{users.map(u => <SelectItem key={u.id} value={u.id.toString()}>{u.name}</SelectItem>)}</SelectContent></Select></div>
-                                                <div className="space-y-1.5"><Label className="text-[10px] font-bold text-slate-400">CLIENT OFFICER</Label><Select value={formData.officer_id} onValueChange={id => setFormData(prev => ({ ...prev, officer_id: id }))}><SelectTrigger className="h-10 border-blue-50 bg-blue-50/10"><SelectValue placeholder="Select Officer" /></SelectTrigger><SelectContent>{officers.map(o => <SelectItem key={o.id} value={o.id.toString()}>{o.name}</SelectItem>)}</SelectContent></Select></div>
+                                   <div className="space-y-4">
+                                    <h3 className="text-xs font-bold uppercase tracking-wider text-blue-600 flex items-center gap-2">
+                                        <UserCheck className="h-4 w-4" /> Internal Processing
+                                    </h3>
+                                    <Card className="border-blue-100 shadow-sm bg-white">
+                                        <CardContent className="p-5 space-y-4">
+                                            <div className="space-y-1.5">
+                                                <Label className="text-[10px] font-bold text-slate-400">ASSIGNED MANAGER</Label>
+                                                <Select value={formData.task_manager_id} onValueChange={id => setFormData(prev => ({ ...prev, task_manager_id: id }))}>
+                                                    <SelectTrigger className="h-10 border-blue-50 bg-blue-50/10"><SelectValue placeholder="Select Staff" /></SelectTrigger>
+                                                    <SelectContent>
+                                                        {/* FIXED: Check for u.full_name as well */}
+                                                        {users.map(u => <SelectItem key={u.id} value={u.id.toString()}>{u.full_name || u.name}</SelectItem>)}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <Label className="text-[10px] font-bold text-slate-400">CLIENT OFFICER</Label>
+                                                <Select value={formData.officer_id} onValueChange={id => setFormData(prev => ({ ...prev, officer_id: id }))}>
+                                                    <SelectTrigger className="h-10 border-blue-50 bg-blue-50/10"><SelectValue placeholder="Select Officer" /></SelectTrigger>
+                                                    <SelectContent>
+                                                        {/* FIXED: Check for o.full_name as well */}
+                                                        {officers.map(o => <SelectItem key={o.id} value={o.id.toString()}>{o.full_name || o.name}</SelectItem>)}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
                                                 <div className="space-y-1.5"><Label className="text-[10px] font-bold text-slate-400">ENQUIRY DATE</Label><div className="relative"><Input type="date" value={formData.enquiry_date} onChange={e => setFormData(prev => ({ ...prev, enquiry_date: e.target.value }))} className="pl-10 h-10" /><Calendar className="absolute left-3 top-3 h-4 w-4 text-blue-400 pointer-events-none" /></div></div>
                                             </CardContent>
                                         </Card>
                                     </div>
                                 </div>
 
-                                {/* JOB SPECIFIC QUESTIONS */}
                                 <div className="space-y-4">
                                     <div className="flex items-center justify-between px-1">
                                         <h3 className="text-xs font-bold uppercase tracking-wider text-blue-600 flex items-center gap-2">

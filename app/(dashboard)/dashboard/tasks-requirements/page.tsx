@@ -58,7 +58,7 @@ export default function TasksPage() {
   const [selectedTaskForDocuments, setSelectedTaskForDocuments] = useState<UtilTask | null>(null);
   const [isDocumentsDialogOpen, setIsDocumentsDialogOpen] = useState(false);
   const [companyInquiryDialogOpen, setCompanyInquiryDialogOpen] = useState(false);
-
+const [internalStaff, setInternalStaff] = useState({ users: [], officers: [] });
   // --- Data Fetching Callbacks ---
   const loadTasksAndStages = useCallback(async (departmentId: string, subdepartmentId?: string) => {
     if (!departmentId || departments.length === 0) return;
@@ -96,6 +96,18 @@ export default function TasksPage() {
       setStages([]);
     }
   }, [selectedDepartment, selectedSubdepartment, loadTasksAndStages]);
+
+  useEffect(() => {
+    const fetchStaff = async () => {
+        const { data: staff } = await supabase.from('registry_users').select('id, full_name').order('full_name');
+        // If your schema differentiates officers, filter here or fetch separately
+        setInternalStaff({
+            users: staff || [],
+            officers: staff || [] // Assuming same table for this example
+        });
+    };
+    fetchStaff();
+}, []);
 
   // --- Filtering and Memoization ---
   const getFilteredTasks = useCallback((status?: string | string[]) => {
@@ -197,7 +209,6 @@ export default function TasksPage() {
 
   const handleEnquiryCreated = (newEnquiry: UtilTask | UtilTask[]) => {
     const newEnquiries = Array.isArray(newEnquiry) ? newEnquiry : [newEnquiry];
-    setTasks(prev => [...newEnquiries, ...prev]);
     toast({ title: "Success", description: `${newEnquiries.length} new enquiry/enquiries created.` });
   };
 
@@ -390,16 +401,24 @@ export default function TasksPage() {
             key={`company-dialog-${selectedDepartment}-${selectedSubdepartment}-${selectedClass}`} // Force re-render when any selection changes
           />
 
-          <EnquiryDialog
-            open={enquiryDialogOpen}
-            onOpenChange={setEnquiryDialogOpen}
-            onEnquiryCreated={handleEnquiryCreated}
-            departments={departments}
-            selectedDepartment={selectedDepartment}
-            selectedSubdepartment={selectedSubdepartment}
-            selectedClass={selectedClass}
-            selectedSubclass={selectedSubclass}
-          />
+      <EnquiryDialog
+    open={enquiryDialogOpen}
+    onOpenChange={setEnquiryDialogOpen}
+    onEnquiryCreated={(newTasks) => {
+        handleEnquiryCreated(newTasks);
+        // Small delay to ensure server has processed the new task, then refresh data
+        setTimeout(() => {
+            loadTasksAndStages(selectedDepartment, selectedSubdepartment); 
+        }, 500);
+    }}
+    departments={departments}
+    users={internalStaff.users}       // Pass real data
+    officers={internalStaff.officers} // Pass real data
+    selectedDepartment={selectedDepartment}
+    selectedSubdepartment={selectedSubdepartment}
+    selectedClass={selectedClass}
+    selectedSubclass={selectedSubclass}
+/>
         </div>
       </main>
     </div>
