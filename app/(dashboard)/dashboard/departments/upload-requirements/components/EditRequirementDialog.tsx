@@ -25,7 +25,7 @@ import {
   type NationalityType,
   type AgeRangeType
 } from "@/lib/constants/entity-types"
-import { COMPUTED_FUNCTIONS, EXECUTION_MODES } from "@/lib/constants/computed-functions"
+import { COMPUTED_FUNCTIONS, EXECUTION_MODES, LINKING_VARIABLES } from "@/lib/constants/computed-functions"
 import { useTableData, type TableOption } from "@/lib/tableUtils"
 import { Card } from '@/components/ui/card'
 
@@ -80,7 +80,10 @@ export function EditRequirementDialog({
     webdata: [],
     executionMode: 'latest',
     computedFunction: 'none',
-    sourceTable: ''
+    sourceTable: '',
+    linkingVariable: null,
+    selectedTemplateId: undefined,
+    selectedTemplate: undefined
   })
   
   const [templates, setTemplates] = useState<any[]>([]);
@@ -117,7 +120,11 @@ export function EditRequirementDialog({
         hasTemplate: requirement.hasTemplate || false,
         webdata: requirement.webdata || [],
         executionMode: requirement.execution_mode || 'latest',
-        computedFunction: requirement.computed_function || 'getLatestDocument'
+        computedFunction: requirement.computed_function || 'getLatestDocument',
+        sourceTable: requirement.sourceTable || '',
+        linkingVariable: requirement.linkingVariable || null,
+        selectedTemplateId: requirement.selectedTemplateId || undefined,
+        selectedTemplate: requirement.selectedTemplate || undefined
       });
 
       fetchKycDocuments();
@@ -125,32 +132,55 @@ export function EditRequirementDialog({
     }
   }, [requirement, isOpen]);
 
-  useEffect(() => {
-    const fetchTemplates = async () => {
-      const docIds = formData.kycDocumentIds || [];
-      if (docIds.length === 0 || !formData.hasTemplate) {
-        setTemplates([]);
-        return;
-      }
-      setLoadingTemplates(true);
-      try {
-        const { data, error } = await supabase
-          .from('acc_portal_templates')
-          .select('*')
-          .in('document_id', docIds)
-          .or('banks_associated.is.null,banks_associated.eq.[]')
-          .order('file_name', { ascending: true });
+useEffect(() => {
+  const fetchTemplates = async () => {
+    const docIds = formData.kycDocumentIds || [];
+    if (docIds.length === 0 || !formData.hasTemplate) {
+      setTemplates([]);
+      return;
+    }
+    
+    setLoadingTemplates(true);
+    try {
+      const entityTypeMap: Record<string, string> = {
+        'company': 'company',
+        'principal': 'principal',
+        'director': 'director',
+        'shareholder': 'shareholder',
+        'dependent': 'dependent',
+        'employee': 'employee',
+        'understudy': 'understudy'
+      };
 
-        if (error) throw error;
-        setTemplates(data || []);
-      } catch (error) {
-        console.error("Error fetching templates:", error);
-      } finally {
-        setLoadingTemplates(false);
+      const applicantTypes = formData.applicantTypes || ['principal'];
+      const entityTypes = [...new Set(applicantTypes.map(type => entityTypeMap[type] || 'principal'))];
+      const entityFilters = entityTypes.map(et => `entity_types.cs.["${et}"]`).join(',');
+
+      // BUILD THE QUERY
+      let query = supabase
+        .from('acc_portal_templates')
+        .select('*')
+        .in('document_id', docIds) // Use docIds here
+        // Logic: No bank association restriction
+        .or(`banks_associated.is.null,banks_associated.eq.[]`);
+
+      // Logic: Must match the entity type
+      if (entityFilters) {
+        query = query.or(entityFilters);
       }
-    };
-    if (isOpen) fetchTemplates();
-  }, [formData.kycDocumentIds, formData.hasTemplate, isOpen]);
+
+      const { data, error } = await query.order('file_name', { ascending: true });
+
+      if (error) throw error;
+      setTemplates(data || []);
+    } catch (error) {
+      console.error("Error fetching templates:", error);
+    } finally {
+      setLoadingTemplates(false);
+    }
+  };
+  if (isOpen) fetchTemplates();
+}, [formData.kycDocumentIds, formData.hasTemplate, formData.applicantTypes, isOpen]);
 
   const fetchKycDocuments = async () => {
     try {
@@ -231,6 +261,9 @@ export function EditRequirementDialog({
         nationality: formData.nationality,
         ageRange: formData.ageRange,
         dependantRelationships: formData.dependantRelationships,
+        sourceTable: formData.sourceTable || '',
+        linkingVariable: formData.linkingVariable || null,
+        selectedTemplateId: formData.selectedTemplateId || undefined,
         updated_at: new Date().toISOString()
       }
       await onSave(updatedRequirement)
@@ -374,50 +407,89 @@ export function EditRequirementDialog({
 
                   <div className="space-y-2">
                     <Label className="text-xs font-bold text-slate-500">Source Table</Label>
-                    <Select value={formData.sourceTable || ''} onValueChange={(value) => updateField('sourceTable', value)}>
-                      <SelectTrigger className="bg-white h-9">
-                        <SelectValue placeholder="Select source table..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {loadingTables ? (
-                          <div className="px-2 py-1 text-sm text-slate-500">Loading tables...</div>
-                        ) : tables.length > 0 ? (
-                          tables.map(table => (
-                            <SelectItem key={table.name} value={table.name}>
-                              {table.label}
-                            </SelectItem>
-                          ))
-                        ) : (
-                          <div className="px-2 py-1 text-sm text-slate-500">No tables available</div>
-                        )}
-                      </SelectContent>
-                    </Select>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="w-full justify-between border-dashed border-2 hover:border-primary hover:bg-slate-50 transition-all">
+                          <span className="text-slate-400">
+                            {formData.sourceTable ? tables.find(t => t.name === formData.sourceTable)?.label || formData.sourceTable : "Select source table..."}
+                          </span>
+                          <Search className="h-4 w-4 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[450px] p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder="Search tables..." />
+                          <CommandList>
+                            {loadingTables ? (
+                              <div className="px-2 py-4 text-center text-sm text-slate-500">Loading tables...</div>
+                            ) : tables.length > 0 ? (
+                              <CommandGroup className="max-h-[300px] overflow-y-auto">
+                                {tables.map(table => (
+                                  <CommandItem key={table.name} onSelect={() => {
+                                    updateField('sourceTable', table.name);
+                                  }}>
+                                    <Check className={cn("mr-2 h-4 w-4", formData.sourceTable === table.name ? "opacity-100" : "opacity-0")} />
+                                    {table.label}
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            ) : (
+                              <div className="px-2 py-4 text-center text-sm text-slate-500">No tables available</div>
+                            )}
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                   </div>
+
+                  {formData.sourceTable && (
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-slate-500">Linking Variable</Label>
+                      <Select value={formData.linkingVariable || ''} onValueChange={(value) => updateField('linkingVariable', value || null)}>
+                        <SelectTrigger className="bg-white h-9">
+                          <SelectValue placeholder="Select linking variable..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {LINKING_VARIABLES.map(variable => (
+                            <SelectItem key={variable.value} value={variable.value}>
+                              {variable.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
 
                   <div className="pt-4 border-t">
                     <div className="space-y-2">
                       <Label className="text-xs font-bold text-slate-500">Extraction / Computed Function</Label>
-                      <Select value={formData.computedFunction} onValueChange={v => {
-                        updateField('computedFunction', v)
+                      <Select value={formData.computedFunction || 'none'} onValueChange={v => {
+                        console.log('Computed function changed:', v); // Debug log
+                        
+                        // Combine all updates into a single call
+                        const updates: any = { computedFunction: v };
+                        
                         // Auto-derive execution mode from function (only if not None)
                         if (v === 'none') {
-                          updateField('executionMode', '')
+                          updates.executionMode = '';
                         } else if (v.includes('Latest')) {
-                          updateField('executionMode', 'latest')
+                          updates.executionMode = 'latest';
                         } else {
-                          updateField('executionMode', 'all')
+                          updates.executionMode = 'all';
                         }
+                        
+                        // Apply all updates at once
+                        Object.keys(updates).forEach(key => {
+                          updateField(key, updates[key]);
+                        });
                       }}>
                         <SelectTrigger className="bg-slate-50 border-slate-200 h-10">
-                          <SelectValue />
+                          <SelectValue placeholder="Select function..." />
                         </SelectTrigger>
                         <SelectContent>
                           {COMPUTED_FUNCTIONS.map(fn => (
                             <SelectItem key={fn.value} value={fn.value} className="text-sm">
-                              <div className="flex flex-col py-0.5">
-                                <span className="font-medium">{fn.label}</span>
-                                <span className="text-[10px] text-slate-500">{fn.value === 'getLatestDocument' ? 'Returns the full document object.' : 'Returns specific field from document metadata.'}</span>
-                              </div>
+                              {fn.label}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -481,6 +553,55 @@ export function EditRequirementDialog({
                       </div>
                       <Switch checked={formData.hasTemplate || false} onCheckedChange={(v) => updateField('hasTemplate', v)} />
                     </div>
+                    {formData.hasTemplate && (
+                      <div className="mt-4 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-orange-600" />
+                          <Label className="text-sm font-medium text-orange-800">Available Templates</Label>
+                          {loadingTemplates && <Loader2 className="h-4 w-4 animate-spin text-orange-600" />}
+                        </div>
+                        
+                        {templates.length > 0 ? (
+                          <div className="space-y-2">
+                            <p className="text-xs text-slate-600">Templates for selected documents:</p>
+                            <div className="grid gap-2">
+                              {templates.map(template => (
+                                <div key={template.id} className="flex items-center justify-between p-2 bg-orange-50 rounded border border-orange-200">
+                                  <div className="flex items-center gap-2">
+                                    <FileText className="h-4 w-4 text-orange-600" />
+                                    <div>
+                                      <p className="text-sm font-medium">{template.file_name}</p>
+                                      <p className="text-xs text-slate-500">{template.file_type?.toUpperCase()}</p>
+                                    </div>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    variant={formData.selectedTemplateId === template.id ? "default" : "outline"}
+                                    className="h-7 text-xs"
+                                    onClick={() => {
+                                      updateField('selectedTemplateId', template.id);
+                                      updateField('selectedTemplate', template);
+                                      toast({
+                                        title: "Template Selected",
+                                        description: `${template.file_name} has been selected`
+                                      });
+                                    }}
+                                  >
+                                    {formData.selectedTemplateId === template.id ? "Selected" : "Select"}
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : !loadingTemplates ? (
+                          <div className="text-center py-4">
+                            <FileText className="h-8 w-8 text-slate-300 mx-auto mb-2" />
+                            <p className="text-sm text-slate-500">No templates found</p>
+                            <p className="text-xs text-slate-400">Templates will appear here once available for the selected documents</p>
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

@@ -1810,7 +1810,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                       </div>
                     </TableCell>
                   </TableRow>
-                  {expandedSections.templates && renderDocumentSection([...organizedRequirements.documents.templates, ...organizedRequirements.documents.automations], 'templates')}
+                  {expandedSections.templates && renderDocumentSection([ ...organizedRequirements.documents.automations,...organizedRequirements.documents.templates], 'templates')}
                 </>
               )}
             </TableBody>

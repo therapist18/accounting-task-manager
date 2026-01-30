@@ -25,7 +25,7 @@ import {
   type NationalityType,
   type AgeRangeType
 } from "@/lib/constants/entity-types"
-import { COMPUTED_FUNCTIONS, EXECUTION_MODES } from "@/lib/constants/computed-functions"
+import { COMPUTED_FUNCTIONS, EXECUTION_MODES, LINKING_VARIABLES } from "@/lib/constants/computed-functions"
 import { useTableData, type TableOption } from "@/lib/tableUtils"
 import { Card } from "@/components/ui/card"
 
@@ -59,6 +59,9 @@ export interface RequirementForm {
   ageRange?: AgeRangeType
   dependantRelationships?: string[]
   sourceTable?: string // Table where document data comes from
+  linkingVariable?: "id" | "individual_id" | "director_id" | "kyc_document_id" | "company_id" | null // How to link to the source table
+  selectedTemplateId?: string // ID of selected template
+  selectedTemplate?: any // Selected template object
 }
 
 const DEFAULT_REQUIREMENT = (category: RequirementCategory): RequirementForm => ({
@@ -82,7 +85,10 @@ const DEFAULT_REQUIREMENT = (category: RequirementCategory): RequirementForm => 
   nationality: undefined,
   ageRange: undefined,
   dependantRelationships: [],
-  sourceTable: ''
+  sourceTable: '',
+  linkingVariable: null,
+  selectedTemplateId: undefined,
+  selectedTemplate: undefined
 })
 
 interface AddRequirementsDialogProps {
@@ -129,9 +135,13 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
   const [selectedGeneralConfigs, setSelectedGeneralConfigs] = useState<Record<string, GeneralDocConfig>>({})
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
-  const [bulkInput, setBulkInput] = useState('')
+  const [processingBulkInput, setProcessingBulkInput] = useState('')
+  const [issuanceBulkInput, setIssuanceBulkInput] = useState('')
+  const [jobSpecificBulkInput, setJobSpecificBulkInput] = useState('')
   const [automationTypes, setAutomationTypes] = useState<any[]>([])
   const [masterFields, setMasterFields] = useState<any[]>([])
+  const [templates, setTemplates] = useState<any[]>([])
+  const [loadingTemplates, setLoadingTemplates] = useState(false)
 
   // Table data hook for fetching available tables
   const { tables, loadingTables } = useTableData()
@@ -161,6 +171,74 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
       setLoading(false)
     }
   }
+
+const fetchTemplates = async (documentIds: string[], applicantTypes: ApplicantType[] = ['principal']) => {
+  if (documentIds.length === 0) {
+    setTemplates([]);
+    return;
+  }
+  
+  setLoadingTemplates(true);
+  try {
+    const entityTypeMap: Record<string, string> = {
+      'company': 'company',
+      'principal': 'principal',
+      'director': 'director',
+      'shareholder': 'shareholder',
+      'dependent': 'dependent',
+      'employee': 'employee',
+      'understudy': 'understudy'
+    };
+
+    const entityTypes = [...new Set(applicantTypes.map(type => entityTypeMap[type] || 'principal'))];
+    
+    // Construct the entity filter: "entity_types.cs.["type1"],entity_types.cs.["type2"]"
+    const entityFilters = entityTypes.map(et => `entity_types.cs.["${et}"]`).join(',');
+
+    // BUILD THE QUERY
+    let query = supabase
+      .from('acc_portal_templates')
+      .select('*')
+      .in('document_id', documentIds)
+      // Group 1: Bank must be null or empty (Mandatory)
+      .or(`banks_associated.is.null,banks_associated.eq.[]`);
+
+    // Group 2: Entity type must match one of the applicants (Mandatory)
+    if (entityFilters) {
+      query = query.or(entityFilters);
+    }
+
+    const { data, error } = await query.order('file_name', { ascending: true });
+
+    if (error) throw error;
+    setTemplates(data || []);
+  } catch (error) {
+    console.error("Error fetching templates:", error);
+    toast({ title: "Error", description: "Failed to fetch templates", variant: "destructive" });
+  } finally {
+    setLoadingTemplates(false);
+  }
+}
+
+  // Fetch templates when hasTemplate or kycDocumentIds change
+  useEffect(() => {
+    if (!isOpen) return;
+    
+    const allDocIds = [...processingReqs, ...issuanceReqs, ...jobSpecificReqs]
+      .filter(req => req.hasTemplate && req.kycDocumentIds.length > 0)
+      .flatMap(req => req.kycDocumentIds);
+    
+    // Get all unique applicant types from requirements with templates
+    const allApplicantTypes = [...processingReqs, ...issuanceReqs, ...jobSpecificReqs]
+      .filter(req => req.hasTemplate)
+      .flatMap(req => req.applicantTypes || ['principal']);
+    
+    if (allDocIds.length > 0) {
+      fetchTemplates(allDocIds, allApplicantTypes);
+    } else {
+      setTemplates([]);
+    }
+  }, [isOpen, processingReqs, issuanceReqs, jobSpecificReqs]);
 
   const handleToggleGeneralDoc = (doc: any) => {
     const kycId = String(doc.id);
@@ -253,6 +331,9 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
             web_automation,
             execution_mode: req.executionMode || 'latest',
             computed_function: req.computedFunction || 'getLatestDocument',
+            sourceTable: req.sourceTable || '',
+            linkingVariable: req.linkingVariable || null,
+            selectedTemplateId: req.selectedTemplateId || undefined,
             order: existingReqs.length + index
           }
         })];
@@ -267,13 +348,18 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
   }
 
   const handleClose = () => {
+    const resetForm = () => {
+      setProcessingReqs([DEFAULT_REQUIREMENT('processing')])
+      setIssuanceReqs([DEFAULT_REQUIREMENT('issuance')])
+      setJobSpecificReqs([DEFAULT_REQUIREMENT('job-specific')])
+      setSelectedGeneralConfigs({})
+      setProcessingBulkInput('')
+      setIssuanceBulkInput('')
+      setJobSpecificBulkInput('')
+      setActiveSection('processing')
+    }
     onOpenChange(false)
-    setProcessingReqs([DEFAULT_REQUIREMENT('processing')])
-    setIssuanceReqs([DEFAULT_REQUIREMENT('issuance')])
-    setJobSpecificReqs([DEFAULT_REQUIREMENT('job-specific')])
-    setSelectedGeneralConfigs({})
-    setBulkInput('')
-    setActiveSection('processing')
+    resetForm()
   }
 
   const updateCurrentReq = (idx: number, fields: Partial<RequirementForm>) => {
@@ -289,6 +375,53 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
       const updated = [...jobSpecificReqs];
       updated[idx] = { ...updated[idx], ...fields };
       setJobSpecificReqs(updated);
+    }
+  }
+
+  const handleBulkInputChange = (section: RequirementCategory, value: string) => {
+    const lines = value.split('\n').filter(l => l.trim())
+    
+    switch (section) {
+      case 'processing':
+        setProcessingBulkInput(value)
+        if (lines.length > 0) {
+          setProcessingReqs(lines.map(l => ({ ...DEFAULT_REQUIREMENT('processing'), name: l.trim() })))
+        }
+        break
+      case 'issuance':
+        setIssuanceBulkInput(value)
+        if (lines.length > 0) {
+          setIssuanceReqs(lines.map(l => ({ ...DEFAULT_REQUIREMENT('issuance'), name: l.trim() })))
+        }
+        break
+      case 'job-specific':
+        setJobSpecificBulkInput(value)
+        if (lines.length > 0) {
+          setJobSpecificReqs(lines.map(l => ({ ...DEFAULT_REQUIREMENT('job-specific'), name: l.trim() })))
+        }
+        break
+    }
+  }
+
+  const getCurrentBulkInput = () => {
+    switch (activeSection) {
+      case 'processing': return processingBulkInput
+      case 'issuance': return issuanceBulkInput
+      case 'job-specific': return jobSpecificBulkInput
+      default: return ''
+    }
+  }
+
+  const getCurrentBulkPlaceholder = () => {
+    switch (activeSection) {
+      case 'processing':
+        return "Enter processing requirements line by line (e.g. Current Passport, Tax PIN, Good Conduct)"
+      case 'issuance':
+        return "Enter issuance requirements line by line (e.g. Work Permit, Certificate of Incorporation, Tax Compliance)"
+      case 'job-specific':
+        return "Enter job-specific questions line by line (e.g. Years of Experience, Highest Qualification, Technical Skills)"
+      default:
+        return "Enter requirements line by line"
     }
   }
 
@@ -369,23 +502,17 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
             </div>
           ) : (
             <div className="space-y-6 pb-6">
-              {activeSection !== 'job-specific' && (
-                <div className="bg-white border p-4 rounded-xl shadow-sm">
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground font-bold mb-2 block">Bulk Add Requirements (Quick Setup)</Label>
-                  <Textarea
-                    value={bulkInput}
-                    onChange={(e) => {
-                      setBulkInput(e.target.value)
-                      const lines = e.target.value.split('\n').filter(l => l.trim())
-                      if (lines.length > 0) {
-                        setProcessingReqs(lines.map(l => ({ ...DEFAULT_REQUIREMENT(activeSection), name: l.trim() })))
-                      }
-                    }}
-                    placeholder="Enter names line by line (e.g. Current Passport, Tax PIN, Good Conduct)"
-                    className="min-h-[60px] bg-slate-50/50"
-                  />
-                </div>
-              )}
+              <div className="bg-white border p-4 rounded-xl shadow-sm">
+                <Label className="text-xs uppercase tracking-wider text-muted-foreground font-bold mb-2 block">
+                  Bulk Add {activeSection === 'job-specific' ? 'Questions' : 'Requirements'} (Quick Setup)
+                </Label>
+                <Textarea
+                  value={getCurrentBulkInput()}
+                  onChange={(e) => handleBulkInputChange(activeSection, e.target.value)}
+                  placeholder={getCurrentBulkPlaceholder()}
+                  className="min-h-[60px] bg-slate-50/50"
+                />
+              </div>
 
               {currentReqs.map((req, idx) => (
                 <Card key={idx} className="relative border-2 border-slate-200 p-0 overflow-hidden bg-white shadow-sm hover:border-slate-300 transition-all">
@@ -517,50 +644,86 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
 
                           <div className="space-y-2">
                             <Label className="text-xs font-bold text-slate-500">Source Table</Label>
-                            <Select value={req.sourceTable || ''} onValueChange={(value) => updateCurrentReq(idx, { sourceTable: value })}>
-                              <SelectTrigger className="bg-white h-9">
-                                <SelectValue placeholder="Select source table..." />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {loadingTables ? (
-                                  <div className="px-2 py-1 text-sm text-slate-500">Loading tables...</div>
-                                ) : tables.length > 0 ? (
-                                  tables.map(table => (
-                                    <SelectItem key={table.name} value={table.name}>
-                                      {table.label}
-                                    </SelectItem>
-                                  ))
-                                ) : (
-                                  <div className="px-2 py-1 text-sm text-slate-500">No tables available</div>
-                                )}
-                              </SelectContent>
-                            </Select>
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button variant="outline" className="w-full justify-between border-dashed border-2 hover:border-primary hover:bg-slate-50 transition-all">
+                                  <span className="text-slate-400">
+                                    {req.sourceTable ? tables.find(t => t.name === req.sourceTable)?.label || req.sourceTable : "Select source table..."}
+                                  </span>
+                                  <Search className="h-4 w-4 opacity-50" />
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-[450px] p-0" align="start">
+                                <Command>
+                                  <CommandInput placeholder="Search tables..." />
+                                  <CommandList>
+                                    {loadingTables ? (
+                                      <div className="px-2 py-4 text-center text-sm text-slate-500">Loading tables...</div>
+                                    ) : tables.length > 0 ? (
+                                      <CommandGroup className="max-h-[300px] overflow-y-auto">
+                                        {tables.map(table => (
+                                          <CommandItem key={table.name} onSelect={() => {
+                                            updateCurrentReq(idx, { sourceTable: table.name });
+                                          }}>
+                                            <Check className={cn("mr-2 h-4 w-4", req.sourceTable === table.name ? "opacity-100" : "opacity-0")} />
+                                            {table.label}
+                                          </CommandItem>
+                                        ))}
+                                      </CommandGroup>
+                                    ) : (
+                                      <div className="px-2 py-4 text-center text-sm text-slate-500">No tables available</div>
+                                    )}
+                                  </CommandList>
+                                </Command>
+                              </PopoverContent>
+                            </Popover>
                           </div>
+
+                          {req.sourceTable && (
+                            <div className="space-y-2">
+                              <Label className="text-xs font-bold text-slate-500">Linking Variable</Label>
+                              <Select value={req.linkingVariable || ''} onValueChange={(value) => updateCurrentReq(idx, { linkingVariable: value || null })}>
+                                <SelectTrigger className="bg-white h-9">
+                                  <SelectValue placeholder="Select linking variable..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {LINKING_VARIABLES.map(variable => (
+                                    <SelectItem key={variable.value} value={variable.value}>
+                                      {variable.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
 
                           <div className="pt-4 border-t">
                             <div className="space-y-2">
                               <Label className="text-xs font-bold text-slate-500">Extraction / Computed Function</Label>
-                              <Select value={req.computedFunction} onValueChange={(v) => {
-                                updateCurrentReq(idx, { computedFunction: v })
+                              <Select value={req.computedFunction || 'none'} onValueChange={(v) => {
+                                console.log('Computed function changed:', v); // Debug log
+                                
+                                // Combine all updates into a single call
+                                const updates: Partial<RequirementForm> = { computedFunction: v };
+                                
                                 // Auto-derive execution mode from function (only if not None)
                                 if (v === 'none') {
-                                  updateCurrentReq(idx, { executionMode: '' })
+                                  updates.executionMode = '';
                                 } else if (v.includes('Latest')) {
-                                  updateCurrentReq(idx, { executionMode: 'latest' })
+                                  updates.executionMode = 'latest';
                                 } else {
-                                  updateCurrentReq(idx, { executionMode: 'all' })
+                                  updates.executionMode = 'all';
                                 }
+                                
+                                updateCurrentReq(idx, updates);
                               }}>
                                 <SelectTrigger className="bg-slate-50 border-slate-200 h-10">
-                                  <SelectValue />
+                                  <SelectValue placeholder="Select function..." />
                                 </SelectTrigger>
                                 <SelectContent>
                                   {COMPUTED_FUNCTIONS.map(fn => (
                                     <SelectItem key={fn.value} value={fn.value} className="text-sm">
-                                      <div className="flex flex-col py-0.5">
-                                        <span className="font-medium">{fn.label}</span>
-                                        <span className="text-[10px] text-slate-500">{fn.value === 'getLatestDocument' ? 'Returns the full document object.' : 'Returns specific field from document metadata.'}</span>
-                                      </div>
+                                      {fn.label}
                                     </SelectItem>
                                   ))}
                                 </SelectContent>
@@ -593,6 +756,61 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                               </div>
                            </div>
                         </div>
+
+                        {req.hasTemplate && (
+                          <div className="bg-orange-50/50 p-4 rounded-lg border border-orange-100">
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-2">
+                                <Settings2 className="h-4 w-4 text-orange-600" />
+                                <Label className="text-sm font-medium text-orange-800">Template Selection</Label>
+                                {loadingTemplates && <Loader2 className="h-4 w-4 animate-spin text-orange-600" />}
+                              </div>
+                              
+                              {templates.length > 0 ? (
+                                <div className="space-y-2">
+                                  <p className="text-xs text-slate-600">Available templates for selected documents:</p>
+                                  <div className="grid gap-2">
+                                    {templates.map(template => (
+                                      <div key={template.id} className="flex items-center justify-between p-2 bg-white rounded border border-orange-200">
+                                        <div className="flex items-center gap-2">
+                                          <FileText className="h-4 w-4 text-orange-600" />
+                                          <div>
+                                            <p className="text-sm font-medium">{template.file_name}</p>
+                                            <p className="text-xs text-slate-500">{template.file_type?.toUpperCase()}</p>
+                                          </div>
+                                        </div>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="h-7 text-xs"
+                                          onClick={() => {
+                                            // Store selected template in the requirement
+                                            updateCurrentReq(idx, { 
+                                              selectedTemplateId: template.id,
+                                              selectedTemplate: template 
+                                            });
+                                            toast({
+                                              title: "Template Selected",
+                                              description: `${template.file_name} has been selected`
+                                            });
+                                          }}
+                                        >
+                                          Select
+                                        </Button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : !loadingTemplates ? (
+                                <div className="text-center py-4">
+                                  <FileText className="h-8 w-8 text-slate-300 mx-auto mb-2" />
+                                  <p className="text-sm text-slate-500">No templates found</p>
+                                  <p className="text-xs text-slate-400">Templates will appear here once available for the selected documents</p>
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
