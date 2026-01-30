@@ -146,7 +146,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       // Get the document metadata to check if it has isEffectiveTo field
       const docMetadata = documentMetadataCache.get(docId);
       if (!docMetadata) {
-        console.log('No document metadata found for:', docId);
         const result = { status: 'unknown', label: 'Unknown', color: 'text-gray-400', bgColor: 'bg-gray-50' };
         setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)));
         return result;
@@ -156,19 +155,15 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       const hasEffectiveToDate = docMetadata.fields?.some((field: any) => field.isEffectiveTo);
 
       if (!hasEffectiveToDate) {
-        console.log('Document has no effective to field:', docId);
         const result = { status: 'valid', label: 'Valid', color: 'text-green-600', bgColor: 'bg-green-50' };
         setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)));
         return result;
       }
 
-      console.log('Getting expiry date for:', docId, 'personId:', personId);
       // Get expiry date using computed function
       const expiryDate = await getLatestDocumentExpiryDate(personId, [docId]);
-      console.log('Expiry date result:', expiryDate);
 
       if (expiryDate.includes('Not Found')) {
-        console.log('No expiry date found for:', docId);
         const result = { status: 'unknown', label: 'No Expiry', color: 'text-gray-400', bgColor: 'bg-gray-50' };
         setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)));
         return result;
@@ -203,8 +198,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       const formattedDate = `${day}/${month}/${year}`;
 
       const result = { status, label, color, bgColor, expiryDate: formattedDate };
-
-      console.log('Final status result:', result);
 
       // Cache the result
       setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)));
@@ -548,9 +541,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
         const metadataMap = new Map(data.map(doc => [doc.id, doc]));
         setDocumentMetadataCache(metadataMap);
-
-        // LOG TO VERIFY:
-        console.log('✅ Metadata Cache Populated with:', data.length, 'items');
       } catch (error) {
         console.error('Error fetching document metadata:', error);
       }
@@ -561,15 +551,9 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
   const fetchDocumentTemplates = async (documentId: string, task: any) => {
     try {
-      console.log('=== fetchDocumentTemplates Debug ===');
-      console.log('Task participants details:', JSON.stringify(task.participants_details, null, 2));
-
       // Get bank ID from task's participants_details
       const bankParticipant = task.participants_details?.find((p: any) => p.type === 'bank');
       const bankId = bankParticipant?.id;
-
-      console.log('Found bank participant:', bankParticipant);
-      console.log('Using bankId:', bankId);
 
       let query = supabase
         .from('acc_portal_templates')
@@ -579,16 +563,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
       // If bank ID is found, filter templates by bank_id
       if (bankId) {
-        console.log(`Filtering templates for bank ID: ${bankId}`);
         query = query.filter('banks_associated', 'cs', `[{"bank_id":${bankId},"bank_name":"${bankParticipant.name}"}]`);
-      } else {
-        console.log('No bank ID found, fetching all templates for document');
       }
-
-      console.log('Executing query with params:', {
-        document_id: documentId,
-        banks_associated: bankId ? `cs.[{"bank_id":"${bankId}"}]` : 'not filtered'
-      });
 
       const { data: templates, error } = await query;
 
@@ -596,10 +572,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         console.error('Error fetching templates:', error);
         throw error;
       }
-
-      console.log(`Found ${templates?.length || 0} templates`);
-      console.log('Templates sample:', templates?.slice(0, 2));
-      console.log('=== End of Debug ===');
 
       return templates || [];
     } catch (error) {
@@ -707,7 +679,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       });
 
       // 4. PARALLEL FETCH EXECUTION
-      console.log("⏳ Fetching template data sources in parallel...");
       const sourceDataCache: Record<string, Record<number, any>> = { 'tm_tasks': { [task.id]: task } };
 
       const fetchPromises = Array.from(queriesToRun.entries()).map(async ([table, { docIds, links }]) => {
@@ -880,18 +851,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
   const relationshipData = useMemo(() => getRelationshipData(), [getRelationshipData]);
 
-  useEffect(() => {
-    if (relationshipData && relationshipData.length > 0) {
-      console.log('=== RELATIONSHIP DATA ===', JSON.parse(JSON.stringify(relationshipData)));
-      relationshipData.forEach(({ company, directors, principal, dependants, understudy }) => {
-        console.log(`=== Company: ${company.name} ===`);
-        console.log('Directors:', directors);
-        console.log('Principal:', principal);
-        console.log('Dependants:', dependants);
-        console.log('Understudy:', understudy);
-      });
-    }
-  }, [relationshipData]);
 
   const handleViewDocuments = (documents: any[], docInfo: any, column: any) => {
     if (!documents || documents.length === 0) return;

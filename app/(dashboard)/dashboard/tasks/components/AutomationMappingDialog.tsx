@@ -10,7 +10,8 @@ import {
   Settings, Webhook, ChevronRight, AlertCircle,
   CheckCircle2, Edit3, X, Save, Calculator,
   FunctionSquare, ExternalLink, Paperclip, AlertTriangle,
-  ArrowUpDown, Filter, Check, List, ChevronDown
+  ArrowUpDown, Filter, Check, List, ChevronDown,
+  HelpCircle
 } from 'lucide-react';
 import {
   Table,
@@ -158,6 +159,7 @@ export const AutomationMappingDialog = ({
   const [expandedSourceFields, setExpandedSourceFields] = useState<Set<string>>(new Set());
   const lastFetchKey = React.useRef<string>('');
   const isFetchingRef = React.useRef(false);
+const [requirementJobQuestions, setRequirementJobQuestions] = useState<any[]>([]);
 
   const buildFileUrl = (linkedDoc: any): string | null => {
     if (!linkedDoc?.file_path) return null;
@@ -322,32 +324,50 @@ export const AutomationMappingDialog = ({
     return fieldIdStr;
   };
 
-  const fetchSourceData = useCallback(async () => {
+const fetchSourceData = useCallback(async () => {
     if (!isOpen || !selectedAutomationId || Object.keys(jobFields).length === 0 || !webData.length) {
       return;
     }
+
     const fetchKey = `${selectedAutomationId}-${Object.keys(jobFields).length}-${webData.length}-${Date.now()}`;
-    if (isFetchingRef.current) {
-      return;
-    }
+    if (isFetchingRef.current) return;
+    
     lastFetchKey.current = fetchKey;
     isFetchingRef.current = true;
     setIsLoadingData(true);
+
     try {
-      const standardFetchQueue = new Map<string, { ids: Set<string>, linkingVariable: string }>();
+      const standardFetchQueue = new Map<string, { table: string, ids: Set<string>, linkingVariable: string }>();
+      
+      const addToQueue = (table: string, linkingVar: string, id: string) => {
+        const queueKey = `${table}:${linkingVar}`;
+        if (!standardFetchQueue.has(queueKey)) {
+          standardFetchQueue.set(queueKey, { table, ids: new Set(), linkingVariable: linkingVar });
+        }
+        standardFetchQueue.get(queueKey)!.ids.add(id);
+      };
+
       const computedRequirements = {
         individualIds: new Set<string>(),
         documentIds: new Set<string>()
       };
+      
       const activeAutomation = webData.find(w => w.automationId === selectedAutomationId);
       const fieldsToProcess = activeAutomation?.fields || [];
       const computedMasterFields: any[] = [];
 
       fieldsToProcess.forEach((field: any) => {
+        if (field.linkedJobQuestionId) {
+          console.log('[fetchSourceData] Queuing Job Question lookup for Task:', taskId);
+          if (taskId) addToQueue('tm_tasks', 'id', String(taskId));
+          return; 
+        }
+
         const isArray = field.fieldType === 'array';
         const cols = isArray
           ? (field.arrayItems || [])
           : [{ linkedMasterFieldId: field.linkedMasterFields?.[0] || field.masterFieldIds?.[0] }];
+        
         let entityIds: string[] = [];
         if (isArray) {
           entityIds = resolveEntityIdsForArray(field, relationshipData);
@@ -357,64 +377,39 @@ export const AutomationMappingDialog = ({
         }
 
         cols.forEach((col: any) => {
-          // Handle both linkedMasterFields (array) and linkedMasterFieldId (single value)
           const fieldIds = col.linkedMasterFields || (col.linkedMasterFieldId ? [col.linkedMasterFieldId] : []);
           const mid = fieldIds[0] || field.linkedMasterFields?.[0] || field.masterFieldIds?.[0];
           if (!mid) return;
 
           const jobField = jobFields[mid];
-          if (jobField) {
-            if (jobField.is_computed || jobField.computed_config?.is_computed) {
-              const extractionMode = col.extractionMode || field.extractionMode || 'latest';
-              const config = jobField.computed_config || {};
-              const docIds = config.document_ids || [];
+          if (!jobField) return;
 
-              docIds.forEach((did: string) => computedRequirements.documentIds.add(did));
-              entityIds.forEach(id => computedRequirements.individualIds.add(String(id)));
-
-              entityIds.forEach((id: any) => {
-                computedMasterFields.push({
-                  field: jobField,
-                  entityId: String(id),
-                  extractionMode: extractionMode
-                });
-              });
-
-            } else {
-              jobField.sources?.forEach((source: any) => {
-                if (source.table && entityIds.length > 0) {
-
-                  let entityCategory = 'individual';
-                  if (field.entityTypes?.includes('company')) {
-                    entityCategory = 'company';
-                  }
-
-                  let linkVar = source.linking_variable;
-                  if (!linkVar) {
-                    if (source.table === 'acc_portal_directors_documents') linkVar = 'director_id';
-                    else if (source.table === 'acc_portal_company_documents') linkVar = 'company_id';
-                    else if (source.table === 'tm_tasks') linkVar = 'id';
-                    else linkVar = 'id';
-                  }
-
-                  if (!standardFetchQueue.has(source.table)) {
-                    standardFetchQueue.set(source.table, {
-                      ids: new Set(),
-                      linkingVariable: linkVar
-                    });
-                  }
-
-                  const queueItem = standardFetchQueue.get(source.table);
-                  if (queueItem && queueItem.linkingVariable === linkVar) {
-                    if (source.table === 'tm_tasks' && linkVar === 'id') {
-                      if (taskId) queueItem.ids.add(String(taskId));
-                    } else {
-                      entityIds.forEach(id => queueItem.ids.add(String(id)));
-                    }
-                  }
+          if (jobField.is_computed || jobField.computed_config?.is_computed) {
+            const extractionMode = col.extractionMode || field.extractionMode || 'latest';
+            const config = jobField.computed_config || {};
+            (config.document_ids || []).forEach((did: string) => computedRequirements.documentIds.add(did));
+            entityIds.forEach(id => {
+              computedRequirements.individualIds.add(String(id));
+              computedMasterFields.push({ field: jobField, entityId: String(id), extractionMode });
+            });
+          } 
+          else {
+            jobField.sources?.forEach((source: any) => {
+              if (source.table && entityIds.length > 0) {
+                let linkVar = source.linking_variable;
+                if (!linkVar) {
+                  if (source.table === 'acc_portal_directors_documents') linkVar = 'director_id';
+                  else if (source.table === 'acc_portal_company_documents') linkVar = 'company_id';
+                  else linkVar = 'id';
                 }
-              });
-            }
+
+                if (source.table === 'tm_tasks' && linkVar === 'id') {
+                  if (taskId) addToQueue('tm_tasks', 'id', String(taskId));
+                } else {
+                  entityIds.forEach(id => addToQueue(source.table, linkVar, String(id)));
+                }
+              }
+            });
           }
         });
       });
@@ -423,20 +418,28 @@ export const AutomationMappingDialog = ({
       const documentCache = { documents: [], docTypes: [] };
       const fetchPromises = [];
 
-      for (const [table, { ids, linkingVariable }] of standardFetchQueue.entries()) {
+       for (const [queueKey, { table, ids, linkingVariable }] of standardFetchQueue.entries()) {
         const idArray = Array.from(ids);
         if (idArray.length === 0) continue;
+
+        console.log(`[fetchSourceData] Fetching from ${table} with ${linkingVariable} IN (${idArray.join(',')})`);
 
         fetchPromises.push(
           supabase.from(table)
             .select('*')
             .in(linkingVariable, idArray)
             .then(({ data, error }) => {
+              console.log(`[fetchSourceData] Response from ${table}:`, { data: data?.length || 0, error });
               if (!error && data) {
                 if (!newSourceData[table]) newSourceData[table] = {};
                 data.forEach(record => {
                   const recordKey = String(record[linkingVariable]);
                   newSourceData[table][recordKey] = record;
+                  
+                  // Ensure tm_tasks records are indexed by 'id' specifically
+                  if (table === 'tm_tasks' && record.id) {
+                    newSourceData[table][String(record.id)] = record;
+                  }
                 });
 
                 if (table === 'acc_portal_directors_documents') {
@@ -448,203 +451,48 @@ export const AutomationMappingDialog = ({
       }
 
       await Promise.all(fetchPromises);
+      
+      console.log('[fetchSourceData] COMPLETED. Current sourceData state:', newSourceData);
 
-      const fullDocsDirectorIds = standardFetchQueue.get('acc_portal_directors_documents')?.ids;
+      // Handle remaining computed logic (Documents/Functions)
       const neededDocTypes = Array.from(computedRequirements.documentIds);
-      const allNeededPeople = Array.from(computedRequirements.individualIds);
-
-      const remainingPeople = allNeededPeople.filter(pid =>
-        !fullDocsDirectorIds || !fullDocsDirectorIds.has(pid)
-      );
-
-      const computedPromises = [];
-
       if (neededDocTypes.length > 0) {
-        computedPromises.push(
+        const remainingPeople = Array.from(computedRequirements.individualIds);
+        await Promise.all([
           supabase.from('acc_portal_kyc').select('*').in('id', neededDocTypes)
-            .then(({ data }) => { if (data) documentCache.docTypes = data; })
-        );
-
-        if (remainingPeople.length > 0) {
-          computedPromises.push(
-            supabase.from('acc_portal_directors_documents')
-              .select('*')
-              .in('director_id', remainingPeople)
-              .in('document_id', neededDocTypes)
-              .neq('status', 'deleted')
-              .then(({ data }) => {
-                if (data) documentCache.documents.push(...data);
-              })
-          );
-        }
+            .then(({ data }) => { if (data) documentCache.docTypes = data; }),
+          supabase.from('acc_portal_directors_documents')
+            .select('*')
+            .in('director_id', remainingPeople)
+            .in('document_id', neededDocTypes)
+            .neq('status', 'deleted')
+            .then(({ data }) => { if (data) documentCache.documents.push(...data); })
+        ]);
       }
-
-      await Promise.all(computedPromises);
 
       if (computedMasterFields.length > 0) {
         const newComputedValues: Record<string, any> = {};
         for (const item of computedMasterFields) {
           const { field, entityId, extractionMode } = item;
           const config = field.computed_config || {};
-          const docs = config.document_ids || [];
           const source = field.sources?.[0];
-          let computedValue: any;
-
-          if (config.computed_function) {
-            // Only pass fieldPath for functions that need document field extraction
-            const functionsNeedingFieldPath = [
-              'getLatestDocumentNumber',
-              'getLatestWorkPermit',
-              'extractFieldFromLatestDocument',
-              'extractFieldFromAllDocuments'
-            ];
-            const fieldPathToUse = functionsNeedingFieldPath.includes(config.computed_function) && source?.path
-              ? source.path
-              : undefined;
-
-            // Check if this is an arithmetic or date calculation function
-            const arithmeticFunctions = ['calculateArithmetic', 'calculateDateDifference'];
-            const arithmeticConfig = config.arithmeticConfig;
-
-            if (arithmeticFunctions.includes(config.computed_function) && arithmeticConfig) {
-              // For arithmetic functions, we need to resolve field IDs to actual document paths
-              let resolvedArithmeticConfig: any = { ...arithmeticConfig };
-
-              // Handle startDatePath/endDatePath (for calculateDateDifference)
-              // or field1Path/field2Path (for calculateArithmetic)
-              const field1Key = arithmeticConfig.startDatePath || arithmeticConfig.field1Path;
-              const field2Key = arithmeticConfig.endDatePath || arithmeticConfig.field2Path;
-
-              if (field1Key) {
-                // Check if it's a field ID (number) or already a path (string with ->)
-                if (typeof field1Key === 'number' || !String(field1Key).includes('->')) {
-                  // It's a field ID, look up the field to get its path
-                  const field1 = jobFields[String(field1Key)];
-                  if (field1?.sources?.[0]?.path) {
-                    resolvedArithmeticConfig.field1Path = field1.sources[0].path;
-                  } else {
-                    // Assume it's in extracted_details
-                    resolvedArithmeticConfig.field1Path = `extracted_details->>'${field1?.field_key || field1Key}'`;
-                  }
-                } else {
-                  resolvedArithmeticConfig.field1Path = field1Key;
-                }
-              }
-
-              if (field2Key) {
-                if (typeof field2Key === 'number' || !String(field2Key).includes('->')) {
-                  const field2 = jobFields[String(field2Key)];
-                  if (field2?.sources?.[0]?.path) {
-                    resolvedArithmeticConfig.field2Path = field2.sources[0].path;
-                  } else {
-                    resolvedArithmeticConfig.field2Path = `extracted_details->>'${field2?.field_key || field2Key}'`;
-                  }
-                } else {
-                  resolvedArithmeticConfig.field2Path = field2Key;
-                }
-              }
-
-              // For calculateDateDifference, we need to pass startDatePath and endDatePath
-              if (config.computed_function === 'calculateDateDifference') {
-                console.log('[DEBUG] calculateDateDifference - Original config:', {
-                  arithmeticConfig,
-                  startDatePath: arithmeticConfig.startDatePath,
-                  endDatePath: arithmeticConfig.endDatePath,
-                  unit: arithmeticConfig.unit
-                });
-
-                console.log('[DEBUG] calculateDateDifference - Resolved paths:', {
-                  resolvedStartDatePath: resolvedArithmeticConfig.field1Path,
-                  resolvedEndDatePath: resolvedArithmeticConfig.field2Path,
-                  jobFieldsAvailable: Object.keys(jobFields).length
-                });
-
-                // Log field details for debugging
-                if (arithmeticConfig.startDatePath) {
-                  const startField = jobFields[String(arithmeticConfig.startDatePath)];
-                  console.log('[DEBUG] Start field details:', {
-                    fieldId: arithmeticConfig.startDatePath,
-                    fieldData: startField,
-                    sources: startField?.sources
-                  });
-                }
-
-                if (arithmeticConfig.endDatePath) {
-                  const endField = jobFields[String(arithmeticConfig.endDatePath)];
-                  console.log('[DEBUG] End field details:', {
-                    fieldId: arithmeticConfig.endDatePath,
-                    fieldData: endField,
-                    sources: endField?.sources
-                  });
-                }
-
-                computedValue = await executeComputedField(
-                  config.computed_function,
-                  entityId,
-                  docs,
-                  undefined, // fieldPath not needed for date difference
-                  extractionMode,
-                  documentCache,
-                  {
-                    startDatePath: resolvedArithmeticConfig.field1Path,
-                    endDatePath: resolvedArithmeticConfig.field2Path,
-                    unit: resolvedArithmeticConfig.unit
-                  }
-                );
-
-                console.log('[DEBUG] calculateDateDifference - Result:', computedValue);
-              } else {
-                // For other arithmetic functions, use field1Path and field2Path
-                computedValue = await executeComputedField(
-                  config.computed_function,
-                  entityId,
-                  docs,
-                  resolvedArithmeticConfig.field1Path,
-                  extractionMode,
-                  documentCache,
-                  {
-                    field2Path: resolvedArithmeticConfig.field2Path,
-                    operation: resolvedArithmeticConfig.operation,
-                    operand: resolvedArithmeticConfig.operand,
-                    unit: resolvedArithmeticConfig.unit
-                  }
-                );
-              }
-            } else {
-              computedValue = await executeComputedField(
-                config.computed_function,
-                entityId,
-                docs,
-                fieldPathToUse,
-                extractionMode,
-                documentCache
-              );
-            }
-
-            if (typeof computedValue === 'string' && computedValue === '[object Object]') {
-              console.error('[fetchSourceData] CRITICAL: Object was already converted to "[object Object]" before this point!');
-            }
-          } else if (source && source.path && source.source_type === 'document') {
-            computedValue = await executeComputedField(
-              'extractFieldFromLatestDocument',
-              entityId,
-              docs,
-              source.path,
-              extractionMode,
-              documentCache
-            );
-          } else {
-            computedValue = "No Config";
-          }
-          const cacheKey = `${field.id}_${entityId}_${extractionMode}`;
-          let storageValue = computedValue;
-          if (typeof computedValue === 'object' && computedValue !== null && !Array.isArray(computedValue)) {
-            storageValue = JSON.stringify(computedValue);
-          }
-          newComputedValues[cacheKey] = storageValue;
+          
+          const val = await executeComputedField(
+            config.computed_function || 'extractFieldFromLatestDocument',
+            entityId,
+            config.document_ids || [],
+            source?.path,
+            extractionMode,
+            documentCache,
+            config.arithmeticConfig
+          );
+          
+          newComputedValues[`${field.id}_${entityId}_${extractionMode}`] = 
+            (typeof val === 'object' && val !== null && !Array.isArray(val)) ? JSON.stringify(val) : val;
         }
         setMasterFieldComputedValues(newComputedValues);
       }
+      
       setSourceData(newSourceData);
 
     } catch (error) {
@@ -665,49 +513,57 @@ export const AutomationMappingDialog = ({
     return val !== undefined && val !== null ? String(val) : "Missing";
   };
 
-  // ============================================================
-  // FIXED: getFieldValue - Properly match entity types with data sources
-  // ============================================================
-  const getFieldValue = (fieldId: string, entityId: string, sourceIdx: number = 0, extractionMode: string = 'latest', preserveArray: boolean = false) => {
-    const field = jobFields[fieldId];
-    if (!field) return "Missing Config";
+const getFieldValue = (fieldIdOrVariable: string, entityId: string, sourceIdx: number = 0, extractionMode: string = 'latest', preserveArray: boolean = false) => {
+    const activeAuto = webData.find(w => w.automationId === selectedAutomationId);
     
+    // Look up field by variableName OR ID
+    const fieldDef = activeAuto?.fields?.find(f => 
+        f.variableName === fieldIdOrVariable || 
+        String(f.id) === String(fieldIdOrVariable)
+    );
+
+    // --- JOB QUESTION LOGIC ---
+    if (fieldDef?.linkedJobQuestionId) {
+      console.log(`[getFieldValue] Resolving Job Question: ${fieldIdOrVariable} (ID: ${fieldDef.linkedJobQuestionId})`);
+      
+      const taskRecord = sourceData['tm_tasks']?.[String(taskId)];
+      
+      if (!taskRecord) {
+        console.warn(`[getFieldValue] NO Task Record found in sourceData for Task ID: ${taskId}. Available Task records:`, Object.keys(sourceData['tm_tasks'] || {}));
+        return "Missing Task Data";
+      }
+
+      const answers = taskRecord.job_specific_answers || {};
+      const questionId = String(fieldDef.linkedJobQuestionId);
+      
+      // Robust lookup: try string key, then try number key
+      let answer = answers[questionId];
+      if (answer === undefined || answer === null) {
+        answer = answers[Number(questionId)];
+      }
+
+      console.log(`[getFieldValue] Found answer for ${questionId}:`, answer);
+      return (answer !== undefined && answer !== null) ? String(answer) : "Missing";
+    }
+
+    // --- STANDARD MASTER FIELD LOGIC ---
+    const field = jobFields[fieldIdOrVariable];
+    if (!field) return "Missing Config";
+
     if (field.is_computed || field.computed_config?.is_computed) {
       const key = `${field.id}_${entityId}_${extractionMode}`;
       const val = masterFieldComputedValues[key];
       if (val === undefined) return "Computing...";
       if (typeof val === 'object' && val !== null) {
-        if (Array.isArray(val)) {
-          return preserveArray ? val : val.join(', ');
-        } else {
-          return JSON.stringify(val);
-        }
+        return Array.isArray(val) ? (preserveArray ? val : val.join(', ')) : JSON.stringify(val);
       }
-      if (val === '[object Object]') {
-        return "Computed Value Error: Object Detected";
-      }
-
       return String(val);
     }
 
-    // ============================================================
-    // KEY FIX: Determine entity category based on actual entityId
-    // ============================================================
-    let entityCategory = 'individual';
-    
-    // Check if this entity is a company
-    if (entityId === String(relationshipData?.company?.id) || entityId === String(task?.company_id)) {
-      entityCategory = 'company';
-    }
+    let entityCategory = (entityId === String(relationshipData?.company?.id) || entityId === String(task?.company_id)) 
+      ? 'company' : 'individual';
 
-    // Find the correct source based on entity category
-    let source = field.sources?.find((s: any) => s.source_type === entityCategory);
-    
-    // If no matching source found, fallback to provided sourceIdx or first source
-    if (!source) {
-      source = field.sources?.[sourceIdx] || field.sources?.[0];
-    }
-
+    let source = field.sources?.find((s: any) => s.source_type === entityCategory) || field.sources?.[sourceIdx] || field.sources?.[0];
     if (!source) return "No Source";
 
     let lookupId = String(entityId);
@@ -780,7 +636,7 @@ export const AutomationMappingDialog = ({
 
         const { data: requirement } = await query.maybeSingle();
         if (!requirement) return;
-
+setRequirementJobQuestions(requirement.job_specific_questions || []);
         const individualRequirements = requirement.requirements?.filter((req: any) =>
           req.automationId || req.automation_id || req.web_automation?.automationId
         ) || [];
@@ -891,6 +747,12 @@ export const AutomationMappingDialog = ({
 
       activeWeb?.fields?.forEach((f: any) => {
 
+        if (f.linkedJobQuestionId) {
+          const val = getFieldValue(f.variableName, ""); // entityId not needed for job questions
+          formData[f.variableName] = (val === 'Missing' || val === 'Missing Task Data') ? null : val;
+          return;
+        }
+
         if (f.fieldType === 'document') {
           const targetId = resolveTargetEntityId(f);
           const doc = documentFiles.find(d => d.document_id === f.kycDocumentId && String(d.owner_id) === String(targetId));
@@ -955,13 +817,13 @@ export const AutomationMappingDialog = ({
 
         const targetId = resolveTargetEntityId(f);
         const masterIds = f.linkedMasterFields || f.masterFieldIds || [];
-        
+
         // ============================================================
         // KEY FIX: Use getFieldValue which now properly matches entity types
         // ============================================================
         const values = masterIds.map((mid: string | number) => {
           let val = getFieldValue(String(mid), String(targetId), 0, f.extractionMode || 'latest');
-          
+
           // Handle Object values preventing [object Object]
           if (typeof val === 'object' && val !== null) {
             // If it's a date object, leave it for formatting
@@ -1139,8 +1001,7 @@ export const AutomationMappingDialog = ({
     return availableOptions;
   }, [jobFields, getFieldValue]);
 
-  // --- EXCEL-LIKE TABLE RENDER WITH ALL FIELD TYPES ---
-  const renderFieldsTable = () => {
+ const renderFieldsTable = () => {
     if (!activeWebEntry?.fields || activeWebEntry.fields.length === 0) {
       return <div className="p-12 text-center text-slate-400 text-sm">No fields configured for this automation.</div>;
     }
@@ -1161,6 +1022,9 @@ export const AutomationMappingDialog = ({
       } else if (field.fieldType === 'computed') {
         const val = computedFieldsPreview[field.variableName];
         if (!val) isMissing = true;
+      } else if (field.linkedJobQuestionId) {
+        const val = getFieldValue(field.variableName, "");
+        if (!val || val === 'Missing' || val === 'Missing Task Data') isMissing = true;
       } else {
         const targetId = resolveTargetEntityId(field);
         if (!targetId) {
@@ -1222,7 +1086,6 @@ export const AutomationMappingDialog = ({
                         variant="ghost"
                         size="sm"
                         onClick={() => {
-                          // Toggle all source fields
                           const allFieldIds = sortedFields.map(f => f.variableName).filter(Boolean);
                           if (expandedSourceFields.size === allFieldIds.length) {
                             setExpandedSourceFields(new Set());
@@ -1232,11 +1095,7 @@ export const AutomationMappingDialog = ({
                         }}
                         className="h-5 w-5 p-0 hover:bg-slate-200"
                       >
-                        {expandedSourceFields.size > 0 ? (
-                          <ChevronDown className="h-3 w-3" />
-                        ) : (
-                          <ChevronRight className="h-3 w-3" />
-                        )}
+                        {expandedSourceFields.size > 0 ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                       </Button>
                     </div>
                   </TableHead>
@@ -1248,11 +1107,11 @@ export const AutomationMappingDialog = ({
               <TableBody>
                 {sortedFields.map((field, fIdx) => {
                   const isEditing = editingCell?.fieldId === field.variableName;
+                  const isJobQuestion = !!field.linkedJobQuestionId;
 
                   // CASE: ARRAY FIELDS
                   if (field.fieldType === 'array') {
                     const entityIds = resolveEntityIdsForArray(field, relationshipData);
-                    const arrayCount = entityIds.length;
                     const isExpanded = expandedArrayFields.has(field.variableName);
                     const arrayData = getArrayFieldData(field);
 
@@ -1264,13 +1123,8 @@ export const AutomationMappingDialog = ({
                           </TableCell>
                           <TableCell className="px-4 py-2 border-r border-slate-100">
                             <div className="flex items-center gap-2">
-                              <button
-                                onClick={() => toggleArrayFieldExpansion(field.variableName)}
-                                className="flex items-center gap-1 hover:bg-blue-100 rounded px-2 py-1 transition-colors"
-                              >
-                                <ChevronRight
-                                  className={`h-4 w-4 text-blue-600 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-                                />
+                              <button onClick={() => toggleArrayFieldExpansion(field.variableName)} className="flex items-center gap-1 hover:bg-blue-100 rounded px-2 py-1 transition-colors">
+                                <ChevronRight className={`h-4 w-4 text-blue-600 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
                                 <List className="h-4 w-4 text-blue-600" />
                               </button>
                               <span className="text-sm font-semibold text-slate-900">{field.efnsDisplayName || field.variableName}</span>
@@ -1278,14 +1132,11 @@ export const AutomationMappingDialog = ({
                             </div>
                           </TableCell>
                           <TableCell className="px-4 py-2 border-r border-slate-100">
-                            <span className="text-xs text-slate-600">{arrayCount} entities • {field.arrayItems?.length || 0} columns</span>
+                            <span className="text-xs text-slate-600">{entityIds.length} entities • {field.arrayItems?.length || 0} columns</span>
                           </TableCell>
                           <TableCell className="px-4 py-2">
-                            <button
-                              onClick={() => toggleArrayFieldExpansion(field.variableName)}
-                              className="text-xs text-blue-600 hover:text-blue-800 hover:underline italic"
-                            >
-                              {isExpanded ? 'Hide details' : 'View in original layout for full details'}
+                            <button onClick={() => toggleArrayFieldExpansion(field.variableName)} className="text-xs text-blue-600 hover:text-blue-800 hover:underline italic">
+                              {isExpanded ? 'Hide details' : 'View full details'}
                             </button>
                           </TableCell>
                         </TableRow>
@@ -1293,86 +1144,30 @@ export const AutomationMappingDialog = ({
                         {isExpanded && (
                           <TableRow>
                             <TableCell colSpan={4} className="p-0 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 border-b-2 border-blue-300">
+                              {/* ... Array Table rendering logic ... */}
                               <div className="p-6">
-                                <div className="mb-4 flex items-center gap-3 pb-3 border-b-2 border-blue-200">
-                                  <div className="h-8 w-1 bg-gradient-to-b from-blue-500 to-indigo-500 rounded-full"></div>
-                                  <h4 className="text-base font-bold text-slate-800">Array Field Details</h4>
-                                  <Badge variant="outline" className="text-xs border-blue-400 bg-blue-100 text-blue-700">
-                                    {arrayData.length} {arrayData.length === 1 ? 'row' : 'rows'}
-                                  </Badge>
-                                </div>
-
-                                {arrayData.length > 0 ? (
-                                  <div className="border-2 border-blue-300 rounded-lg overflow-hidden shadow-sm">
+                                <div className="border-2 border-blue-300 rounded-lg overflow-hidden shadow-sm">
                                     <Table>
                                       <TableHeader className="bg-gradient-to-r from-blue-100 to-indigo-100 border-b-2 border-blue-300">
                                         <TableRow>
-                                          <TableHead className="px-4 py-3 text-left text-xs font-bold text-slate-800 border-r-2 border-blue-200 bg-blue-50/50 w-16">
-                                            #
-                                          </TableHead>
+                                          <TableHead className="px-4 py-3 text-left text-xs font-bold text-slate-800 border-r-2 border-blue-200 bg-blue-50/50 w-16">#</TableHead>
                                           {field.arrayItems?.map((item: any, idx: number) => (
-                                            <TableHead
-                                              key={idx}
-                                              className={cn(
-                                                "px-4 py-3 text-left text-xs font-bold text-slate-800",
-                                                idx < field.arrayItems.length - 1 && "border-r-2 border-blue-200"
-                                              )}
-                                            >
-                                              <div className="flex flex-col gap-1">
-                                                <div className="flex items-center gap-2">
-                                                  <div className="h-2 w-2 rounded-full bg-blue-500"></div>
-                                                  <span>{item.name || item.header || getMasterFieldDisplayName((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId)}</span>
-                                                  {item.extractionMode === 'all' && (
-                                                    <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-purple-300 text-purple-600 bg-purple-50">
-                                                      MULTI
-                                                    </Badge>
-                                                  )}
-                                                </div>
-                                                {item.customFieldSource && (
-                                                  <div className="text-[10px] text-emerald-600 font-medium flex items-center gap-1">
-                                                    <span className="inline-block w-1 h-1 rounded-full bg-emerald-500"></span>
-                                                    {item.customFieldSource}
-                                                  </div>
-                                                )}
-                                              </div>
+                                            <TableHead key={idx} className={cn("px-4 py-3 text-left text-xs font-bold text-slate-800", idx < field.arrayItems.length - 1 && "border-r-2 border-blue-200")}>
+                                              <span>{item.name || item.header || getMasterFieldDisplayName((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId)}</span>
                                             </TableHead>
                                           ))}
                                         </TableRow>
                                       </TableHeader>
                                       <TableBody className="bg-white">
                                         {arrayData.map((row: any, rowIndex: number) => (
-                                          <TableRow
-                                            key={rowIndex}
-                                            className={cn(
-                                              "border-b border-blue-200 last:border-b-0 transition-colors hover:bg-blue-50/30",
-                                              rowIndex % 2 === 0 ? "bg-white" : "bg-blue-50/10"
-                                            )}
-                                          >
-                                            <TableCell className="px-4 py-3 text-xs font-semibold text-slate-600 border-r-2 border-blue-200 bg-blue-50/30">
-                                              {row.index}
-                                            </TableCell>
+                                          <TableRow key={rowIndex} className="border-b border-blue-200 last:border-b-0 hover:bg-blue-50/30">
+                                            <TableCell className="px-4 py-3 text-xs font-semibold text-slate-600 border-r-2 border-blue-200 bg-blue-50/30">{row.index}</TableCell>
                                             {field.arrayItems?.map((item: any, colIndex: number) => {
                                               const columnKey = item.variableName || String((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId || '');
                                               const value = row[columnKey];
-                                              const isMissing = !value || value === '' || value === 'Missing Config';
-
                                               return (
-                                                <TableCell
-                                                  key={colIndex}
-                                                  className={cn(
-                                                    "px-4 py-3 text-xs",
-                                                    colIndex < field.arrayItems.length - 1 && "border-r-2 border-blue-100",
-                                                    isMissing ? "text-red-600 font-medium" : "text-slate-800"
-                                                  )}
-                                                >
-                                                  {isMissing ? (
-                                                    <span className="italic flex items-center gap-1">
-                                                      <AlertCircle className="h-3 w-3" />
-                                                      Missing
-                                                    </span>
-                                                  ) : (
-                                                    value
-                                                  )}
+                                                <TableCell key={colIndex} className={cn("px-4 py-3 text-xs", colIndex < field.arrayItems.length - 1 && "border-r-2 border-blue-100", (!value) ? "text-red-600 font-medium" : "text-slate-800")}>
+                                                  {value || "Missing"}
                                                 </TableCell>
                                               );
                                             })}
@@ -1380,13 +1175,7 @@ export const AutomationMappingDialog = ({
                                         ))}
                                       </TableBody>
                                     </Table>
-                                  </div>
-                                ) : (
-                                  <div className="text-center py-12 text-slate-400 text-sm border-2 border-dashed border-blue-200 rounded-lg bg-blue-50/20">
-                                    <List className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                                    No data available for this array field
-                                  </div>
-                                )}
+                                </div>
                               </div>
                             </TableCell>
                           </TableRow>
@@ -1402,9 +1191,7 @@ export const AutomationMappingDialog = ({
 
                     return (
                       <TableRow key={fIdx} className="group border-b border-slate-200">
-                        <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">
-                          {fIdx + 1}
-                        </TableCell>
+                        <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">{fIdx + 1}</TableCell>
                         <TableCell className="px-4 py-2 border-r border-slate-100">
                           <div className="flex items-center gap-2">
                             <Paperclip className="h-4 w-4 text-amber-600" />
@@ -1413,16 +1200,7 @@ export const AutomationMappingDialog = ({
                           </div>
                         </TableCell>
                         <TableCell className="px-4 py-2 border-r border-slate-100">
-                          {foundDoc ? (
-                            <div className="flex items-center gap-2">
-                              <Badge className="bg-green-600 text-white h-6">Available</Badge>
-                              <a href={buildFileUrl(foundDoc)} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
-                                View <ExternalLink className="h-3 w-3" />
-                              </a>
-                            </div>
-                          ) : (
-                            <Badge variant="destructive" className="h-6">Missing</Badge>
-                          )}
+                          {foundDoc ? <Badge className="bg-green-600 text-white h-6">Available</Badge> : <Badge variant="destructive" className="h-6">Missing</Badge>}
                         </TableCell>
                         <TableCell className="px-4 py-2">
                           <span className="text-xs text-slate-500">KYC: {field.kycDocumentId?.substring(0, 12)}...</span>
@@ -1430,13 +1208,13 @@ export const AutomationMappingDialog = ({
                       </TableRow>
                     );
                   }
+
+                  // CASE: COMPUTED FIELDS
                   if (field.fieldType === 'computed') {
                     const computedValue = computedFieldsPreview[field.variableName];
                     return (
                       <TableRow key={fIdx} className="group border-b border-slate-200 bg-purple-50/20">
-                        <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">
-                          {fIdx + 1}
-                        </TableCell>
+                        <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">{fIdx + 1}</TableCell>
                         <TableCell className="px-4 py-2 border-r border-slate-100">
                           <div className="flex items-center gap-2">
                             <Calculator className="h-4 w-4 text-purple-600" />
@@ -1445,219 +1223,146 @@ export const AutomationMappingDialog = ({
                           </div>
                         </TableCell>
                         <TableCell className="px-4 py-2 border-r border-slate-100">
-                          {isComputing ? (
-                            <div className="flex items-center gap-2 text-xs text-slate-400">
-                              <Loader2 className="h-3 w-3 animate-spin" /> Calculating...
-                            </div>
-                          ) : computedValue ? (
-                            <span className="text-sm font-semibold text-green-700">{computedValue}</span>
-                          ) : (
-                            <span className="text-xs text-slate-400 italic">Pending...</span>
-                          )}
+                           {isComputing ? <Loader2 className="h-3 w-3 animate-spin" /> : <span className="text-sm font-semibold text-green-700">{computedValue || 'Pending...'}</span>}
                         </TableCell>
-                        <TableCell className="px-4 py-2">
-                          <div className="flex items-center gap-2">
-                            <FunctionSquare className="h-3 w-3 text-purple-500" />
-                            <span className="text-xs font-mono text-purple-700">{field.computedFunction}</span>
-                          </div>
-                        </TableCell>
+                        <TableCell className="px-4 py-2 text-xs font-mono text-purple-700">{field.computedFunction}</TableCell>
                       </TableRow>
                     );
                   }
 
-                  const targetId = resolveTargetEntityId(field);
-                  const isMissingEntity = !targetId;
-                  const masterIds = field.linkedMasterFields || field.masterFieldIds || [];
+                  // CASE: STANDARD DATA FIELDS (MASTER FIELDS & JOB QUESTIONS)
+                 const targetId = resolveTargetEntityId(field);
+const masterIds = field.linkedMasterFields || field.masterFieldIds || [];
+const linkedJobField = jobFields[masterIds[0]];
 
-                  const linkedJobField = jobFields[masterIds[0]];
-                  const isDropdown = linkedJobField?.type === 'select';
+// --- UPDATED LOGIC FOR DROPDOWNS ---
+let isDropdown = false;
+let dropdownOptions = [];
 
-                  const dropdownOptions = isDropdown
-                    ? getDependentDropdownOptions(field, linkedJobField, String(targetId))
-                    : [];
+if (isJobQuestion) {
+  // Find the specific question definition from tm_class_requirements
+  const questionDef = requirementJobQuestions.find(q => String(q.id) === String(field.linkedJobQuestionId));
+  if (questionDef?.type === 'select') {
+    isDropdown = true;
+    dropdownOptions = (questionDef.options || []).map(opt => ({
+      label: opt,
+      value: opt
+    }));
+  }
+} else {
+  // Standard Master Field logic
+  isDropdown = linkedJobField?.type === 'select';
+  dropdownOptions = isDropdown ? getDependentDropdownOptions(field, linkedJobField, String(targetId)) : [];
+}
 
                   let entityCategory = 'individual';
-                  if (field.entityTypes?.includes('company')) entityCategory = 'company';
-                  if (targetId && (targetId === relationshipData?.company?.id || targetId === task?.company_id)) {
-                    entityCategory = 'company';
-                  }
-
-                  const sources = masterIds.map((mid: string | number) => {
-                    const f = jobFields[mid];
-                    if (!f?.sources) return null;
-                    let matchingSource = f.sources.find((s: any) => s.source_type === entityCategory);
-                    if (!matchingSource) matchingSource = f.sources[0];
-                    return matchingSource ? { ...matchingSource, label: f.label } : null;
-                  }).filter(Boolean);
+                  if (targetId && (targetId === relationshipData?.company?.id || targetId === task?.company_id)) entityCategory = 'company';
 
                   const sourcesDisplay = masterIds.map((mid: string | number) => {
                     const jobField = jobFields[mid];
                     if (!jobField) return null;
-                    if (jobField.is_computed || jobField.computed_config?.is_computed) {
-                      const funcName = jobField.computed_config?.computed_function || jobField.computed_function;
-                      return { label: jobField.label, type: 'computed', info: funcName };
-                    }
+                    if (jobField.is_computed || jobField.computed_config?.is_computed) return { label: jobField.label, type: 'computed' };
                     const s = jobField.sources?.find((s: any) => s.source_type === entityCategory) || jobField.sources?.[0];
                     return s ? { ...s, label: jobField.label, type: 'db' } : null;
                   }).filter(Boolean);
 
-                  const mergedValue = masterIds.map((mid: string | number) => {
-                    const v = getFieldValue(String(mid), String(targetId), 0, field.extractionMode || 'latest');
-                    return Array.isArray(v) ? v.join(', ') : v;
-                  }).join(' ');
+                  const primarySource = sourcesDisplay[0];
 
-                  const primarySource = sources[0];
+                  // --- UNIFIED VALUE RESOLUTION ---
+                  let mergedValue = "";
+                  if (isJobQuestion) {
+                    mergedValue = getFieldValue(field.variableName, String(targetId));
+                  } else {
+                    mergedValue = masterIds.map((mid: string | number) => {
+                      const v = getFieldValue(String(mid), String(targetId), 0, field.extractionMode || 'latest');
+                      return Array.isArray(v) ? v.join(', ') : v;
+                    }).join(' ');
+                  }
 
-                  const isSourceEditable = primarySource && sourcesDisplay.every(s => s.type !== 'computed');
+                                  const isSourceEditable = isJobQuestion || (primarySource && sourcesDisplay.every(s => s.type !== 'computed'));
                   const isValueMissing = !mergedValue || mergedValue === 'Missing' || mergedValue === '' || mergedValue === 'Missing Config' || mergedValue === 'No Source';
 
-                 return (
-                    <TableRow
-                      key={fIdx}
-                      className={cn(
-                        "group border-b border-slate-200 transition-colors",
-                        isEditing ? "bg-blue-50/50" : (isValueMissing ? "bg-red-50/30 hover:bg-red-100/30" : "hover:bg-blue-50")
-                      )}
-                    >
-                      <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">
-                        {fIdx + 1}
-                      </TableCell>
-
+                  return (
+                    <TableRow key={fIdx} className={cn("group border-b border-slate-200 transition-colors", isEditing ? "bg-blue-50/50" : (isValueMissing ? "bg-red-50/30 hover:bg-red-100/30" : "hover:bg-blue-50"))}>
+                      <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">{fIdx + 1}</TableCell>
                       <TableCell className="px-4 py-2 border-r border-slate-100">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-slate-900">
-                            {field.efnsDisplayName || field.variableName}
-                          </span>
-                          {isValueMissing && (
-                            <AlertCircle className="h-3.5 w-3.5 text-red-500" />
-                          )}
+                          <span className="text-sm font-semibold text-slate-900">{field.efnsDisplayName || field.variableName}</span>
+                          {isValueMissing && <AlertCircle className="h-3.5 w-3.5 text-red-500" />}
                         </div>
                       </TableCell>
 
-                      {/* --- MODIFIED SOURCE CELL: Show the DB Table and Path (The "Formula") --- */}
                       <TableCell className="px-4 py-2 text-xs text-slate-600">
-                        {primarySource ? (
+                        {isJobQuestion ? (
+                          <div className="font-mono text-[10px] bg-purple-100 text-purple-700 p-1 rounded inline-flex items-center">
+                            <HelpCircle className="h-3 w-3 mr-1" /> Job Question
+                          </div>
+                        ) : primarySource ? (
                           <TooltipProvider delayDuration={150}>
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <div className="font-mono text-[10px] bg-slate-100 p-1 rounded inline-flex items-center">
                                   <Database className="h-3 w-3 mr-1 text-blue-500" />
-                                  {primarySource.table.replace('acc_portal_', '').substring(0, 15)}...
+                                  {primarySource.table?.replace('acc_portal_', '').substring(0, 15)}...
                                 </div>
                               </TooltipTrigger>
                               <TooltipContent className="text-xs bg-slate-800 text-white">
-                                <p className="font-bold mb-1">{linkedJobField?.label || 'Master Field'}</p>
+                                <p className="font-bold mb-1">{primarySource.label}</p>
                                 <p>Table: {primarySource.table}</p>
                                 <p>Path: {primarySource.path}</p>
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
-                        ) : (
-                          <div className="text-xs text-red-600 font-medium flex items-center gap-1">
-                            <AlertTriangle className="h-3 w-3" /> No Source
-                          </div>
-                        )}
-                        {field.customFieldSource && (
-                          <div className="mt-1 text-[10px] text-purple-600 font-medium flex items-center gap-1">
-                            <span className="inline-block w-1 h-1 rounded-full bg-purple-500"></span>
-                            {field.customFieldSource}
-                          </div>
-                        )}
+                        ) : <div className="text-xs text-red-600 font-medium">No Source</div>}
                       </TableCell>
-                      {/* --- END MODIFIED SOURCE CELL --- */}
 
-
-                      {/* --- MODIFIED CURRENT VALUE CELL: Excel-like Editing Trigger --- */}
                       <TableCell className="px-4 py-1 border-r border-slate-100 h-full">
                         {isEditing ? (
                           <div className="flex items-center gap-2">
-                            {/* ... (Keep Input/Select components as they are) ... */}
                             {isDropdown ? (
                               <Select value={editValue} onValueChange={setEditValue}>
-                                <SelectTrigger className="h-8 text-sm border-blue-400 focus:ring-1 focus:ring-blue-500">
-                                  <SelectValue />
-                                </SelectTrigger>
+                                <SelectTrigger className="h-8 text-sm border-blue-400"><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                  {dropdownOptions.length > 0 ? (
-                                    dropdownOptions.map(opt => (
-                                      <SelectItem key={opt.value} value={opt.value} className="text-sm">
-                                        {opt.label}
-                                      </SelectItem>
-                                    ))
-                                  ) : (
-                                    <div className="p-2 text-xs text-slate-400 italic text-center">
-                                      No options (Check parent field)
-                                    </div>
-                                  )}
+                                  {dropdownOptions.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}
                                 </SelectContent>
                               </Select>
                             ) : (
-                              <Input
-                                autoFocus
-                                value={editValue}
-                                onChange={e => setEditValue(e.target.value)}
-                                onKeyDown={e => {
-                                  if (e.key === 'Enter') saveEdit(isDropdown, dropdownOptions);
-                                  if (e.key === 'Escape') cancelEditing();
-                                }}
-                                className="h-8 text-sm border-blue-400 focus-visible:ring-1 focus-visible:ring-blue-500"
-                              />
+                              <Input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveEdit(isDropdown, dropdownOptions); if (e.key === 'Escape') cancelEditing(); }} className="h-8 text-sm border-blue-400" />
                             )}
-                            <Button
-                              size="icon"
-                              onClick={() => saveEdit(isDropdown, dropdownOptions)}
-                              className="h-8 w-8 bg-green-600 hover:bg-green-700"
-                            >
-                              <Check className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              onClick={cancelEditing}
-                              className="h-8 w-8 hover:bg-red-50 hover:text-red-600"
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
+                            <Button size="icon" onClick={() => saveEdit(isDropdown, dropdownOptions)} className="h-8 w-8 bg-green-600 hover:bg-green-700"><Check className="h-4 w-4" /></Button>
+                            <Button size="icon" variant="ghost" onClick={cancelEditing} className="h-8 w-8 text-red-500"><X className="h-4 w-4" /></Button>
                           </div>
                         ) : (
-                          // Make the cell border and background change on hover to mimic a spreadsheet cell
                           <div
-                            className={cn(
-                              "text-sm h-7 flex items-center px-2 rounded -my-1 transition-colors relative",
-                              isSourceEditable && !isEditing
-                                ? "cursor-pointer border border-transparent hover:border-blue-400 hover:bg-blue-50"
-                                : "cursor-default",
-                              isValueMissing
-                                ? "text-red-600 font-medium"
-                                : "text-slate-900"
-                            )}
-                            onClick={() => {
-                              if (isSourceEditable && targetId) {
-                                startEditing(field.variableName, 0, primarySource.table, primarySource.path, mergedValue, String(targetId), primarySource.linking_variable);
-                              }
-                            }}
+                            className={cn("text-sm h-7 flex items-center px-2 rounded -my-1 transition-colors relative", isSourceEditable ? "cursor-pointer border border-transparent hover:border-blue-400 hover:bg-blue-50" : "cursor-default", isValueMissing ? "text-red-600 font-medium" : "text-slate-900")}
+                           onClick={() => {
+  if (isSourceEditable) {
+    if (isJobQuestion) {
+      // Find the question def again to check type for the startEditing call
+      const questionDef = requirementJobQuestions.find(q => String(q.id) === String(field.linkedJobQuestionId));
+      const isSelect = questionDef?.type === 'select';
+      
+      startEditing(
+        field.variableName, 
+        0, 
+        'tm_tasks', 
+        `job_specific_answers->>'${field.linkedJobQuestionId}'`, 
+        mergedValue, 
+        String(taskId), 
+        'id'
+      );
+    } else if (targetId && primarySource) {
+      startEditing(field.variableName, 0, primarySource.table, primarySource.path, mergedValue, String(targetId), primarySource.linking_variable);
+    }
+  }
+}}
                           >
-                            {isValueMissing ? (
-                              <span className="italic flex items-center gap-1">
-                                <AlertCircle className="h-3 w-3" />
-                                Missing
-                              </span>
-                            ) : (
-                              // Display the value or the dropdown label
-                              isDropdown && dropdownOptions.length > 0
-                                ? (dropdownOptions.find(o => o.value === mergedValue)?.label || mergedValue)
-                                : mergedValue
-                            )}
-                            {mergedValue === 'Computing...' && (
-                              <Loader2 className="h-3 w-3 animate-spin inline ml-2" />
-                            )}
-                            {isSourceEditable && !isEditing && (
-                              <Edit3 className="h-3 w-3 ml-auto text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2" />
-                            )}
+                            {isValueMissing ? <span className="italic flex items-center gap-1"><AlertCircle className="h-3 w-3" /> Missing</span> : (isDropdown ? (dropdownOptions.find(o => o.value === mergedValue)?.label || mergedValue) : mergedValue)}
+                            {mergedValue === 'Computing...' && <Loader2 className="h-3 w-3 animate-spin inline ml-2" />}
+                            {isSourceEditable && !isEditing && <Edit3 className="h-3 w-3 ml-auto text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2" />}
                           </div>
                         )}
                       </TableCell>
-                      {/* --- END MODIFIED CURRENT VALUE CELL --- */}
                     </TableRow>
                   );
                 })}

@@ -50,7 +50,8 @@ import {
   Files,
   ArrowRight,
   Eye,
-  EyeOff
+  EyeOff,
+  HelpCircle
 } from "lucide-react"
 import * as z from "zod"
 import { useForm } from "react-hook-form"
@@ -115,13 +116,11 @@ interface WebDataGroup {
     dateFormat?: 'iso' | 'object_split' | 'dd_mm_yyyy';
     extractionMode?: 'latest' | 'all';
   }>;
-  linkedMasterFields: number[]; // Array of field IDs
-
-  // Updated Document Logic
+  linkedMasterFields: number[];
+  linkedJobQuestionId?: string;
   kycDocumentId?: string; // Legacy support
   linkedKycDocuments?: string[]; // Array of IDs
-  documentLogic?: 'merge' | 'fallback'; // 'merge' = use all, 'fallback' = use first available
-
+  documentLogic?: 'merge' | 'fallback';
   computedFunction?: string;
   computedDocuments?: string[];
   customFieldSource?: string;
@@ -592,17 +591,17 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
 
                         {/* 4. Extraction Mode */}
                         <TableCell className="p-3">
-                          {(item.linkedKycDocuments && item.linkedKycDocuments.length > 0) || 
-                           (item.linkedMasterFields && item.linkedMasterFields.length > 0) ? (
+                          {(item.linkedKycDocuments && item.linkedKycDocuments.length > 0) ||
+                            (item.linkedMasterFields && item.linkedMasterFields.length > 0) ? (
                             <div className="space-y-1">
-                              <Select 
-                                value={item.extractionMode || 'latest'} 
+                              <Select
+                                value={item.extractionMode || 'latest'}
                                 onValueChange={(val) => handleItemChange(i, 'extractionMode', val)}
                               >
                                 <SelectTrigger className={cn(
                                   "h-7 text-[10px]",
-                                  item.type === 'document' 
-                                    ? "bg-amber-50 text-amber-700 border-amber-100" 
+                                  item.type === 'document'
+                                    ? "bg-amber-50 text-amber-700 border-amber-100"
                                     : "bg-blue-50 text-blue-700 border-blue-100"
                                 )}>
                                   <SelectValue />
@@ -671,16 +670,60 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
   );
 }
 
-// ... rest of the code remains the same ...
+// --- Supporting Component: Job Question Picker ---
+function JobQuestionPicker({ 
+  availableQuestions, 
+  onSelect 
+}: { 
+  availableQuestions: any[]; 
+  onSelect: (question: any) => void 
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" type="button" className="h-8 border-dashed border-2 text-slate-500 hover:text-purple-600 hover:border-purple-300 transition-all">
+          <Plus className="h-3.5 w-3.5 mr-2" /> Link Job Question
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[320px] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search job questions..." className="h-9 text-sm" />
+          <CommandList>
+            <CommandEmpty>No questions found.</CommandEmpty>
+            <CommandGroup heading="Available Questions">
+              <ScrollArea className="h-[200px]">
+                {availableQuestions.map((q, idx) => (
+                  <CommandItem 
+                    key={`${q.label}-${idx}`} 
+                    onSelect={() => { onSelect(q); setOpen(false) }} 
+                    className="text-sm cursor-pointer"
+                  >
+                    <HelpCircle className="h-3.5 w-3.5 mr-2 text-purple-400" />
+                    <div className="flex flex-col">
+                      <span>{q.label}</span>
+                      <span className="text-[10px] text-slate-400 capitalize">{q.type}</span>
+                    </div>
+                  </CommandItem>
+                ))}
+              </ScrollArea>
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  )
+}
 
-// --- NEW COMPONENT: Edit Dialog for WebDataGroup ---
+// --- Main Component ---
 function WebDataGroupEditDialog({
   open,
   onOpenChange,
   group,
   onSave,
   masterFields,
-  kycDocuments
+  kycDocuments,
+   jobQuestions 
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -688,13 +731,13 @@ function WebDataGroupEditDialog({
   onSave: (updatedGroup: WebDataGroup) => void;
   masterFields: JobField[];
   kycDocuments: KYCDocument[];
+  jobQuestions: any[];
 }) {
   const [editingGroup, setEditingGroup] = useState<WebDataGroup | null>(null);
   const [addDocOpen, setAddDocOpen] = useState(false);
 
   useEffect(() => {
     if (group) {
-      // Backward Compatibility: If linkedKycDocuments is empty but kycDocumentId exists, populate array
       const initialDocuments = group.linkedKycDocuments && group.linkedKycDocuments.length > 0
         ? group.linkedKycDocuments
         : (group.kycDocumentId ? [group.kycDocumentId] : []);
@@ -702,7 +745,8 @@ function WebDataGroupEditDialog({
       setEditingGroup({
         ...group,
         linkedKycDocuments: initialDocuments,
-        documentLogic: group.documentLogic || 'merge'
+        documentLogic: group.documentLogic || 'merge',
+        linkedJobQuestionId: group.linkedJobQuestionId || undefined
       });
     }
   }, [group, open]);
@@ -727,7 +771,10 @@ function WebDataGroupEditDialog({
     } : null);
   };
 
-  // --- Document Logic Helpers ---
+  const unlinkJobQuestion = () => {
+    setEditingGroup(prev => prev ? ({ ...prev, linkedJobQuestionId: undefined }) : null);
+  };
+
   const addDocument = (docId: string) => {
     setEditingGroup(prev => {
       if (!prev) return null;
@@ -758,253 +805,249 @@ function WebDataGroupEditDialog({
 
   const isDocument = editingGroup.fieldType === 'document';
   const isComputed = editingGroup.fieldType === 'computed';
-  const hasComputedMasterField = editingGroup.linkedMasterFields?.some(fieldId => {
+  
+  // Show extraction mode if it's a job question or a computed field
+  const showExtractionMode = editingGroup.linkedJobQuestionId || isComputed || editingGroup.linkedMasterFields?.some(fieldId => {
     const field = masterFields.find(f => f.id === fieldId);
     return field?.is_computed || field?.computed_config?.is_computed;
   });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>Edit Data Field</DialogTitle>
           <DialogDescription>Configure how this field maps to the web automation.</DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-6 py-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Variable Key (JSON Property)</Label>
-              <Input
-                value={editingGroup.variableName}
-                onChange={(e) => updateField('variableName', e.target.value)}
-                className=" text-sm"
-                placeholder="e.g. first_name"
-              />
+        <ScrollArea className="flex-1 pr-4">
+          <div className="grid gap-6 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Variable Key (JSON Property)</Label>
+                <Input
+                  value={editingGroup.variableName}
+                  onChange={(e) => updateField('variableName', e.target.value)}
+                  className=" text-sm"
+                  placeholder="e.g. first_name"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Display Label</Label>
+                <Input
+                  value={editingGroup.efnsDisplayName}
+                  onChange={(e) => updateField('efnsDisplayName', e.target.value)}
+                  placeholder="e.g. First Name"
+                />
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label>Display Label</Label>
-              <Input
-                value={editingGroup.efnsDisplayName}
-                onChange={(e) => updateField('efnsDisplayName', e.target.value)}
-                placeholder="e.g. First Name"
-              />
-            </div>
-          </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Data Type</Label>
-              <Select value={editingGroup.fieldType} onValueChange={(v) => updateField('fieldType', v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="text">Text</SelectItem>
-                  <SelectItem value="number">Number</SelectItem>
-                  <SelectItem value="date">Date</SelectItem>
-                  <SelectItem value="array">Array</SelectItem>
-                  <SelectItem value="document">Document</SelectItem>
-                  <SelectItem value="computed">Computed</SelectItem>
-                </SelectContent>
-              </Select>
-
-              {editingGroup.fieldType === 'date' && (
-                <Select value={editingGroup.dateFormat || 'iso'} onValueChange={(v) => updateField('dateFormat', v)}>
-                  <SelectTrigger className="mt-2 text-sm h-8"><SelectValue placeholder="Format..." /></SelectTrigger>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Data Type</Label>
+                <Select value={editingGroup.fieldType} onValueChange={(v) => updateField('fieldType', v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="iso">YYYY-MM-DD</SelectItem>
-                    <SelectItem value="object_split">Object &#123;d,m,y&#125;</SelectItem>
-                    <SelectItem value="dd_mm_yyyy">DD/MM/YYYY</SelectItem>
+                    <SelectItem value="text">Text</SelectItem>
+                    <SelectItem value="number">Number</SelectItem>
+                    <SelectItem value="date">Date</SelectItem>
+                    <SelectItem value="array">Array</SelectItem>
+                    <SelectItem value="document">Document</SelectItem>
+                    <SelectItem value="computed">Computed</SelectItem>
                   </SelectContent>
                 </Select>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label>Entity Scope</Label>
-              <EntityConfigurator
-                group={editingGroup}
-                onUpdate={(updates) => Object.entries(updates).forEach(([k, v]) => updateField(k as any, v))}
-              />
-            </div>
-          </div>
 
-          <div className="space-y-2">
-            <Label>Custom Field Source (Optional)</Label>
-            <Input
-              value={editingGroup.customFieldSource || ''}
-              onChange={(e) => updateField('customFieldSource', e.target.value)}
-              placeholder="e.g. Passport (Used for grouping fields in UI)"
-            />
-          </div>
-
-          {/* DYNAMIC CONFIGURATION AREA */}
-          <div className="space-y-2 border rounded-lg p-4 bg-slate-50">
-            <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-2 block">
-              Source Configuration
-            </Label>
-
-            {isDocument ? (
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <Label className="text-xs text-slate-600">Document Logic Condition:</Label>
-                  <Select
-                    value={editingGroup.documentLogic || 'merge'}
-                    onValueChange={(v) => updateField('documentLogic', v)}
-                  >
-                    <SelectTrigger className="w-[200px] h-8 text-xs bg-white">
-                      <SelectValue />
-                    </SelectTrigger>
+                {editingGroup.fieldType === 'date' && (
+                  <Select value={editingGroup.dateFormat || 'iso'} onValueChange={(v) => updateField('dateFormat', v)}>
+                    <SelectTrigger className="mt-2 text-sm h-8"><SelectValue placeholder="Format..." /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="merge">Merge (Use All)</SelectItem>
-                      <SelectItem value="fallback">Fallback (Use First Found)</SelectItem>
+                      <SelectItem value="iso">YYYY-MM-DD</SelectItem>
+                      <SelectItem value="object_split">Object &#123;d,m,y&#125;</SelectItem>
+                      <SelectItem value="dd_mm_yyyy">DD/MM/YYYY</SelectItem>
                     </SelectContent>
                   </Select>
-                </div>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label>Entity Scope</Label>
+                <EntityConfigurator
+                  group={editingGroup}
+                  onUpdate={(updates) => Object.entries(updates).forEach(([k, v]) => updateField(k as any, v))}
+                />
+              </div>
+            </div>
 
-                <div className="border rounded-md bg-white p-2 space-y-2 overflow-auto max-h-[300px]">
-                  {editingGroup.linkedKycDocuments?.map((docId, index) => {
-                    const doc = kycDocuments.find(d => d.id === docId);
-                    return (
-                      <div key={docId} className="flex items-center gap-2 p-2 rounded border border-slate-100 bg-slate-50 group">
-                        <div className="flex flex-col gap-0.5">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-4 w-4 rounded-none hover:bg-slate-200"
-                            onClick={() => moveDocument(index, 'up')}
-                            disabled={index === 0}
-                          >
-                            <ArrowUp className="h-2 w-2 text-slate-500" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-4 w-4 rounded-none hover:bg-slate-200"
-                            onClick={() => moveDocument(index, 'down')}
-                            disabled={index === (editingGroup.linkedKycDocuments?.length || 0) - 1}
-                          >
-                            <ArrowDown className="h-2 w-2 text-slate-500" />
+            <div className="space-y-2">
+              <Label>Custom Field Source (Optional)</Label>
+              <Input
+                value={editingGroup.customFieldSource || ''}
+                onChange={(e) => updateField('customFieldSource', e.target.value)}
+                placeholder="e.g. Passport (Used for grouping fields in UI)"
+              />
+            </div>
+
+            <div className="space-y-4 border rounded-lg p-4 bg-slate-50">
+              <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-2 block">
+                Source Configuration
+              </Label>
+
+              {isDocument ? (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <Label className="text-xs text-slate-600">Document Logic Condition:</Label>
+                    <Select
+                      value={editingGroup.documentLogic || 'merge'}
+                      onValueChange={(v) => updateField('documentLogic', v)}
+                    >
+                      <SelectTrigger className="w-[200px] h-8 text-xs bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="merge">Merge (Use All)</SelectItem>
+                        <SelectItem value="fallback">Fallback (Use First Found)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="border rounded-md bg-white p-2 space-y-2 overflow-auto max-h-[300px]">
+                    {editingGroup.linkedKycDocuments?.map((docId, index) => {
+                      const doc = kycDocuments.find(d => d.id === docId);
+                      return (
+                        <div key={docId} className="flex items-center gap-2 p-2 rounded border border-slate-100 bg-slate-50 group">
+                          <div className="flex flex-col gap-0.5">
+                            <Button variant="ghost" size="icon" className="h-4 w-4 rounded-none" onClick={() => moveDocument(index, 'up')} disabled={index === 0}>
+                              <ArrowUp className="h-2 w-2 text-slate-500" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-4 w-4 rounded-none" onClick={() => moveDocument(index, 'down')} disabled={index === (editingGroup.linkedKycDocuments?.length || 0) - 1}>
+                              <ArrowDown className="h-2 w-2 text-slate-500" />
+                            </Button>
+                          </div>
+                          <FileText className="h-4 w-4 text-amber-500" />
+                          <span className="text-sm font-medium flex-1 truncate">{doc?.display_name || "Unknown Doc"}</span>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400 hover:text-red-600 hover:bg-red-50" onClick={() => removeDocument(docId)}>
+                            <X className="h-3 w-3" />
                           </Button>
                         </div>
-                        <FileText className="h-4 w-4 text-amber-500" />
-                        <span className="text-sm font-medium flex-1 truncate">{doc?.display_name || "Unknown Doc"}</span>
-                        <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400 hover:text-red-600 hover:bg-red-50" onClick={() => removeDocument(docId)}>
-                          <X className="h-3 w-3" />
+                      )
+                    })}
+                    <Popover open={addDocOpen} onOpenChange={setAddDocOpen}>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" size="sm" className="w-full border-dashed text-slate-500 hover:text-blue-600">
+                          <Plus className="h-3 w-3 mr-2" /> Link Document Type
                         </Button>
-                      </div>
-                    )
-                  })}
-                  {(!editingGroup.linkedKycDocuments || editingGroup.linkedKycDocuments.length === 0) && (
-                    <div className="text-center py-4 text-slate-400 text-xs italic">
-                      No documents linked.
-                    </div>
-                  )}
-
-                  <Popover open={addDocOpen} onOpenChange={setAddDocOpen}>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" size="sm" className="w-full border-dashed text-slate-500 hover:text-blue-600 hover:border-blue-300">
-                        <Plus className="h-3 w-3 mr-2" /> Link Document Type
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[300px] p-0" align="start">
-                      <Command>
-                        <CommandInput placeholder="Search documents..." />
-                        <CommandList>
-                          <CommandEmpty>No document found.</CommandEmpty>
-                          <CommandGroup>
-                            <ScrollArea className="h-[200px]">
-                              {kycDocuments.map(doc => (
-                                <CommandItem
-                                  key={doc.id}
-                                  onSelect={() => addDocument(doc.id)}
-                                  disabled={editingGroup.linkedKycDocuments?.includes(doc.id)}
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <Check className={cn("h-3 w-3", editingGroup.linkedKycDocuments?.includes(doc.id) ? "opacity-100" : "opacity-0")} />
-                                    {doc.display_name}
-                                  </div>
-                                </CommandItem>
-                              ))}
-                            </ScrollArea>
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[300px] p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder="Search documents..." />
+                          <CommandList>
+                            <CommandEmpty>No document found.</CommandEmpty>
+                            <CommandGroup>
+                              <ScrollArea className="h-[200px]">
+                                {kycDocuments.map(doc => (
+                                  <CommandItem key={doc.id} onSelect={() => addDocument(doc.id)} disabled={editingGroup.linkedKycDocuments?.includes(doc.id)}>
+                                    <div className="flex items-center gap-2">
+                                      <Check className={cn("h-3 w-3", editingGroup.linkedKycDocuments?.includes(doc.id) ? "opacity-100" : "opacity-0")} />
+                                      {doc.display_name}
+                                    </div>
+                                  </CommandItem>
+                                ))}
+                              </ScrollArea>
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
                 </div>
-                <p className="text-[10px] text-slate-500">
-                  {editingGroup.documentLogic === 'merge'
-                    ? "All documents listed above will be combined into a single file during upload."
-                    : "The system will check for documents in the order listed above and use the first one available."}
-                </p>
-              </div>
-            ) : isComputed ? (
-              <div className="flex gap-2">
-                <div className="flex-1">
+              ) : isComputed ? (
+                <div className="space-y-4">
                   <ComputedFieldConfig
                     group={editingGroup}
                     kycDocuments={kycDocuments}
                     onUpdate={(updates) => Object.entries(updates).forEach(([k, v]) => updateField(k as any, v))}
                   />
                 </div>
-                <div className="w-[120px]">
+              ) : editingGroup.fieldType === 'array' ? (
+                <ArrayConfigurator
+                  group={editingGroup}
+                  masterFields={masterFields}
+                  kycDocuments={kycDocuments}
+                  onUpdate={(items) => updateField('arrayItems', items)}
+                />
+              ) : (
+                <div className="space-y-4">
+                  {/* Database Fields Mapping */}
+                  <div className="space-y-2">
+                    <Label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
+                      <Database className="h-3 w-3" /> Linked Database Fields
+                    </Label>
+                    <div className="flex flex-wrap gap-2 p-2 bg-white border rounded min-h-[40px]">
+                      {(editingGroup.linkedMasterFields || []).map(fieldId => {
+                        const field = masterFields.find(f => f.id === fieldId);
+                        return (
+                          <Badge key={fieldId} variant="secondary" className="pl-2 pr-1 h-7 flex items-center gap-1">
+                            {field?.label || fieldId}
+                            <Button variant="ghost" size="icon" className="h-4 w-4 rounded-full" onClick={() => unlinkMasterField(fieldId)}>
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </Badge>
+                        );
+                      })}
+                      <MasterFieldPicker availableFields={masterFields} onSelect={linkMasterField} />
+                    </div>
+                  </div>
+
+                  {/* Job Question Mapping */}
+                  <div className="space-y-2">
+                    <Label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
+                      <HelpCircle className="h-3 w-3" /> Linked Job Question
+                    </Label>
+                    <div>
+                      {editingGroup.linkedJobQuestionId ? (
+                        <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 h-8 pl-3 pr-1 flex items-center gap-2">
+                          <HelpCircle className="h-3.5 w-3.5" />
+                          <span className="font-medium">{editingGroup.linkedJobQuestionId}</span>
+                          <Button variant="ghost" size="icon" className="h-5 w-5 rounded-full hover:bg-purple-100" onClick={unlinkJobQuestion}>
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </Badge>
+                      ) : (
+                        <JobQuestionPicker 
+                          availableQuestions={jobQuestions} 
+                          onSelect={(q) => updateField('linkedJobQuestionId', q.label)} 
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Extraction Mode Select */}
+              {showExtractionMode && !isDocument && editingGroup.fieldType !== 'array' && (
+                <div className="flex items-center gap-2 pt-4 border-t mt-4">
+                  <Label className="text-xs font-semibold text-slate-600">Extraction Mode:</Label>
                   <Select
                     value={editingGroup.extractionMode || 'latest'}
                     onValueChange={(v) => updateField('extractionMode', v)}
                   >
-                    <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="w-[120px] h-8 text-xs bg-white">
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="latest">Latest</SelectItem>
-                      <SelectItem value="all">All</SelectItem>
+                      <SelectItem value="all">All Entries</SelectItem>
                     </SelectContent>
                   </Select>
+                  <p className="text-[10px] text-slate-400 italic">
+                    * Determines if the automation receives one value or an array of values per applicant.
+                  </p>
                 </div>
-              </div>
-            ) : editingGroup.fieldType === 'array' ? (
-              <ArrayConfigurator
-                group={editingGroup}
-                masterFields={masterFields}
-                kycDocuments={kycDocuments}
-                onUpdate={(items) => updateField('arrayItems', items)}
-              />
-            ) : (
-              <div className="flex flex-col gap-3">
-                <div className="flex flex-wrap gap-2 p-2 bg-white border rounded min-h-[40px]">
-                  {(editingGroup.linkedMasterFields || []).map(fieldId => {
-                    const field = masterFields.find(f => f.id === fieldId);
-                    if (!field) return null;
-
-                    return (
-                      <Badge key={field.id} variant="secondary" className="pl-2 pr-1 h-7 flex items-center gap-1">
-                        {field.label}
-                        <Button variant="ghost" size="icon" className="h-4 w-4 rounded-full hover:bg-slate-200" onClick={() => unlinkMasterField(field.id)}>
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </Badge>
-                    );
-                  })}
-                  <MasterFieldPicker availableFields={masterFields} onSelect={linkMasterField} />
-                </div>
-                {hasComputedMasterField && (
-                  <div className="flex items-center gap-2">
-                    <Label className="text-sm">Extraction Mode:</Label>
-                    <Select
-                      value={editingGroup.extractionMode || 'latest'}
-                      onValueChange={(v) => updateField('extractionMode', v)}
-                    >
-                      <SelectTrigger className="w-[120px] h-8 text-sm bg-white"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="latest">Latest</SelectItem>
-                        <SelectItem value="all">All</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-              </div>
-            )}
+              )}
+            </div>
           </div>
-        </div>
+        </ScrollArea>
 
-        <DialogFooter>
+        <DialogFooter className="px-6 py-4 border-t bg-white">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={() => onSave(editingGroup)}>Save Changes</Button>
         </DialogFooter>
@@ -1348,13 +1391,15 @@ function AddDataFieldDialog({
   onOpenChange,
   onAdd,
   masterFields,
-  kycDocuments
+  kycDocuments,
+  jobQuestions
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAdd: (type: 'text' | 'document' | 'computed' | 'db', data?: any) => void;
+  onAdd: (type: 'text' | 'document' | 'computed' | 'db' | 'job_question', data?: any) => void;
   masterFields: JobField[];
   kycDocuments: KYCDocument[];
+  jobQuestions: any[];
 }) {
   const [selectedTab, setSelectedTab] = useState("db");
   const [dbFieldOpen, setDbFieldOpen] = useState(false);
@@ -1384,6 +1429,7 @@ function AddDataFieldDialog({
           <TabsList className="w-full justify-start rounded-none border-b bg-white px-6 h-12 gap-6">
             <TabsTrigger value="db" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none h-full px-0">Database</TabsTrigger>
             <TabsTrigger value="doc" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-amber-500 rounded-none h-full px-0">Document</TabsTrigger>
+            <TabsTrigger value="job" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-amber-500 rounded-none h-full px-0">Job Question</TabsTrigger>
             <TabsTrigger value="manual" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-slate-600 rounded-none h-full px-0">Manual / Computed</TabsTrigger>
           </TabsList>
 
@@ -1585,6 +1631,29 @@ function AddDataFieldDialog({
                 </div>
               </button>
             </TabsContent>
+
+            <TabsContent value="job" className="mt-0 space-y-4">
+              <div className="bg-purple-50/50 p-3 rounded-lg border border-purple-100 mb-4 flex gap-3">
+                <HelpCircle className="h-5 w-5 text-purple-600 flex-shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <h4 className="text-sm font-semibold text-purple-900">Map from Job Question</h4>
+                  <p className="text-xs text-purple-700">Map the answer of a job-specific question to this key.</p>
+                </div>
+              </div>
+              <ScrollArea className="h-[200px] border rounded-md bg-white">
+                {jobQuestions.map(q => (
+                  <div
+                    key={q.id}
+                    className="p-2 hover:bg-slate-50 cursor-pointer flex items-center gap-2 border-b last:border-0"
+                    onClick={() => onAdd('job_question', q)}
+                  >
+                    <HelpCircle className="h-4 w-4 text-purple-400" />
+                    <span className="text-sm">{q.label}</span>
+                  </div>
+                ))}
+              </ScrollArea>
+            </TabsContent>
+
           </div>
         </Tabs>
         <DialogFooter className="border-t p-2 bg-slate-50">
@@ -1636,12 +1705,10 @@ export function AutomationDialog({
   const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
-
   const [webDataGroups, setWebDataGroups] = useState<WebDataGroup[]>([])
   const [masterFields, setMasterFields] = useState<JobField[]>([])
   const [kycDocuments, setKycDocuments] = useState<KYCDocument[]>([])
-
-  // ... rest of the code remains the same ...
+ const [jobQuestions, setJobQuestions] = useState<any[]>([]);
   const [isAddFieldOpen, setIsAddFieldOpen] = useState(false)
   const [fieldSearch, setFieldSearch] = useState('')
   const [deleteGroupDialogOpen, setDeleteGroupDialogOpen] = useState(false);
@@ -1665,9 +1732,6 @@ export function AutomationDialog({
       is_active: true,
       category: "general",
       max_concurrent_runs: 1,
-      queue_priority: 0,
-      async_processing: false,
-      webdata: [],
       login: { url: "", email: "", idNumber: "", password: "" }
     },
   })
@@ -1686,6 +1750,51 @@ export function AutomationDialog({
       fetchKyc();
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    const fetchQuestions = async () => {
+      const { data } = await supabase.from('tm_class_requirements').select('job_specific_questions');
+      // Flatten and get unique labels
+      const allQuestions = data?.flatMap(r => r.job_specific_questions || []) || [];
+      const unique = Array.from(new Map(allQuestions.map(q => [q.label, q])).values());
+      setJobQuestions(unique);
+    };
+    fetchQuestions();
+  }, [open]);
+
+  useEffect(() => {
+  const fetchContextualData = async () => {
+    if (!isOpen) return;
+
+    // 1. Fetch Job Fields and KYC as usual
+    const [fieldsRes, kycRes] = await Promise.all([
+      supabase.from('tm_job_fields').select('*').order('label'),
+      supabase.from('acc_portal_kyc').select('*').order('display_name')
+    ]);
+    setMasterFields(fieldsRes.data || []);
+    setKycDocuments(kycRes.data || []);
+
+    // 2. Fetch Job Questions matching the automation's job_level
+    if (initialData?.job_level) {
+      const { data, error } = await supabase
+        .from('tm_class_requirements')
+        .select('job_specific_questions')
+        // Match the JSON object exactly
+        .eq('job_level', JSON.stringify(initialData.job_level))
+        .maybeSingle();
+
+      if (error) {
+        console.error("Error fetching contextual questions:", error);
+      } else {
+        setJobQuestions(data?.job_specific_questions || []);
+      }
+    } else {
+      setJobQuestions([]);
+    }
+  };
+
+  fetchContextualData();
+}, [isOpen, initialData]);
 
   useEffect(() => {
     if (initialData) {
@@ -1908,7 +2017,7 @@ export function AutomationDialog({
     }
   };
 
-  const handleAddData = (type: 'text' | 'document' | 'computed' | 'db', data?: any) => {
+  const handleAddData = (type: 'text' | 'document' | 'computed' | 'db' | 'job_question', data?: any) => {
     if (type === 'db' && data) {
       setWebDataGroups(prev => [...prev, {
         id: crypto.randomUUID(),
@@ -1916,7 +2025,8 @@ export function AutomationDialog({
         variableName: data.field_key.toLowerCase().replace(/[^a-z0-9]+(.)/g, (_, chr) => chr.toUpperCase()),
         fieldType: 'text',
         entityTypes: ['principal'],
-        linkedMasterFields: [data.id]
+        linkedMasterFields: [data.id],
+        linkedJobQuestionId: data.id
       }]);
     } else if (type === 'document' && data) {
       setWebDataGroups(prev => [...prev, {
@@ -1928,7 +2038,18 @@ export function AutomationDialog({
         linkedMasterFields: [],
         kycDocumentId: data.id,
         linkedKycDocuments: [data.id], // Initialize array
-        documentLogic: 'merge'
+        documentLogic: 'merge',
+        linkedJobQuestionId: data.label
+      }]);
+    } else if (type === 'job_question' && data) {
+      setWebDataGroups(prev => [...prev, {
+        id: crypto.randomUUID(),
+        efnsDisplayName: data.label,
+        variableName: data.label.toLowerCase().replace(/[^a-z0-9]+(.)/g, (_, chr) => chr.toUpperCase()),
+        fieldType: 'text',
+        entityTypes: ['principal'],
+        linkedMasterFields: [],
+        linkedJobQuestionId: data.id
       }]);
     } else {
       const newRow: WebDataGroup = {
@@ -2161,9 +2282,9 @@ export function AutomationDialog({
                                 <FormLabel className="text-sm font-bold text-slate-500">Password</FormLabel>
                                 <FormControl>
                                   <div className="relative">
-                                    <Input 
-                                      type={showPassword ? "text" : "password"} 
-                                      {...field} 
+                                    <Input
+                                      type={showPassword ? "text" : "password"}
+                                      {...field}
                                       className="pr-10"
                                     />
                                     <Button
@@ -2274,8 +2395,8 @@ export function AutomationDialog({
                                 const rowBg = isDocument ? "bg-amber-50/30 hover:bg-amber-50/60" : isComputed ? "bg-purple-50/30 hover:bg-purple-50/60" : "hover:bg-slate-50";
 
                                 return (
-                                  <TableRow 
-                                    key={group.id} 
+                                  <TableRow
+                                    key={group.id}
                                     className={cn("h-10 border-b border-slate-100 group transition-all", rowBg)}
                                   >
                                     <TableCell className="text-center text-sm border-r border-slate-100 p-0 relative">
@@ -2505,6 +2626,7 @@ export function AutomationDialog({
         onSave={saveEditedGroup}
         masterFields={masterFields}
         kycDocuments={kycDocuments}
+        jobQuestions={jobQuestions} 
       />
 
       {/* NEW Add Data Field Dialog */}
@@ -2514,6 +2636,7 @@ export function AutomationDialog({
         onAdd={handleAddData}
         masterFields={masterFields}
         kycDocuments={kycDocuments}
+        jobQuestions={jobQuestions}
       />
     </>
   )

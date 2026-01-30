@@ -152,7 +152,6 @@ export function RequirementsTable({
 
   // OPTIMIZED: Batch fetch individual documents
   const fetchAllIndividualData = useCallback(async (tasksToFetch: any[], requiredKycIds: string[]) => {
-    console.log('🔄 [fetchAllIndividualData] Starting batch fetch...');
     const startTime = performance.now();
 
     const uniqueIds = new Set<number>();
@@ -181,13 +180,10 @@ export function RequirementsTable({
 
     const validIds = Array.from(uniqueIds).filter(Boolean);
     if (validIds.length === 0 || requiredKycIds.length === 0) {
-      console.log('⏭️ No individual IDs or required KYC IDs to fetch');
       return;
     }
 
     try {
-      console.log(`📊 Fetching documents for ${validIds.length} individuals across ${requiredKycIds.length} document types...`);
-      
       // SINGLE QUERY for all individuals and all document types
       const { data: documentsRes, error } = await supabase
         .from('acc_portal_directors_documents')
@@ -199,7 +195,6 @@ export function RequirementsTable({
       if (error) throw error;
 
       const endTime = performance.now();
-      console.log(`✅ Fetched ${documentsRes?.length || 0} individual documents in ${Math.round(endTime - startTime)}ms`);
 
       // Filter documents based on applicability
       const filteredDocuments = documentsRes?.filter(doc => {
@@ -210,8 +205,6 @@ export function RequirementsTable({
         
         return docApplicantTypes.includes(individualType);
       });
-
-      console.log(`🔍 After applicability filter: ${filteredDocuments?.length || 0} documents`);
 
       const documentsByDirector = filteredDocuments?.reduce((acc, doc) => {
         if (!acc[doc.director_id]) acc[doc.director_id] = [];
@@ -227,7 +220,6 @@ export function RequirementsTable({
 
   // OPTIMIZED: Batch fetch company documents
   const fetchAllCompanyDocuments = useCallback(async (tasksToFetch: any[], requiredKycIds: string[]) => {
-    console.log('🔄 [fetchAllCompanyDocuments] Starting batch fetch...');
     const startTime = performance.now();
 
     const companyIds = [...new Set(tasksToFetch.flatMap(t => {
@@ -236,13 +228,10 @@ export function RequirementsTable({
     }))];
 
     if (companyIds.length === 0 || requiredKycIds.length === 0) {
-      console.log('⏭️ No company IDs or required KYC IDs to fetch');
       return;
     }
 
     try {
-      console.log(`📊 Fetching documents for ${companyIds.length} companies across ${requiredKycIds.length} document types...`);
-      
       // SINGLE QUERY for all companies and all document types
       const { data, error } = await supabase
         .from('acc_portal_kyc_uploads')
@@ -254,7 +243,6 @@ export function RequirementsTable({
       if (error) throw error;
       
       const endTime = performance.now();
-      console.log(`✅ Fetched ${data?.length || 0} company documents in ${Math.round(endTime - startTime)}ms`);
     
       const docsByCompany = data?.reduce((acc, doc) => {
         if (!acc[doc.company_id]) acc[doc.company_id] = [];
@@ -270,7 +258,6 @@ export function RequirementsTable({
 
   // OPTIMIZED: Batch fetch company metadata
   const fetchCompanyData = useCallback(async (tasksToFetch: any[]) => {
-    console.log('🔄 [fetchCompanyData] Starting batch fetch...');
     const startTime = performance.now();
     
     const companyIds = [...new Set(tasksToFetch.flatMap(t => {
@@ -290,14 +277,11 @@ export function RequirementsTable({
     }).filter(Boolean))];
     
     if (companyIds.length === 0) {
-      console.log('⏭️ No company IDs to fetch');
       return;
     }
 
-    console.log(`📊 Fetching metadata for ${companyIds.length} companies...`);
-
+    // SINGLE QUERY for all companies
     try {
-      // SINGLE QUERY for all companies
       const { data, error } = await supabase
         .from('acc_portal_company_duplicate')
         .select('id, company_name')
@@ -306,7 +290,6 @@ export function RequirementsTable({
       if (error) throw error;
 
       const endTime = performance.now();
-      console.log(`✅ Fetched ${data?.length || 0} companies in ${Math.round(endTime - startTime)}ms`);
 
       const companiesMap = data?.reduce((acc, co) => {
         acc[co.id] = co;
@@ -612,7 +595,6 @@ useEffect(() => {
   }, []);
 
   const handleAutomationAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number, relationshipData?: any) => {
-    console.log("⚙️ Opening Automation Dialog with Relationship Data:", relationshipData);
     setSelectedAutomationData({ task, document: item, columnType, applicantId, relationshipData });
     setIsAutomationDialogOpen(true);
   }, []);
