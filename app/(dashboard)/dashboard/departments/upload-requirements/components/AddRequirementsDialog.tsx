@@ -29,7 +29,7 @@ import { COMPUTED_FUNCTIONS, EXECUTION_MODES, LINKING_VARIABLES } from "@/lib/co
 import { useTableData, type TableOption } from "@/lib/tableUtils"
 import { Card } from "@/components/ui/card"
 
-export type ApplicantType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependent' | 'employee' | 'understudy';
+export type ApplicantType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependant' | 'employee' | 'understudy';
 export type RequirementCategory = 'general' | 'processing' | 'issuance' | 'job-specific';
 export type SubmissionMode = 'standard' | 'template' | 'webform';
 export type QuestionType = 'text' | 'number' | 'date' | 'select' | 'multiselect' | 'boolean';
@@ -113,7 +113,7 @@ const APPLICANT_OPTIONS = [
   { label: 'Principal', value: 'principal' },
   { label: 'Director', value: 'director' },
   { label: 'Shareholder', value: 'shareholder' },
-  { label: 'Dependent', value: 'dependent' },
+  { label: 'Dependant', value: 'dependant' },
   { label: 'Employee', value: 'employee' },
   { label: 'Understudy', value: 'understudy' },
 ]
@@ -185,7 +185,7 @@ const fetchTemplates = async (documentIds: string[], applicantTypes: ApplicantTy
       'principal': 'principal',
       'director': 'director',
       'shareholder': 'shareholder',
-      'dependent': 'dependent',
+      'dependant': 'dependant',
       'employee': 'employee',
       'understudy': 'understudy'
     };
