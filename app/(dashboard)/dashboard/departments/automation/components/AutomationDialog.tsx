@@ -1026,7 +1026,7 @@ function WebDataGroupEditDialog({
                       ) : (
                         <JobQuestionPicker 
                           availableQuestions={jobQuestions} 
-                          onSelect={(q) => updateField('linkedJobQuestionId', q.label)} 
+                          onSelect={(q) => updateField('linkedJobQuestionId', q.id)} 
                         />
                       )}
                     </div>

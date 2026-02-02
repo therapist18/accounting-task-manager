@@ -638,6 +638,159 @@ export async function getLatestWorkPermit(individualId: string | number, compute
     return await getLatestDocumentNumber(individualId, computedDocuments, fieldPath, cache);
 }
 
+async function getJobFieldDefinition(fieldKey: string) {
+    const { data, error } = await supabase
+        .from('tm_job_fields')
+        .select('*')
+        .eq('field_key', fieldKey)
+        .maybeSingle();
+    
+    if (error || !data) return null;
+    return data;
+}
+
+/**
+ * Generic extractor that follows the "sources" configuration of a Master Field.
+ * It now decides whether to use individualId or companyId based on the source_type.
+ */
+async function extractFromMasterField(
+    fieldKey: string, 
+    individualId: string | number,
+    companyId: string | number
+): Promise<string> {
+    try {
+        const fieldConfig = await getJobFieldDefinition(fieldKey);
+        if (!fieldConfig || !fieldConfig.sources || fieldConfig.sources.length === 0) {
+            return '';
+        }
+
+        // Sort sources by priority
+        const sortedSources = [...fieldConfig.sources].sort((a, b) => (a.priority || 99) - (b.priority || 99));
+
+        for (const source of sortedSources) {
+            const { table, path, linking_variable = 'id', source_type } = source;
+            
+            // Determine which ID to use based on source type
+            const targetId = source_type === 'company' ? companyId : individualId;
+            if (!targetId) continue;
+
+            // 1. Fetch the record from the specified table
+            const { data: record, error } = await supabase
+                .from(table)
+                .select('*')
+                .eq(linking_variable, targetId)
+                .maybeSingle();
+
+            if (error || !record) continue;
+
+            // 2. Extract value via the path
+            const value = parseJsonPath(record, path);
+
+            if (value !== null && value !== undefined && value !== '') {
+                // Handle objects (like translations {en: "..."})
+                if (typeof value === 'object') {
+                    return value.en || value.name || value.title || String(Object.values(value)[0]);
+                }
+                return String(value);
+            }
+        }
+
+        return '';
+    } catch (error) {
+        console.error(`[Extract Master Field Error - ${fieldKey}]:`, error);
+        return '';
+    }
+}
+
+const mapEntityTypeToRegistry = (type?: string): string => {
+    const map: Record<string, string> = {
+      'principal': 'Principal',
+      'director': 'Director',
+      'understudy': 'Understudy',
+      'employee': 'Employee',
+      'dependant': 'Dependant'
+    };
+    return map[type?.toLowerCase()] || 'Principal';
+  };
+
+/**
+ * Extracts job title matching the specific entity type from registry associations
+ */
+export async function extractCurrentJobTitle(
+    individualId: string | number,
+    companyId: string | number,
+    entityContext?: string
+): Promise<string> {
+    try {
+        const { data: individual } = await supabase
+            .from('registry_individuals')
+            .select('employment_data')
+            .eq('id', individualId)
+            .maybeSingle();
+
+        const associations = individual?.employment_data?.associations;
+
+        if (Array.isArray(associations)) {
+            const targetRegistryType = mapEntityTypeToRegistry(entityContext);
+            
+            // Filter by current status and individual type
+            const match = associations.find(a => 
+                a.is_current === true && 
+                String(a.individual_type).toLowerCase() === targetRegistryType.toLowerCase()
+            );
+
+            // Path mapping based on your JSON: associations -> job -> title
+            if (match?.job?.title) return String(match.job.title);
+            if (match?.role) return String(match.role);
+            
+            // Context-less fallback: pick first current job
+            const fallback = associations.find(a => a.is_current === true && a.job?.title);
+            if (fallback?.job?.title) return String(fallback.job.title);
+        }
+
+        // Final fallback to documents logic via tm_job_fields
+        return await extractFromMasterField('job_title', individualId, companyId);
+    } catch (error) {
+        console.error("Error in extractCurrentJobTitle:", error);
+        return "";
+    }
+}
+
+/**
+ * Extracts job description matching the specific entity type from registry associations
+ */
+export async function extractCurrentJobDescription(
+    individualId: string | number,
+    companyId: string | number,
+    entityContext?: string
+): Promise<string> {
+    try {
+        const { data: individual } = await supabase
+            .from('registry_individuals')
+            .select('employment_data')
+            .eq('id', individualId)
+            .maybeSingle();
+
+        const associations = individual?.employment_data?.associations;
+
+        if (Array.isArray(associations)) {
+            const targetRegistryType = mapEntityTypeToRegistry(entityContext);
+            const match = associations.find(a => 
+                a.is_current === true && 
+                String(a.individual_type).toLowerCase() === targetRegistryType.toLowerCase()
+            );
+
+            // associations -> job -> description
+            if (match?.job?.description) return String(match.job.description);
+            if (match?.description) return String(match.description);
+        }
+
+        return await extractFromMasterField('job_description', individualId, companyId);
+    } catch (error) {
+        return "";
+    }
+}
+
 export async function executeComputedField(
     functionName: string,
     individualId: number | string,
@@ -645,18 +798,13 @@ export async function executeComputedField(
     fieldPath?: string,
     extractionMode: 'latest' | 'all' = 'latest',
     cache?: DocumentCache,
-    arithmeticConfig?: {
-        operation?: string;
-        field1Path?: string;
-        field2Path?: string;
-        operand?: number;
-        unit?: string;
-        startDatePath?: string;
-        endDatePath?: string
-    }
+    arithmeticConfig?: any,
+    companyId?: string | number,
+    entityContext?: string  // NEW PARAMETER
 ): Promise<any> {
     const normalizedFunctionName = functionName.replace(/\(\)/g, '').trim();
 
+    // Standard field extraction (non-arithmetic)
     if (fieldPath && !arithmeticConfig) {
         if (extractionMode === 'all') {
             return await extractFieldFromAllDocuments(individualId, computedDocuments, fieldPath, cache);
@@ -664,7 +812,12 @@ export async function executeComputedField(
             return await extractFieldFromLatestDocument(individualId, computedDocuments, fieldPath, cache);
         }
     }
+
     switch (normalizedFunctionName) {
+        case 'extractCurrentJobTitle':
+            return await extractCurrentJobTitle(individualId, companyId, entityContext);
+        case 'extractCurrentJobDescription':
+            return await extractCurrentJobDescription(individualId, companyId, entityContext);
         case 'getLatestDocument':
             return await getLatestDocument(individualId, computedDocuments, cache);
         case 'determineImmigrationStatus':
@@ -680,34 +833,9 @@ export async function executeComputedField(
         case 'getEducationalDetails':
             return await getEducationalDetails(individualId, computedDocuments, cache);
         case 'calculateArithmetic':
-            if (!arithmeticConfig?.operation) return "Missing Arithmetic Config";
-            const field1 = arithmeticConfig.field1Path || fieldPath;
-            if (!field1) return "Missing Field Path";
-            return await calculateArithmetic(
-                individualId,
-                computedDocuments,
-                arithmeticConfig.operation,
-                field1,
-                arithmeticConfig.field2Path,
-                arithmeticConfig.operand,
-                cache
-            );
+            return await calculateArithmetic(individualId, computedDocuments, arithmeticConfig.operation, arithmeticConfig.field1Path || fieldPath, arithmeticConfig.field2Path, arithmeticConfig.operand, cache);
         case 'calculateDateDifference':
-            const startPath = arithmeticConfig?.startDatePath || arithmeticConfig?.field1Path || fieldPath;
-            const endPath = arithmeticConfig?.endDatePath || arithmeticConfig?.field2Path;
-            if (!startPath || !endPath) return "Missing Date Config";
-            return await calculateDateDifference(
-                individualId,
-                computedDocuments,
-                startPath,
-                endPath,
-                arithmeticConfig?.unit as any,
-                cache
-            );
-        case 'extractFieldFromLatestDocument':
-            return "Missing Path Parameter";
-        case 'extractFieldFromAllDocuments':
-            return [];
+            return await calculateDateDifference(individualId, computedDocuments, arithmeticConfig.startDatePath || fieldPath, arithmeticConfig.endDatePath, arithmeticConfig.unit, cache);
         default:
             return "Unknown Function";
     }
@@ -715,7 +843,8 @@ export async function executeComputedField(
 
 export async function processComputedFields(
     individualId: number | string,
-    computedFieldsConfig: any[]
+    computedFieldsConfig: any[],
+    companyId?: string | number // NEW PARAMETER
 ): Promise<Record<string, string | string[]>> {
     const results: Record<string, string | string[]> = {};
     for (const config of computedFieldsConfig) {
@@ -727,7 +856,8 @@ export async function processComputedFields(
                 config.fieldPath,
                 config.extractionMode || 'latest',
                 config.cache,
-                config.arithmeticConfig
+                config.arithmeticConfig,
+                companyId // Passed down
             );
             results[config.variableName] = value;
         } catch (error) {
