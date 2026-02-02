@@ -279,30 +279,72 @@ const fetchTemplates = async (documentIds: string[], applicantTypes: ApplicantTy
 
     try {
       const jobLevelObj = {
-        department_id: Number(context.departmentId),
-        subdepartment_id: Number(context.subdepartmentId),
+        level: context.type === 'subdepartment' ? 2 : context.type === 'class' ? 3 : 4,
         class_id: context.classId ? Number(context.classId) : null,
         subclass_id: context.subclassId ? Number(context.subclassId) : null,
-        level: context.type === 'subdepartment' ? 2 : context.type === 'class' ? 3 : 4
+        department_id: Number(context.departmentId),
+        subdepartment_id: Number(context.subdepartmentId)
+      };
+
+      const jobLevelForAutomation = {
+        level: context.type === 'subdepartment' ? 2 : context.type === 'class' ? 3 : 4,
+        class_id: context.classId ? Number(context.classId) : null,
+        subclass_id: context.subclassId ? Number(context.subclassId) : null,
+        department_id: Number(context.departmentId),
+        subdepartment_id: Number(context.subdepartmentId)
+      };
+
+      const { data: existingRecord } = await supabase
+        .from('tm_class_requirements')
+        .select('*')
+        .eq('job_level', JSON.stringify(jobLevelObj))
+        .maybeSingle();
+
+      let payload: any = { 
+        job_level: jobLevelObj, 
+        type: context.type, 
+        updated_at: new Date().toISOString(), 
+        id: existingRecord?.id 
+      };
+
+      // Update tm_automations table for any web form automations
+      const automationUpdates = [];
+      for (const req of validItems) {
+        if (req.hasWebForm && req.automationId) {
+          automationUpdates.push(
+            supabase
+              .from('tm_automations')
+              .update({
+                job_level: jobLevelForAutomation,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', req.automationId)
+          );
+        }
       }
-
-      const { data: existingRecord } = await supabase.from('tm_class_requirements').select('*').eq('job_level', JSON.stringify(jobLevelObj)).maybeSingle();
-
-      let payload: any = { job_level: jobLevelObj, type: context.type, updated_at: new Date().toISOString(), id: existingRecord?.id };
+      
+      // Execute all automation updates in parallel
+      if (automationUpdates.length > 0) {
+        await Promise.all(automationUpdates);
+      }
 
       if (activeSection === 'job-specific') {
         const existingQuestions = existingRecord?.job_specific_questions || [];
-        payload.job_specific_questions = [...existingQuestions, ...validItems.map((req, index) => ({
+        payload.job_specific_questions = [...existingQuestions, ...validItems.map((req, index) => {
+        // Filter out empty options before saving
+        const options = Array.isArray(req.options) ? req.options.filter(opt => opt.trim() !== '') : [];
+        return {
           id: (Date.now() + index).toString(),
           label: req.name.trim(),
           type: req.inputType || 'text',
           required: req.isRequired,
           default_value: req.defaultValue || '',
-          options: req.options || [],
+          options: options,
           linked_field_id: req.linkedMasterFieldId || null,
           applicant_types: req.applicantTypes,
           order: existingQuestions.length + index
-        }))];
+        };
+      })];
       } else {
         const existingReqs = existingRecord?.requirements || [];
         payload.requirements = [...existingReqs, ...validItems.map((req, index) => {
@@ -567,13 +609,64 @@ const fetchTemplates = async (documentIds: string[], applicantTypes: ApplicantTy
                               <Label className="text-[10px] uppercase font-bold text-blue-600">Answer Type</Label>
                               <Select value={req.inputType} onValueChange={(v: QuestionType) => updateCurrentReq(idx, { inputType: v })}>
                                 <SelectTrigger className="bg-white h-9"><SelectValue /></SelectTrigger>
-                                <SelectContent><SelectItem value="text">Text Input</SelectItem><SelectItem value="number">Number</SelectItem><SelectItem value="date">Date Picker</SelectItem><SelectItem value="select">Dropdown</SelectItem><SelectItem value="boolean">Yes/No</SelectItem></SelectContent>
+                                <SelectContent><SelectItem value="text">Text Input</SelectItem><SelectItem value="number">Number</SelectItem><SelectItem value="date">Date Picker</SelectItem><SelectItem value="select">Dropdown</SelectItem><SelectItem value="boolean">Yes/No</SelectItem><SelectItem value="multiselect">Multiselect</SelectItem></SelectContent>
                               </Select>
                           </div>
                           <div className="space-y-2">
                               <Label className="text-[10px] uppercase font-bold text-blue-600">Default Value</Label>
                               <Input value={req.defaultValue} onChange={e => updateCurrentReq(idx, { defaultValue: e.target.value })} className="bg-white h-9" />
                           </div>
+                          {(req.inputType === 'select' || req.inputType === 'multiselect') && (
+                            <div className="space-y-2 col-span-3">
+                              <div className="flex justify-between items-center">
+                                <Label className="text-[10px] uppercase font-bold text-blue-600">Dropdown Options</Label>
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="h-7 text-xs"
+                                  onClick={() => {
+                                    const currentOptions = Array.isArray(req.options) ? [...req.options] : [];
+                                    updateCurrentReq(idx, { options: [...currentOptions, ''] });
+                                  }}
+                                >
+                                  <Plus className="h-3 w-3 mr-1" /> Add Option
+                                </Button>
+                              </div>
+                              <div className="space-y-2">
+                                {Array.isArray(req.options) && req.options.map((option, optIdx) => (
+                                  <div key={optIdx} className="flex gap-2 items-center">
+                                    <Input
+                                      value={option}
+                                      onChange={(e) => {
+                                        const newOptions = [...req.options];
+                                        newOptions[optIdx] = e.target.value;
+                                        updateCurrentReq(idx, { options: newOptions });
+                                      }}
+                                      placeholder={`Option ${optIdx + 1}`}
+                                      className="h-9 flex-1"
+                                    />
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-9 w-9 text-destructive"
+                                      onClick={() => {
+                                        const newOptions = [...req.options];
+                                        newOptions.splice(optIdx, 1);
+                                        updateCurrentReq(idx, { options: newOptions });
+                                      }}
+                                    >
+                                      <X className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                ))}
+                                {(!req.options || req.options.length === 0) && (
+                                  <div className="text-sm text-muted-foreground text-center py-2">
+                                    No options added yet. Click "Add Option" to get started.
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
                           <div className="space-y-2">
                               <Label className="text-[10px] uppercase font-bold text-blue-600">Master Field Sync</Label>
                               <Select value={req.linkedMasterFieldId} onValueChange={(v) => updateCurrentReq(idx, { linkedMasterFieldId: v })}>

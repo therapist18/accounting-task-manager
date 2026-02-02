@@ -678,7 +678,19 @@ function JobQuestionPicker({
   availableQuestions: any[]; 
   onSelect: (question: any) => void 
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(false);
+  
+  // Log when questions are received
+  useEffect(() => {
+    console.log('JobQuestionPicker - Available questions:', availableQuestions);
+  }, [availableQuestions]);
+
+  const handleQuestionSelect = (question: any) => {
+    console.log('Job question selected:', question);
+    onSelect(question);
+    setOpen(false);
+  };
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -696,7 +708,7 @@ function JobQuestionPicker({
                 {availableQuestions.map((q, idx) => (
                   <CommandItem 
                     key={`${q.label}-${idx}`} 
-                    onSelect={() => { onSelect(q); setOpen(false) }} 
+                    onSelect={() => handleQuestionSelect(q)} 
                     className="text-sm cursor-pointer"
                   >
                     <HelpCircle className="h-3.5 w-3.5 mr-2 text-purple-400" />
@@ -712,7 +724,7 @@ function JobQuestionPicker({
         </Command>
       </PopoverContent>
     </Popover>
-  )
+  );
 }
 
 // --- Main Component ---

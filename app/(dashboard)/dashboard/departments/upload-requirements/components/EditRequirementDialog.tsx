@@ -227,19 +227,75 @@ useEffect(() => {
   }
 
   const handleSubmit = async () => {
-    if (!formData.name.trim()) return
-    setIsSubmitting(true)
+    console.log('[handleSubmit] Starting form submission...');
+    if (!formData.name.trim()) {
+      console.log('[handleSubmit] Validation failed: Name is required');
+      return;
+    }
+    
+    setIsSubmitting(true);
     try {
-      let web_automation = null
+      let web_automation = null;
+      console.log('[handleSubmit] Form data:', {
+        hasWebForm: formData.hasWebForm,
+        automationId: formData.automationId,
+        contextJobLevel: context?.jobLevel
+      });
+
       if (formData.hasWebForm && formData.automationId) {
-        const auto = automationTypes.find(a => String(a.id) === String(formData.automationId))
+        const auto = automationTypes.find(a => String(a.id) === String(formData.automationId));
+        console.log('[handleSubmit] Found automation:', auto);
+        
+        // Update tm_automations table with job level data if it exists in context
+        if (context?.jobLevel) {
+          // Create job level object with correct structure
+          const jobLevelForAutomation = {
+            level: context.jobLevel.level || (context.type === 'subdepartment' ? 2 : context.type === 'class' ? 3 : 4),
+            class_id: context.classId ? Number(context.classId) : null,
+            subclass_id: context.subclassId ? Number(context.subclassId) : null,
+            department_id: Number(context.departmentId),
+            subdepartment_id: Number(context.subdepartmentId)
+          };
+          
+          console.log('[handleSubmit] Updating automation with job level:', {
+            automationId: formData.automationId,
+            jobLevel: jobLevelForAutomation
+          });
+          
+          try {
+            const { data, error: updateError } = await supabase
+              .from('tm_automations')
+              .update({ 
+                job_level: jobLevelForAutomation,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', formData.automationId)
+              .select();
+
+            console.log('[handleSubmit] Update result:', { data, error: updateError });
+
+            if (updateError) {
+              console.error('[handleSubmit] Error updating automation job level:', updateError);
+              throw updateError;
+            }
+            
+            console.log('[handleSubmit] Successfully updated automation with job level');
+          } catch (updateErr) {
+            console.error('[handleSubmit] Exception during automation update:', updateErr);
+            throw updateErr;
+          }
+        } else {
+          console.log('[handleSubmit] No job level found in context, skipping automation update');
+        }
+
         web_automation = {
           automationId: formData.automationId,
           automationName: auto?.name || '',
           webFormName: formData.webFormName,
           webhookUrl: auto?.webhook_url || ''
-        }
+        };
       }
+      console.log('[handleSubmit] Creating updated requirement object...');
       const updatedRequirement = {
         ...requirement,
         name: formData.name.trim(),
@@ -265,13 +321,31 @@ useEffect(() => {
         linkingVariable: formData.linkingVariable || null,
         selectedTemplateId: formData.selectedTemplateId || undefined,
         updated_at: new Date().toISOString()
+      };
+      console.log('[handleSubmit] Created updated requirement:', updatedRequirement);
+      console.log('[handleSubmit] Calling onSave with updated requirement...');
+      try {
+        await onSave(updatedRequirement);
+        console.log('[handleSubmit] Successfully saved requirement');
+        onOpenChange(false);
+      } catch (saveError) {
+        console.error('[handleSubmit] Error in onSave callback:', saveError);
+        throw saveError;
       }
-      await onSave(updatedRequirement)
-      onOpenChange(false)
     } catch (error) {
-      toast({ title: 'Error', description: 'Failed to save', variant: 'destructive' })
+      console.error('[handleSubmit] Error in handleSubmit:', {
+        error,
+        message: error.message,
+        stack: error.stack
+      });
+      toast({ 
+        title: 'Error', 
+        description: error.message || 'Failed to save requirement', 
+        variant: 'destructive' 
+      });
     } finally {
-      setIsSubmitting(false)
+      console.log('[handleSubmit] Form submission complete');
+      setIsSubmitting(false);
     }
   }
 

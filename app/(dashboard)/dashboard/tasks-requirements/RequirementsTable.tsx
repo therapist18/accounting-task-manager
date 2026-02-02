@@ -845,30 +845,36 @@ useEffect(() => {
           </div>
         </ScrollArea>
       </div>
-      <div className="flex-1 flex flex-col border rounded-md bg-background shadow-sm">
-        <div className="overflow-auto flex-1">
-          <RequirementsTableCombined
-            loading={documentsLoading || loading}
-            error={error}
-            filteredGroupedTasks={filteredGroupedTasks}
-            organizedRequirements={organizedRequirements}
-            classRequirements={currentClassRequirements}
-            expandedDocuments={expandedDocuments}
-            toggleDocumentExpansion={toggleDocumentExpansion}
-            renderDocumentStatus={renderDocumentStatus}
-            renderClientFieldData={renderClientFieldData}
-            renderReferencesData={renderReferencesData}
-            hasReferencesColumn={hasReferencesColumn}
-            allIndividualDocuments={allIndividualDocuments}
-            allCompanyDocuments={allCompanyDocuments}
-            individualNames={individualNames}
-            companyData={companyData}
-            getCurrentRequirements={getCurrentRequirements}
-            fuzzyMatch={fuzzyMatch}
-            kycDocuments={new Map()}
-          />
+      {filteredGroupedTasks.length > 0 ? (
+        <div className="flex-1 flex flex-col border rounded-md bg-background shadow-sm">
+          <div className="overflow-auto flex-1">
+            <RequirementsTableCombined
+              loading={documentsLoading || loading}
+              error={error}
+              filteredGroupedTasks={filteredGroupedTasks}
+              organizedRequirements={organizedRequirements}
+              classRequirements={currentClassRequirements}
+              expandedDocuments={expandedDocuments}
+              toggleDocumentExpansion={toggleDocumentExpansion}
+              renderDocumentStatus={renderDocumentStatus}
+              renderClientFieldData={renderClientFieldData}
+              renderReferencesData={renderReferencesData}
+              hasReferencesColumn={hasReferencesColumn}
+              allIndividualDocuments={allIndividualDocuments}
+              allCompanyDocuments={allCompanyDocuments}
+              individualNames={individualNames}
+              companyData={companyData}
+              getCurrentRequirements={getCurrentRequirements}
+              fuzzyMatch={fuzzyMatch}
+              kycDocuments={new Map()}
+            />
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="flex-1 flex items-center justify-center border rounded-md bg-background">
+          <p className="text-muted-foreground">No applicants found</p>
+        </div>
+      )}
       {previewDocument && previewDocument.documents.length > 0 && (
         <ExtractionPreview
           open={documentPreviewOpen}

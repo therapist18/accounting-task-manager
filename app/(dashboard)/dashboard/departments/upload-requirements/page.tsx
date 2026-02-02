@@ -69,6 +69,12 @@ interface EditingContext {
   className?: string
   subclassId?: string | number
   subclassName?: string
+  jobLevel?: {
+    department_id: string | number
+    subdepartment_id: string | number
+    class_id: string | number | null
+    subclass_id: string | number | null
+  }
 }
 
 interface WebDataField {
@@ -368,10 +374,49 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     const currentSubclass = currentClass?.subClasses?.find(sc => String(sc.id) === String(currentSubclassId))
 
     const targetContext: EditingContext = currentSubclass 
-      ? { type: 'subclass', departmentId: currentDept.id, subdepartmentId: currentSubdept.id, classId: currentClass.id, subclassId: currentSubclass.id, subdepartmentName: currentSubdept.name, className: currentClass.name, subclassName: currentSubclass.name }
+      ? { 
+          type: 'subclass', 
+          departmentId: currentDept.id, 
+          subdepartmentId: currentSubdept.id, 
+          classId: currentClass.id, 
+          subclassId: currentSubclass.id, 
+          subdepartmentName: currentSubdept.name, 
+          className: currentClass.name, 
+          subclassName: currentSubclass.name,
+          jobLevel: {
+            department_id: currentDept.id,
+            subdepartment_id: currentSubdept.id,
+            class_id: currentClass.id,
+            subclass_id: currentSubclass.id
+          }
+        }
       : currentClass
-      ? { type: 'class', departmentId: currentDept.id, subdepartmentId: currentSubdept.id, classId: currentClass.id, subdepartmentName: currentSubdept.name, className: currentClass.name }
-      : { type: 'subdepartment', departmentId: currentDept.id, subdepartmentId: currentSubdept.id, subdepartmentName: currentSubdept.name }
+      ? { 
+          type: 'class', 
+          departmentId: currentDept.id, 
+          subdepartmentId: currentSubdept.id, 
+          classId: currentClass.id, 
+          subdepartmentName: currentSubdept.name, 
+          className: currentClass.name,
+          jobLevel: {
+            department_id: currentDept.id,
+            subdepartment_id: currentSubdept.id,
+            class_id: currentClass.id,
+            subclass_id: null
+          }
+        }
+      : { 
+          type: 'subdepartment', 
+          departmentId: currentDept.id, 
+          subdepartmentId: currentSubdept.id, 
+          subdepartmentName: currentSubdept.name,
+          jobLevel: {
+            department_id: currentDept.id,
+            subdepartment_id: currentSubdept.id,
+            class_id: null,
+            subclass_id: null
+          }
+        }
     
     const reqsToDisplay = (currentSubclass ? currentSubclass.requirements : currentClass ? currentClass.requirements : currentSubdept.upload_requirements) || []
     const questionsToDisplay = (currentSubclass ? currentSubclass.job_specific_questions : currentClass ? currentClass.job_specific_questions : currentSubdept.job_specific_questions) || []
@@ -581,7 +626,19 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                         <TableCell className="border-r">{getAutomationDisplay(req)}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600" onClick={() => { setEditingRequirement(req); setEditingContext(context); setIsEditDialogOpen(true); }}>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600" onClick={() => { 
+                              setEditingRequirement(req); 
+                              setEditingContext({
+                                ...context,
+                                jobLevel: context.jobLevel || {
+                                  department_id: context.departmentId,
+                                  subdepartment_id: context.subdepartmentId,
+                                  class_id: context.classId || null,
+                                  subclass_id: context.subclassId || null
+                                }
+                              }); 
+                              setIsEditDialogOpen(true); 
+                            }}>
                               <Pencil className="h-3.5 w-3.5" />
                             </Button>
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => { 
