@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
-import { Briefcase, FileText, Loader2, Search, UploadCloud, Eye, Zap, FileType, Wand2 } from "lucide-react"
+import { Briefcase, FileText, Loader2, Search, UploadCloud, Eye, Zap, FileType, Wand2, Download, FileUp } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
@@ -14,6 +14,8 @@ import RequirementsTableCombined from "./RequirementsTableCombined"
 import { FileUploadComponent } from "../tasks/components/FileUploadComponent"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { AutomationMappingDialog } from "../tasks/components/AutomationMappingDialog"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import * as XLSX from 'xlsx'
 
 const LetterTemplateDialog = ({ open, onOpenChange, letterData, individualNames }) => {
   if (!letterData) return null;
@@ -101,6 +103,7 @@ export function RequirementsTable({
   const [selectedLetterData, setSelectedLetterData] = useState(null);
   const [isAutomationDialogOpen, setIsAutomationDialogOpen] = useState(false);
   const [selectedAutomationData, setSelectedAutomationData] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const parseSelectionId = useCallback((selectionId: string) => {
     const cleanId = selectionId.replace(/_\d+_\d+$/, '');
@@ -162,7 +165,7 @@ export function RequirementsTable({
         uniqueIds.add(task.applicant_details.id);
         individualTypeMap.set(task.applicant_details.id, 'principal');
       }
-      
+
       if (Array.isArray(task.participants_details)) {
         task.participants_details.forEach(p => {
           if (p.id) {
@@ -171,7 +174,7 @@ export function RequirementsTable({
           }
         });
       }
-      
+
       if (task.understudy) {
         uniqueIds.add(task.understudy);
         if (!individualTypeMap.has(task.understudy)) individualTypeMap.set(task.understudy, 'understudy');
@@ -200,9 +203,9 @@ export function RequirementsTable({
       const filteredDocuments = documentsRes?.filter(doc => {
         const individualType = individualTypeMap.get(doc.director_id);
         const docApplicantTypes = doc.acc_portal_kyc?.applicant_types;
-        
+
         if (!docApplicantTypes || !Array.isArray(docApplicantTypes) || docApplicantTypes.length === 0) return true;
-        
+
         return docApplicantTypes.includes(individualType);
       });
 
@@ -213,8 +216,8 @@ export function RequirementsTable({
       }, {});
 
       setAllIndividualDocuments(prev => ({ ...prev, ...documentsByDirector }));
-    } catch (err) { 
-      console.error('❌ Error Individual Fetch:', err); 
+    } catch (err) {
+      console.error('❌ Error Individual Fetch:', err);
     }
   }, []);
 
@@ -241,41 +244,41 @@ export function RequirementsTable({
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      
+
       const endTime = performance.now();
-    
+
       const docsByCompany = data?.reduce((acc, doc) => {
         if (!acc[doc.company_id]) acc[doc.company_id] = [];
         acc[doc.company_id].push(doc);
         return acc;
       }, {});
-      
+
       setAllCompanyDocuments(prev => ({ ...prev, ...docsByCompany }));
-    } catch (err) { 
-      console.error('❌ Error Company Fetch:', err); 
+    } catch (err) {
+      console.error('❌ Error Company Fetch:', err);
     }
   }, []);
 
   // OPTIMIZED: Batch fetch company metadata
   const fetchCompanyData = useCallback(async (tasksToFetch: any[]) => {
     const startTime = performance.now();
-    
+
     const companyIds = [...new Set(tasksToFetch.flatMap(t => {
       const ids = [];
       if (t.company_id) ids.push(t.company_id);
-      
+
       if (t.applicant_details?.type === 'company' && t.applicant_details?.id) {
         ids.push(t.applicant_details.id);
       }
-      
+
       if (Array.isArray(t.participants_details)) {
         const companyParticipant = t.participants_details.find(p => p.type === 'company');
         if (companyParticipant?.id) ids.push(companyParticipant.id);
       }
-      
+
       return ids;
     }).filter(Boolean))];
-    
+
     if (companyIds.length === 0) {
       return;
     }
@@ -303,7 +306,7 @@ export function RequirementsTable({
     }
   }, []);
 
-useEffect(() => {
+  useEffect(() => {
     let isMounted = true;
     const loadData = async () => {
       if (!filteredTasks.length) return;
@@ -324,9 +327,9 @@ useEffect(() => {
         if (uniqueDepartmentIds.length > 0) conditions.push(`job_level->>department_id.in.(${uniqueDepartmentIds.join(',')})`);
 
         // If no valid IDs exist, we shouldn't query requirements that won't match anything relevant
-        const reqPromise = conditions.length > 0 
-           ? reqQuery.or(conditions.join(',')) 
-           : Promise.resolve({ data: [], error: null });
+        const reqPromise = conditions.length > 0
+          ? reqQuery.or(conditions.join(','))
+          : Promise.resolve({ data: [], error: null });
 
         const [metadataRes, classRequirementsRes] = await Promise.all([
           supabase.from('acc_portal_kyc').select('*').order('display_name', { ascending: true, nullsLast: true }),
@@ -342,17 +345,17 @@ useEffect(() => {
         // 3. Map Requirements Logic (Hierarchy: Class > Subdept > Dept)
         const classReqMap: Record<string, any> = {};
         const reqs = classRequirementsRes.data || [];
-        
+
         filteredTasks.forEach(task => {
-           let match = null;
-           // Priority 1: Exact Class Match
-           if (task.class_id) match = reqs.find(r => r.job_level?.class_id == task.class_id);
-           // Priority 2: Subdepartment Match (if no class ID in task)
-           if (!match && task.subdepartment_id) match = reqs.find(r => r.job_level?.subdepartment_id == task.subdepartment_id && !r.job_level?.class_id);
-           // Priority 3: Department Match
-           if (!match && task.department_id) match = reqs.find(r => r.job_level?.department_id == task.department_id && !r.job_level?.subdepartment_id && !r.job_level?.class_id);
-           
-           if(match) classReqMap[task.id] = match;
+          let match = null;
+          // Priority 1: Exact Class Match
+          if (task.class_id) match = reqs.find(r => r.job_level?.class_id == task.class_id);
+          // Priority 2: Subdepartment Match (if no class ID in task)
+          if (!match && task.subdepartment_id) match = reqs.find(r => r.job_level?.subdepartment_id == task.subdepartment_id && !r.job_level?.class_id);
+          // Priority 3: Department Match
+          if (!match && task.department_id) match = reqs.find(r => r.job_level?.department_id == task.department_id && !r.job_level?.subdepartment_id && !r.job_level?.class_id);
+
+          if (match) classReqMap[task.id] = match;
         });
         setTaskClassRequirements(classReqMap);
 
@@ -362,27 +365,27 @@ useEffect(() => {
         const requiredKycIds = new Set<string>();
 
         Object.values(classReqMap).forEach((cr: any) => {
-             const list = cr.requirements || cr.documents_and_fields || [];
-             list.forEach((r: any) => {
-                if(r.kyc_document_id && UUID_REGEX.test(r.kyc_document_id)) requiredKycIds.add(r.kyc_document_id);
-                if(r.kyc_document_ids) {
-                    r.kyc_document_ids.forEach((id: string) => {
-                        if(UUID_REGEX.test(id)) requiredKycIds.add(id);
-                    });
-                }
-                // Handle legacy documents_and_fields ID if necessary - BUT ensure it is UUID
-                if(cr.documents_and_fields && r.id && UUID_REGEX.test(r.id)) requiredKycIds.add(r.id);
-             });
+          const list = cr.requirements || cr.documents_and_fields || [];
+          list.forEach((r: any) => {
+            if (r.kyc_document_id && UUID_REGEX.test(r.kyc_document_id)) requiredKycIds.add(r.kyc_document_id);
+            if (r.kyc_document_ids) {
+              r.kyc_document_ids.forEach((id: string) => {
+                if (UUID_REGEX.test(id)) requiredKycIds.add(id);
+              });
+            }
+            // Handle legacy documents_and_fields ID if necessary - BUT ensure it is UUID
+            if (cr.documents_and_fields && r.id && UUID_REGEX.test(r.id)) requiredKycIds.add(r.id);
+          });
         });
-        
+
         filteredTasks.forEach(task => {
-            if(task.applicant_details?.type === 'individual' && task.applicant_details?.id) allIndividualIds.add(task.applicant_details.id);
-            task.participants_details?.forEach(p => {
-                if(p.type === 'individual' && p.id) allIndividualIds.add(p.id);
-                if(p.type === 'company' && p.id) allCompanyIds.add(p.id);
-            });
-            if(task.company_id) allCompanyIds.add(task.company_id);
-            if(task.applicant_details?.type === 'company' && task.applicant_details?.id) allCompanyIds.add(task.applicant_details.id);
+          if (task.applicant_details?.type === 'individual' && task.applicant_details?.id) allIndividualIds.add(task.applicant_details.id);
+          task.participants_details?.forEach(p => {
+            if (p.type === 'individual' && p.id) allIndividualIds.add(p.id);
+            if (p.type === 'company' && p.id) allCompanyIds.add(p.id);
+          });
+          if (task.company_id) allCompanyIds.add(task.company_id);
+          if (task.applicant_details?.type === 'company' && task.applicant_details?.id) allCompanyIds.add(task.applicant_details.id);
         });
 
         const indIds = Array.from(allIndividualIds);
@@ -402,19 +405,19 @@ useEffect(() => {
         const [indDocs, coDocs, coMeta] = await Promise.all(promises);
 
         if (indDocs.data) {
-             const map = {}; indDocs.data.forEach(d => { if(!map[d.director_id]) map[d.director_id] = []; map[d.director_id].push(d); });
-             setAllIndividualDocuments(map);
+          const map = {}; indDocs.data.forEach(d => { if (!map[d.director_id]) map[d.director_id] = []; map[d.director_id].push(d); });
+          setAllIndividualDocuments(map);
         }
         if (coDocs.data) {
-             const map = {}; coDocs.data.forEach(d => { if(!map[d.company_id]) map[d.company_id] = []; map[d.company_id].push(d); });
-             setAllCompanyDocuments(map);
+          const map = {}; coDocs.data.forEach(d => { if (!map[d.company_id]) map[d.company_id] = []; map[d.company_id].push(d); });
+          setAllCompanyDocuments(map);
         }
         if (coMeta.data) {
-             const map = {}; coMeta.data.forEach(c => map[c.id] = c);
-             setCompanyData(map);
+          const map = {}; coMeta.data.forEach(c => map[c.id] = c);
+          setCompanyData(map);
         }
 
-      } catch (err) { console.error(err); } 
+      } catch (err) { console.error(err); }
       finally { if (isMounted) setDocumentsLoading(false); }
     };
     loadData();
@@ -422,7 +425,7 @@ useEffect(() => {
   }, [filteredTasks]);
 
 
-   const hasReferencesColumn = useMemo(() => filteredTasks.some(task => REFERENCE_SUBDEPARTMENT_IDS.includes(task.subdepartment?.id) || REFERENCE_SUBDEPARTMENT_IDS.includes(task.subdepartment?.parent_id)), [filteredTasks]);
+  const hasReferencesColumn = useMemo(() => filteredTasks.some(task => REFERENCE_SUBDEPARTMENT_IDS.includes(task.subdepartment?.id) || REFERENCE_SUBDEPARTMENT_IDS.includes(task.subdepartment?.parent_id)), [filteredTasks]);
 
   const groupedTasks = useMemo(() => {
     const groups = new Map<string, any[]>();
@@ -476,12 +479,12 @@ useEffect(() => {
 
     allTasks.forEach(task => {
       const classReqs = taskClassRequirements[task.id];
-      
+
       // Handle both data structures: requirements array OR documents_and_fields
       if (!classReqs) return;
-      
+
       let requirementsToProcess = [];
-      
+
       // Structure 1: requirements array with hasTemplate and web_automation
       if (classReqs?.requirements && Array.isArray(classReqs.requirements)) {
         requirementsToProcess = classReqs.requirements;
@@ -497,22 +500,22 @@ useEffect(() => {
           applicantTypes: doc.Principal ? ['principal'] : doc.Company ? ['company'] : doc.Dependent ? ['dependent'] : []
         }));
       }
-      
+
       if (requirementsToProcess.length === 0) return;
 
       requirementsToProcess.forEach((req: any) => {
         const kycDocIds = req.kyc_document_ids || (req.kyc_document_id ? [req.kyc_document_id] : []);
-        
+
         if (kycDocIds.length === 0) return;
-        
+
         // Check if we already have this requirement (by ID, not name)
         const existingReq = requirementRows.find(r => r.id === req.id);
         if (existingReq) return; // Skip duplicates from multiple tasks
-        
+
         // Get the first document for display purposes
         const firstDocId = kycDocIds[0];
         const firstDocDef = documents.find(d => d.id === firstDocId);
-        
+
         // Determine if this is a composite requirement (multiple different document types)
         const uniqueDocTypes = new Set(
           kycDocIds.map(docId => {
@@ -520,12 +523,12 @@ useEffect(() => {
             return doc?.display_name || doc?.name || 'Unknown';
           })
         );
-        
+
         const isComposite = uniqueDocTypes.size > 1;
-        
+
         // Use requirement name, not document name
         const requirementName = req.name || firstDocDef?.display_name || firstDocDef?.name || 'Unnamed Requirement';
-        
+
         requirementRows.push({
           ...req,
           documentDefinition: firstDocDef, // For fields and metadata
@@ -535,42 +538,45 @@ useEffect(() => {
           name: requirementName, // Use requirement name
           documentCount: kycDocIds.length, // Total number of document types
           isMultiDocument: isComposite, // True if multiple different types
-          category: (() => {
+          // Separate section_type from actual category
+          section_type: (() => {
             // Priority 1: Check for automation first
             if (req.web_automation?.automationId) {
               return 'automation';
             }
-            
+
             // Priority 2: Check for template
             if (req.hasTemplate) {
               return 'template';
             }
-            
+
             const applicantTypes = req.applicantTypes || (req.applicantType ? [req.applicantType] : []);
             if (applicantTypes.includes('company')) {
               return 'company';
             }
-            
+
             if (firstDocDef?.category === 'company-docs') {
               return 'company';
             }
-            
+
             if (firstDocDef?.has_template) {
               return 'template';
             }
-            
+
             return 'individual';
-          })()
+          })(),
+          // Explicitly preserve the original category for sub-sectioning
+          category: req.category || 'general'
         });
       });
     });
 
     return {
       documents: {
-        company: requirementRows.filter(r => r.category === 'company'),
-        individual: requirementRows.filter(r => r.category === 'individual'),
-        templates: requirementRows.filter(r => r.category === 'template'),
-        automations: requirementRows.filter(r => r.category === 'automation'),
+        company: requirementRows.filter(r => r.section_type === 'company'),
+        individual: requirementRows.filter(r => r.section_type === 'individual'),
+        templates: requirementRows.filter(r => r.section_type === 'template'),
+        automations: requirementRows.filter(r => r.section_type === 'automation'),
       }
     };
   }, [filteredGroupedTasks, taskClassRequirements, documents]);
@@ -578,14 +584,14 @@ useEffect(() => {
   const handleSelectApplicant = (applicantName: string) => setSelectedApplicant(applicantName);
   const toggleDocumentExpansion = useCallback((docId: string) => setExpandedDocuments(prev => { const newSet = new Set(prev); newSet.has(docId) ? newSet.delete(docId) : newSet.add(docId); return newSet; }), []);
   const handleUploadAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number) => { setSelectedUploadData({ task, document: item, columnType, applicantId }); setUploadDialogOpen(true); }, []);
-  const handleUploadComplete = useCallback(() => { 
-    setUploadDialogOpen(false); 
+  const handleUploadComplete = useCallback(() => {
+    setUploadDialogOpen(false);
     if (filteredTasks.length > 0) {
       const requiredKycIds = getRequiredKycIds();
       Promise.all([
-        fetchAllIndividualData(filteredTasks, requiredKycIds), 
+        fetchAllIndividualData(filteredTasks, requiredKycIds),
         fetchAllCompanyDocuments(filteredTasks, requiredKycIds)
-      ]); 
+      ]);
     }
   }, [filteredTasks, getRequiredKycIds, fetchAllIndividualData, fetchAllCompanyDocuments]);
 
@@ -599,11 +605,11 @@ useEffect(() => {
     setIsAutomationDialogOpen(true);
   }, []);
 
-  const getDocumentStatusForColumn = useCallback((task: any, reqItem: any, columnType: ApplicantType, applicantId?: number): 
-  DocumentStatus => {
+  const getDocumentStatusForColumn = useCallback((task: any, reqItem: any, columnType: ApplicantType, applicantId?: number):
+    DocumentStatus => {
     const baseStatus = { documents: [], count: 0 };
     const kycDocIds = reqItem.kyc_document_ids || (reqItem.kyc_document_id ? [reqItem.kyc_document_id] : []);
-    
+
     if (kycDocIds.length === 0) return baseStatus;
 
     const allowedTypes = reqItem.applicantTypes || (reqItem.applicantType ? [reqItem.applicantType] : []);
@@ -614,32 +620,32 @@ useEffect(() => {
 
     if (columnType === 'company') {
       let companyId = null;
-      
+
       if (task.applicant_details?.type === 'company' && task.applicant_details?.id) {
         companyId = task.applicant_details.id;
       } else if (task.participants_details) {
         const companyPart = task.participants_details.find(p => p.type === 'company');
         companyId = companyPart?.id;
       }
-      
+
       if (!companyId) {
         companyId = task.company_id;
       }
-      
+
       if (companyId && allCompanyDocuments[companyId]) {
-        foundDocuments = allCompanyDocuments[companyId].filter(doc => 
+        foundDocuments = allCompanyDocuments[companyId].filter(doc =>
           kycDocIds.includes(doc.kyc_document_id)
         );
       }
     } else {
       let individualId = applicantId;
-      
+
       if (columnType === 'principal') {
         if (task.applicant_details?.type === 'individual' && task.applicant_details?.id) {
           individualId = task.applicant_details.id;
         } else if (task.participants_details) {
-          const principalIndividual = task.participants_details.find(p => 
-            p.type === 'individual' && 
+          const principalIndividual = task.participants_details.find(p =>
+            p.type === 'individual' &&
             (p.role === 'principal' || p.role === 'applicant' || (!p.role && !p.relationship))
           );
           individualId = principalIndividual?.id || task.individual_id;
@@ -651,7 +657,7 @@ useEffect(() => {
       }
 
       if (individualId && allIndividualDocuments[individualId]) {
-        foundDocuments = allIndividualDocuments[individualId].filter(doc => 
+        foundDocuments = allIndividualDocuments[individualId].filter(doc =>
           kycDocIds.includes(doc.document_id)
         );
       }
@@ -689,7 +695,7 @@ useEffect(() => {
                 .select('fields')
                 .eq('id', doc.document_id)
                 .single();
-              
+
               if (!kycError && kycData) {
                 fields = kycData.fields || [];
               } else if (kycError) {
@@ -750,7 +756,7 @@ useEffect(() => {
             <span className="text-[10px] font-bold uppercase">Generate</span>
           </Button>
         )}
-        
+
         {isLetter && !item.hasTemplate && (
           <Button
             variant="ghost"
@@ -763,11 +769,11 @@ useEffect(() => {
             <span className="text-[10px] font-bold uppercase">Generate</span>
           </Button>
         )}
-        
+
         {!item.web_automation?.automationId && (
           <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-amber-600 hover:bg-amber-50" onClick={() => handleUploadAction(task, item, columnType, applicantId)} title={`Upload ${item.display_name}`}><UploadCloud className="h-4 w-4" /></Button>
         )}
-        
+
         {status.type === 'view' && (
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-green-600 hover:bg-green-100" onClick={handleViewClick} title={`View ${status.count} document(s)`}><Eye className="h-4 w-4" /></Button>
@@ -786,7 +792,7 @@ useEffect(() => {
   const currentClassRequirements = useMemo(() => {
     const firstTask = filteredGroupedTasks[0]?.tasks?.[0];
     if (!firstTask) return [];
-    const requirements = taskClassRequirements[firstTask.id];   
+    const requirements = taskClassRequirements[firstTask.id];
     return requirements ? [requirements] : [];
   }, [filteredGroupedTasks, taskClassRequirements]);
 
@@ -808,6 +814,105 @@ useEffect(() => {
     }
 
     return null;
+  };
+
+  const handleExportChecklist = () => {
+    const worksheetData: any[] = [];
+    const headers = ["#", "Requirement"];
+
+    filteredGroupedTasks.forEach(group => {
+      const companyId = group.tasks[0]?.company_id;
+      const company = companyId ? companyData[companyId] : null;
+      headers.push(company ? company.company_name : "Company");
+      const principal = group.tasks[0]?.participants_details?.find(p =>
+        (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')
+      );
+      const principalId = principal?.id || group.tasks[0]?.individual_id;
+      headers.push(principal?.name || individualNames[principalId] || "Principal");
+      (group.dependantIds || []).forEach((id, index) => headers.push(individualNames[id] || `Dependant ${index + 1}`));
+      if (group.tasks.some(task => task.class_id === CLASS_D_ID)) headers.push("Understudy");
+    });
+    if (hasReferencesColumn) allReferences.forEach(ref => headers.push(ref.name));
+
+    worksheetData.push(headers);
+    worksheetData.push(["Company Documents", ...Array(headers.length - 1).fill("")]);
+    organizedRequirements.documents.company
+      .sort((a, b) => (a.document.custom_order || 999) - (b.document.custom_order || 999))
+      .forEach((docItem, index) => worksheetData.push([`${index + 1}.`, docItem.document.display_name, ...Array(headers.length - 2).fill(" ")]));
+
+    worksheetData.push(["Individual Documents", ...Array(headers.length - 1).fill("")]);
+    organizedRequirements.documents.individual
+      .sort((a, b) => (a.document.custom_order || 999) - (b.document.custom_order || 999))
+      .forEach((docItem, index) => worksheetData.push([`${index + 1}.`, docItem.document.display_name, ...Array(headers.length - 2).fill(" ")]));
+
+    const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Requirements Checklist");
+    XLSX.writeFile(workbook, "Requirements_Checklist.xlsx");
+  };
+
+  const handleExportData = () => {
+    const worksheetData: any[] = [];
+    const headers = ["#", "Requirement"];
+    const entityColumns: { type: string, id?: number, name: string, groupIndex: number }[] = [];
+
+    filteredGroupedTasks.forEach((group, groupIndex) => {
+      const companyId = group.tasks[0]?.company_id;
+      const company = companyId ? companyData[companyId] : null;
+      headers.push(company ? company.company_name : `Company (Group ${groupIndex + 1})`);
+      entityColumns.push({ type: 'company', name: 'company', groupIndex });
+
+      const participants = group.tasks[0]?.participants_details || [];
+      const principal = participants.find(p =>
+        (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')
+      );
+      const understudy = participants.find(p =>
+        (Array.isArray(p.role) ? p.role.includes('understudy') : p.role === 'understudy')
+      );
+      const principalId = principal?.id || null;
+      const understudyId = understudy?.id || null;
+
+      headers.push(individualNames[principalId] || `Principal (Group ${groupIndex + 1})`);
+      entityColumns.push({ type: 'principal', name: 'principal', groupIndex });
+      (group.dependantIds || []).forEach((id, depIndex) => {
+        headers.push(individualNames[id] || `Dependant ${depIndex + 1} (Group ${groupIndex + 1})`);
+        entityColumns.push({ type: 'dependant', id, name: 'dependant', groupIndex });
+      });
+      if (group.tasks.some(task => task.class_id === CLASS_D_ID)) {
+        headers.push(individualNames[understudyId] || `Understudy (Group ${groupIndex + 1})`);
+        entityColumns.push({ type: 'understudy', name: 'understudy', groupIndex });
+      }
+    });
+    if (hasReferencesColumn) {
+      allReferences.forEach(ref => {
+        headers.push(ref.name);
+        entityColumns.push({ type: 'reference', id: ref.member, name: 'reference', groupIndex: 0 });
+      });
+    }
+    worksheetData.push(headers);
+
+    const processDocuments = (docType: string, documents: any[]) => {
+      worksheetData.push([`${docType} Documents`, ...Array(headers.length - 1).fill("")]);
+      documents
+        .sort((a, b) => (a.order || 999) - (b.order || 999))
+        .forEach((reqItem, index) => {
+          const docDef = reqItem.documentDefinition;
+          const row = [`${index + 1}.`, docDef?.display_name || docDef?.name || reqItem.name];
+          entityColumns.forEach(col => {
+            const task = filteredGroupedTasks[col.groupIndex]?.tasks[0];
+            row.push(task ? getDocumentStatusText(task, docDef, col.type, col.id) : "N/A");
+          });
+          worksheetData.push(row);
+        });
+    };
+
+    processDocuments("Company", organizedRequirements.documents.company);
+    processDocuments("Individual", organizedRequirements.documents.individual);
+
+    const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Requirements Data");
+    XLSX.writeFile(workbook, "Requirements_Data_Export.xlsx");
   };
 
   return (
@@ -847,6 +952,34 @@ useEffect(() => {
       </div>
       {filteredGroupedTasks.length > 0 ? (
         <div className="flex-1 flex flex-col border rounded-md bg-background shadow-sm">
+          <div className="p-4 border-b flex justify-between">
+            <div className="relative">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search requirements..."
+                className="pl-10"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            <div className="flex justify-end">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline">
+                    <Download className="mr-2 h-4 w-4" /> Export
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={handleExportChecklist}>
+                    <FileText className="mr-2 h-4 w-4" /> Export Requirements Checklist
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleExportData}>
+                    <FileUp className="mr-2 h-4 w-4" /> Export Data
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
           <div className="overflow-auto flex-1">
             <RequirementsTableCombined
               loading={documentsLoading || loading}
@@ -867,6 +1000,8 @@ useEffect(() => {
               getCurrentRequirements={getCurrentRequirements}
               fuzzyMatch={fuzzyMatch}
               kycDocuments={new Map()}
+              documentTypes={documents}
+              searchQuery={searchQuery}
             />
           </div>
         </div>

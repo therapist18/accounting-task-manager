@@ -10,9 +10,29 @@ export interface DocumentCache {
 /**
  * Parses a date string into a Date object, supporting multiple date formats
  */
-const parseDateString = (dateInput: string | Date | null | undefined): Date | null => {
+const parseDateString = (dateInput: string | Date | number | null | undefined): Date | null => {
     if (!dateInput) return null;
     if (dateInput instanceof Date && !isNaN(dateInput.getTime())) return dateInput;
+    
+    // Handle numeric values (could be timestamps or arithmetic results)
+    if (typeof dateInput === 'number') {
+        // Check if it's a reasonable timestamp (milliseconds since epoch)
+        if (dateInput > 1000000000 && dateInput < 9999999999) {
+            // Likely seconds timestamp, convert to milliseconds
+            const date = new Date(dateInput * 1000);
+            if (!isNaN(date.getTime())) return date;
+        } else if (dateInput > 1000000000000 && dateInput < 9999999999999) {
+            // Likely milliseconds timestamp
+            const date = new Date(dateInput);
+            if (!isNaN(date.getTime())) return date;
+        }
+        // If it's a year, create a date for January 1st of that year
+        if (dateInput >= 1900 && dateInput <= 2100) {
+            return new Date(dateInput, 0, 1);
+        }
+        return null;
+    }
+    
     if (typeof dateInput !== 'string') return null;
 
     let date = new Date(dateInput);
@@ -141,12 +161,15 @@ function sortDocsByRecency(docs: any[], docTypes: any[]) {
  * IMPROVED: Parse JSON path from document data
  * Handles both ->> (text extraction) and -> (JSON extraction)
  */
-function parseJsonPath(doc: any, fieldPath: string): any {
+function parseJsonPath(doc: any, fieldPath: string | number): any {
     if (!fieldPath) return null;
 
+    // Convert to string if it's a number
+    const pathStr = String(fieldPath);
+
     // Handle ->> operator (PostgreSQL text extraction)
-    if (fieldPath.includes("->>")) {
-        const parts = fieldPath.split("->>");
+    if (pathStr.includes("->>")) {
+        const parts = pathStr.split("->>");
         if (parts.length === 2) {
             const column = parts[0].trim().replace(/['"]/g, '');
             const key = parts[1].trim().replace(/['"]/g, '');
@@ -159,8 +182,8 @@ function parseJsonPath(doc: any, fieldPath: string): any {
     }
 
     // Handle -> operator (PostgreSQL JSON extraction)
-    if (fieldPath.includes("->")) {
-        const parts = fieldPath.split("->");
+    if (pathStr.includes("->")) {
+        const parts = pathStr.split("->");
         if (parts.length === 2) {
             const column = parts[0].trim().replace(/['"]/g, '');
             const key = parts[1].trim().replace(/['"]/g, '');
@@ -173,7 +196,7 @@ function parseJsonPath(doc: any, fieldPath: string): any {
     }
 
     // Handle direct column access
-    return doc[fieldPath];
+    return doc[pathStr];
 }
 
 // --- ARRAY EXTRACTION ---
@@ -258,24 +281,37 @@ export async function extractFieldFromLatestDocument(
     cache?: DocumentCache
 ): Promise<string> {
     try {
+        console.log(`[Extract Debug] Individual: ${individualId}, Docs: ${documentIds.join(', ')}, Path: ${fieldPath}`);
+        
         const { docs, types } = await fetchDocsAndTypes(individualId, documentIds, cache);
      
         if (docs.length === 0) {
+            console.log(`[Extract Debug] No documents found`);
             return "Missing Document";
         }
 
+        console.log(`[Extract Debug] Found ${docs.length} documents`);
         const sorted = sortDocsByRecency(docs, types);
         const latest = sorted[0];
-              const value = parseJsonPath(latest.doc, fieldPath);
-               if (value === null || value === undefined) {
+        
+        console.log(`[Extract Debug] Latest doc:`, latest.doc);
+        console.log(`[Extract Debug] Extracting from path: ${fieldPath}`);
+        
+        const value = parseJsonPath(latest.doc, fieldPath);
+        console.log(`[Extract Debug] Extracted value:`, value, `Type: ${typeof value}`);
+        
+        if (value === null || value === undefined) {
+            console.log(`[Extract Debug] Field not found at path: ${fieldPath}`);
             return "Field Not Found";
         }
 
         const result = String(value);
+        console.log(`[Extract Debug] Final result: ${result}`);
         return result;
 
     } catch (error) {
-               return "Extraction Error";
+        console.error(`[Extract Error] Individual: ${individualId}, Path: ${fieldPath}, Error:`, error);
+        return "Extraction Error";
     }
 }
 
@@ -412,6 +448,19 @@ export async function getLatestDocumentIssueDate(individualId: string | number, 
     return "Issue Date Not Found";
 }
 
+export async function getLatestDocumentStartDate(individualId: string | number, computedDocuments: string[], cache?: DocumentCache): Promise<string> {
+    const commonPaths = ["extracted_details->>'With_Effect_From'", "extracted_details->>'Date_of_Issue'", "extracted_details->>'Issue_Date'", "extracted_details->>'Issued_Date'"];
+    for (const path of commonPaths) {
+        const result = await extractFieldFromLatestDocument(individualId, computedDocuments, path, cache);
+        if (result !== "Field Not Found" && result !== "Missing Document") {
+            const parsed = parseDateString(result);
+            if (parsed) return parsed.toISOString().split('T')[0];
+            return result;
+        }
+    }
+    return "Start Date Not Found";
+}
+
 export async function determineImmigrationStatus(individualId: string | number, computedDocuments: string[], cache?: DocumentCache): Promise<string> {
     try {
         const { docs, types } = await fetchDocsAndTypes(individualId, computedDocuments, cache);
@@ -467,7 +516,7 @@ export async function determineImmigrationStatus(individualId: string | number, 
             } else {
                 immigrationStatusStr = "Unknown";
             }
-            const expiredResult = `Expired (${immigrationStatusStr})`;
+            const expiredResult = `${immigrationStatusStr}`;
             return expiredResult;
         }
 
@@ -594,18 +643,72 @@ export async function calculateDateDifference(
     cache?: DocumentCache
 ): Promise<string> {
     try {
-        const startDateStr = await extractFieldFromLatestDocument(individualId, computedDocuments, startDatePath, cache);
-        if (startDateStr === "Field Not Found" || startDateStr === "Missing Document") {
+        // Helper function to resolve master field ID to actual document path using linked sources
+        const resolveFieldPath = async (fieldPathOrId: any): Promise<string> => {
+            // Convert to string first to handle all input types
+            const fieldPathStr = String(fieldPathOrId);
+            
+            // If it's already a document path (contains ->>), return as-is
+            if (fieldPathStr.includes('->>')) {
+                return fieldPathStr;
+            }
+
+            // If it's a numeric ID, look up the master field and get its linked sources
+            if (!isNaN(Number(fieldPathStr))) {
+                try {
+                    const { data: masterField } = await supabase
+                        .from('tm_job_fields')
+                        .select('*')
+                        .eq('id', fieldPathOrId)
+                        .maybeSingle();
+
+                    console.log(`[Date Debug] Master field ${fieldPathOrId}:`, masterField);
+
+                    if (masterField?.sources?.length > 0) {
+                        // Find the source that matches document extraction
+                        const documentSource = masterField.sources.find(source => 
+                            source.table === 'acc_portal_directors_documents' && 
+                            source.path
+                        );
+                        
+                        if (documentSource?.path) {
+                            console.log(`[Date Debug] Found source path: ${documentSource.path} for field ${fieldPathOrId}`);
+                            return documentSource.path;
+                        }
+                    }
+                } catch (error) {
+                    console.error(`[Date Debug] Error looking up master field ${fieldPathOrId}:`, error);
+                }
+            }
+
+            console.log(`[Date Debug] Could not resolve path for ${fieldPathOrId}, using as-is`);
+            return fieldPathOrId;
+        };
+
+        // Resolve the actual paths
+        const resolvedStartDatePath = await resolveFieldPath(startDatePath);
+        const resolvedEndDatePath = await resolveFieldPath(endDatePath);
+
+        console.log(`[Date Debug] Resolved paths - Start: ${startDatePath} -> ${resolvedStartDatePath}, End: ${endDatePath} -> ${resolvedEndDatePath}`);
+
+        const startDateValue = await extractFieldFromLatestDocument(individualId, computedDocuments, resolvedStartDatePath, cache);
+        if (startDateValue === "Field Not Found" || startDateValue === "Missing Document") {
             return "Start Date Not Found";
         }
 
-        const endDateStr = await extractFieldFromLatestDocument(individualId, computedDocuments, endDatePath, cache);
-        if (endDateStr === "Field Not Found" || endDateStr === "Missing Document") {
+        const endDateValue = await extractFieldFromLatestDocument(individualId, computedDocuments, resolvedEndDatePath, cache);
+        if (endDateValue === "Field Not Found" || endDateValue === "Missing Document") {
             return "End Date Not Found";
         }
+
+        // Convert string numbers to actual numbers if needed
+        const startDateStr = typeof startDateValue === 'string' && !isNaN(Number(startDateValue)) ? Number(startDateValue) : startDateValue;
+        const endDateStr = typeof endDateValue === 'string' && !isNaN(Number(endDateValue)) ? Number(endDateValue) : endDateValue;
+
         const startDate = parseDateString(startDateStr);
         const endDate = parseDateString(endDateStr);
         if (!startDate || !endDate) {
+            console.log(`[Date Debug] Start: ${startDateStr} (${typeof startDateStr}), End: ${endDateStr} (${typeof endDateStr})`);
             return "Invalid Date Format";
         }
 
@@ -627,6 +730,8 @@ export async function calculateDateDifference(
             default:
                 difference = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
         }
+        
+        console.log(`[Date Debug] Calculated difference: ${difference} ${unit}`);
         return String(difference);
     } catch (error) {
         console.error("[Date Difference Error]:", error);
@@ -830,6 +935,8 @@ export async function executeComputedField(
             return await getLatestDocumentExpiryDate(individualId, computedDocuments, cache);
         case 'getLatestDocumentIssueDate':
             return await getLatestDocumentIssueDate(individualId, computedDocuments, cache);
+        case 'getLatestDocumentStartDate':
+            return await getLatestDocumentStartDate(individualId, computedDocuments, cache);
         case 'getEducationalDetails':
             return await getEducationalDetails(individualId, computedDocuments, cache);
         case 'calculateArithmetic':

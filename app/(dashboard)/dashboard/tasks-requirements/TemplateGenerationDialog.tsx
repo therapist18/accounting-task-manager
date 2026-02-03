@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp, Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp, Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles, View, MousePointer2, Layout } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -202,12 +202,12 @@ const getOrdinalWord = (index: number): string => {
 
 const parseImageDimension = (dimension: string | undefined): number | null => {
     if (!dimension) return null;
-    
+
     const cleaned = dimension.toString().trim();
     const numericValue = parseFloat(cleaned);
-    
+
     if (isNaN(numericValue)) return null;
-    
+
     return numericValue;
 };
 
@@ -1225,8 +1225,17 @@ const PlaceholderInput = ({
 };
 
 export default function TemplateGenerationDialog({ isOpen, onClose, template, availableTemplates = [], documentName, masterFields, entityIdMap, sourceDataCache, extractedData = {}, personData = {}, companyData = {}, relationshipData = { directors: [], dependants: [], company: {}, principal: null, understudy: null } }) {
+  const [panelsVisible, setPanelsVisible] = useState({
+        form: true,     // Left Panel (Input fields)
+        preview: true,  // Middle Panel (Live Render)
+        source: true    // Right Panel (Original Doc/Reference)
+    });
     const { toast } = useToast();
-    const [formData, setFormData] = useState(() => ({ ...extractedData, ...personData, ...companyData, directors: relationshipData.directors || [], company: relationshipData.company || {} }));
+    const [formData, setFormData] = useState(() => {
+        const initialData = { ...extractedData, ...personData, ...companyData, directors: relationshipData.directors || [], company: relationshipData.company || {} };
+        console.log('📊 INITIAL FORM DATA:', initialData);
+        return initialData;
+    });
     const [refiningFields, setRefiningFields] = useState(new Set());
     const [originalFormData, setOriginalFormData] = useState({ ...formData });
     const [isGenerating, setIsGenerating] = useState(false);
@@ -1256,6 +1265,43 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
         source: string;
     }>>([]);
     const [showConflictBanner, setShowConflictBanner] = useState(false);
+ const togglePanel = (panel: 'form' | 'preview' | 'source') => {
+        const currentlyVisibleCount = Object.values(panelsVisible).filter(Boolean).length;
+        if (currentlyVisibleCount === 1 && panelsVisible[panel]) {
+            toast({ title: "Cannot hide the last visible panel." });
+            return;
+        }
+        setPanelsVisible(prev => ({ ...prev, [panel]: !prev[panel] }));
+    };
+
+    // NEW: Dynamic Column Calculation (mirrors the logic in DocumentTemplateManager)
+    const panelClasses = useMemo(() => {
+        const { form, preview, source } = panelsVisible;
+        const visibleCount = [form, preview, source].filter(Boolean).length;
+
+        const getClass = (className: string) => className.replace(/\s+/g, ' ').trim();
+
+        if (visibleCount === 3) return {
+            form: getClass('col-span-3'),
+            preview: getClass('col-span-5'),
+            source: getClass('col-span-4')
+        };
+        
+        if (visibleCount === 2) {
+            if (!form) return { form: 'hidden', preview: 'col-span-7', source: 'col-span-5' };
+            if (!preview) return { form: 'col-span-5', preview: 'hidden', source: 'col-span-7' };
+            if (!source) return { form: 'col-span-4', preview: 'col-span-8', source: 'hidden' };
+        }
+
+        if (visibleCount === 1) {
+            return {
+                form: form ? 'col-span-12' : 'hidden',
+                preview: preview ? 'col-span-12' : 'hidden',
+                source: source ? 'col-span-12' : 'hidden'
+            };
+        }
+        return { form: 'hidden', preview: 'hidden', source: 'hidden' };
+    }, [panelsVisible]);
 
     const loadExistingDraft = useCallback(async () => {
         if (!isOpen || !selectedTemplate || !entityIdMap) return;
@@ -3100,7 +3146,7 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                         const height = parseImageDimension(placeholder.image_height);
                         return [width || 300, height || 200];
                     }
-                    
+
                     // Fallback to legacy imageStyles for backward compatibility
                     const styleKeys = [name, name?.split('_').slice(2).join('_')];
                     let s = null;
@@ -3346,8 +3392,43 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                         )}
                     </DialogHeader>
 
-                    <div className="flex-1 overflow-hidden grid grid-cols-12 gap-0">
-                        <ScrollArea className="col-span-3 border-r bg-white">
+    <div className="flex items-center gap-2 px-6 py-2 border-b bg-white">
+                        <View className="h-4 w-4 text-muted-foreground" />
+                        <Label className="text-xs font-semibold mr-2">View Panels:</Label>
+                        <div className="flex bg-slate-100 p-1 rounded-md">
+                            <Button 
+                                variant={panelsVisible.form ? 'secondary' : 'ghost'} 
+                                size="sm" 
+                                className="h-7 text-xs"
+                                onClick={() => togglePanel('form')}
+                            >
+                                <MousePointer2 className="h-3 w-3 mr-1" />
+                                Form Fields
+                            </Button>
+                            <Button 
+                                variant={panelsVisible.preview ? 'secondary' : 'ghost'} 
+                                size="sm" 
+                                className="h-7 text-xs"
+                                onClick={() => togglePanel('preview')}
+                            >
+                                <Layout className="h-3 w-3 mr-1" />
+                                Live Preview
+                            </Button>
+                            <Button 
+                                variant={panelsVisible.source ? 'secondary' : 'ghost'} 
+                                size="sm" 
+                                className="h-7 text-xs"
+                                onClick={() => togglePanel('source')}
+                            >
+                                <FileText className="h-3 w-3 mr-1" />
+                                Template Source
+                            </Button>
+                        </div>
+                    </div>
+
+             <div className="flex-1 overflow-hidden grid grid-cols-12 gap-0">
+                        {/* LEFT PANEL: Form Fields */}
+                        <ScrollArea className={`${panelClasses.form} border-r bg-white transition-all duration-300`}>
                             <div className="p-4 space-y-6">
                                 <div className="space-y-4">
                                     <Label className="text-xs font-bold text-slate-400 uppercase tracking-widest">
@@ -3387,12 +3468,13 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                             </div>
                         </ScrollArea>
 
-                        <div className="col-span-5 border-r relative bg-slate-100 overflow-y-auto">
+                          {/* MIDDLE PANEL: Live Preview */}
+                        <div className={`${panelClasses.preview} border-r relative bg-slate-100 overflow-y-auto transition-all duration-300`}>
                             <div className="sticky top-0 z-10 bg-white/90 backdrop-blur px-4 py-2 border-b flex justify-between">
-                                <span className="text-[10px] font-bold text-slate-500">LIVE PREVIEW</span>
+                                <span className="text-[10px] font-bold text-slate-500">LIVE GENERATED DOCUMENT</span>
                                 {isPreviewLoading && <Loader2 className="h-4 w-4 animate-spin text-blue-500" />}
                             </div>
-                            <div className="p-8">
+                            <div className="p-8 max-w-4xl mx-auto">
                                 <div
                                     className={`bg-white shadow-xl p-12 min-h-[11in] ${EDITOR_PREVIEW_STYLES}`}
                                     dangerouslySetInnerHTML={{ __html: previewContent }}
@@ -3400,35 +3482,35 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                             </div>
                         </div>
 
-                        {isWordTemplate ? (
-                            <div className="col-span-4 bg-slate-50 overflow-y-auto">
-                                <div className="sticky top-0 z-10 bg-white/90 backdrop-blur px-4 py-2 border-b">
-                                    <span className="text-[10px] font-bold text-slate-500">ORIGINAL TEMPLATE</span>
-                                </div>
-                                <div className="p-4">
-                                    {docPreviewUrl ? (
+                        {/* RIGHT PANEL: Original Template Reference */}
+                        <div className={`${panelClasses.source} bg-slate-50 overflow-y-auto transition-all duration-300`}>
+                            <div className="sticky top-0 z-10 bg-white/90 backdrop-blur px-4 py-2 border-b flex justify-between">
+                                <span className="text-[10px] font-bold text-slate-500">ORIGINAL REFERENCE</span>
+                            </div>
+                            <div className="p-4">
+                                {isWordTemplate ? (
+                                    docPreviewUrl ? (
                                         <iframe
                                             src={docPreviewUrl}
-                                            className="w-full h-[calc(100vh-200px)] border-0 rounded shadow"
+                                            className="w-full h-[calc(100vh-250px)] border-0 rounded shadow bg-white"
                                             title="Original"
                                             onError={() => setDocPreviewUrl(null)}
                                         />
                                     ) : (
-                                        <div className="h-[calc(100vh-200px)] flex items-center justify-center">
-                                            <FileText className="h-12 w-12 text-slate-300" />
+                                        <div className="h-[300px] flex flex-col items-center justify-center text-slate-400 border-2 border-dashed rounded">
+                                            <FileText className="h-12 w-12 mb-2" />
+                                            <p className="text-xs">Preview unavailable</p>
                                         </div>
-                                    )}
-                                </div>
+                                    )
+                                ) : (
+                                    <div className="bg-white rounded border p-6">
+                                        <Code className="h-8 w-8 text-blue-500 mb-3" />
+                                        <h3 className="font-semibold text-sm mb-2">HTML Template Source</h3>
+                                        <p className="text-xs text-slate-600 italic">This template is HTML based. Use the Live Preview to see the output.</p>
+                                    </div>
+                                )}
                             </div>
-                        ) : (
-                            <div className="col-span-4 bg-slate-50 p-8">
-                                <div className="bg-white rounded border p-6">
-                                    <FileText className="h-8 w-8 text-blue-500 mb-3" />
-                                    <h3 className="font-semibold mb-2">HTML Template</h3>
-                                    <p className="text-xs text-slate-600">Preview shows generated output</p>
-                                </div>
-                            </div>
-                        )}
+                        </div>
                     </div>
                     <DialogFooter className="border-t px-6 py-3 bg-white flex justify-between flex-shrink-0">
                         <div className="text-[10px] flex items-center gap-1.5">

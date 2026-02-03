@@ -171,6 +171,7 @@ export const AutomationMappingDialog = ({
   const lastFetchKey = React.useRef<string>('');
   const isFetchingRef = React.useRef(false);
   const [requirementJobQuestions, setRequirementJobQuestions] = useState<any[]>([]);
+  const [individualName, setIndividualName] = useState<string>('');
 
   const buildFileUrl = (linkedDoc: any): string | null => {
     if (!linkedDoc?.file_path) return null;
@@ -195,6 +196,82 @@ export const AutomationMappingDialog = ({
 
     return relationshipData?.principal?.id || currentIndividualId;
   }, [relationshipData, currentIndividualId, task]);
+
+  const getEntityNameAndId = useCallback((entityType?: string, entityId?: string) => {
+    if (!entityType && !entityId) {
+      // Default to principal
+      return {
+        name: task?.applicant_name || individualName || currentIndividualId || 'Not specified',
+        id: currentIndividualId || 'Not specified'
+      };
+    }
+
+    const type = entityType?.toLowerCase();
+    
+    if (type === 'company') {
+      return {
+        name: relationshipData?.company?.company_name || task?.company_name || `Company ${relationshipData?.company?.id || task?.company_id || ''}`,
+        id: String(relationshipData?.company?.id || task?.company_id || 'Not specified')
+      };
+    }
+
+    if (type === 'director') {
+      const director = relationshipData?.directors?.[0];
+      if (director) {
+        const name = director.full_name || 
+          (director.first_name && director.last_name ? `${director.first_name} ${director.last_name}` : 
+          `Director ${director.id}`);
+        return { name, id: String(director.id) };
+      }
+    }
+
+    if (type === 'understudy') {
+      const understudy = relationshipData?.understudy;
+      if (understudy) {
+        const name = understudy.full_name || 
+          (understudy.first_name && understudy.last_name ? `${understudy.first_name} ${understudy.last_name}` : 
+          `Understudy ${understudy.id}`);
+        return { name, id: String(understudy.id) };
+      }
+    }
+
+    if (type === 'dependant') {
+      const dependant = relationshipData?.dependants?.[0];
+      if (dependant) {
+        const name = dependant.full_name || 
+          (dependant.first_name && dependant.last_name ? `${dependant.first_name} ${dependant.last_name}` : 
+          `Dependant ${dependant.id}`);
+        return { name, id: String(dependant.id) };
+      }
+    }
+
+    // Default to principal
+    return {
+      name: task?.applicant_name || individualName || currentIndividualId || 'Not specified',
+      id: currentIndividualId || 'Not specified'
+    };
+  }, [relationshipData, task, individualName, currentIndividualId]);
+
+  // Get the primary entity type from the active automation
+  const getPrimaryEntityType = useCallback(() => {
+    const activeAutomation = webData.find(w => w.automationId === selectedAutomationId);
+    if (!activeAutomation?.fields) return 'principal';
+    
+    // Check entity types in fields to determine primary entity
+    const entityTypes = new Set<string>();
+    activeAutomation.fields.forEach((field: any) => {
+      if (field.entityTypes && field.entityTypes.length > 0) {
+        field.entityTypes.forEach((type: string) => entityTypes.add(type));
+      }
+    });
+    
+    // Priority order: company > director > understudy > dependant > principal
+    if (entityTypes.has('company')) return 'company';
+    if (entityTypes.has('director')) return 'director';
+    if (entityTypes.has('understudy')) return 'understudy';
+    if (entityTypes.has('dependant')) return 'dependant';
+    return 'principal';
+  }, [webData, selectedAutomationId]);
 
   const resolveEntityIdsForArray = (field: any, relationshipData: any) => {
     const types = field.entityTypes || [];
@@ -713,6 +790,45 @@ export const AutomationMappingDialog = ({
   }, [selectedAutomationId, isOpen, fetchSourceData, fetchDocumentFiles]);
 
   useEffect(() => {
+    const fetchIndividualName = async () => {
+      if (!currentIndividualId) return;
+      
+      // If we already have name from relationship data, use it
+      if (relationshipData?.principal?.full_name) {
+        setIndividualName(relationshipData.principal.full_name);
+        return;
+      }
+      
+      if (relationshipData?.principal?.first_name && relationshipData?.principal?.last_name) {
+        setIndividualName(`${relationshipData.principal.first_name} ${relationshipData.principal.last_name}`);
+        return;
+      }
+      
+      // Otherwise, fetch from database
+      try {
+        const { data: individual } = await supabase
+          .from('registry_individuals')
+          .select('first_name, last_name, full_name')
+          .eq('id', currentIndividualId)
+          .single();
+        
+        if (individual) {
+          const name = individual.full_name || 
+            (individual.first_name && individual.last_name ? 
+              `${individual.first_name} ${individual.last_name}` : 
+              currentIndividualId);
+          setIndividualName(name);
+        }
+      } catch (error) {
+        console.error('Error fetching individual name:', error);
+        setIndividualName(currentIndividualId);
+      }
+    };
+    
+    fetchIndividualName();
+  }, [currentIndividualId, relationshipData]);
+
+  useEffect(() => {
     const runComputation = async () => {
       if (!currentIndividualId || !selectedAutomationId) return;
       const cid = relationshipData?.company?.id || task?.company_id;
@@ -777,6 +893,7 @@ export const AutomationMappingDialog = ({
   const handleRunAutomation = async () => {
     if (!selectedAutomationId) {
       toast({ title: "Validation Error", description: "Missing automation selection", variant: "destructive" });
+    // ...
       return;
     }
 
@@ -950,7 +1067,7 @@ export const AutomationMappingDialog = ({
       // For non-computed fields, ensure we have the record in cache
       if (table && entityId) {
         let record = sourceData[table]?.[entityId];
-        
+
         // If record not in cache, fetch it using the correct linking variables from master field sources
         if (!record) {
           let query = supabase
@@ -1030,7 +1147,7 @@ export const AutomationMappingDialog = ({
         ...prev,
         [editingCell.fieldId]: valueToSave
       }));
-      
+
       // Also update the form data if needed
       if (formData) {
         setFormData((prev: any) => ({
@@ -1038,7 +1155,7 @@ export const AutomationMappingDialog = ({
           [editingCell.fieldId]: valueToSave
         }));
       }
-      
+
       setEditingCell(null);
       setEditValue('');
       return;
@@ -1147,8 +1264,8 @@ export const AutomationMappingDialog = ({
           }
         }));
 
-        toast({ 
-          title: 'Success', 
+        toast({
+          title: 'Success',
           description: 'Field updated successfully',
           variant: 'default'
         });
@@ -1357,8 +1474,8 @@ export const AutomationMappingDialog = ({
                   const isEditable = !!persistenceSource;
                   const isValueMissing = !mergedValue || mergedValue === 'Missing' || mergedValue === 'Pending...';
 
-                   // CASE: ARRAY FIELDS
-                   if (field.fieldType === 'array') {
+                  // CASE: ARRAY FIELDS
+                  if (field.fieldType === 'array') {
                     const entityIds = resolveEntityIdsForArray(field, relationshipData);
                     const isExpanded = expandedArrayFields.has(field.variableName);
                     const arrayData = getArrayFieldData(field);
@@ -1395,34 +1512,34 @@ export const AutomationMappingDialog = ({
                               {/* ... Array Table rendering logic ... */}
                               <div className="p-6">
                                 <div className="border-2 border-blue-300 rounded-lg overflow-hidden shadow-sm">
-                                    <Table>
-                                      <TableHeader className="bg-gradient-to-r from-blue-100 to-indigo-100 border-b-2 border-blue-300">
-                                        <TableRow>
-                                          <TableHead className="px-4 py-3 text-left text-xs font-bold text-slate-800 border-r-2 border-blue-200 bg-blue-50/50 w-16">#</TableHead>
-                                          {field.arrayItems?.map((item: any, idx: number) => (
-                                            <TableHead key={idx} className={cn("px-4 py-3 text-left text-xs font-bold text-slate-800", idx < field.arrayItems.length - 1 && "border-r-2 border-blue-200")}>
-                                              <span>{item.name || item.header || getMasterFieldDisplayName((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId)}</span>
-                                            </TableHead>
-                                          ))}
-                                        </TableRow>
-                                      </TableHeader>
-                                      <TableBody className="bg-white">
-                                        {arrayData.map((row: any, rowIndex: number) => (
-                                          <TableRow key={rowIndex} className="border-b border-blue-200 last:border-b-0 hover:bg-blue-50/30">
-                                            <TableCell className="px-4 py-3 text-xs font-semibold text-slate-600 border-r-2 border-blue-200 bg-blue-50/30">{row.index}</TableCell>
-                                            {field.arrayItems?.map((item: any, colIndex: number) => {
-                                              const columnKey = item.variableName || String((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId || '');
-                                              const value = row[columnKey];
-                                              return (
-                                                <TableCell key={colIndex} className={cn("px-4 py-3 text-xs", colIndex < field.arrayItems.length - 1 && "border-r-2 border-blue-100", (!value) ? "text-red-600 font-medium" : "text-slate-800")}>
-                                                  {value || "Missing"}
-                                                </TableCell>
-                                              );
-                                            })}
-                                          </TableRow>
+                                  <Table>
+                                    <TableHeader className="bg-gradient-to-r from-blue-100 to-indigo-100 border-b-2 border-blue-300">
+                                      <TableRow>
+                                        <TableHead className="px-4 py-3 text-left text-xs font-bold text-slate-800 border-r-2 border-blue-200 bg-blue-50/50 w-16">#</TableHead>
+                                        {field.arrayItems?.map((item: any, idx: number) => (
+                                          <TableHead key={idx} className={cn("px-4 py-3 text-left text-xs font-bold text-slate-800", idx < field.arrayItems.length - 1 && "border-r-2 border-blue-200")}>
+                                            <span>{item.name || item.header || getMasterFieldDisplayName((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId)}</span>
+                                          </TableHead>
                                         ))}
-                                      </TableBody>
-                                    </Table>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody className="bg-white">
+                                      {arrayData.map((row: any, rowIndex: number) => (
+                                        <TableRow key={rowIndex} className="border-b border-blue-200 last:border-b-0 hover:bg-blue-50/30">
+                                          <TableCell className="px-4 py-3 text-xs font-semibold text-slate-600 border-r-2 border-blue-200 bg-blue-50/30">{row.index}</TableCell>
+                                          {field.arrayItems?.map((item: any, colIndex: number) => {
+                                            const columnKey = item.variableName || String((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId || '');
+                                            const value = row[columnKey];
+                                            return (
+                                              <TableCell key={colIndex} className={cn("px-4 py-3 text-xs", colIndex < field.arrayItems.length - 1 && "border-r-2 border-blue-100", (!value) ? "text-red-600 font-medium" : "text-slate-800")}>
+                                                {value || "Missing"}
+                                              </TableCell>
+                                            );
+                                          })}
+                                        </TableRow>
+                                      ))}
+                                    </TableBody>
+                                  </Table>
                                 </div>
                               </div>
                             </TableCell>
@@ -1518,22 +1635,22 @@ export const AutomationMappingDialog = ({
                             )}
                             onClick={() => {
                               if (!isEditable) return;
-                      
+
                               let finalPath = persistenceSource.path || '';
                               let idToUse = (persistenceSource.table === 'tm_tasks') ? taskId : targetId;
-                      
+
                               // --- DYNAMIC ARRAY INDEX RESOLUTION ---
                               if (persistenceSource.table === 'registry_individuals' && finalPath.includes('associations')) {
                                 const record = sourceData['registry_individuals']?.[targetId];
                                 const associations = record?.employment_data?.associations || [];
                                 const targetRegistryType = mapEntityTypeToRegistry(entityCategory);
-                      
+
                                 // Find index matching BOTH the Individual Type (Principal/Employee) and the Company ID
-                                const assocIdx = associations.findIndex(a => 
+                                const assocIdx = associations.findIndex(a =>
                                   String(a.individual_type).toLowerCase() === targetRegistryType.toLowerCase() &&
                                   String(a.company_id) === targetCompanyId
                                 );
-                      
+
                                 if (assocIdx !== -1) {
                                   /** 
                                    * Transform generic path: 
@@ -1543,18 +1660,18 @@ export const AutomationMappingDialog = ({
                                    */
                                   const rawPath = finalPath.includes('->>') ? finalPath.split('->>')[1] : finalPath;
                                   const column = finalPath.includes('->>') ? finalPath.split('->>')[0] : '';
-                                  
+
                                   const resolvedJsonPath = rawPath
                                     .replace(/['"]/g, '')       // Remove quotes
                                     .replace('associations[]', `associations.${assocIdx}`)
                                     .replace('job[]', 'job');   // Flatten the job[] template to job object
-                                  
+
                                   finalPath = column ? `${column}->>${resolvedJsonPath}` : resolvedJsonPath;
-                                  
+
                                   console.log(`[Persistence] Targeted Index: ${assocIdx} | Entity: ${targetRegistryType} | Path: ${finalPath}`);
                                 }
                               }
-                      
+
                               startEditing(
                                 field.variableName,
                                 0,
@@ -1567,7 +1684,7 @@ export const AutomationMappingDialog = ({
                                 field.computedFunction
                               );
                             }}
-                      
+
                           >
                             {isComputing ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : getDisplayValue(mergedValue)}
                             {isEditable && !isEditing && <Edit3 className="h-3 w-3 ml-auto text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2" />}
@@ -1625,7 +1742,11 @@ export const AutomationMappingDialog = ({
               <div className="flex items-center gap-2 text-white/80 text-sm mt-0.5">
                 <span>Task #{task?.id}</span>
                 <span>•</span>
-                <span>{task?.applicant_name}</span>
+                <span>Full name: {(() => {
+                  const primaryEntityType = getPrimaryEntityType();
+                  const entityInfo = getEntityNameAndId(primaryEntityType);
+                  return entityInfo.name;
+                })()}</span>
               </div>
             </div>
           </div>
@@ -1653,10 +1774,25 @@ export const AutomationMappingDialog = ({
             <div className="flex items-center gap-2 bg-white/10 backdrop-blur px-3 py-2 rounded-lg border border-white/20">
               <User className="h-4 w-4 text-white" />
               <input
-                value={currentIndividualId}
-                onChange={(e) => setCurrentIndividualId(e.target.value)}
+                value={(() => {
+                  const primaryEntityType = getPrimaryEntityType();
+                  const entityInfo = getEntityNameAndId(primaryEntityType);
+                  return entityInfo.id;
+                })()}
+                onChange={(e) => {
+                  const primaryEntityType = getPrimaryEntityType();
+                  const entityInfo = getEntityNameAndId(primaryEntityType);
+                  // Only allow editing if it's the principal individual
+                  if (primaryEntityType === 'principal') {
+                    setCurrentIndividualId(e.target.value);
+                  }
+                }}
                 placeholder="ID Number..."
                 className="w-28 outline-none text-sm font-semibold text-white bg-transparent placeholder:text-white/50"
+                disabled={(() => {
+                  const primaryEntityType = getPrimaryEntityType();
+                  return primaryEntityType !== 'principal';
+                })()}
               />
             </div>
           </div>
