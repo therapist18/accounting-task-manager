@@ -6,12 +6,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button"
 import { Trash2, RotateCw, AlertTriangle, CheckCircle, XCircle } from 'lucide-react'
 import { performExtraction } from '@/lib/extractionUtils'
-import { supabase } from '@/lib/supabase'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
 import { ExtractionPreview } from '@/components/ExtractionPreview'
 import { FileUpload } from '@/components/ui/file-upload'
 import { toast } from 'sonner'
+import supabase from '@/lib/supabase/client'
 
 interface DocumentField {
   id: string
@@ -487,8 +487,8 @@ export function UploadModal({
   documentName,
   documentFields,
   entityName,
-  company,
   entityId,
+  company,
   selectedDoc,
   selectedMember,
   mainTab = '',
@@ -507,6 +507,15 @@ export function UploadModal({
   additionalFields = {},
   onBeforeUpload
 }: UploadModalProps) {
+  console.log('[UploadModal] Component props received:', {
+    entityId,
+    entityName,
+    selectedMember,
+    company,
+    isCompanyUpload
+  });
+    console.log('[UploadModal] Supabase import check:', supabase);
+  console.log('[UploadModal] Supabase storage available:', !!supabase?.storage);
   const [uploadedDocs, setUploadedDocs] = useState<Array<{
     id: string;
     file: File;
@@ -524,6 +533,11 @@ export function UploadModal({
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [currentDocumentName, setCurrentDocumentName] = useState(documentName);
   const [selectedValues, setSelectedValues] = useState<Record<string, string>>({});
+
+  // Sync currentDocumentName with documentName prop
+  useEffect(() => {
+    setCurrentDocumentName(documentName);
+  }, [documentName]);
 
   // Log when companyAssetId changes
   useEffect(() => {
@@ -877,15 +891,23 @@ export function UploadModal({
   };
 
   const handleSaveUploads = async () => {
+    console.log('[UploadModal] === SAVE BUTTON CLICKED ===');
+    console.log('[UploadModal] uploadedDocs:', uploadedDocs);
+    console.log('[UploadModal] uploadedDocs.length:', uploadedDocs.length);
+    
     if (uploadedDocs.length === 0) {
+      console.log('[UploadModal] ERROR: No documents to upload');
       toast.error('Please upload at least one document.');
       return;
     }
 
     // Check if multi-type mode and all docs have types selected
     if (allowMultipleTypes) {
+      console.log('[UploadModal] Multi-type mode enabled, checking document types...');
       const docsWithoutType = uploadedDocs.filter(doc => !doc.selectedDocTypeId);
+      console.log('[UploadModal] Documents without type:', docsWithoutType);
       if (docsWithoutType.length > 0) {
+        console.log('[UploadModal] ERROR: Some documents missing type selection');
         toast.error('Please select a document type for all uploaded files.');
         return;
       }
@@ -900,7 +922,9 @@ export function UploadModal({
     });
 
     const docsWithErrors = docsToValidate.filter(doc => doc.validationStatus === 'error');
+    console.log('[UploadModal] Documents with validation errors:', docsWithErrors);
     if (docsWithErrors.length > 0) {
+      console.log('[UploadModal] ERROR: Validation errors blocking save');
       setValidationDialog({
         isOpen: true,
         title: 'Upload Blocked',
@@ -912,8 +936,10 @@ export function UploadModal({
     }
 
     const docsWithWarnings = docsToValidate.filter(doc => doc.validationStatus === 'warning');
+    console.log('[UploadModal] Documents with warnings:', docsWithWarnings);
     if (docsWithWarnings.length > 0) {
       const warningMessage = docsWithWarnings.map(d => `${d.fileName}:\n${d.validationMessage}`).join('\n\n');
+      console.log('[UploadModal] Warning message to show:', warningMessage);
       setValidationDialog({
         isOpen: true,
         title: 'Validation Warnings',
@@ -924,35 +950,77 @@ export function UploadModal({
       return;
     }
 
+    console.log('[UploadModal] No validation issues, proceeding with upload...');
     await proceedWithUpload();
   };
   
 
   const proceedWithUpload = async () => {
+    console.log('[UploadModal] === PROCEED WITH UPLOAD START ===');
     setIsUploading(true);
     const toastId = toast.loading('Processing documents...');
 
     try {
+      console.log('[UploadModal] Company:', company);
+      console.log('[UploadModal] Entity ID:', entityId);
+      console.log('[UploadModal] Selected Member:', selectedMember);
+      console.log('[UploadModal] Selected Member properties:', selectedMember ? Object.keys(selectedMember) : 'null');
+      console.log('[UploadModal] Company Name:', companyName);
+      console.log('[UploadModal] Entity Name:', entityName);
+      
       const isCompanyUpload = !!company?.id;
-      const entityIdToUse = isCompanyUpload ? (company?.id || entityId) : (selectedMember?.id || entityId);
+      console.log('[UploadModal] isCompanyUpload:', isCompanyUpload);
+      
+      let entityIdToUse = isCompanyUpload ? (company?.id || entityId) : (selectedMember?.id || entityId);
       const entityNameToUse = isCompanyUpload
         ? (companyName || company?.company_name || entityName || 'Unknown Company')
-        : (selectedMember?.name || entityName || 'New Individual');
+        : (selectedMember?.name || selectedMember?.full_name || entityName || 'New Individual');
+        
+      // If we still don't have an entity ID, try alternative sources
+      if (!entityIdToUse) {
+        const alternativeId = selectedMember?.director_id || selectedMember?.user_id || selectedMember?.person_id || entityId;
+        if (alternativeId) {
+          entityIdToUse = alternativeId;
+          console.log('[UploadModal] Using alternative entity ID:', entityIdToUse);
+        }
+      }
+        
+      console.log('[UploadModal] entityIdToUse:', entityIdToUse);
+      console.log('[UploadModal] entityNameToUse:', entityNameToUse);
 
       // Check if we should skip saving to database (for QuickAddDialog)
       const shouldSkipSave = additionalFields?.disableSave === true;
+      console.log('[UploadModal] shouldSkipSave:', shouldSkipSave);
+      console.log('[UploadModal] additionalFields:', additionalFields);
       
       // Only require entity ID if not in quick add mode (indicated by isFormContext prop)
       // and we're actually going to save to the database
       const isQuickAdd = !isCompanyUpload && additionalFields?.isFormContext;
+      console.log('[UploadModal] isQuickAdd:', isQuickAdd);
       
       if (!shouldSkipSave && !isQuickAdd && !entityIdToUse) {
-        const errorMsg = isCompanyUpload
-          ? 'Company ID is missing. Please ensure a company is selected.'
-          : 'Person/Entity ID is missing. Please ensure an entity is selected.';
-        toast.error(errorMsg, { id: toastId });
-        setIsUploading(false);
-        return;
+        console.log('[UploadModal] ERROR: Missing entity ID - shouldSkipSave:', shouldSkipSave, 'isQuickAdd:', isQuickAdd, 'entityIdToUse:', entityIdToUse);
+        
+        // Try to find alternative ID sources
+        const alternativeId = selectedMember?.director_id || selectedMember?.user_id || selectedMember?.person_id || entityId;
+        console.log('[UploadModal] Trying alternative ID sources:', {
+          director_id: selectedMember?.director_id,
+          user_id: selectedMember?.user_id,
+          person_id: selectedMember?.person_id,
+          original_entityId: entityId
+        });
+        
+        if (alternativeId) {
+          console.log('[UploadModal] Found alternative ID:', alternativeId);
+          // Continue with alternative ID
+        } else {
+          const errorMsg = isCompanyUpload
+            ? 'Company ID is missing. Please ensure a company is selected.'
+            : 'Person/Entity ID is missing. Please ensure an entity is selected.';
+          toast.error(errorMsg, { id: toastId });
+          setIsUploading(false);
+          return;
+        }
       }
       
       // Ensure all documents have a valid status before proceeding
@@ -975,10 +1043,13 @@ export function UploadModal({
       }
 
       if (!uploadedDocs || uploadedDocs.length === 0) {
+        console.log('[UploadModal] ERROR: No documents to upload');
         toast.error('No documents to upload.', { id: toastId });
         setIsUploading(false);
         return;
       }
+      
+      console.log('[UploadModal] Processing', uploadedDocs.length, 'documents');
 
       const dropdownValues = {};
       dropdowns?.forEach(dropdown => {
@@ -993,17 +1064,28 @@ export function UploadModal({
 
       const uploadPromises = uploadedDocs.map(async (doc) => {
         try {
+          console.log('[UploadModal] === Processing document ===');
+          console.log('[UploadModal] Document:', doc.fileName);
+          console.log('[UploadModal] allowMultipleTypes:', allowMultipleTypes);
+          console.log('[UploadModal] doc.selectedDocTypeId:', doc.selectedDocTypeId);
+          
           // Get the appropriate doc type for this document
           const docTypeForUpload = allowMultipleTypes && doc.selectedDocTypeId
             ? availableDocTypes.find(dt => dt.id === doc.selectedDocTypeId)
             : finalSelectedDoc;
 
+          console.log('[UploadModal] Doc type for upload:', docTypeForUpload);
+
           if (!docTypeForUpload?.id) {
+            console.log('[UploadModal] ERROR: Document type is missing for upload');
             throw new Error('Document type is missing for upload');
           }
           
+          console.log('[UploadModal] Final doc type for upload:', docTypeForUpload);
+          
           // If we're skipping the save, just return the document data for the parent component
           if (shouldSkipSave) {
+            console.log('[UploadModal] Skipping save, returning document data to parent');
             return {
               file: doc.file,
               extractedData: {
@@ -1045,6 +1127,16 @@ export function UploadModal({
           const filePath = isCompanyUpload
             ? `company-documents/${entityPathName}/${documentTypeId}/${doc.file.name}`
             : `individual-documents/${entityPathName}/${documentTypeId}/${doc.file.name}`;
+            
+          console.log('[UploadModal] File path for upload:', filePath);
+          console.log('[UploadModal] Supabase client:', supabase);
+          console.log('[UploadModal] Supabase storage:', supabase?.storage);
+          console.log('[UploadModal] Uploading file to Supabase storage...');
+
+          if (!supabase?.storage) {
+            console.log('[UploadModal] ERROR: Supabase storage is not available');
+            throw new Error('Supabase storage is not available. Please check your configuration.');
+          }
 
           const { error: uploadError } = await supabase.storage
             .from('kyc-documents')
@@ -1054,8 +1146,11 @@ export function UploadModal({
             });
 
           if (uploadError) {
+            console.log('[UploadModal] ERROR: File upload failed:', uploadError);
             throw new Error(`Failed to upload file: ${uploadError.message}`);
           }
+          
+          console.log('[UploadModal] File uploaded successfully');
 
           const extractedDataWithAssetId = {
             ...doc.extractedData
@@ -1126,18 +1221,26 @@ export function UploadModal({
 
           // Allow custom upload handling if provided
           if (onBeforeUpload) {
+            console.log('[UploadModal] Calling onBeforeUpload...');
             const customResult = await onBeforeUpload(recordData);
-            if (customResult) return customResult;
+            if (customResult) {
+              console.log('[UploadModal] onBeforeUpload returned custom result, skipping database insert');
+              return customResult;
+            }
           }
 
+          console.log('[UploadModal] Inserting into database...');
           const { data: insertedData, error: insertError } = await supabase
             .from(targetTable)
             .insert([recordData])
             .select();
 
           if (insertError) {
+            console.log('[UploadModal] ERROR: Database insert failed:', insertError);
             throw new Error(`Failed to save document record: ${insertError.message}`);
           }
+          
+          console.log('[UploadModal] Database insert successful:', insertedData);
 
           return {
             ...insertedData[0],
@@ -1151,10 +1254,12 @@ export function UploadModal({
       });
 
       const results = await Promise.all(uploadPromises);
+      console.log('[UploadModal] All upload promises completed:', results);
 
       try {
         // If we skipped saving, format the results to match what handleQuickAddUpload expects
         if (shouldSkipSave) {
+          console.log('[UploadModal] Processing skipped save results...');
           if (results && results.length > 0) {
             // Format the results to match the expected structure
             const formattedResults = {
@@ -1164,6 +1269,7 @@ export function UploadModal({
               }))
             };
             
+            console.log('[UploadModal] Calling onSuccess with formatted results:', formattedResults);
             // Call onSuccess with the formatted results
             onSuccess?.(formattedResults);
             
@@ -1172,6 +1278,7 @@ export function UploadModal({
           } else {
             // If no results but we have extracted data, still try to process it
             const hasExtractedData = uploadedDocs.some(doc => doc.extractedData);
+            console.log('[UploadModal] No results, checking extracted data:', hasExtractedData);
             if (hasExtractedData) {
               const formattedResults = {
                 files: uploadedDocs.map(doc => ({
@@ -1179,19 +1286,23 @@ export function UploadModal({
                   extractedData: doc.extractedData || {}
                 }))
               };
+              console.log('[UploadModal] Calling onSuccess with uploaded docs data:', formattedResults);
               onSuccess?.(formattedResults);
               toast.success('Document processed successfully', { id: toastId });
             } else {
+              console.log('[UploadModal] ERROR: No document data to process');
               throw new Error('No document data to process');
             }
           }
         } 
         // Handle normal save flow
         else if (onSuccess && results && results.length > 0) {
+          console.log('[UploadModal] Normal save flow, calling onSuccess...');
           const resultToPass = results.length === 1 ? results[0] : results;
           onSuccess(resultToPass);
           toast.success('Document uploaded successfully!', { id: toastId });
         } else {
+          console.log('[UploadModal] ERROR: No results to process - results:', results, 'onSuccess:', !!onSuccess);
           throw new Error('No results to process');
         }
       } catch (error) {
@@ -1202,9 +1313,10 @@ export function UploadModal({
 
       setUploadedDocs([]);
       setIsUploading(false);
+      console.log('[UploadModal] === UPLOAD SUCCESSFUL ===');
       onClose();
     } catch (error) {
-      console.error('Error uploading documents:', error);
+      console.error('[UploadModal] ERROR: Error uploading documents:', error);
       
       // Provide more user-friendly error messages
       let errorMessage = 'Failed to upload documents.';
@@ -1225,6 +1337,7 @@ export function UploadModal({
         errorMessage = `Upload failed: ${error.message}`;
       }
       
+      console.log('[UploadModal] Final error message:', errorMessage);
       toast.error(errorMessage, { 
         id: toastId, 
         duration: 6000 

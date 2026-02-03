@@ -8,10 +8,10 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Briefcase, FileText, Loader2, Search, UploadCloud, Eye, Zap, FileType, Wand2, Download, FileUp } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import RequirementsTableCombined from "./RequirementsTableCombined"
-import { FileUploadComponent } from "../tasks/components/FileUploadComponent"
+import { UploadModal } from "@/app/generic-components/UploadModal"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { AutomationMappingDialog } from "../tasks/components/AutomationMappingDialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -68,6 +68,14 @@ type ApplicantType = 'principal' | 'dependant' | 'understudy' | 'company' | 'ref
 const REFERENCE_SUBDEPARTMENT_IDS = [10, 5];
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const PERMIT_CLASS_OPTIONS = [
+  { value: 'class_a', label: 'Class A' },
+  { value: 'class_b', label: 'Class B' },
+  { value: 'class_c', label: 'Class C' },
+  { value: 'class_d', label: 'Class D' },
+  { value: 'class_e', label: 'Class E' },
+];
+
 export function RequirementsTable({
   tasks,
   loading,
@@ -80,10 +88,10 @@ export function RequirementsTable({
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
   const [selectedApplicant, setSelectedApplicant] = useState<string | null>(null);
   const [individualNames, setIndividualNames] = useState<Record<number, string>>({})
-  const [allIndividualDocuments, setAllIndividualDocuments] = useState<Record<string, any[]>>({});
-  const [allCompanyDocuments, setAllCompanyDocuments] = useState<Record<string, any[]>>({});
-  const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
-  const [selectedUploadData, setSelectedUploadData] = useState<any>(null)
+  const [allIndividualDocuments, setAllIndividualDocuments] = useState<Record<string, any[]>>({}); 
+  const [allCompanyDocuments, setAllCompanyDocuments] = useState<Record<string, any[]>>({}); 
+  const [showUploadModal, setShowUploadModal] = useState(false)
+  const [selectedDocForUpload, setSelectedDocForUpload] = useState<any>(null)
   const [documentPreviewOpen, setDocumentPreviewOpen] = useState(false);
   const [selectedDocumentForPreview, setSelectedDocumentForPreview] = useState<any>(null);
   const [companyData, setCompanyData] = useState<Record<number, any>>({});
@@ -583,17 +591,133 @@ export function RequirementsTable({
 
   const handleSelectApplicant = (applicantName: string) => setSelectedApplicant(applicantName);
   const toggleDocumentExpansion = useCallback((docId: string) => setExpandedDocuments(prev => { const newSet = new Set(prev); newSet.has(docId) ? newSet.delete(docId) : newSet.add(docId); return newSet; }), []);
-  const handleUploadAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number) => { setSelectedUploadData({ task, document: item, columnType, applicantId }); setUploadDialogOpen(true); }, []);
+  const handleUploadAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number) => { 
+    // Get a better person name
+    let personName = individualNames[applicantId || task.individual_id] || 'Unknown Person';
+    if (!personName || personName === 'Unknown Person') {
+      personName = individualNames[task.applicant_details?.id] ||
+                 task.applicant_details?.name ||
+                 'Individual';
+    }
+    
+    setSelectedDocForUpload({
+      doc: item,
+      fields: item.fields,
+      person: { 
+        full_name: personName,
+        type: columnType === 'company' ? 'company' : 'individual',
+        id: applicantId || task.individual_id
+      },
+      task: task,
+      columnType: columnType,
+      applicantId: applicantId
+    }); 
+    setShowUploadModal(true); 
+  }, [individualNames]);
+
+const handleSaveDocument = useCallback(async (doc: any, editedData?: any) => {
+  if (!doc) return;
+  const toastId = toast.loading('Saving changes...');
+
+  try {
+    // 1. Determine target table and ID field
+    const isIndividual = !!doc.director_id;
+    const targetTable = isIndividual ? 'acc_portal_directors_documents' : 'acc_portal_kyc_uploads';
+    
+    // 2. Prepare data to save
+    const dataToSave = editedData || doc.edited_details || doc.extracted_details || {};
+    
+    // 3. Find doc definition for expiry calculation
+    const docId = doc.document_id || doc.kyc_document_id;
+    const docDef = documents.find(d => d.id === docId);
+    
+    // 4. Calculate new expiry if applicable (imported from utils)
+    let updatePayload = {
+      extracted_details: dataToSave,
+      edited_details: dataToSave,
+    };
+
+    // If your project has a getExpiryDate utility:
+    if (typeof getExpiryDate === 'function' && docDef) {
+       const newExpiry = getExpiryDate({ extracted_details: dataToSave }, docDef);
+       updatePayload.expiry_date = newExpiry ? newExpiry.toISOString() : null;
+    }
+
+    // 5. Execute Database Update
+    const { error } = await supabase
+      .from(targetTable)
+      .update(updatePayload)
+      .eq('id', doc.id);
+
+    if (error) throw error;
+
+    // 6. Optimistic State Update
+    if (isIndividual) {
+      setAllIndividualDocuments(prev => {
+        const directorId = doc.director_id;
+        if (!prev[directorId]) return prev;
+        return {
+          ...prev,
+          [directorId]: prev[directorId].map(d => d.id === doc.id ? { ...d, ...updatePayload } : d)
+        };
+      });
+    } else {
+      setAllCompanyDocuments(prev => {
+        const companyId = doc.company_id;
+        if (!prev[companyId]) return prev;
+        return {
+          ...prev,
+          [companyId]: prev[companyId].map(d => d.id === doc.id ? { ...d, ...updatePayload } : d)
+        };
+      });
+    }
+
+    toast.success('Document updated successfully', { id: toastId });
+  } catch (error) {
+    console.error('Save error:', error);
+    toast.error(`Save failed: ${error.message}`, { id: toastId });
+  }
+}, [documents, allIndividualDocuments, allCompanyDocuments]);
+
   const handleUploadComplete = useCallback(() => {
-    setUploadDialogOpen(false);
+    setShowUploadModal(false);
     if (filteredTasks.length > 0) {
       const requiredKycIds = getRequiredKycIds();
-      Promise.all([
-        fetchAllIndividualData(filteredTasks, requiredKycIds),
-        fetchAllCompanyDocuments(filteredTasks, requiredKycIds)
-      ]);
+      try {
+        Promise.all([
+          fetchAllIndividualData(filteredTasks, requiredKycIds),
+          fetchAllCompanyDocuments(filteredTasks, requiredKycIds)
+        ]);
+        console.log('Documents refreshed successfully');
+      } catch (error) {
+        console.error('Error refreshing documents:', error);
+      }
     }
   }, [filteredTasks, getRequiredKycIds, fetchAllIndividualData, fetchAllCompanyDocuments]);
+
+  // Function to refresh documents after upload
+  const refreshDocuments = useCallback(async () => {
+    console.log('Refreshing documents data...');
+    if (filteredTasks.length > 0) {
+      const requiredKycIds = getRequiredKycIds();
+      try {
+        await Promise.all([
+          fetchAllIndividualData(filteredTasks, requiredKycIds),
+          fetchAllCompanyDocuments(filteredTasks, requiredKycIds)
+        ]);
+        console.log('Documents refreshed successfully');
+      } catch (error) {
+        console.error('Error refreshing documents:', error);
+      }
+    }
+  }, [filteredTasks, getRequiredKycIds, fetchAllIndividualData, fetchAllCompanyDocuments]);
+
+  const handleDocumentUploadSuccess = (uploadedDocument: any) => {
+    console.log('Document uploaded successfully:', uploadedDocument);
+    toast.success('Document uploaded successfully!');
+    setShowUploadModal(false);
+    refreshDocuments(); // Call the refreshDocuments function here
+  };
 
   const handleGenerateLetterAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number) => {
     setSelectedLetterData({ task, document: item, columnType, applicantId });
@@ -1002,6 +1126,8 @@ export function RequirementsTable({
               kycDocuments={new Map()}
               documentTypes={documents}
               searchQuery={searchQuery}
+               onSaveDocument={handleSaveDocument}
+               refreshDocuments={refreshDocuments}
             />
           </div>
         </div>
@@ -1024,7 +1150,35 @@ export function RequirementsTable({
           }}
         />
       )}
-      <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}><DialogContent className="max-w-6xl w-[90vw] max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>Upload {(selectedUploadData?.document?.display_name || 'Document')}</DialogTitle></DialogHeader><FileUploadComponent open={uploadDialogOpen} onOpenChange={setUploadDialogOpen} task={selectedUploadData?.task} document={selectedUploadData?.document} columnType={selectedUploadData?.columnType} applicantId={selectedUploadData?.applicantId} individualNames={individualNames} onUploadComplete={handleUploadComplete} /></DialogContent></Dialog>
+      <UploadModal
+        isOpen={showUploadModal}
+        onClose={() => setShowUploadModal(false)}
+        onUpload={handleUploadComplete}
+        onSuccess={handleDocumentUploadSuccess}
+        documentName={selectedDocForUpload?.doc?.display_name || selectedDocForUpload?.doc?.name || selectedDocForUpload?.doc?.document_name || 'Document'}
+        documentFields={selectedDocForUpload?.fields}
+        entityName={selectedDocForUpload?.person?.full_name}
+        selectedDoc={selectedDocForUpload?.doc}
+        selectedMember={selectedDocForUpload?.person}
+        isAllKepUpload={false}
+        permitClassOptions={PERMIT_CLASS_OPTIONS}
+        allDocumentTypes={documents}
+        mainTab={activeTab}
+        isPassportUpload={false}
+        selectedDocumentId={selectedDocForUpload?.doc?.id}
+        dropdowns={[]}
+        targetTable={selectedDocForUpload?.person?.type === 'company' ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents'}
+        idFieldName={selectedDocForUpload?.person?.type === 'company' ? 'company_id' : 'director_id'}
+        documentIdFieldName={selectedDocForUpload?.person?.type === 'company' ? 'kyc_document_id' : 'document_id'}
+        isCompanyUpload={selectedDocForUpload?.person?.type === 'company'}
+        additionalFields={{
+          issue_date: new Date().toISOString().split('T')[0],
+          expiry_date: null
+        }}
+        onBeforeUpload={async (recordData) => {
+          return null;
+        }}
+      />
 
       <LetterTemplateDialog
         open={isLetterDialogOpen}

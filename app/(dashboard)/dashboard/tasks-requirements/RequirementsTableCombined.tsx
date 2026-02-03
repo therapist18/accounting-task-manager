@@ -42,6 +42,14 @@ const generateDocxBlobFromHtml = async (html: string) => {
 const CLASS_D_ID = '1750687058159';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const PERMIT_CLASS_OPTIONS = [
+  { value: 'class_a', label: 'Class A' },
+  { value: 'class_b', label: 'Class B' },
+  { value: 'class_c', label: 'Class C' },
+  { value: 'class_d', label: 'Class D' },
+  { value: 'class_e', label: 'Class E' },
+];
+
 function deepEqual(obj1, obj2) {
   if (obj1 === obj2) return true;
   if (typeof obj1 !== 'object' || obj1 === null || typeof obj2 !== 'object' || obj2 === null) return false;
@@ -79,7 +87,7 @@ const getFileUrl = (filePath: string) => {
   return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${filePath}`;
 };
 
-export default function RequirementsTableCombined({ loading, error, filteredGroupedTasks, organizedRequirements, classRequirements, expandedDocuments, toggleDocumentExpansion, renderDocumentStatus, renderClientFieldData, renderReferencesData, hasReferencesColumn, individualNames, companyData, getCurrentRequirements, fuzzyMatch, kycDocuments, documentTypes, mainTab, handleUploadSubmit, handleDeleteDocument, handleRetryExtraction, documentTemplates, allIndividualDocuments, allCompanyDocuments, searchQuery = "", }: any) {
+export default function RequirementsTableCombined({ loading, error, filteredGroupedTasks, organizedRequirements, classRequirements, expandedDocuments, onSaveDocument, onSave , toggleDocumentExpansion, renderDocumentStatus, renderClientFieldData, renderReferencesData, hasReferencesColumn, individualNames, companyData, getCurrentRequirements, fuzzyMatch, kycDocuments, documentTypes, mainTab, handleUploadSubmit, handleDeleteDocument, handleRetryExtraction, documentTemplates, allIndividualDocuments, allCompanyDocuments, searchQuery = "", refreshDocuments, }: any) {
   const [expandedSections, setExpandedSections] = useState({
     company: true,
     individual: true,
@@ -321,67 +329,31 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     }
   };
 
-  const handleSaveEditedDocument = useCallback(async (doc: any, editedData?: any) => {
-    if (!doc) return; 
-    const toastId = toast.loading('Saving changes...');
-    
-    try {
-      // If editedData is provided, use it; otherwise use doc.edited_details
-      const dataToSave = editedData || doc.edited_details || {};
-      
-      const docType = documentTypes.find(dt => dt.id === doc.document_id); 
-      if (!docType) throw new Error("Document type configuration not found.");
-      
-      const newExpiryDate = getExpiryDate({ extracted_details: dataToSave }, docType);
-      
-      // Update the database with the new edited details
-      const { error } = await supabase
-        .from('acc_portal_directors_documents')
-        .update({ 
-          extracted_details: dataToSave, 
-          edited_details: dataToSave,
-          expiry_date: newExpiryDate ? newExpiryDate.toISOString() : null 
-        })
-        .eq('id', doc.id); 
-        
-      if (error) throw error;
-      
-      const finalUpdatedDoc = { 
-        ...doc, 
-        extracted_details: dataToSave,
-        edited_details: dataToSave
-      };
-      
-      // Update local state
-      setIndividuals(prev => prev.map(p => { 
-        if (p.id === finalUpdatedDoc.director_id) { 
-          return { 
-            ...p, 
-            uploaded_documents: p.uploaded_documents.map(d => 
-              d.id === finalUpdatedDoc.id ? finalUpdatedDoc : d
-            ) 
-          }; 
-        } 
-        return p; 
-      }));
-      
-      // Update preview state if open
-      if (previewingDocuments) {
-        setPreviewingDocuments(prev => ({
+const handleSaveEditedDocument = useCallback(async (doc: any, editedData?: any) => {
+    // Bubble the save action to the parent logic
+    if (onSaveDocument) {
+        await onSaveDocument(doc, editedData);
+    } else if (onSave) {
+        // Fallback to generic onSave if passed
+        await onSave(doc, editedData);
+    }
+
+    // Update the local Preview Modal state so the UI reflects changes immediately
+    if (previewingDocuments) {
+      setPreviewingDocuments(prev => {
+        if (!prev) return prev;
+        const dataToUpdate = editedData || doc.edited_details || {};
+        return {
           ...prev,
           documents: prev.documents.map(d => 
             d.id === doc.id 
-              ? { ...d, edited_details: dataToSave, extracted_details: dataToSave }
+              ? { ...d, edited_details: dataToUpdate, extracted_details: dataToUpdate }
               : d
           )
-        }));
-      }
-      
-      toast.success('Changes saved successfully!', { id: toastId }); 
-    } catch (error) { 
-      toast.error(`Failed to save changes: ${error.message}`, { id: toastId }); 
+        };
+      });
     }
-  }, [documentTypes, previewingDocuments]);
+}, [onSaveDocument, onSave, previewingDocuments]);
 
   // Function to get document status with caching - now inside component
   const getDocumentStatus = async (task: any, docId: string, personType: string, personId: string) => {
@@ -1147,12 +1119,28 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       if (!prev) return prev;
       return {
         ...prev,
-        documents: prev.documents.map(d =>
-          d.id === docId ? { ...d, edited_details: { ...d.edited_details, [fieldName]: value } } : d
-        ),
+        documents: prev.documents.map(doc => 
+          doc.id === docId 
+            ? { ...doc, extracted_details: { ...doc.extracted_details, [fieldName]: value } }
+            : doc
+        )
       };
     });
   }, []);
+
+  const handleDocumentUploadSuccess = (uploadedDocument: any) => {
+    console.log('Document uploaded successfully:', uploadedDocument);
+    toast.success('Document uploaded successfully!');
+    setShowUploadModal(false);
+    
+    // Refresh the documents data to show the newly uploaded document
+    if (refreshDocuments) {
+      console.log('Refreshing documents after upload...');
+      refreshDocuments();
+    }
+    
+    // You can add additional success handling here if needed
+  };
 
   const toggleSectionExpansion = (section: 'company' | 'individual' | 'letters') => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
@@ -1641,12 +1629,35 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                     variant="ghost"
                                     size="sm"
                                     className="h-6 w-6 p-0 text-amber-600 hover:bg-amber-50"
-                                    onClick={() => {
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      
+                                      // Get a better person name
+                                      let personName = col.label;
+                                      if (!personName || personName === 'Unknown Person') {
+                                        personName = individualNames[col.task?.individual_id] || 
+                                                   individualNames[col.task?.applicant_details?.id] ||
+                                                   col.task?.applicant_details?.name ||
+                                                   'Individual';
+                                      }
+                                      
+                                      // Get document name with comprehensive fallbacks
+                                      let documentName = docMetadata?.display_name || 
+                                                         docMetadata?.name || 
+                                                         docMetadata?.document_name ||
+                                                         docMetadata?.main_category ||
+                                                         docMetadata?.sub_category ||
+                                                         docMetadata?.id ||
+                                                         'Document';
+                                      
                                       // Trigger upload for this specific document type
                                       setSelectedDocForUpload({
-                                        doc: docMetadata,
+                                        doc: {
+                                          ...docMetadata,
+                                          display_name: documentName // Ensure we have a display_name
+                                        },
                                         fields: docMetadata.fields,
-                                        person: { full_name: col.label },
+                                        person: { full_name: personName },
                                         task: col.task,
                                         columnType: col.type,
                                         columnId: col.id
@@ -1978,11 +1989,34 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                             variant="ghost"
                             size="sm"
                             className="h-6 w-6 p-0 text-amber-600 hover:bg-amber-50"
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              
+                              // Get a better person name
+                              let personName = col.label;
+                              if (!personName || personName === 'Unknown Person') {
+                                personName = individualNames[col.task?.individual_id] || 
+                                           individualNames[col.task?.applicant_details?.id] ||
+                                           col.task?.applicant_details?.name ||
+                                           'Individual';
+                              }
+                              
+                              // Get document name with comprehensive fallbacks
+                              let documentName = docMetadata?.display_name || 
+                                                 docMetadata?.name || 
+                                                 docMetadata?.document_name ||
+                                                 docMetadata?.main_category ||
+                                                 docMetadata?.sub_category ||
+                                                 docMetadata?.id ||
+                                                 'Document';
+                              
                               setSelectedDocForUpload({
-                                doc: docMetadata,
+                                doc: {
+                                  ...docMetadata,
+                                  display_name: documentName // Ensure we have a display_name
+                                },
                                 fields: docMetadata.fields,
-                                person: { full_name: col.label },
+                                person: { full_name: personName },
                                 task: col.task,
                                 columnType: col.type,
                                 columnId: col.id
@@ -2038,23 +2072,52 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       <UploadModal
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
-        documentName={selectedDocForUpload?.doc?.display_name || 'KEP Document'}
+        onUpload={handleUploadSubmit}
+        onSuccess={handleDocumentUploadSuccess}
+        documentName={selectedDocForUpload?.doc?.display_name || selectedDocForUpload?.doc?.name || selectedDocForUpload?.doc?.document_name || 'Document'}
         documentFields={selectedDocForUpload?.fields}
         entityName={selectedDocForUpload?.person?.full_name}
+        entityId={selectedDocForUpload?.person?.id || selectedDocForUpload?.person?.director_id || selectedDocForUpload?.task?.principal_id || selectedDocForUpload?.task?.director_id || selectedDocForUpload?.task?.individual_id}
         selectedDoc={selectedDocForUpload?.doc}
         selectedMember={selectedDocForUpload?.person}
-        selectedDocumentId={selectedDocForUpload?.doc?.id}
-        documentTypes={documentTypes}
+        isAllKepUpload={selectedDocForUpload?.isAllKepUpload}
+        permitClassOptions={PERMIT_CLASS_OPTIONS}
+        allDocumentTypes={documentTypes}
         mainTab={mainTab}
-        onSuccess={handleUploadSubmit}
-        company={companyData}
-        companyName={companyData?.company_name}
-        isCompanyUpload={selectedDocForUpload?.person?.type === 'company'}
+        isPassportUpload={selectedDocForUpload?.isPassportUpload}
+        selectedDocumentId={selectedDocForUpload?.doc?.id}
+        dropdowns={selectedDocForUpload?.dropdowns || []}
         targetTable={selectedDocForUpload?.person?.type === 'company' ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents'}
         idFieldName={selectedDocForUpload?.person?.type === 'company' ? 'company_id' : 'director_id'}
         documentIdFieldName={selectedDocForUpload?.person?.type === 'company' ? 'kyc_document_id' : 'document_id'}
-        additionalFields={selectedDocForUpload?.additionalFields || {}}
+        isCompanyUpload={selectedDocForUpload?.person?.type === 'company'}
+        additionalFields={{
+          issue_date: new Date().toISOString().split('T')[0],
+          expiry_date: null,
+          ...selectedDocForUpload?.additionalFields
+        }}
+        onBeforeUpload={async (recordData) => {
+          // Custom handling before upload if needed
+          if (selectedDocForUpload?.onBeforeUpload) {
+            return selectedDocForUpload.onBeforeUpload(recordData);
+          }
+          return null;
+        }}
       />
+      
+      {/* Debug log to see what's being passed */}
+      {console.log('[RequirementsTableCombined] UploadModal props:', {
+        selectedDocForUpload,
+        entityId: selectedDocForUpload?.person?.id || selectedDocForUpload?.person?.director_id || selectedDocForUpload?.task?.principal_id || selectedDocForUpload?.task?.director_id || selectedDocForUpload?.task?.individual_id,
+        person: selectedDocForUpload?.person,
+        task: selectedDocForUpload?.task,
+        columnType: selectedDocForUpload?.columnType,
+        taskIds: {
+          principal_id: selectedDocForUpload?.task?.principal_id,
+          director_id: selectedDocForUpload?.task?.director_id,
+          individual_id: selectedDocForUpload?.task?.individual_id
+        }
+      })}
 
       <Dialog open={showPreviewModal} onOpenChange={setShowPreviewModal}>
         <DialogContent className="max-w-[95vw] w-full max-h-[95vh] flex flex-col p-0 overflow-hidden bg-slate-50">
