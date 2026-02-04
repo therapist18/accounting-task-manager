@@ -229,24 +229,13 @@ const checkDocumentStatus = (
         linking_variable: entityType === 'company' ? 'company_id' : 'individual_id',
         document_id_field: 'kyc_document_id'
     };
-
-    console.log('[checkDocumentStatus] Config:', config);
-    console.log('[checkDocumentStatus] Looking for document:', documentId, 'entity:', entityId);
-
-    // Get uploads from the specified table
     const uploads = sourceDataCache[config.table] || {};
-
-    // Check if the document exists for this entity
     const documentFound = Object.values(uploads).some(upload => {
-        // Must match the document ID using the specified field
         const uploadDocId = upload[config.document_id_field];
         const uploadEntityId = upload[config.linking_variable];
         return uploadDocId === documentId && uploadEntityId === entityId;
-        // Match based on the specified linking variable
         return String(upload[config.linking_variable]) === String(entityId);
     });
-
-    console.log('[checkDocumentStatus] Result:', documentFound);
     return documentFound;
 };
 
@@ -260,19 +249,9 @@ const generateDocumentChecklist = (
     const linkedDocs = placeholder.linked_document_ids || [];
     const format = placeholder.checklist_display_format || 'checkboxes';
     const dataSourceConfig = placeholder.checklist_data_source;
-
-    console.log('[generateDocumentChecklist] Placeholder config:', {
-        linkedDocs,
-        format,
-        dataSourceConfig,
-        entityId,
-        entityType
-    });
-
     if (linkedDocs.length === 0) {
         return '';
     }
-
     const checklist = linkedDocs.map(docId => {
         const doc = availableDocuments.find(d => d.id === docId);
         const isFound = checkDocumentStatus(
@@ -280,7 +259,7 @@ const generateDocumentChecklist = (
             entityId,
             entityType,
             sourceDataCache,
-            dataSourceConfig // Pass the custom config
+            dataSourceConfig
         );
 
         const docName = doc?.display_name || doc?.name || 'Unknown Document';
@@ -315,8 +294,6 @@ const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourc
         entityType = placeholder.entity_type;
     }
     const normType = entityType?.toLowerCase()?.trim();
-
-    // 1. Check entityIdMap for specific overrides
     if (entityIdMap) {
         if (normType === 'director' && entityIdMap.director) {
             const dirId = entityIdMap.director;
@@ -327,10 +304,7 @@ const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourc
             return relationshipData?.principal || extractedData;
         }
     }
-
-    // 2. Fallback to Relationship Data logic
     if (normType === 'principal') {
-        // Broaden matching for principal
         return relationshipData?.principal || extractedData || personData;
     }
 
@@ -372,7 +346,6 @@ const processOrdinalField = (placeholder, arrayIndex) => {
             source: 'Custom Ordinal Generator'
         };
     } else {
-        // Default to number format
         return {
             value: getOrdinalNumber(arrayIndex),
             source: 'Ordinal Generator'
@@ -407,8 +380,6 @@ const processConditionalField = (placeholder, targetEntity, combinedCache, maste
 
     for (const condition of placeholder.conditions) {
         const tag = condition.tag;
-
-        // ONLY use Master Field Cache Lookup - no direct access
         if (condition.master_field_id && masterFields) {
             const mf = masterFields.get(parseInt(condition.master_field_id, 10));
             if (mf?.sources) {
@@ -525,25 +496,16 @@ const processImageField = (placeholder, targetEntity, combinedCache, masterField
     }
 
     const searchId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id);
-    console.log(`🖼️ processImageField: Looking for image with searchId: ${searchId}`);
-
     for (const id of placeholder.master_field_ids) {
         const mf = masterFields.get(parseInt(id, 10));
-        console.log(`🖼️ processImageField: Master field ${id}:`, mf);
-
         if (!mf?.sources) {
-            console.log(`🖼️ processImageField: No sources found for master field ${id}`);
             continue;
         }
 
         for (const source of mf.sources) {
-            console.log(`🖼️ processImageField: Checking source:`, source);
-
             const tableData = combinedCache[source.table];
-            console.log(`🖼️ processImageField: Table data for ${source.table}:`, tableData);
 
             if (!tableData) {
-                console.log(`🖼️ processImageField: No table data found for ${source.table}`);
                 continue;
             }
 
@@ -552,26 +514,13 @@ const processImageField = (placeholder, targetEntity, combinedCache, masterField
                 ? source.document_id
                 : [source.document_id];
 
-            console.log(`🖼️ processImageField: Looking for document_ids: ${reqDocIds}, linkingVar: ${linkingVar}`);
-
             const match = Object.values(tableData).find(d => {
                 const docIdMatch = reqDocIds.includes(d.document_id || d.kyc_document_id);
                 const entityIdMatch = String(d[linkingVar] || d.id) === searchId;
-                console.log(`🖼️ processImageField: Checking record:`, {
-                    record: d,
-                    docIdMatch,
-                    entityIdMatch,
-                    recordDocId: d.document_id || d.kyc_document_id,
-                    recordEntityId: d[linkingVar] || d.id
-                });
                 return docIdMatch && entityIdMatch;
             });
-
-            console.log(`🖼️ processImageField: Match found:`, match);
-
             if (match?.file_path) {
                 const imageUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${match.file_path}`;
-                console.log(`🖼️ processImageField: Found image URL:`, imageUrl);
                 return {
                     value: imageUrl,
                     source: 'Image Cache'
@@ -579,8 +528,6 @@ const processImageField = (placeholder, targetEntity, combinedCache, masterField
             }
         }
     }
-
-    console.log(`🖼️ processImageField: No image found, returning empty result`);
     return { value: '', source: null };
 };
 
@@ -590,37 +537,25 @@ const processTextField = (placeholder, targetEntity, combinedCache, masterFields
     }
 
     const searchId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id);
-    console.log(`🔍 processTextField: Looking for ${placeholder.name} with searchId: ${searchId}`);
     const allValues = [];
     const allSources = [];
 
     // Iterate through ALL master field IDs
     for (const id of placeholder.master_field_ids) {
         const mf = masterFields.get(parseInt(id, 10));
-        console.log(`🔍 processTextField: Master field ${id}:`, mf);
         if (!mf?.sources) continue;
 
         for (const source of mf.sources) {
-            console.log(`🔍 processTextField: Checking source:`, source);
             const tableData = combinedCache[source.table];
-            console.log(`🔍 processTextField: Table data for ${source.table}:`, tableData);
             if (!tableData) continue;
-
-            // Debug: Show available IDs in cache
             if (source.table === 'registry_individuals') {
                 const availableIds = Object.keys(tableData);
-                console.log(`🔍 Available IDs in registry_individuals cache:`, availableIds);
             }
 
             const linkingVar = source.linking_variable || 'id';
-            console.log(`🔍 processTextField: Using linking variable: ${linkingVar}`);
-
             const record = Object.values(tableData).find(r => {
                 const recordId = String(r[linkingVar] || r.id);
                 const matches = recordId === searchId;
-                if (matches) {
-                    console.log(`🔍 processTextField: Found matching record:`, r);
-                }
                 return matches;
             });
 
@@ -629,23 +564,16 @@ const processTextField = (placeholder, targetEntity, combinedCache, masterFields
                     ? parseJsonValue(record, source.path)
                     : (record[mf.field_key] || record[placeholder.name]);
 
-                console.log(`🔍 processTextField: Extracted value:`, val);
                 if (val) {
                     allValues.push(val);
                     allSources.push(`DB: ${source.table}`);
                 }
-            } else {
-                console.log(`🔍 processTextField: No record found for searchId: ${searchId} in table ${source.table}`);
             }
         }
     }
-
-    // If we found values, combine them
     if (allValues.length > 0) {
-        // For names and similar fields, join with space
         const combinedValue = allValues.join(' ');
-        const combinedSource = allSources[0]; // Use first source for display
-
+        const combinedSource = allSources[0];
         return {
             value: combinedValue,
             source: combinedSource
@@ -656,7 +584,7 @@ const processTextField = (placeholder, targetEntity, combinedCache, masterFields
 };
 
 const processPlaceholderValue = (placeholder, relationshipData, combinedCache, masterFields, entityIdMap = null, extractedData, companyData, arrayIndex = null, sourceArray = null) => {
-    console.group(`🔍 Processing: ${placeholder.name} (${placeholder.type || 'text'})`);
+    // console.group(`🔍 Processing: ${placeholder.name} (${placeholder.type || 'text'})`);
     if (placeholder.master_field_ids?.length) {
         const dateResult = processCurrentDateField(placeholder, masterFields);
         if (dateResult.value) {
@@ -714,10 +642,7 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
         default:
             result = processTextField(placeholder, targetEntity, combinedCache, masterFields);
     }
-
-    console.log('Result:', result);
-    console.groupEnd();
-
+    // console.groupEnd();
     return result;
 };
 
@@ -968,8 +893,8 @@ const PlaceholderInput = ({
     const hasChanged = JSON.stringify(value) !== JSON.stringify(originalValue);
     const canSave = placeholder.master_field_ids?.length > 0;
 
-    const options = resolvedOptions.length > 0 
-        ? resolvedOptions 
+    const options = resolvedOptions.length > 0
+        ? resolvedOptions
         : (placeholder.options || []).map(o => typeof o === 'string' ? { label: o, value: o } : o);
 
     const FieldHeader = () => (
@@ -1038,6 +963,12 @@ const PlaceholderInput = ({
                     </div>
                 ) : <div className="text-xs italic border-2 border-dashed rounded p-4 text-center">Upload {placeholder.name}</div>}
                 <input id={`file-${fieldKey}`} type="file" className="hidden" accept="image/*" onChange={onFileChange} />
+                {value && onImageStyleChange && (
+                    <ImagePlaceholderControls
+                        styles={style}
+                        onStyleChange={(key, val) => onImageStyleChange(fieldKey, key, val)}
+                    />
+                )}
             </div>
         );
     }
@@ -1093,17 +1024,12 @@ const PlaceholderInput = ({
             </div>
         </div>
     );
-};  
+};
 
 export default function TemplateGenerationDialog({ isOpen, onClose, template, availableTemplates = [], documentName, masterFields, entityIdMap, sourceDataCache, extractedData = {}, personData = {}, companyData = {}, relationshipData = { directors: [], dependants: [], company: {}, principal: null, understudy: null }, onDraftDiscarded }) {
     const [panelsVisible, setPanelsVisible] = useState({ form: true, preview: true, source: true });
     const { toast } = useToast();
-      const [formData, setFormData] = useState(() => ({ ...extractedData, ...personData, ...companyData, directors: relationshipData.directors || [], company: relationshipData.company || {} }));
-  
-    useEffect(() => {
-        console.log('[TemplateGenerationDialog] Form data received:', formData);
-    }, [formData]);
-
+    const [formData, setFormData] = useState(() => ({ ...extractedData, ...personData, ...companyData, directors: relationshipData.directors || [], company: relationshipData.company || {} }));
     const [originalFormData, setOriginalFormData] = useState({ ...formData });
     const [refiningFields, setRefiningFields] = useState(new Set());
     const [isGenerating, setIsGenerating] = useState(false);
@@ -1129,7 +1055,7 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
     const [dataConflicts, setDataConflicts] = useState([]);
     const [showConflictBanner, setShowConflictBanner] = useState(false);
     const togglePanel = (panel) => setPanelsVisible(prev => ({ ...prev, [panel]: !prev[panel] }));
-   const panelClasses = useMemo(() => {
+    const panelClasses = useMemo(() => {
         const { form, preview, source } = panelsVisible;
         const count = [form, preview, source].filter(Boolean).length;
         if (count === 3) return { form: 'col-span-3', preview: 'col-span-5', source: 'col-span-4' };
@@ -1164,33 +1090,26 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
 
         try {
             setIsLoadingDraft(true);
-            
+
             // Delete from storage bucket first
             if (loadedDraft.file_path) {
                 const { error: storageError } = await supabase
                     .storage
                     .from('kyc-documents')
                     .remove([loadedDraft.file_path]);
-                
+
                 if (storageError) {
                     console.error('Error deleting draft from storage:', storageError);
-                    // Continue with database deletion even if storage fails
-                } else {
-                    console.log('✅ Draft file deleted from storage:', loadedDraft.file_path);
                 }
             }
-
-            // Delete from database table
             let deleteError;
             if (entityIdMap.director || entityIdMap.principal) {
-                // Director draft
                 const { error } = await supabase
                     .from('acc_portal_directors_documents')
                     .delete()
                     .eq('id', loadedDraft.id);
                 deleteError = error;
             } else if (entityIdMap.company) {
-                // Company draft
                 const { error } = await supabase
                     .from('acc_portal_kyc_uploads')
                     .delete()
@@ -1199,7 +1118,6 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
             }
 
             if (deleteError) {
-                console.error('Error deleting draft from database:', deleteError);
                 toast({
                     title: "Error",
                     description: "Could not delete draft from database",
@@ -1207,20 +1125,13 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                 });
                 return;
             }
-
-            console.log('✅ Draft deleted from database');
-            
-            // Clear local state
             setLoadedDraft(null);
             setFormData({});
             setOriginalFormData({});
             setImageStyles({});
-            
-            // Call refresh callback to update RequirementsTable
             if (onDraftDiscarded) {
                 onDraftDiscarded();
             }
-            
             toast({
                 title: "Draft Discarded",
                 description: "Draft has been permanently deleted",
@@ -1271,38 +1182,15 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
             }
 
             if (!query) {
-                console.log('[loadExistingDraft] No query constructed');
                 return;
             }
 
             const { data: draftData, error } = await query;
-
-            console.log('[loadExistingDraft] Query executed. Results:', {
-                draftData,
-                error,
-                hasData: !!draftData,
-                dataKeys: draftData ? Object.keys(draftData) : null
-            });
-
             if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
-                console.error('[loadExistingDraft] Error:', error);
                 return;
             }
 
             if (draftData) {
-                console.log('[loadExistingDraft] Found draft:', draftData);
-                console.log('[loadExistingDraft] Draft metadata:', draftData.metadata);
-                console.log('[loadExistingDraft] Draft metadata contents:', {
-                    hasMetadata: !!draftData.metadata,
-                    metadataType: typeof draftData.metadata,
-                    metadataKeys: draftData.metadata ? Object.keys(draftData.metadata) : null,
-                    formDataKeys: draftData.metadata?.formData ? Object.keys(draftData.metadata.formData) : null,
-                    imageStylesCount: draftData.metadata?.imageStyles ? Object.keys(draftData.metadata.imageStyles).length : 0,
-                    savedAt: draftData.metadata?.savedAt,
-                    created_at: draftData.created_at,
-                    status: draftData.status,
-                    file_path: draftData.file_path
-                });
                 setLoadedDraft(draftData);
 
                 toast({
@@ -1310,11 +1198,8 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                     description: `Continuing from draft saved on ${new Date(draftData.created_at).toLocaleString()}`,
                     duration: 5000,
                 });
-
-                // Parse the draft data and populate form
                 await parseDraftAndPopulateForm(draftData);
             } else {
-                console.log('[loadExistingDraft] No draft found');
             }
 
         } catch (error) {
@@ -1362,9 +1247,6 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
             if (draft.metadata && typeof draft.metadata === 'object') {
                 if (draft.metadata.formData) {
                     const draftFormData = draft.metadata.formData;
-
-                    // 🆕 Generate live data FIRST for comparison
-                    console.log('🔄 Generating live data for conflict detection...');
                     const liveData = {};
                     const liveAutoMap = new Map();
 
@@ -1395,21 +1277,12 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                             }
                         }
                     });
-
-                    // 🆕 Detect conflicts between draft and live data
                     const conflicts = await detectDataConflicts(draftFormData, liveData);
-
-                    console.log(`✅ Found ${conflicts.length} conflicts between draft and live data`);
-
-                    // 🆕 PRIORITY: Apply draft data first
                     setFormData(draftFormData);
                     setOriginalFormData(JSON.parse(JSON.stringify(draftFormData)));
-
                     if (draft.metadata.imageStyles) {
                         setImageStyles(draft.metadata.imageStyles);
                     }
-
-                    // Update preview with draft data
                     setTimeout(() => {
                         if (docxTemplateBuffer.current) {
                             updateWordPreview(draftFormData, draft.metadata.imageStyles || {});
@@ -1448,18 +1321,12 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
 
             selectedTemplate.placeholders?.forEach(placeholder => {
                 const placeholderName = placeholder.name;
-
-                // Look for the placeholder value in the XML
-                // This is a simplified extraction - you may need to enhance this
                 const regex = new RegExp(`<w:t[^>]*>([^<]*)</w:t>`, 'g');
                 let match;
                 let foundValue = null;
-
                 while ((match = regex.exec(xmlContent)) !== null) {
                     const text = match[1];
-                    // Check if this text appears near our placeholder
                     if (text && text.trim() && !text.includes('{') && !text.includes('}')) {
-                        // Store potential value
                         foundValue = text;
                     }
                 }
@@ -1550,181 +1417,152 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
         });
     }, [formData, groupedPlaceholders, relationshipData, combinedCache, masterFields, entityIdMap, extractedData, companyData]);
 
-// --- CORRECTED: fetchMissingDataSources ---
-const fetchMissingDataSources = useCallback(async () => {
-    if (!isOpen || !selectedTemplate || !masterFields) return;
-    
-    const allIds = new Set();
-    if (entityIdMap.company) allIds.add(String(entityIdMap.company));
-    const dirIds = Array.isArray(entityIdMap.directors) ? entityIdMap.directors : [entityIdMap.director];
-    dirIds.forEach(id => id && allIds.add(String(id)));
-    relationshipData?.directors?.forEach(d => d.id && allIds.add(String(d.id)));
-    relationshipData?.dependants?.forEach(d => d.id && allIds.add(String(d.id)));
+    const fetchMissingDataSources = useCallback(async () => {
+        if (!isOpen || !selectedTemplate || !masterFields) return;
 
-    const idList = Array.from(allIds).filter(Boolean);
-    if (idList.length === 0) return;
+        const allIds = new Set();
+        if (entityIdMap.company) allIds.add(String(entityIdMap.company));
+        const dirIds = Array.isArray(entityIdMap.directors) ? entityIdMap.directors : [entityIdMap.director];
+        dirIds.forEach(id => id && allIds.add(String(id)));
+        relationshipData?.directors?.forEach(d => d.id && allIds.add(String(d.id)));
+        relationshipData?.dependants?.forEach(d => d.id && allIds.add(String(d.id)));
 
-    const tableConfigs = new Map();
-    selectedTemplate.placeholders?.forEach(p => {
-        p.master_field_ids?.forEach(mId => {
-            const masterField = masterFields.get(parseInt(mId));
-            masterField?.sources?.forEach(source => {
-                if (!source.table) return;
-                if (!tableConfigs.has(source.table)) {
-                    tableConfigs.set(source.table, { linkingVars: new Set() });
+        const idList = Array.from(allIds).filter(Boolean);
+        if (idList.length === 0) return;
+
+        const tableConfigs = new Map();
+        selectedTemplate.placeholders?.forEach(p => {
+            p.master_field_ids?.forEach(mId => {
+                const masterField = masterFields.get(parseInt(mId));
+                masterField?.sources?.forEach(source => {
+                    if (!source.table) return;
+                    if (!tableConfigs.has(source.table)) {
+                        tableConfigs.set(source.table, { linkingVars: new Set() });
+                    }
+                    const config = tableConfigs.get(source.table);
+                    config.linkingVars.add(source.linking_variable || 'id');
+                });
+            });
+        });
+
+        const tablesToFetch = Array.from(tableConfigs.keys());
+        setFetchingTables(prev => new Set([...prev, ...tablesToFetch]));
+
+        const fetchPromises = Array.from(tableConfigs.entries()).map(async ([table, config]) => {
+            try {
+                const linkingVars = Array.from(config.linkingVars);
+                let query = supabase.from(table).select('*');
+
+                if (linkingVars.length === 1) {
+                    query = query.in(linkingVars[0], idList);
+                } else {
+                    const orConditions = linkingVars.map(linkVar => `${linkVar}.in.(${idList.join(',')})`).join(',');
+                    query = query.or(orConditions);
                 }
-                const config = tableConfigs.get(source.table);
-                config.linkingVars.add(source.linking_variable || 'id');
-            });
-        });
-    });
 
-    // Track which tables we're fetching
-    const tablesToFetch = Array.from(tableConfigs.keys());
-    setFetchingTables(prev => new Set([...prev, ...tablesToFetch]));
+                const { data, error } = await query;
+                if (error) throw error;
 
-    const fetchPromises = Array.from(tableConfigs.entries()).map(async ([table, config]) => {
-        try {
-            const linkingVars = Array.from(config.linkingVars);
-            let query = supabase.from(table).select('*');
-            
-            if (linkingVars.length === 1) {
-                query = query.in(linkingVars[0], idList);
-            } else {
-                const orConditions = linkingVars.map(linkVar => `${linkVar}.in.(${idList.join(',')})`).join(',');
-                query = query.or(orConditions);
+                const tableCache = {};
+                data?.forEach(row => {
+                    const primaryId = String(row.id || row.director_id || row.individual_id || row.company_id);
+                    if (primaryId && primaryId !== 'undefined') tableCache[primaryId] = row;
+                    linkingVars.forEach(v => { if (row[v]) tableCache[String(row[v])] = row; });
+                });
+                return { table, cache: tableCache };
+            } catch (err) {
+                console.error(`❌ Error fetching ${table}:`, err);
+                return { table, cache: null };
             }
-
-            const { data, error } = await query;
-            if (error) throw error;
-            
-            const tableCache = {};
-            data?.forEach(row => {
-                // Key the cache by every possible linking variable for instant lookup
-                const primaryId = String(row.id || row.director_id || row.individual_id || row.company_id);
-                if (primaryId && primaryId !== 'undefined') tableCache[primaryId] = row;
-                linkingVars.forEach(v => { if(row[v]) tableCache[String(row[v])] = row; });
-            });
-            console.log(`✅ Table ${table}: Cached ${data.length} records`);
-            return { table, cache: tableCache };
-        } catch (err) {
-            console.error(`❌ Error fetching ${table}:`, err);
-            return { table, cache: null };
-        }
-    });
-
-    const results = await Promise.all(fetchPromises);
-    const newCacheEntries = {};
-    results.forEach(res => {
-        if (res.cache) newCacheEntries[res.table] = res.cache;
-    });
-
-    if (Object.keys(newCacheEntries).length > 0) {
-        setAdditionalCache(prev => ({ ...prev, ...newCacheEntries }));
-    }
-    
-    // Remove tables from fetching set
-    setFetchingTables(prev => {
-        const newSet = new Set(prev);
-        tablesToFetch.forEach(table => newSet.delete(table));
-        return newSet;
-    });
-}, [isOpen, selectedTemplate?.id, entityIdMap, relationshipData, masterFields]);
-// --- FIX 2: Remove the "setAdditionalCache({})" Clear (Around Line 1332) ---
-useEffect(() => {
-    if (isOpen && selectedTemplate?.id) {
-        // Don't clear cache here! Just fetch.
-        fetchMissingDataSources();
-    }
-}, [isOpen, selectedTemplate?.id, fetchMissingDataSources]);
-
-// --- CORRECTED: Improved Sync Logic ---
-useEffect(() => {
-    if (!isOpen || !selectedTemplate) return;
-    // Don't overwrite if a draft exists
-    if (loadedDraft && Object.keys(formData).length > 0) return;
-
-    // Check if we're still fetching required tables
-    if (fetchingTables.size > 0) {
-        console.log(`⏳ Waiting for tables to load: ${Array.from(fetchingTables).join(', ')}`);
-        return;
-    }
-
-    const init = { ...formData };
-    const autoMap = new Map(autoPopulatedFields);
-    let hasChanged = false;
-
-    // 1. Process Arrays
-    Object.keys(groupedPlaceholders.blocks).forEach(name => {
-        const currentRows = init[name] || [];
-        
-        // We need to populate if:
-        // A) Array is empty
-        // B) Any row has a Database-linked field that is currently an empty string
-        const needsPopulating = currentRows.length === 0 || currentRows.some(row => {
-            return groupedPlaceholders.blocks[name].children.some(child => {
-                const isDbLinked = child.master_field_ids?.length > 0;
-                const isEmpty = !row[child.name] || row[child.name] === '';
-                return isDbLinked && isEmpty;
-            });
         });
 
-        if (needsPopulating) {
-            console.log(`🔄 Processing array ${name} - Cache state:`, {
-                registry_individuals: Object.keys(combinedCache.registry_individuals || {}),
-                acc_portal_company_duplicate: Object.keys(combinedCache.acc_portal_company_duplicate || {}),
-                acc_portal_directors_documents: Object.keys(combinedCache.acc_portal_directors_documents || {})
+        const results = await Promise.all(fetchPromises);
+        const newCacheEntries = {};
+        results.forEach(res => {
+            if (res.cache) newCacheEntries[res.table] = res.cache;
+        });
+
+        if (Object.keys(newCacheEntries).length > 0) {
+            setAdditionalCache(prev => ({ ...prev, ...newCacheEntries }));
+        }
+        setFetchingTables(prev => {
+            const newSet = new Set(prev);
+            tablesToFetch.forEach(table => newSet.delete(table));
+            return newSet;
+        });
+    }, [isOpen, selectedTemplate?.id, entityIdMap, relationshipData, masterFields]);
+
+    useEffect(() => {
+        if (isOpen && selectedTemplate?.id) {
+            fetchMissingDataSources();
+        }
+    }, [isOpen, selectedTemplate?.id, fetchMissingDataSources]);
+
+    useEffect(() => {
+        if (!isOpen || !selectedTemplate) return;
+        if (loadedDraft && Object.keys(formData).length > 0) return;
+        if (fetchingTables.size > 0) {
+            return;
+        }
+
+        const init = { ...formData };
+        const autoMap = new Map(autoPopulatedFields);
+        let hasChanged = false;
+        Object.keys(groupedPlaceholders.blocks).forEach(name => {
+            const currentRows = init[name] || [];
+            const needsPopulating = currentRows.length === 0 || currentRows.some(row => {
+                return groupedPlaceholders.blocks[name].children.some(child => {
+                    const isDbLinked = child.master_field_ids?.length > 0;
+                    const isEmpty = !row[child.name] || row[child.name] === '';
+                    return isDbLinked && isEmpty;
+                });
             });
-            
-            const resolvedRows = resolveArrayData(
-                groupedPlaceholders.blocks[name].config, 
-                selectedTemplate.placeholders, 
-                combinedCache, 
-                masterFields, 
-                entityIdMap, 
-                relationshipData, 
-                extractedData, 
-                companyData
-            );
-            
-            // Check if we actually found DATABASE data (don't count system dates/ordinals)
-            const actuallyFoundDbData = resolvedRows.some(row => 
-                Object.entries(row).some(([key, val]) => {
-                    if (key.startsWith('__')) return false; // Ignore source tags
-                    const sourceTag = row[`__${key}_source`];
-                    // Only count as "Found Data" if the source isn't local system data
-                    const isRealDbSource = sourceTag && !['System Date', 'Ordinal Generator'].includes(sourceTag);
-                    return isRealDbSource && val !== '';
-                })
-            );
 
-            if (actuallyFoundDbData) {
-                init[name] = resolvedRows;
-                autoMap.set(name, `Auto-populated (${resolvedRows.length} items)`);
-                hasChanged = true;
+            if (needsPopulating) {
+                const resolvedRows = resolveArrayData(
+                    groupedPlaceholders.blocks[name].config,
+                    selectedTemplate.placeholders,
+                    combinedCache,
+                    masterFields,
+                    entityIdMap,
+                    relationshipData,
+                    extractedData,
+                    companyData
+                );
+                const actuallyFoundDbData = resolvedRows.some(row =>
+                    Object.entries(row).some(([key, val]) => {
+                        if (key.startsWith('__')) return false; // Ignore source tags
+                        const sourceTag = row[`__${key}_source`];
+                        const isRealDbSource = sourceTag && !['System Date', 'Ordinal Generator'].includes(sourceTag);
+                        return isRealDbSource && val !== '';
+                    })
+                );
+
+                if (actuallyFoundDbData) {
+                    init[name] = resolvedRows;
+                    autoMap.set(name, `Auto-populated (${resolvedRows.length} items)`);
+                    hasChanged = true;
+                }
             }
-        }
-    });
-
-    // 2. Process Top Level
-    groupedPlaceholders.topLevel.forEach(p => {
-        if (!init[p.name] || init[p.name] === '') {
-            const match = processPlaceholderValue(p, relationshipData, combinedCache, masterFields, entityIdMap, extractedData, companyData);
-            let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
-            if (val && val !== '') {
-                init[p.name] = val;
-                if (match.source) autoMap.set(p.name, match.source);
-                hasChanged = true;
+        });
+        groupedPlaceholders.topLevel.forEach(p => {
+            if (!init[p.name] || init[p.name] === '') {
+                const match = processPlaceholderValue(p, relationshipData, combinedCache, masterFields, entityIdMap, extractedData, companyData);
+                let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
+                if (val && val !== '') {
+                    init[p.name] = val;
+                    if (match.source) autoMap.set(p.name, match.source);
+                    hasChanged = true;
+                }
             }
-        }
-    });
+        });
 
-    if (hasChanged) {
-        setFormData(init);
-        setOriginalFormData(JSON.parse(JSON.stringify(init)));
-        setAutoPopulatedFields(autoMap);
-    }
-}, [isOpen, selectedTemplate?.id, combinedCache, loadedDraft, fetchingTables]);
+        if (hasChanged) {
+            setFormData(init);
+            setOriginalFormData(JSON.parse(JSON.stringify(init)));
+            setAutoPopulatedFields(autoMap);
+        }
+    }, [isOpen, selectedTemplate?.id, combinedCache, loadedDraft, fetchingTables]);
 
     useEffect(() => {
         const fetchAvailableDocuments = async () => {
@@ -1765,8 +1603,6 @@ useEffect(() => {
     }, [extractedData, personData, companyData]);
 
     const resolveArrayData = useCallback((blockPlaceholder, allPlaceholders, combinedCache, masterFields, entityIdMap, relationshipData, extractedData, companyData) => {
-        console.group(`🔄 Processing Array Block: ${blockPlaceholder.name || 'unnamed-block'}`);
-
         const entityType = Array.isArray(blockPlaceholder.entity_type)
             ? blockPlaceholder.entity_type[0]
             : (blockPlaceholder.entity_type || 'director');
@@ -1821,10 +1657,7 @@ useEffect(() => {
                 }
             }
         }
-
-        // HANDLE DIFFERENT ENTITY TYPES FOR ARRAYS
         const normalizedEntityType = entityType.toLowerCase().trim();
-
         if (normalizedEntityType === 'director') {
             sourceArray = relationshipData.directors || [];
             if (isPrimaryOnly && sourceArray.length > 0) {
@@ -1833,27 +1666,16 @@ useEffect(() => {
             }
         } else if (['dependant', 'dependant', 'spouse', 'child', 'father', 'mother', 'son', 'daughter'].includes(normalizedEntityType)) {
             sourceArray = relationshipData.dependants || [];
-            console.log(`🔍 Found ${sourceArray.length} total dependants:`, sourceArray);
-
-            // Filter by relationship if specified in block config
             if (blockPlaceholder.dependant_relationship?.length > 0) {
                 const targetRels = blockPlaceholder.dependant_relationship.map(rel => rel.toLowerCase());
-                console.log(`🎯 Filtering by block config relationships: "${targetRels.join(', ')}"`);
-
                 sourceArray = sourceArray.filter(d =>
                     targetRels.includes(d.relationship?.toLowerCase())
                 );
-                console.log(`📊 After filtering by "${targetRels.join(', ')}": ${sourceArray.length} items`);
             }
-            // Or filter by entity type name itself (e.g., "spouse", "child") - only if no specific relationships configured
             else if (['spouse', 'child', 'father', 'mother', 'son', 'daughter'].includes(normalizedEntityType)) {
-                console.log(`🎯 Filtering by entity type: "${normalizedEntityType}"`);
-
-                // Use the entity type directly as relationship filter
                 sourceArray = sourceArray.filter(d =>
                     d.relationship?.toLowerCase() === normalizedEntityType
                 );
-                console.log(`📊 After filtering by entity type "${normalizedEntityType}": ${sourceArray.length} items`);
             }
         }
 
@@ -1863,10 +1685,7 @@ useEffect(() => {
             return [];
         }
 
-        console.log(`✅ Found ${sourceArray.length} items for ${blockName}`);
-
         const result = sourceArray.map((item, index) => {
-            console.group(`📝 Item ${index + 1}/${sourceArray.length}`);
             const rowData = {};
 
             childFields.forEach(field => {
@@ -1892,8 +1711,6 @@ useEffect(() => {
                     rowData[`__${field.name}_source`] = processed.source;
                 }
             });
-
-            console.log(`📊 Final row data:`, rowData);
             console.groupEnd();
             return rowData;
         });
@@ -1902,7 +1719,7 @@ useEffect(() => {
         return result;
     }, [extractedData, personData, companyData]);
 
- const handleInputChange = (name, val) => {
+    const handleInputChange = (name, val) => {
         setFormData(prev => {
             const newState = { ...prev, [name]: val };
 
@@ -2011,7 +1828,7 @@ useEffect(() => {
         return result.value;
     };
 
-   const renderArrayInputs = (blockName, blockData) => {
+    const renderArrayInputs = (blockName, blockData) => {
         const rows = Array.isArray(formData[blockName]) ? formData[blockName] : [];
         const isHorizontal = blockData?.config?.array_direction === 'horizontal';
 
@@ -2445,10 +2262,6 @@ useEffect(() => {
 
     useEffect(() => {
         if (isOpen && (headerContent || footerContent) && formData) {
-            console.log('🔄 Header/Footer changed, updating preview');
-            console.log('📄 Current headerContent:', headerContent?.substring(0, 100));
-            console.log('📄 Current footerContent:', footerContent?.substring(0, 100));
-
             if (docxTemplateBuffer.current) {
                 updateWordPreview(formData, imageStyles);
             } else {
@@ -2627,7 +2440,7 @@ useEffect(() => {
         }
     };
 
-   const updateJsonValue = (existingData, path, newValue) => {
+    const updateJsonValue = (existingData, path, newValue) => {
         if (!path || !path.includes('->')) return { [path]: newValue };
         try {
             const parts = path.split(/->>|->/);
@@ -2638,7 +2451,7 @@ useEffect(() => {
         } catch (e) { return {}; }
     };
 
-const saveFieldToDatabase = async (placeholder, newValue) => {
+    const saveFieldToDatabase = async (placeholder, newValue) => {
         const mfId = placeholder.master_field_ids?.[0];
         if (!mfId) return;
         const mf = masterFields.get(parseInt(mfId));
@@ -2671,24 +2484,13 @@ const saveFieldToDatabase = async (placeholder, newValue) => {
     };
 
     const refineFieldWithAI = async (placeholder, allFormData) => {
-        console.log(' [AI Refine] Starting refinement for:', placeholder.name);
-        console.log(' [AI Refine] Prompt:', placeholder.ai_prompt);
-        console.log(' [AI Refine] Form data keys:', Object.keys(allFormData));
-
         if (!placeholder.ai_prompt) return null;
         const regex = /\{([^}]+)\}/g;
         const finalPrompt = placeholder.ai_prompt.replace(regex, (match, key) => {
-            // Lookup value in formData
             const val = allFormData[key];
-            console.log(` [AI Refine] Replacing ${match} with:`, val);
-            // If it's a string/number return it, otherwise keep the tag
             return (val && typeof val !== 'object') ? val : match;
         });
-
-        console.log(' [AI Refine] Final prompt:', finalPrompt);
-
         try {
-            console.log(' [AI Refine] Calling API...');
             const response = await fetch('/api/ai/refine', { // Ensure this matches your route path
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -2697,20 +2499,14 @@ const saveFieldToDatabase = async (placeholder, newValue) => {
                     fieldName: placeholder.name
                 })
             });
-
-            console.log(' [AI Refine] Response status:', response.status);
-
             if (!response.ok) {
                 const err = await response.json();
-                console.error(' [AI Refine] API Error:', err);
                 throw new Error(err.error || 'AI Refinement failed');
             }
 
             const data = await response.json();
-            console.log(' [AI Refine] API Response:', data);
             return data.result; // This matches your Gemini route return
         } catch (err) {
-            console.error("[AI Refinement Error]:", err);
             toast({
                 title: "AI Error",
                 description: err.message,

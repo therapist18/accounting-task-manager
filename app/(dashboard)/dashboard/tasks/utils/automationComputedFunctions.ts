@@ -661,9 +661,6 @@ export async function calculateDateDifference(
                         .select('*')
                         .eq('id', fieldPathOrId)
                         .maybeSingle();
-
-                    console.log(`[Date Debug] Master field ${fieldPathOrId}:`, masterField);
-
                     if (masterField?.sources?.length > 0) {
                         // Find the source that matches document extraction
                         const documentSource = masterField.sources.find(source => 
@@ -672,8 +669,7 @@ export async function calculateDateDifference(
                         );
                         
                         if (documentSource?.path) {
-                            console.log(`[Date Debug] Found source path: ${documentSource.path} for field ${fieldPathOrId}`);
-                            return documentSource.path;
+                             return documentSource.path;
                         }
                     }
                 } catch (error) {
@@ -681,17 +677,13 @@ export async function calculateDateDifference(
                 }
             }
 
-            console.log(`[Date Debug] Could not resolve path for ${fieldPathOrId}, using as-is`);
-            return fieldPathOrId;
+           return fieldPathOrId;
         };
 
         // Resolve the actual paths
         const resolvedStartDatePath = await resolveFieldPath(startDatePath);
         const resolvedEndDatePath = await resolveFieldPath(endDatePath);
-
-        console.log(`[Date Debug] Resolved paths - Start: ${startDatePath} -> ${resolvedStartDatePath}, End: ${endDatePath} -> ${resolvedEndDatePath}`);
-
-        const startDateValue = await extractFieldFromLatestDocument(individualId, computedDocuments, resolvedStartDatePath, cache);
+const startDateValue = await extractFieldFromLatestDocument(individualId, computedDocuments, resolvedStartDatePath, cache);
         if (startDateValue === "Field Not Found" || startDateValue === "Missing Document") {
             return "Start Date Not Found";
         }
@@ -708,7 +700,6 @@ export async function calculateDateDifference(
         const startDate = parseDateString(startDateStr);
         const endDate = parseDateString(endDateStr);
         if (!startDate || !endDate) {
-            console.log(`[Date Debug] Start: ${startDateStr} (${typeof startDateStr}), End: ${endDateStr} (${typeof endDateStr})`);
             return "Invalid Date Format";
         }
 
@@ -730,9 +721,7 @@ export async function calculateDateDifference(
             default:
                 difference = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
         }
-        
-        console.log(`[Date Debug] Calculated difference: ${difference} ${unit}`);
-        return String(difference);
+         return String(difference);
     } catch (error) {
         console.error("[Date Difference Error]:", error);
         return "Date Calculation Error";

@@ -547,14 +547,21 @@ export function UploadModal({
 
   useEffect(() => {
     if (isOpen) {
-      setFinalSelectedDoc(selectedDoc);
+      // Transform selectedDoc to use UUID instead of legacy ID
+      const transformedDoc = selectedDoc ? {
+        ...selectedDoc,
+        id: selectedDoc.kyc_document_ids?.[0] || selectedDoc.kyc_document_id || selectedDoc.id
+      } : null;
+      setFinalSelectedDoc(transformedDoc);
       setUploadedDocs([]);
     }
   }, [isOpen, selectedDoc]);
 
   const individualName = useMemo(() => {
     const isCompanyUpload = !!company?.id;
-    if (isCompanyUpload) {
+    // For director uploads (individual type), always use the individual's name
+    // Only use company name if it's actually a company upload (not individual director upload)
+    if (isCompanyUpload && selectedMember?.type === 'company') {
       return companyName || company?.company_name || entityName || 'Unknown Company';
     }
     return selectedMember?.full_name || selectedMember?.name || entityName || 'New Individual';
@@ -565,8 +572,8 @@ export function UploadModal({
   }, [selectedMember, entityId]);
 
   const docId = useMemo(() => {
-    return finalSelectedDoc?.id;
-  }, [finalSelectedDoc]);
+    return finalSelectedDoc?.kyc_document_ids?.[0] || finalSelectedDoc?.kyc_document_id || selectedDoc?.kyc_document_ids?.[0] || selectedDoc?.kyc_document_id;
+  }, [finalSelectedDoc, selectedDoc]);
 
   const handleFileUpload = async (files: File[]) => {
     const requiredDropdowns = dropdowns?.filter(d => d.required) || [];
@@ -591,7 +598,7 @@ export function UploadModal({
       fileName: file.name,
       validationStatus: 'pending' as const,
       validationMessage: 'Processing...',
-      selectedDocTypeId: allowMultipleTypes ? '' : (finalSelectedDoc?.id || selectedDoc?.id)
+      selectedDocTypeId: allowMultipleTypes ? '' : (finalSelectedDoc?.kyc_document_ids?.[0] || finalSelectedDoc?.kyc_document_id || selectedDoc?.kyc_document_ids?.[0] || selectedDoc?.kyc_document_id)
     }));
     setUploadedDocs(prev => [...prev, ...newDocs]);
 
@@ -625,17 +632,28 @@ export function UploadModal({
           };
 
           try {
-            let { extractedData, success } = await performExtraction(
-              doc.fileUrl,
-              finalSelectedDoc?.fields || [],
-              finalSelectedDoc?.name || documentName,
-              (progressMessage) => toast.loading(`${doc.fileName}: ${progressMessage}`, { id: extractionToastId }),
-            );
+            // Skip extraction if there are no fields to extract (saves credits)
+            const fieldsToExtract = finalSelectedDoc?.fields || [];
+            let extractedData = {};
+            let success = true;
+            
+            if (fieldsToExtract.length > 0) {
+              const result = await performExtraction(
+                doc.fileUrl,
+                fieldsToExtract,
+                finalSelectedDoc?.name || documentName,
+                (progressMessage) => toast.loading(`${doc.fileName}: ${progressMessage}`, { id: extractionToastId }),
+              );
+              extractedData = result.extractedData;
+              success = result.success;
+            } else {
+              // No fields to extract, assume it's just an image/document
+              toast.success(`${doc.fileName} processed (no extraction needed)`, { id: extractionToastId });
+            }
 
             // --- CHANGE START ---
             // If extraction returns nothing, don't throw error. Fallback to manual entry.
             if (!extractedData || (typeof extractedData === 'object' && Object.keys(extractedData).length === 0)) {
-               console.warn("No data extracted, falling back to manual entry");
                extractedData = createEmptyData();
             }
             // --- CHANGE END ---
@@ -719,15 +737,33 @@ export function UploadModal({
     const extractionToastId = toast.loading(`Extracting ${doc.fileName} as ${selectedDocType.display_name || selectedDocType.name}...`);
 
     try {
-      const { extractedData, success } = await performExtraction(
-        doc.fileUrl,
-        selectedDocType.fields || [],
-        selectedDocType.display_name || selectedDocType.name,
-        (progressMessage) => toast.loading(`${doc.fileName}: ${progressMessage}`, { id: extractionToastId }),
-      );
+      // Skip extraction if there are no fields to extract (saves credits)
+      const fieldsToExtract = selectedDocType.fields || [];
+      let extractedData = {};
+      let success = true;
+      
+      if (fieldsToExtract.length > 0) {
+        const result = await performExtraction(
+          doc.fileUrl,
+          fieldsToExtract,
+          selectedDocType.display_name || selectedDocType.name,
+          (progressMessage) => toast.loading(`${doc.fileName}: ${progressMessage}`, { id: extractionToastId }),
+        );
+        extractedData = result.extractedData;
+        success = result.success;
+      } else {
+        // No fields to extract, assume it's just an image/document
+        toast.success(`${doc.fileName} processed (no extraction needed)`, { id: extractionToastId });
+      }
 
       if (!extractedData || (typeof extractedData === 'object' && Object.keys(extractedData).length === 0)) {
-        throw new Error('No data was extracted from the document');
+        // Only throw error if we actually tried to extract and got nothing
+        if (fieldsToExtract.length > 0) {
+          throw new Error('No data was extracted from the document');
+        } else {
+          // No fields to extract, so empty data is expected
+          extractedData = {};
+        }
       }
 
       let parsedData;
@@ -831,16 +867,31 @@ export function UploadModal({
     };
 
     try {
-      const { extractedData, success } = await performExtraction(
-        docToUpdate.fileUrl,
-        docTypeToUse.fields || [],
-        docTypeToUse.display_name || docTypeToUse.name || documentName,
-        (progressMessage) => toast.loading(`${docToUpdate.fileName}: ${progressMessage}`, { id: extractionToastId }),
-      );
+      // Skip extraction if there are no fields to extract (saves credits)
+      const fieldsToExtract = docTypeToUse.fields || [];
+      let extractedData = {};
+      let success = true;
+      
+      if (fieldsToExtract.length > 0) {
+        const result = await performExtraction(
+          docToUpdate.fileUrl,
+          fieldsToExtract,
+          docTypeToUse.display_name || docTypeToUse.name || documentName,
+          (progressMessage) => toast.loading(`${docToUpdate.fileName}: ${progressMessage}`, { id: extractionToastId }),
+        );
+        extractedData = result.extractedData;
+        success = result.success;
+      } else {
+        // No fields to extract, assume it's just an image/document
+        toast.success(`${docToUpdate.fileName} processed (no extraction needed)`, { id: extractionToastId });
+      }
+      
       const newExtractedData = typeof extractedData === 'string' ? JSON.parse(extractedData) : extractedData || {};
       const updatedDocForValidation = { ...docToUpdate, extractedData: newExtractedData, status: success ? 'valid' : 'pending' };
 
-      toast.success(`Re-extracted from ${docToUpdate.fileName}`, { id: extractionToastId });
+      if (fieldsToExtract.length > 0) {
+        toast.success(`Re-extracted from ${docToUpdate.fileName}`, { id: extractionToastId });
+      }
 
       const validation = await validateDocument(updatedDocForValidation, validationContext);
 
@@ -876,35 +927,30 @@ export function UploadModal({
   };
 
   const handleSaveUploads = async () => {
-    console.log('[UploadModal] === SAVE BUTTON CLICKED ===');
-    console.log('[UploadModal] uploadedDocs:', uploadedDocs);
-    console.log('[UploadModal] uploadedDocs.length:', uploadedDocs.length);
-    
     if (uploadedDocs.length === 0) {
-      console.log('[UploadModal] ERROR: No documents to upload');
-      toast.error('Please upload at least one document.');
+      toast.error('Please select at least one file to upload');
       return;
     }
 
-    // Check if multi-type mode and all docs have types selected
-    if (allowMultipleTypes) {
+      // Check if multi-type mode and all docs have types selected
+      if (allowMultipleTypes) {
       console.log('[UploadModal] Multi-type mode enabled, checking document types...');
-      const docsWithoutType = uploadedDocs.filter(doc => !doc.selectedDocTypeId);
+        const docsWithoutType = uploadedDocs.filter(doc => !doc.selectedDocTypeId);
       console.log('[UploadModal] Documents without type:', docsWithoutType);
-      if (docsWithoutType.length > 0) {
+        if (docsWithoutType.length > 0) {
         console.log('[UploadModal] ERROR: Some documents missing type selection');
         toast.error('Please select a document type for all uploaded files.');
-        return;
+          return;
+        }
       }
-    }
 
-    // Only validate documents that have fields defined
-    const docsToValidate = uploadedDocs.filter(doc => {
-      const docType = allowMultipleTypes && doc.selectedDocTypeId
-        ? availableDocTypes.find(dt => dt.id === doc.selectedDocTypeId)
-        : finalSelectedDoc;
-      return docType?.fields?.length > 0;
-    });
+      // Only validate documents that have fields defined
+      const docsToValidate = uploadedDocs.filter(doc => {
+        const docType = allowMultipleTypes && doc.selectedDocTypeId
+          ? availableDocTypes.find(dt => dt.id === doc.selectedDocTypeId)
+          : finalSelectedDoc;
+        return docType?.fields?.length > 0;
+      });
 
     const docsWithErrors = docsToValidate.filter(doc => doc.validationStatus === 'error');
     console.log('[UploadModal] Documents with validation errors:', docsWithErrors);
@@ -917,8 +963,8 @@ export function UploadModal({
         type: 'error',
         onConfirm: null
       });
-      return;
-    }
+        return;
+      }
 
     const docsWithWarnings = docsToValidate.filter(doc => doc.validationStatus === 'warning');
     console.log('[UploadModal] Documents with warnings:', docsWithWarnings);
@@ -932,11 +978,10 @@ export function UploadModal({
         type: 'warning',
         onConfirm: () => proceedWithUpload()
       });
-      return;
-    }
+        return;
+      }
 
-    console.log('[UploadModal] No validation issues, proceeding with upload...');
-    await proceedWithUpload();
+      await proceedWithUpload();
   };
   
 

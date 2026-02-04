@@ -68,11 +68,46 @@ const parseJsonValue = (data: any, path: string): any => {
     const jsonPath = parts[2].trim().replace(/['"]/g, '');
     const jsonData = data[column];
 
+    console.log(`[parseJsonValue] Column: ${column}, JSONPath: ${jsonPath}, Data exists: ${!!jsonData}`);
+
     if (jsonData === undefined || jsonData === null) return undefined;
 
-    return jsonPath.split('.').reduce((acc, key) => (acc && typeof acc === 'object' ? acc[key] : undefined), jsonData);
+    // Handle array syntax like associations[].field
+    if (jsonPath.includes('[]')) {
+      console.log(`[parseJsonValue] Processing array path: ${jsonPath}`);
+      const [arrayPath, ...fieldPathParts] = jsonPath.split('[]');
+      const fieldPath = fieldPathParts.join('').replace(/^\./, ''); // Remove leading dot
+      console.log(`[parseJsonValue] ArrayPath: ${arrayPath}, FieldPath: ${fieldPath}`);
+      
+      const arrayData = arrayPath.split('.').reduce((acc, key) => {
+        if (key === '' || key === '[]') return acc;
+        console.log(`[parseJsonValue] Navigating to key: ${key}, Current:`, acc);
+        return (acc && typeof acc === 'object') ? acc[key] : undefined;
+      }, jsonData);
+      
+      console.log(`[parseJsonValue] ArrayData:`, arrayData);
+      
+      if (Array.isArray(arrayData)) {
+        if (fieldPath) {
+          // Extract the field from all array items
+          const values = arrayData.map((item, index) => {
+            const value = fieldPath.split('.').reduce((acc, key) => (acc && typeof acc === 'object') ? acc[key] : undefined, item);
+            console.log(`[parseJsonValue] Item ${index} field "${fieldPath}":`, value);
+            return value;
+          }).filter(val => val !== undefined && val !== null && val !== '');
+          console.log(`[parseJsonValue] Filtered values:`, values);
+          return values.length > 0 ? values.join(', ') : undefined;
+        } else {
+          // Return the entire array
+          return arrayData;
+        }
+      }
+      return undefined;
+    }
+
+    return jsonPath.split('.').reduce((acc, key) => (acc && typeof acc === 'object') ? acc[key] : undefined, jsonData);
   }
-  return path.split('.').reduce((acc, key) => (acc && typeof acc === 'object' ? acc[key] : undefined), data);
+  return path.split('.').reduce((acc, key) => (acc && typeof acc === 'object') ? acc[key] : undefined, data);
 };
 
 const updateJsonValue = (existingData: any, path: string, newValue: any): any => {
@@ -588,12 +623,23 @@ export const AutomationMappingDialog = ({
   }, [jobFields, selectedAutomationId, webData, resolveTargetEntityId, relationshipData, isOpen, taskId]);
 
   const getSourceValue = (table: string, path: string, entityId: string) => {
+    console.log(`[getSourceValue] Looking up: ${table}.${path} for entity ${entityId}`);
+    
     const tableData = sourceData[table];
-    if (!tableData) return "Missing";
+    if (!tableData) {
+      console.log(`[getSourceValue] No data found for table: ${table}. Available tables:`, Object.keys(sourceData));
+      return "Missing";
+    }
 
     const record = tableData[entityId];
-    if (!record) return "Missing";
+    if (!record) {
+      console.log(`[getSourceValue] No record found for entity ${entityId} in table ${table}. Available entities:`, Object.keys(tableData));
+      return "Missing";
+    }
+    
+    console.log(`[getSourceValue] Found record:`, record);
     const val = parseJsonValue(record, path);
+    console.log(`[getSourceValue] Parsed value from path "${path}":`, val);
     return val !== undefined && val !== null ? String(val) : "Missing";
   };
 
@@ -636,24 +682,59 @@ export const AutomationMappingDialog = ({
       const key = `${field.id}_${entityId}_${extractionMode}`;
       const val = masterFieldComputedValues[key];
       if (val === undefined) return "Computing...";
-      if (typeof val === 'object' && val !== null) {
-        return Array.isArray(val) ? (preserveArray ? val : val.join(', ')) : JSON.stringify(val);
+      
+      // Check if computed value is valid, if not, fall back to source-based lookup
+      if (val === null || val === undefined || val === '' || val === 'Number Not Found' || val === 'Missing' || val === 'No Source') {
+        console.log(`[getFieldValue] Computed value "${val}" is invalid, falling back to source-based lookup for field: ${field.field_key || fieldIdOrVariable}`);
+        // Continue to source-based logic below instead of returning
+      } else {
+        if (typeof val === 'object' && val !== null) {
+          return val.en || val.name || val.title || String(Object.values(val)[0]);
+        }
+        return String(val);
       }
-      return String(val);
     }
 
     let entityCategory = (entityId === String(relationshipData?.company?.id) || entityId === String(task?.company_id))
       ? 'company' : 'individual';
 
-    let source = field.sources?.find((s: any) => s.source_type === entityCategory) || field.sources?.[sourceIdx] || field.sources?.[0];
-    if (!source) return "No Source";
+    // ... (rest of the code remains the same)
+    // Sort sources by priority (lower number = higher priority)
+    const sortedSources = field.sources?.sort((a: any, b: any) => (a.priority || 999) - (b.priority || 999)) || [];
 
-    let lookupId = String(entityId);
-    if (source.table === 'tm_tasks' && (!source.linking_variable || source.linking_variable === 'id')) {
-      lookupId = String(taskId);
+    console.log(`[getFieldValue] Field: ${field.field_key || fieldIdOrVariable}, Entity: ${entityId}, EntityCategory: ${entityCategory}`);
+    console.log(`[getFieldValue] Available sources:`, sortedSources.map(s => ({ 
+      table: s.table, 
+      path: s.path, 
+      priority: s.priority, 
+      source_type: s.source_type 
+    })));
+
+    // Try each source in priority order until we find one with data
+    for (let i = 0; i < sortedSources.length; i++) {
+      const source = sortedSources[i];
+      if (!source) continue;
+
+      let lookupId = String(entityId);
+      if (source.table === 'tm_tasks' && (!source.linking_variable || source.linking_variable === 'id')) {
+        lookupId = String(taskId);
+      }
+
+      const value = getSourceValue(source.table, source.path, lookupId);
+      
+      console.log(`[getFieldValue] Source ${i + 1} (Priority: ${source.priority}): ${source.table}.${source.path} -> ${value}`);
+
+      // If we get a valid value (not null, undefined, or empty string), return it
+      if (value !== null && value !== undefined && value !== '' && value !== 'No Source' && value !== 'Missing') {
+        console.log(`[getFieldValue] Using source ${i + 1} with value: ${value}`);
+        return value;
+      } else {
+        console.log(`[getFieldValue] Source ${i + 1} failed or returned empty, trying next...`);
+      }
     }
 
-    return getSourceValue(source.table, source.path, lookupId);
+    console.log(`[getFieldValue] All sources failed for field: ${field.field_key || fieldIdOrVariable}`);
+    return "No Source";
   };
 
   // --- DOCUMENT FETCHER ---
@@ -1344,251 +1425,482 @@ export const AutomationMappingDialog = ({
   }, [jobFields, getFieldValue]);
 
   const renderFieldsTable = () => {
+
     if (!activeWebEntry?.fields || activeWebEntry.fields.length === 0) {
-      return <div className="p-12 text-center text-slate-400 text-sm">No fields configured for this automation.</div>;
-    }
 
-    // 1. PRE-PROCESS FIELDS (Calculate missing status for sorting)
-    const processedFields = activeWebEntry.fields.map(field => {
-      let isMissing = false;
-      const targetId = resolveTargetEntityId(field);
+    return <div className="p-12 text-center text-slate-400 text-sm">No fields configured for this automation.</div>;
+  }
 
-      if (field.fieldType === 'array') {
-        const entityIds = resolveEntityIdsForArray(field, relationshipData);
-        if (entityIds.length === 0) isMissing = true;
-      } else if (field.fieldType === 'document') {
-        const foundDoc = documentFiles.find(d => d.document_id === field.kycDocumentId && String(d.owner_id) === String(targetId));
-        if (!foundDoc) isMissing = true;
-      } else if (field.fieldType === 'computed') {
-        const val = computedFieldsPreview[field.variableName];
-        if (!val || val === 'Pending...' || val === 'Missing' || val === '') isMissing = true;
-      } else if (field.linkedJobQuestionId) {
-        const val = getFieldValue(field.variableName, "");
-        if (!val || val === 'Missing' || val === 'Missing Task Data') isMissing = true;
-      } else {
-        const masterIds = field.linkedMasterFields || field.masterFieldIds || [];
-        const mergedValue = masterIds.map((mid: string | number) => {
-          const v = getFieldValue(String(mid), String(targetId), 0, field.extractionMode || 'latest');
-          return Array.isArray(v) ? v.join(', ') : v;
-        }).join(' ').trim();
-        if (!mergedValue || mergedValue === 'Missing' || mergedValue === 'Missing Config' || mergedValue === 'No Source') isMissing = true;
+  console.log(`[FieldProcessing] Processing ${activeWebEntry.fields.length} fields for automation: ${activeWebEntry.automationName || selectedAutomationId}`);
+  
+  // 1. PRE-PROCESS FIELDS (Calculate missing status for sorting)
+  const processedFields = activeWebEntry.fields.map((field, index) => {
+    let isMissing = false;
+    const targetId = resolveTargetEntityId(field);
+
+    // Log field details
+    console.log(`[FieldProcessing] Field ${index + 1}: ${field.variableName || field.efnsDisplayName || 'Unnamed'} (${field.fieldType})`);
+    
+    if (field.fieldType === 'array') {
+      const entityIds = resolveEntityIdsForArray(field, relationshipData);
+      console.log(`[FieldProcessing] Array field - Entity IDs: [${entityIds.join(', ')}], Items: ${field.arrayItems?.length || 0}`);
+      if (entityIds.length === 0) {
+        isMissing = true;
+        console.log(`[FieldProcessing] Array field marked as missing - no entity IDs found`);
       }
-      return { ...field, isMissing };
-    });
+    } else if (field.fieldType === 'document') {
+      const foundDoc = documentFiles.find(d => d.document_id === field.kycDocumentId && String(d.owner_id) === String(targetId));
+      console.log(`[FieldProcessing] Document field - KYC Doc ID: ${field.kycDocumentId}, Target ID: ${targetId}, Found: ${!!foundDoc}`);
+      if (!foundDoc) isMissing = true;
+    } else if (field.fieldType === 'computed') {
+      const val = computedFieldsPreview[field.variableName];
+      console.log(`[FieldProcessing] Computed field - Value: ${val}, Function: ${field.computedFunction}`);
+      if (!val || val === 'Pending...' || val === 'Missing' || val === '') isMissing = true;
+    } else if (field.linkedJobQuestionId) {
+      const val = getFieldValue(field.variableName, "");
+      console.log(`[FieldProcessing] Job question field - Question ID: ${field.linkedJobQuestionId}, Value: ${val}`);
+      if (!val || val === 'Missing' || val === 'Missing Task Data') isMissing = true;
+    } else {
+      const masterIds = field.linkedMasterFields || field.masterFieldIds || [];
+      console.log(`[FieldProcessing] Standard field - Master IDs: [${masterIds.join(', ')}], Target ID: ${targetId}`);
+      const mergedValue = masterIds.map((mid: string | number) => {
+        const v = getFieldValue(String(mid), String(targetId), 0, field.extractionMode || 'latest');
+        return Array.isArray(v) ? v.join(', ') : v;
+      }).join(' ').trim();
+      console.log(`[FieldProcessing] Standard field - Merged value: "${mergedValue}"`);
+      if (!mergedValue || mergedValue === 'Missing' || mergedValue === 'Missing Config' || mergedValue === 'No Source') isMissing = true;
+    }
+    
+    console.log(`[FieldProcessing] Field ${index + 1} final status - Missing: ${isMissing}`);
+    return { ...field, isMissing };
+  });
 
     const sortedFields = sortMissingFirst
+
       ? [...processedFields].sort((a, b) => (a.isMissing === b.isMissing ? 0 : a.isMissing ? -1 : 1))
+
       : processedFields;
 
+
+
     return (
+
       <div className="flex flex-col h-full">
+
         {/* STATS & FILTER BAR */}
+
         <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-slate-200">
+
           <div className="flex items-center gap-3">
+
             <span className="text-sm font-semibold text-slate-600">{processedFields.length} Fields Total</span>
+
             {processedFields.filter(f => f.isMissing).length > 0 && (
+
               <Badge variant="destructive" className="h-6 px-2 text-xs">
+
                 {processedFields.filter(f => f.isMissing).length} Missing
+
               </Badge>
+
             )}
+
           </div>
+
           <Button variant={sortMissingFirst ? "default" : "outline"} size="sm" onClick={() => setSortMissingFirst(!sortMissingFirst)} className="h-8 text-xs">
+
             <Filter className="h-3 w-3 mr-2" />
+
             {sortMissingFirst ? "Show All" : "Show Missing First"}
+
           </Button>
+
         </div>
 
+
+
         <div className="flex-1 overflow-hidden bg-white">
+
           <ScrollArea className="h-full">
+
             <Table>
+
               <TableHeader className="sticky top-0 z-10 bg-slate-100 border-b-2 border-slate-300">
+
                 <TableRow>
+
                   <TableHead className="w-12 px-2 py-3 text-center text-xs font-bold text-slate-600 border-r border-slate-200">#</TableHead>
+
                   <TableHead className="w-80 px-4 py-3 text-left text-xs font-bold text-slate-700 border-r border-slate-200">FIELD NAME</TableHead>
+
                   <TableHead className="px-4 py-3 text-left text-xs font-bold text-slate-700">SOURCE</TableHead>
+
                   <TableHead className="px-4 py-3 text-left text-xs font-bold text-slate-700 border-r border-slate-200">CURRENT VALUE</TableHead>
+
                 </TableRow>
+
               </TableHeader>
 
+
+
               <TableBody>
+
                 {sortedFields.map((field, fIdx) => {
+
                   const isEditing = editingCell?.fieldId === field.variableName;
+
                   const isJobQuestion = !!field.linkedJobQuestionId;
+
                   const targetId = resolveTargetEntityId(field);
+
                   const entityCategory = field.entityTypes?.includes('company') ? 'company' : 'individual';
+
                   const targetCompanyId = String(relationshipData?.company?.id || task?.company_id);
+
                   // --- DATA RESOLUTION ---
+
                   let persistenceSource = null;
+
                   let mergedValue = "";
+
                   let isDropdown = false;
+
                   let dropdownOptions = [];
+
                   let masterFieldDef = null;
 
+
+
                   if (field.fieldType === 'computed') {
+
                     mergedValue = computedFieldsPreview[field.variableName] || "";
+
                     const mappingKey = field.computedFunction === 'extractCurrentJobTitle' ? 'job_title' :
+
                       field.computedFunction === 'extractCurrentJobDescription' ? 'job_description' : null;
 
+
+
                     if (mappingKey) {
+
                       masterFieldDef = Object.values(jobFields).find(jf => jf.field_key === mappingKey);
+
                       // Find the source matching the entity category (Individual vs Company)
+
                       persistenceSource = masterFieldDef?.sources?.find(s => s.source_type === entityCategory) || masterFieldDef?.sources?.[0];
+
                     }
+
                   }
+
                   else if (isJobQuestion) {
+
                     mergedValue = getFieldValue(field.variableName, String(targetId));
+
                     persistenceSource = { table: 'tm_tasks', path: `job_specific_answers->>'${field.linkedJobQuestionId}'`, linking_variable: 'id' };
+
                     const qDef = requirementJobQuestions.find(q => String(q.id) === String(field.linkedJobQuestionId));
+
                     if (qDef?.type === 'select') {
+
                       isDropdown = true;
+
                       dropdownOptions = (qDef.options || []).map(opt => ({ label: opt, value: opt }));
+
                     }
+
                   }
+
                   else {
+
                     const masterIds = field.linkedMasterFields || field.masterFieldIds || [];
+
                     masterFieldDef = jobFields[masterIds[0]];
+
                     mergedValue = masterIds.map(mid => getFieldValue(String(mid), String(targetId), 0, field.extractionMode)).join(' ').trim();
+
                     persistenceSource = masterFieldDef?.sources?.find(s => s.source_type === entityCategory) || masterFieldDef?.sources?.[0];
 
+
+
                     // DROPDOWN LOGIC
+
                     if (masterFieldDef?.type === 'select') {
+
                       isDropdown = true;
+
                       const opts = masterFieldDef.options;
+
                       if (opts?.isDependencyConfig) {
+
                         // Dependent logic (e.g. County -> Sub County)
+
                         dropdownOptions = getDependentDropdownOptions(field, masterFieldDef, String(targetId));
+
                       } else if (Array.isArray(opts)) {
+
                         // Standard logic
+
                         dropdownOptions = opts.map(o => typeof o === 'string' ? { label: o, value: o } : o);
+
                       }
+
                     }
+
                   }
+
+
 
                   // Helper to get display label for dropdowns
+
                   const getDisplayValue = (val: string) => {
+
                     if (!isDropdown) return val;
+
                     const option = dropdownOptions.find(o => String(o.value) === String(val) || o.label === val);
+
                     return option ? option.label : val;
+
                   };
 
+
+
                   const isEditable = !!persistenceSource;
+
                   const isValueMissing = !mergedValue || mergedValue === 'Missing' || mergedValue === 'Pending...';
 
+
+
                   // CASE: ARRAY FIELDS
+
                   if (field.fieldType === 'array') {
+
                     const entityIds = resolveEntityIdsForArray(field, relationshipData);
+
                     const isExpanded = expandedArrayFields.has(field.variableName);
+
                     const arrayData = getArrayFieldData(field);
 
+
+
                     return (
+
                       <React.Fragment key={fIdx}>
+
                         <TableRow className="group border-b border-slate-200 bg-blue-50/20">
+
                           <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">
+
                             {fIdx + 1}
+
                           </TableCell>
+
                           <TableCell className="px-4 py-2 border-r border-slate-100">
+
                             <div className="flex items-center gap-2">
+
                               <button onClick={() => toggleArrayFieldExpansion(field.variableName)} className="flex items-center gap-1 hover:bg-blue-100 rounded px-2 py-1 transition-colors">
+
                                 <ChevronRight className={`h-4 w-4 text-blue-600 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+
                                 <List className="h-4 w-4 text-blue-600" />
+
                               </button>
+
                               <span className="text-sm font-semibold text-slate-900">{field.efnsDisplayName || field.variableName}</span>
+
                               <Badge variant="outline" className="text-[10px] border-blue-300 text-blue-700 bg-blue-50">Array</Badge>
+
                             </div>
+
                           </TableCell>
+
                           <TableCell className="px-4 py-2 border-r border-slate-100">
+
                             <span className="text-xs text-slate-600">{entityIds.length} entities • {field.arrayItems?.length || 0} columns</span>
+
                           </TableCell>
+
                           <TableCell className="px-4 py-2">
+
                             <button onClick={() => toggleArrayFieldExpansion(field.variableName)} className="text-xs text-blue-600 hover:text-blue-800 hover:underline italic">
+
                               {isExpanded ? 'Hide details' : 'View full details'}
+
                             </button>
+
                           </TableCell>
+
                         </TableRow>
 
+
+
                         {isExpanded && (
+
                           <TableRow>
+
                             <TableCell colSpan={4} className="p-0 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 border-b-2 border-blue-300">
+
                               {/* ... Array Table rendering logic ... */}
+
                               <div className="p-6">
+
                                 <div className="border-2 border-blue-300 rounded-lg overflow-hidden shadow-sm">
+
                                   <Table>
+
                                     <TableHeader className="bg-gradient-to-r from-blue-100 to-indigo-100 border-b-2 border-blue-300">
+
                                       <TableRow>
+
                                         <TableHead className="px-4 py-3 text-left text-xs font-bold text-slate-800 border-r-2 border-blue-200 bg-blue-50/50 w-16">#</TableHead>
+
                                         {field.arrayItems?.map((item: any, idx: number) => (
+
                                           <TableHead key={idx} className={cn("px-4 py-3 text-left text-xs font-bold text-slate-800", idx < field.arrayItems.length - 1 && "border-r-2 border-blue-200")}>
+
                                             <span>{item.name || item.header || getMasterFieldDisplayName((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId)}</span>
+
                                           </TableHead>
+
                                         ))}
+
                                       </TableRow>
+
                                     </TableHeader>
+
                                     <TableBody className="bg-white">
+
                                       {arrayData.map((row: any, rowIndex: number) => (
+
                                         <TableRow key={rowIndex} className="border-b border-blue-200 last:border-b-0 hover:bg-blue-50/30">
+
                                           <TableCell className="px-4 py-3 text-xs font-semibold text-slate-600 border-r-2 border-blue-200 bg-blue-50/30">{row.index}</TableCell>
+
                                           {field.arrayItems?.map((item: any, colIndex: number) => {
+
                                             const columnKey = item.variableName || String((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId || '');
+
                                             const value = row[columnKey];
+
                                             return (
+
                                               <TableCell key={colIndex} className={cn("px-4 py-3 text-xs", colIndex < field.arrayItems.length - 1 && "border-r-2 border-blue-100", (!value) ? "text-red-600 font-medium" : "text-slate-800")}>
+
                                                 {value || "Missing"}
+
                                               </TableCell>
+
                                             );
+
                                           })}
+
                                         </TableRow>
+
                                       ))}
+
                                     </TableBody>
+
                                   </Table>
+
                                 </div>
+
                               </div>
+
                             </TableCell>
+
                           </TableRow>
+
                         )}
+
                       </React.Fragment>
+
                     );
+
                   }
+
+
 
                   // CASE: DOCUMENT FIELDS
+
                   if (field.fieldType === 'document') {
+
                     const targetId = resolveTargetEntityId(field);
+
                     const foundDoc = documentFiles.find(d => d.document_id === field.kycDocumentId && String(d.owner_id) === String(targetId));
 
+
+
                     return (
+
                       <TableRow key={fIdx} className="group border-b border-slate-200">
+
                         <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">{fIdx + 1}</TableCell>
+
                         <TableCell className="px-4 py-2 border-r border-slate-100">
+
                           <div className="flex items-center gap-2">
+
                             <Paperclip className="h-4 w-4 text-amber-600" />
+
                             <span className="text-sm font-semibold text-slate-900">{field.efnsDisplayName || field.variableName}</span>
+
                             <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700 bg-amber-50">Document</Badge>
+
                           </div>
+
                         </TableCell>
+
                         <TableCell className="px-4 py-2 border-r border-slate-100">
+
                           {foundDoc ? <Badge className="bg-green-600 text-white h-6">Available</Badge> : <Badge variant="destructive" className="h-6">Missing</Badge>}
+
                         </TableCell>
+
                         <TableCell className="px-4 py-2">
+
                           <span className="text-xs text-slate-500">KYC: {field.kycDocumentId?.substring(0, 12)}...</span>
+
                         </TableCell>
+
                       </TableRow>
+
                     );
+
                   }
 
+
+
                   return (
+
                     <TableRow key={fIdx} className={cn("group border-b border-slate-200 transition-colors", isEditing ? "bg-blue-50/50" : (field.fieldType === 'computed' ? "bg-purple-50/10" : "hover:bg-blue-50"))}>
+
                       <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">{fIdx + 1}</TableCell>
+
                       <TableCell className="px-4 py-2 border-r border-slate-100">
+
                         <div className="flex items-center gap-2">
+
                           <span className="text-sm font-semibold text-slate-900">{field.efnsDisplayName || field.variableName}</span>
+
                           {field.fieldType === 'computed' && <Badge variant="outline" className="text-[10px] border-purple-300 text-purple-700 bg-purple-50">Computed</Badge>}
+
                           {isEditable && <Badge variant="outline" className="text-[10px] border-blue-300 text-blue-700 bg-blue-50">Editable</Badge>}
+
                           {isValueMissing && <AlertCircle className="h-3.5 w-3.5 text-red-500" />}
+
                         </div>
+
                       </TableCell>
 
+
+
                       <TableCell className="px-4 py-2 text-xs text-slate-600">
+
                         {isJobQuestion ? (
+
                           <div className="font-mono text-[10px] bg-purple-100 text-purple-700 p-1 rounded inline-flex items-center"><HelpCircle className="h-3 w-3 mr-1" /> Job Question</div>
+
                         ) : persistenceSource ? (
                           <TooltipProvider delayDuration={150}>
                             <Tooltip>

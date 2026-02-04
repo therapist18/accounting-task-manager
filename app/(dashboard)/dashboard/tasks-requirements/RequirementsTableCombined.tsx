@@ -519,6 +519,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         p.type === 'individual' &&
         (Array.isArray(p.role) ? p.role.includes('director') || p.role.includes('shareholder') : p.role === 'director' || p.role === 'shareholder')
       );
+      
       directors.forEach(d => {
         // Avoid duplicates
         if (!groupCols.find(col => col.id === d.id && col.groupIndex === groupIndex)) {
@@ -1194,6 +1195,26 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       docsToSearch.some(d => (d.kyc_document_id === docId || d.document_id === docId))
     ).length;
 
+    // Check if any documents are valid (not expired)
+    let validCount = 0;
+    if (foundCount > 0) {
+      for (const docId of kycDocIds) {
+        const matchingDocs = docsToSearch.filter(d => (d.kyc_document_id === docId || d.document_id === docId));
+        if (matchingDocs.length > 0) {
+          // Check if any of these documents are valid
+          for (const doc of matchingDocs) {
+            const statusKey = `${task.id}-${docId}-${columnType}-${personId}`;
+            const docStatus = documentStatusCache.get(statusKey);
+            // If status is valid, expiring, or has no expiry (considered valid), count it
+            if (docStatus && (docStatus.status === 'valid' || docStatus.status === 'expiring' || docStatus.status === 'unknown')) {
+              validCount++;
+              break; // Only need one valid document per document type
+            }
+          }
+        }
+      }
+    }
+
     let latestStatus = null;
     if (latestDocId) {
       const statusKey = `${task.id}-${latestDocId}-${columnType}-${personId}`;
@@ -1201,8 +1222,9 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     }
 
     const result = {
-      type: foundCount > 0 ? 'uploaded' : 'missing',
+      type: validCount > 0 ? 'uploaded' : 'missing',
       count: foundCount,
+      validCount: validCount,
       total: kycDocIds.length,
       latestStatus: latestStatus || (latestDocId ? { status: 'loading', label: 'Loading...', color: 'text-gray-400', bgColor: 'bg-gray-50' } : null)
     };
@@ -1470,8 +1492,14 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                       </Button>
                                     </div>
                                   ) : (
-                                    <span className="text-xs text-amber-600 font-bold uppercase">
-                                      {statusToDisplay.type === 'missing' ? 'Missing' : 'No Status'}
+                                    <span className={`text-xs font-bold uppercase ${
+                                      statusToDisplay.type === 'missing' ? 'text-amber-600' : 
+                                      statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'text-red-600' :
+                                      'text-amber-600'
+                                    }`}>
+                                      {statusToDisplay.type === 'missing' ? 'Missing' : 
+                                       statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'Invalid' :
+                                       'No Status'}
                                     </span>
                                   )}
                                 </>
@@ -1611,7 +1639,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                         display_name: documentName // Ensure we have a display_name
                                       },
                                       fields: docMetadata.fields,
-                                      person: { full_name: personName },
+                                      person: { 
+                                        full_name: personName,
+                                        id: col.id,  // This is the director ID!
+                                        type: 'individual'
+                                      },
                                       task: col.task,
                                       columnType: col.type,
                                       columnId: col.id
@@ -1836,8 +1868,14 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                 </Button>
                               </div>
                             ) : (
-                              <span className="text-xs text-amber-600 font-bold uppercase">
-                                {statusToDisplay.type === 'missing' ? 'Missing' : 'No Status'}
+                              <span className={`text-xs font-bold uppercase ${
+                                statusToDisplay.type === 'missing' ? 'text-amber-600' : 
+                                statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'text-red-600' :
+                                'text-amber-600'
+                              }`}>
+                                {statusToDisplay.type === 'missing' ? 'Missing' : 
+                                 statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'Invalid' :
+                                 'No Status'}
                               </span>
                             )}
                           </>
@@ -1970,7 +2008,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                   display_name: documentName // Ensure we have a display_name
                                 },
                                 fields: docMetadata.fields,
-                                person: { full_name: personName },
+                                person: { 
+                                  full_name: personName,
+                                  id: col.id,  // This is the director ID!
+                                  type: 'individual'
+                                },
                                 task: col.task,
                                 columnType: col.type,
                                 columnId: col.id

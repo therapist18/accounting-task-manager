@@ -647,31 +647,18 @@ export function RequirementsTable({
   const handleSelectApplicant = (applicantName: string) => setSelectedApplicant(applicantName);
   const toggleDocumentExpansion = useCallback((docId: string) => setExpandedDocuments(prev => { const newSet = new Set(prev); newSet.has(docId) ? newSet.delete(docId) : newSet.add(docId); return newSet; }), []);
   const handleUploadAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number) => {
-    // Debug: Log the parameters being passed
-    console.log('🔍 handleUploadAction called with:', {
-      taskId: task.id,
-      itemName: item.name || item.display_name,
-      columnType,
-      applicantId,
-      taskIndividualId: task.individual_id,
-      taskApplicantDetails: task.applicant_details,
-      taskParticipants: task.participants_details?.map(p => ({ id: p.id, type: p.type, role: p.role, name: p.name }))
-    });
-
-    // Get a better person name
     let personName = individualNames[applicantId || task.individual_id] || 'Unknown Person';
+    if (applicantId && task.participants_details) {
+      const participant = task.participants_details.find(p => p.id === applicantId);
+      if (participant && participant.name) {
+        personName = participant.name;
+      }
+    }
     if (!personName || personName === 'Unknown Person') {
       personName = individualNames[task.applicant_details?.id] ||
         task.applicant_details?.name ||
         'Individual';
     }
-
-    console.log('🔍 Person details:', {
-      applicantId,
-      taskIndividualId: task.individual_id,
-      personName,
-      individualNames: individualNames
-    });
 
     setSelectedDocForUpload({
       doc: item,
@@ -998,16 +985,6 @@ const getCurrentRequirements = () => [];
     if (!firstTask) return [];
     const requirements = taskClassRequirements[firstTask.id];
     const result = requirements ? [requirements] : [];
-
-    // Debug: Log what's being passed to RequirementsTableCombined
-    console.log('🔍 Passing to RequirementsTableCombined:', {
-      taskId: firstTask.id,
-      taskIds: Object.keys(taskClassRequirements),
-      requirementsFound: !!requirements,
-      requirementsData: requirements,
-      resultLength: result.length
-    });
-
     return result;
   }, [filteredGroupedTasks, taskClassRequirements]);
 
