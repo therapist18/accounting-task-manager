@@ -133,6 +133,39 @@ interface KYCDocument {
   max_file_size_mb: number;
   name: string;
 }
+
+// --- Helper Functions for Field Name Formatting ---
+function formatDisplayName(input: string): string {
+  if (!input) return '';
+  
+  // Convert camelCase or PascalCase to space-separated words
+  // e.g., "PinNo" -> "Pin No", "firstName" -> "First Name"
+  let formatted = input
+    .replace(/([a-z])([A-Z])/g, '$1 $2')  // Add space between lowercase and uppercase
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2')  // Handle acronyms like "IDNumber" -> "ID Number"
+    .replace(/[_-]/g, ' ')  // Replace underscores and hyphens with spaces
+    .trim();
+  
+  // Capitalize first letter of each word
+  formatted = formatted
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+  
+  return formatted;
+}
+
+function formatVariableName(input: string): string {
+  if (!input) return '';
+  
+  // Convert to camelCase
+  return input
+    .replace(/[_-]/g, ' ')  // Replace underscores and hyphens with spaces
+    .replace(/\s+(.)/g, (_, chr) => chr.toUpperCase())  // Capitalize after spaces
+    .replace(/\s/g, '')  // Remove all spaces
+    .replace(/^(.)/, (_, chr) => chr.toLowerCase());  // Ensure first letter is lowercase
+}
+
 // --- Helper: Entity Configuration ---
 function EntityConfigurator({
   group,
@@ -1397,11 +1430,115 @@ function MultiDocumentPicker({
   )
 }
 
+// --- NEW COMPONENT: Bulk Paste Fields Dialog ---
+function BulkPasteFieldsDialog({
+  open,
+  onOpenChange,
+  onAdd
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onAdd: (fields: Array<{ displayName: string; variableName: string }>) => void;
+}) {
+  const [pastedText, setPastedText] = useState("");
+  const [previewFields, setPreviewFields] = useState<Array<{ displayName: string; variableName: string }>>([]);
+
+  useEffect(() => {
+    if (!open) {
+      setPastedText("");
+      setPreviewFields([]);
+    }
+  }, [open]);
+
+  const handleTextChange = (text: string) => {
+    setPastedText(text);
+    
+    // Parse the pasted text - split by newlines and filter empty lines
+    const lines = text
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0);
+    
+    // Generate preview with formatted names
+    const fields = lines.map(line => ({
+      displayName: formatDisplayName(line),
+      variableName: formatVariableName(line)
+    }));
+    
+    setPreviewFields(fields);
+  };
+
+  const handleAdd = () => {
+    if (previewFields.length > 0) {
+      onAdd(previewFields);
+      onOpenChange(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-[600px] p-0 gap-0 overflow-hidden">
+        <DialogHeader className="px-6 py-4 border-b bg-slate-50/50">
+          <DialogTitle>Bulk Add Fields</DialogTitle>
+          <DialogDescription>Paste a list of field names (one per line) to add multiple fields at once.</DialogDescription>
+        </DialogHeader>
+
+        <div className="p-6 space-y-4">
+          <div className="space-y-2">
+            <Label>Paste Field Names</Label>
+            <Textarea
+              placeholder="Paste field names here, one per line...&#10;Example:&#10;firstName&#10;lastName&#10;PinNo&#10;date_of_birth"
+              className="min-h-[150px] font-mono text-sm"
+              value={pastedText}
+              onChange={(e) => handleTextChange(e.target.value)}
+            />
+            <p className="text-xs text-slate-500">
+              Tip: Field names will be automatically formatted. For example, "PinNo" becomes "Pin No", "first_name" becomes "First Name"
+            </p>
+          </div>
+
+          {previewFields.length > 0 && (
+            <div className="space-y-2">
+              <Label>Preview ({previewFields.length} fields)</Label>
+              <ScrollArea className="h-[200px] border rounded-md bg-white">
+                <div className="p-2 space-y-1">
+                  {previewFields.map((field, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-2 bg-slate-50 rounded text-sm border border-slate-100">
+                      <div className="flex-1">
+                        <div className="font-medium text-slate-800">{field.displayName}</div>
+                        <div className="text-xs text-slate-500 font-mono">{field.variableName}</div>
+                      </div>
+                      <Badge variant="secondary" className="text-xs">Empty Field</Badge>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="border-t p-4 bg-slate-50">
+          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button 
+            size="sm" 
+            onClick={handleAdd}
+            disabled={previewFields.length === 0}
+          >
+            Add {previewFields.length > 0 ? `${previewFields.length} ` : ''}Fields
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // --- NEW COMPONENT: Simplified Add Data Field Dialog ---
+
 function AddDataFieldDialog({
   open,
   onOpenChange,
   onAdd,
+  onOpenBulkPaste,
   masterFields,
   kycDocuments,
   jobQuestions
@@ -1409,6 +1546,7 @@ function AddDataFieldDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onAdd: (type: 'text' | 'document' | 'computed' | 'db' | 'job_question', data?: any) => void;
+  onOpenBulkPaste: () => void;
   masterFields: JobField[];
   kycDocuments: KYCDocument[];
   jobQuestions: any[];
@@ -1617,7 +1755,10 @@ function AddDataFieldDialog({
             <TabsContent value="manual" className="mt-0 grid grid-cols-2 gap-4">
               <button
                 type="button"
-                onClick={() => onAdd('text')}
+                onClick={() => {
+                  onOpenChange(false);
+                  onOpenBulkPaste();
+                }}
                 className="relative flex flex-col items-start p-4 bg-white border border-slate-200 rounded-xl hover:border-blue-400 hover:shadow-md hover:shadow-blue-50 transition-all group text-left"
               >
                 <div className="h-10 w-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
@@ -1625,7 +1766,7 @@ function AddDataFieldDialog({
                 </div>
                 <div className="font-semibold text-sm text-slate-800">Empty Field</div>
                 <div className="text-[11px] text-slate-500 leading-tight mt-1">
-                  Create a placeholder variable for manual data entry later.
+                  Create placeholder variables. Paste a list to add multiple fields at once.
                 </div>
               </button>
 
@@ -1722,6 +1863,7 @@ export function AutomationDialog({
   const [kycDocuments, setKycDocuments] = useState<KYCDocument[]>([])
  const [jobQuestions, setJobQuestions] = useState<any[]>([]);
   const [isAddFieldOpen, setIsAddFieldOpen] = useState(false)
+  const [isBulkPasteOpen, setIsBulkPasteOpen] = useState(false)
   const [fieldSearch, setFieldSearch] = useState('')
   const [deleteGroupDialogOpen, setDeleteGroupDialogOpen] = useState(false);
   const [groupToDelete, setGroupToDelete] = useState<string | null>(null);
@@ -1772,7 +1914,7 @@ export function AutomationDialog({
       setJobQuestions(unique);
     };
     fetchQuestions();
-  }, [open]);
+  }, [isOpen]);
 
   useEffect(() => {
   const fetchContextualData = async () => {
@@ -2033,8 +2175,8 @@ export function AutomationDialog({
     if (type === 'db' && data) {
       setWebDataGroups(prev => [...prev, {
         id: crypto.randomUUID(),
-        efnsDisplayName: data.label,
-        variableName: data.field_key.toLowerCase().replace(/[^a-z0-9]+(.)/g, (_, chr) => chr.toUpperCase()),
+        efnsDisplayName: formatDisplayName(data.label),
+        variableName: formatVariableName(data.field_key),
         fieldType: 'text',
         entityTypes: ['principal'],
         linkedMasterFields: [data.id],
@@ -2043,8 +2185,8 @@ export function AutomationDialog({
     } else if (type === 'document' && data) {
       setWebDataGroups(prev => [...prev, {
         id: crypto.randomUUID(),
-        efnsDisplayName: data.display_name,
-        variableName: data.name,
+        efnsDisplayName: formatDisplayName(data.display_name),
+        variableName: formatVariableName(data.name),
         fieldType: 'document',
         entityTypes: ['principal'],
         linkedMasterFields: [],
@@ -2056,8 +2198,8 @@ export function AutomationDialog({
     } else if (type === 'job_question' && data) {
       setWebDataGroups(prev => [...prev, {
         id: crypto.randomUUID(),
-        efnsDisplayName: data.label,
-        variableName: data.label.toLowerCase().replace(/[^a-z0-9]+(.)/g, (_, chr) => chr.toUpperCase()),
+        efnsDisplayName: formatDisplayName(data.label),
+        variableName: formatVariableName(data.label),
         fieldType: 'text',
         entityTypes: ['principal'],
         linkedMasterFields: [],
@@ -2076,6 +2218,23 @@ export function AutomationDialog({
       setWebDataGroups(prev => [...prev, newRow]);
     }
     setIsAddFieldOpen(false);
+  }
+
+  const handleBulkAddFields = (fields: Array<{ displayName: string; variableName: string }>) => {
+    const newGroups = fields.map(field => ({
+      id: crypto.randomUUID(),
+      efnsDisplayName: field.displayName,
+      variableName: field.variableName,
+      fieldType: 'text' as const,
+      entityTypes: ['principal'],
+      linkedMasterFields: [],
+      arrayItems: []
+    }));
+    setWebDataGroups(prev => [...prev, ...newGroups]);
+    toast({ 
+      title: "Success", 
+      description: `Added ${fields.length} field${fields.length > 1 ? 's' : ''} successfully` 
+    });
   }
 
   const openEditDialog = (group: WebDataGroup) => {
@@ -2099,7 +2258,15 @@ export function AutomationDialog({
                 <Settings2 className="h-5 w-5 text-white" />
               </div>
               <div>
-                <DialogTitle className="text-xl font-bold text-slate-900">{initialData ? 'Edit Automation Flow' : 'Create Automation Flow'}</DialogTitle>
+                <DialogTitle className="text-xl font-bold text-slate-900">
+                  {initialData ? (
+                    <>
+                      Edit Automation: <span className="text-blue-600">{form.watch('name') || initialData.name}</span>
+                    </>
+                  ) : (
+                    'Create Automation Flow'
+                  )}
+                </DialogTitle>
                 <DialogDescription className="text-sm text-slate-500 mt-0.5 font-medium">
                   Configure connection details and map database fields to the target system.
                 </DialogDescription>
@@ -2646,9 +2813,17 @@ export function AutomationDialog({
         open={isAddFieldOpen}
         onOpenChange={setIsAddFieldOpen}
         onAdd={handleAddData}
+        onOpenBulkPaste={() => setIsBulkPasteOpen(true)}
         masterFields={masterFields}
         kycDocuments={kycDocuments}
         jobQuestions={jobQuestions}
+      />
+
+      {/* Bulk Paste Fields Dialog */}
+      <BulkPasteFieldsDialog
+        open={isBulkPasteOpen}
+        onOpenChange={setIsBulkPasteOpen}
+        onAdd={handleBulkAddFields}
       />
     </>
   )
