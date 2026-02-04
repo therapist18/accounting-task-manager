@@ -516,7 +516,7 @@ export function DataSourceConfiguration({
                           <SelectValue placeholder="Select a function" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">Select a function</SelectItem>
+                          <SelectItem value="none">Select a function</SelectItem>
                           {COMPUTED_FUNCTIONS.map((func) => (
                             <SelectItem 
                               key={func.value} 

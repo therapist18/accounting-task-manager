@@ -281,37 +281,69 @@ export async function extractFieldFromLatestDocument(
     cache?: DocumentCache
 ): Promise<string> {
     try {
-        console.log(`[Extract Debug] Individual: ${individualId}, Docs: ${documentIds.join(', ')}, Path: ${fieldPath}`);
+        console.log(`[Extract Debug] Individual: ${individualId}, Docs: ${documentIds?.join(', ') || 'none'}, Path: ${fieldPath}`);
         
+        if (!documentIds || documentIds.length === 0) {
+            console.log(`[Extract Debug] No document IDs provided`);
+            return "No Document Specified";
+        }
+
         const { docs, types } = await fetchDocsAndTypes(individualId, documentIds, cache);
      
-        if (docs.length === 0) {
-            console.log(`[Extract Debug] No documents found`);
-            return "Missing Document";
+        if (!docs || docs.length === 0) {
+            console.log(`[Extract Debug] No documents found for the specified IDs`);
+            return "Document Not Found";
         }
 
         console.log(`[Extract Debug] Found ${docs.length} documents`);
         const sorted = sortDocsByRecency(docs, types);
-        const latest = sorted[0];
+        const latestDoc = sorted[0]?.doc;
         
-        console.log(`[Extract Debug] Latest doc:`, latest.doc);
-        console.log(`[Extract Debug] Extracting from path: ${fieldPath}`);
-        
-        const value = parseJsonPath(latest.doc, fieldPath);
-        console.log(`[Extract Debug] Extracted value:`, value, `Type: ${typeof value}`);
-        
-        if (value === null || value === undefined) {
-            console.log(`[Extract Debug] Field not found at path: ${fieldPath}`);
-            return "Field Not Found";
+        if (!latestDoc) {
+            console.log(`[Extract Debug] No valid document data found`);
+            return "Invalid Document Data";
         }
 
-        const result = String(value);
+        console.log(`[Extract Debug] Latest doc ID: ${latestDoc.id}`);
+        console.log(`[Extract Debug] Extracting from path: ${fieldPath}`);
+        
+        // First try to get the value using the full path
+        let value = parseJsonPath(latestDoc, fieldPath);
+        
+        // If not found and path contains 'extracted_details', try to get it directly from the nested object
+        if ((value === null || value === undefined) && fieldPath.includes('extracted_details')) {
+            const pathParts = fieldPath.split('->>')
+                .join('.')  // Convert ->> to .
+                .replace(/['"]/g, '')  // Remove quotes
+                .split('.');  // Split by dot notation
+            
+            // Remove empty strings from the path parts
+            const cleanPathParts = pathParts.filter(part => part.trim() !== '');
+            
+            // Traverse the object using the path parts
+            value = cleanPathParts.reduce((obj, key) => {
+                if (obj && typeof obj === 'object' && key in obj) {
+                    return obj[key];
+                }
+                return undefined;
+            }, latestDoc);
+        }
+
+        console.log(`[Extract Debug] Extracted value:`, value, `Type: ${typeof value}`);
+        
+        if (value === null || value === undefined || value === '') {
+            console.log(`[Extract Debug] Field not found at path: ${fieldPath}`);
+            return ""; // Return empty string instead of "Field Not Found" to allow for fallback
+        }
+
+        // If the value is an object, try to stringify it
+        const result = typeof value === 'object' ? JSON.stringify(value) : String(value);
         console.log(`[Extract Debug] Final result: ${result}`);
         return result;
 
     } catch (error) {
         console.error(`[Extract Error] Individual: ${individualId}, Path: ${fieldPath}, Error:`, error);
-        return "Extraction Error";
+        return ""; // Return empty string instead of error message to allow for fallback
     }
 }
 
@@ -934,17 +966,27 @@ export async function executeComputedField(
     companyId?: string | number,
     entityContext?: string
 ): Promise<any> {
-    const normalizedFunctionName = functionName.replace(/\(\)/g, '').trim();
+    // Handle cases where functionName might be undefined or null
+    if (!functionName) {
+        console.error('[ExecuteComputedField] No function name provided');
+        return "Function not specified";
+    }
 
-    // Standard field extraction (non-arithmetic)
-    if (fieldPath && !arithmeticConfig) {
+    // Normalize the function name by removing any trailing parentheses and trimming whitespace
+    const normalizedFunctionName = functionName.replace(/\(\).*$/, '').trim();
+    console.log(`[ExecuteComputedField] Executing function: ${normalizedFunctionName} with path: ${fieldPath}`);
+
+    // Handle extractFieldFromLatestDocument specifically
+    if (normalizedFunctionName === 'extractFieldFromLatestDocument' || 
+        (fieldPath && !arithmeticConfig)) {
         if (extractionMode === 'all') {
-            return await extractFieldFromAllDocuments(individualId, computedDocuments, fieldPath, cache);
+            return await extractFieldFromAllDocuments(individualId, computedDocuments, fieldPath || '', cache);
         } else {
-            return await extractFieldFromLatestDocument(individualId, computedDocuments, fieldPath, cache);
+            return await extractFieldFromLatestDocument(individualId, computedDocuments, fieldPath || '', cache);
         }
     }
 
+    // Handle other functions
     switch (normalizedFunctionName) {
         case 'extractCurrentJobTitle':
             return await extractCurrentJobTitle(individualId, companyId, entityContext);
@@ -967,11 +1009,27 @@ export async function executeComputedField(
         case 'getEducationalDetails':
             return await getEducationalDetails(individualId, computedDocuments, cache);
         case 'calculateArithmetic':
-            return await calculateArithmetic(individualId, computedDocuments, arithmeticConfig.operation, arithmeticConfig.field1Path || fieldPath, arithmeticConfig.field2Path, arithmeticConfig.operand, cache);
+            return await calculateArithmetic(
+                individualId, 
+                computedDocuments, 
+                arithmeticConfig?.operation || 'add',
+                arithmeticConfig?.field1Path || fieldPath || '',
+                arithmeticConfig?.field2Path,
+                arithmeticConfig?.operand,
+                cache
+            );
         case 'calculateDateDifference':
-            return await calculateDateDifference(individualId, computedDocuments, arithmeticConfig.startDatePath || fieldPath, arithmeticConfig.endDatePath, arithmeticConfig.unit, cache);
+            return await calculateDateDifference(
+                individualId, 
+                computedDocuments, 
+                arithmeticConfig?.startDatePath || fieldPath || '',
+                arithmeticConfig?.endDatePath || '',
+                arithmeticConfig?.unit || 'days',
+                cache
+            );
         default:
-            return "Unknown Function";
+            console.warn(`[ExecuteComputedField] Unknown function: ${normalizedFunctionName}`);
+            return `Unknown Function: ${normalizedFunctionName}`;
     }
 }
 
