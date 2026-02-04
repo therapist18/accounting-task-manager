@@ -264,27 +264,12 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
             format?: string;
         };
         documentTypes: Array<{ value: string; label: string }>;
-        is_computed: boolean;
-        computed_function: string;
-        computed_config: {
-            document_ids?: string[];
-            arithmeticConfig?: {
-                operation?: string;
-                field1Path?: string;
-                field2Path?: string;
-                operand?: number;
-                unit?: string;
-            };
-        };
         category: string;
     }>({
         fieldType: 'normal',
         date_config: { useCurrentDate: true, format: 'YYYY-MM-DD' },
         documentTypes: [],
-        is_computed: false,
-        computed_function: "",
         category: "General",
-        computed_config: {},
         dependencyConfig: { mode: 'db_filter', valueKey: "name", labelKey: "name", parentOptionKey: "parent_id" },
         manualMapping: {}
     })
@@ -297,8 +282,6 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
 
     const [openCategoryCombo, setOpenCategoryCombo] = useState(false)
     const [openParentCombo, setOpenParentCombo] = useState(false)
-    const [openFunctionCombo, setOpenFunctionCombo] = useState(false)
-
     const [parentFieldOptions, setParentFieldOptions] = useState<ParentOptionItem[]>([])
     const [loadingParentOptions, setLoadingParentOptions] = useState(false)
     const [currentParentValue, setCurrentParentValue] = useState("")
@@ -463,13 +446,6 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                     dependencyConfig: currentDepConfig,
                     manualMapping: currentManualMapping,
                     date_config: field.date_config || { useCurrentDate: true, format: 'YYYY-MM-DD' },
-                    is_computed: computedConfig.is_computed || false,
-                    computed_function: computedConfig.computed_function || "",
-                    computed_config: {
-                        document_ids: computedConfig.document_ids || [],
-                        arithmeticConfig: computedConfig.arithmeticConfig || {},
-                        dateDiffConfig: computedConfig.dateDiffConfig || {}
-                    },
                     category: field.category || "General",
                     documentTypes: formData.documentTypes
                 })
@@ -523,10 +499,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                     fieldType: 'normal',
                     date_config: { useCurrentDate: true, format: 'YYYY-MM-DD' },
                     documentTypes: formData.documentTypes,
-                    is_computed: false,
-                    computed_function: "",
                     category: "General",
-                    computed_config: {},
                     dependencyConfig: { mode: 'db_filter', valueKey: "name", labelKey: "name", parentOptionKey: "parent_id" },
                     manualMapping: {}
                 })
@@ -824,8 +797,6 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
         } finally { setLoading(false) }
     }
 
-    const requiresArithmeticConfig = formData.computed_function === 'calculateArithmetic' || formData.computed_function === 'calculateDateDifference';
-
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-[900px] h-[95vh] flex flex-col p-0 overflow-hidden bg-slate-50">
@@ -957,22 +928,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
 
                                     {/* DATA & LOGIC SECTION FOR CARD */}
                                     <div className="space-y-4 pt-4 border-t border-slate-200">
-                                        <div className="flex items-center justify-between pb-2 border-b border-slate-200">
-                                            <div className="flex items-center gap-2">
-                                                <Database className="w-4 h-4 text-slate-500" />
-                                                <h4 className="font-semibold text-slate-800 text-sm uppercase tracking-wide">Data & Logic</h4>
-                                            </div>
-                                            <div className="flex items-center gap-2 bg-purple-50 px-3 py-1 rounded-full border border-purple-100">
-                                                <Label htmlFor={`computed_toggle-${card.id}`} className="text-xs font-bold text-purple-700 cursor-pointer">Computed?</Label>
-                                                <Switch
-                                                    id={`computed_toggle-${card.id}`}
-                                                    checked={card.data.is_computed || false}
-                                                    onCheckedChange={(checked) => updateFieldCard(card.id, { is_computed: checked })}
-                                                />
-                                            </div>
-                                        </div>
-
-                                        {card.data.is_computed && (
+                                                                               {card.data.is_computed && (
                                             <div className="space-y-4 pt-2">
                                                 <div className="space-y-2">
                                                     <Label className="text-xs font-bold text-purple-900 uppercase">Computed Function</Label>
@@ -1206,202 +1162,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                     {/* DATA LOGIC SECTION */}
                     {fieldCards.length === 0 && (
                         <div className="space-y-4">
-                            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
-                                <div className="flex items-center gap-2">
-                                    <Database className="w-4 h-4 text-slate-500" />
-                                    <h3 className="font-semibold text-slate-800 text-sm uppercase tracking-wide">Data & Logic</h3>
-                                </div>
-                                <div className="flex items-center gap-2 bg-purple-50 px-3 py-1 rounded-full border border-purple-100">
-                                    <Label htmlFor="computed_toggle" className="text-xs font-bold text-purple-700 cursor-pointer">Computed?</Label>
-                                    <Switch id="computed_toggle" checked={formData.is_computed} onCheckedChange={(c) => setFormData({ ...formData, is_computed: c })} className="data-[state=checked]:bg-purple-600" />
-                                </div>
-                            </div>
-
-                        {formData.is_computed && (
-                            <div className="p-5 border border-purple-200 bg-purple-50/30 rounded-xl space-y-4">
-                                <div>
-                                    <Label className="text-xs font-bold text-purple-900 uppercase">Computed Function</Label>
-                                    <Popover open={openFunctionCombo} onOpenChange={setOpenFunctionCombo}>
-                                        <PopoverTrigger asChild>
-                                            <Button variant="outline" role="combobox" aria-expanded={openFunctionCombo} className="w-full justify-between bg-white border-purple-200 mt-2">
-                                                {formData.computed_function ? COMPUTED_FUNCTIONS.find((f) => f.value === formData.computed_function)?.label : "Select logic..."}
-                                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                            </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-[400px] p-0"><Command><CommandInput placeholder="Search function..." /><CommandList><CommandGroup>{COMPUTED_FUNCTIONS.map((fn) => (<CommandItem key={fn.value} value={fn.label} onSelect={() => { setFormData({ ...formData, computed_function: fn.value }); setOpenFunctionCombo(false) }}><Check className={cn("mr-2 h-4 w-4", formData.computed_function === fn.value ? "opacity-100" : "opacity-0")} />{fn.label}</CommandItem>))}</CommandGroup></CommandList></Command></PopoverContent>
-                                    </Popover>
-                                </div>
-
-                                {/* ARITHMETIC CONFIG */}
-                                {formData.computed_function === 'calculateArithmetic' && (
-                                    <div className="space-y-3 pt-3 border-t border-purple-200">
-                                        <Label className="text-xs font-bold text-purple-900 uppercase">Arithmetic Configuration</Label>
-                                        <Select
-                                            value={formData.computed_config.arithmeticConfig?.operation || ""}
-                                            onValueChange={(v) => setFormData(prev => ({
-                                                ...prev,
-                                                computed_config: {
-                                                    ...prev.computed_config,
-                                                    arithmeticConfig: {
-                                                        ...prev.computed_config.arithmeticConfig,
-                                                        operation: v
-                                                    }
-                                                }
-                                            }))}
-                                        >
-                                            <SelectTrigger className="bg-white">
-                                                <SelectValue placeholder="Select operation" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {ARITHMETIC_OPERATIONS.map(op => (
-                                                    <SelectItem key={op.value} value={op.value}>{op.label}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <div className="space-y-2">
-                                                <Label className="text-[10px] font-bold uppercase text-purple-700">Field 1 Path</Label>
-                                                <Input
-                                                    className="h-9 bg-white text-xs font-mono"
-                                                    placeholder="e.g. extracted_details->>'permit_wef'"
-                                                    value={formData.computed_config.arithmeticConfig?.field1Path || ""}
-                                                    onChange={(e) => setFormData(prev => ({
-                                                        ...prev,
-                                                        computed_config: {
-                                                            ...prev.computed_config,
-                                                            arithmeticConfig: {
-                                                                ...prev.computed_config.arithmeticConfig,
-                                                                field1Path: e.target.value
-                                                            }
-                                                        }
-                                                    }))}
-                                                />
-                                            </div>
-                                            <div className="space-y-2">
-                                                <Label className="text-[10px] font-bold uppercase text-purple-700">Field 2 Path (Optional)</Label>
-                                                <Input
-                                                    className="h-9 bg-white text-xs font-mono"
-                                                    placeholder="e.g. extracted_details->>'permit_expiry_date'"
-                                                    value={formData.computed_config.arithmeticConfig?.field2Path || ""}
-                                                    onChange={(e) => setFormData(prev => ({
-                                                        ...prev,
-                                                        computed_config: {
-                                                            ...prev.computed_config,
-                                                            arithmeticConfig: {
-                                                                ...prev.computed_config.arithmeticConfig,
-                                                                field2Path: e.target.value
-                                                            }
-                                                        }
-                                                    }))}
-                                                />
-                                            </div>
-                                        </div>
-
-                                        <div className="space-y-2">
-                                            <Label className="text-[10px] font-bold uppercase text-purple-700">Or Use Fixed Operand</Label>
-                                            <Input
-                                                type="number"
-                                                className="h-9 bg-white"
-                                                placeholder="e.g. 365"
-                                                value={formData.computed_config.arithmeticConfig?.operand || ""}
-                                                onChange={(e) => setFormData(prev => ({
-                                                    ...prev,
-                                                    computed_config: {
-                                                        ...prev.computed_config,
-                                                        arithmeticConfig: {
-                                                            ...prev.computed_config.arithmeticConfig,
-                                                            operand: e.target.value ? Number(e.target.value) : undefined
-                                                        }
-                                                    }
-                                                }))}
-                                            />
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* DATE DIFFERENCE CONFIG */}
-                                {formData.computed_function === 'calculateDateDifference' && (
-                                    <div className="space-y-3 pt-3 border-t border-purple-200">
-                                        <Label className="text-xs font-bold text-purple-900 uppercase">Date Difference Configuration</Label>
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <div className="space-y-2">
-                                                <Label className="text-[10px] font-bold uppercase text-purple-700">Start Date Path</Label>
-                                                <SearchableSelect
-                                                    value={formData.computed_config.arithmeticConfig?.startDatePath || ""}
-                                                    onValueChange={(value) => setFormData(prev => ({
-                                                        ...prev,
-                                                        computed_config: {
-                                                            ...prev.computed_config,
-                                                            arithmeticConfig: {
-                                                                ...prev.computed_config.arithmeticConfig,
-                                                                startDatePath: value
-                                                            }
-                                                        }
-                                                    }))}
-                                                    options={masterFields.map(field => ({
-                                                        value: field.id,
-                                                        label: `${field.label} (${field.field_key})`
-                                                    }))}
-                                                    loading={loadingMasterFields}
-                                                    placeholder="Select master field..."
-                                                    searchPlaceholder="Search fields..."
-                                                />
-                                            </div>
-                                            <div className="space-y-2">
-                                                <Label className="text-[10px] font-bold uppercase text-purple-700">End Date Path</Label>
-                                                <SearchableSelect
-                                                    value={formData.computed_config.arithmeticConfig?.endDatePath || ""}
-                                                    onValueChange={(value) => setFormData(prev => ({
-                                                        ...prev,
-                                                        computed_config: {
-                                                            ...prev.computed_config,
-                                                            arithmeticConfig: {
-                                                                ...prev.computed_config.arithmeticConfig,
-                                                                endDatePath: value
-                                                            }
-                                                        }
-                                                    }))}
-                                                    options={masterFields.map(field => ({
-                                                        value: field.id,
-                                                        label: `${field.label} (${field.field_key})`
-                                                    }))}
-                                                    loading={loadingMasterFields}
-                                                    placeholder="Select master field..."
-                                                    searchPlaceholder="Search fields..."
-                                                />
-                                            </div>
-                                        </div>
-
-                                        <div className="space-y-2">
-                                            <Label className="text-[10px] font-bold uppercase text-purple-700">Unit</Label>
-                                            <Select
-                                                value={formData.computed_config.arithmeticConfig?.unit || "days"}
-                                                onValueChange={(v) => setFormData(prev => ({
-                                                    ...prev,
-                                                    computed_config: {
-                                                        ...prev.computed_config,
-                                                        arithmeticConfig: {
-                                                            ...prev.computed_config.arithmeticConfig,
-                                                            unit: v
-                                                        }
-                                                    }
-                                                }))}
-                                            >
-                                                <SelectTrigger className="bg-white">
-                                                    <SelectValue />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {DATE_DIFF_UNITS.map(unit => (
-                                                        <SelectItem key={unit.value} value={unit.value}>{unit.label}</SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
+                     
 
                         {!formData.is_computed && formData.fieldType === 'dropdown' && (
                             <Card className="border shadow-sm">

@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area" 
+import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Plus,
   Trash2,
@@ -36,8 +36,10 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import { Switch } from "@/components/ui/switch"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { getComputedFunction, COMPUTED_FUNCTIONS } from "@/lib/constants/computed-functions"
 
-// --- Types ---
 interface JsonbArrayConfig {
   fields: Array<{ id: string; name: string; type: string; parentField: string }>
   maxItems: number
@@ -58,6 +60,18 @@ export type SourceCardState = {
   document_id?: string[] | null
   fields?: TableColumn[]
   loadingFields?: boolean
+  is_computed?: boolean
+  computed_function?: string
+  computed_config?: {
+    document_ids?: string[]
+    arithmeticConfig?: {
+      operation?: string
+      field1Path?: string
+      field2Path?: string
+      operand?: number
+      unit?: string
+    }
+  }
 }
 
 interface DataSourceConfigurationProps {
@@ -74,7 +88,7 @@ interface DataSourceConfigurationProps {
 // --- 1. MultiSelect Component ---
 function MultiSelectBox({ options, selectedValues, onChange, placeholder = "Select items..." }: any) {
   const [open, setOpen] = useState(false)
-  
+
   const handleSelect = (value: string) => {
     if (selectedValues.includes(value)) onChange(selectedValues.filter((item: string) => item !== value))
     else onChange([...selectedValues, value])
@@ -131,7 +145,7 @@ function MultiSelectBox({ options, selectedValues, onChange, placeholder = "Sele
 // --- 2. SearchableSelect Component ---
 function SearchableSelect({ value, onValueChange, options, placeholder = "Select...", searchPlaceholder = "Search...", loading = false, emptyMessage = "No results found." }: any) {
   const [open, setOpen] = useState(false)
-  
+
   // Find label from options to display in the closed button
   const displayLabel = options.find((f: any) => f.value === value)?.label || value;
 
@@ -153,7 +167,7 @@ function SearchableSelect({ value, onValueChange, options, placeholder = "Select
                 {options.map((framework: any) => (
                   <CommandItem
                     key={framework.value}
-                    value={framework.label} 
+                    value={framework.label}
                     onSelect={(currentValue) => {
                       const found = options.find((o: any) => o.label.toLowerCase() === currentValue.toLowerCase()) || options.find((o: any) => o.value === currentValue);
                       onValueChange(found ? found.value : currentValue)
@@ -201,106 +215,117 @@ function fieldsReducer(state: Record<number, FieldStateItem>, action: FieldActio
 
 // Generates the deep JSON path options for the Blue Box Popover
 const getJsonPathOptions = (field: TableColumn) => {
-  if(!field || !field.is_jsonb) return [];
-  
+  if (!field || !field.is_jsonb) return [];
+
   const options = [];
-  
+
   // 1. Always add a "Custom Key" option for manual entry
   options.push({
-      value: `${field.column_name}->>'?'`,
-      label: `Manual Key Entry`,
-      detail: "Select to fill template, then type key"
+    value: `${field.column_name}->>'?'`,
+    label: `Manual Key Entry`,
+    detail: "Select to fill template, then type key"
   });
 
   // 2. Add detected keys
   if (field.jsonb_properties && field.jsonb_properties.length > 0) {
-      field.jsonb_properties.forEach(prop => {
-          const typeLabel = prop.isArray ? 'Array []' : 'Text';
-          
-          // Add Text Extraction (->>)
-          if (!prop.isArray) {
-            options.push({
-                value: `${field.column_name}->>'${prop.name}'`,
-                label: `${prop.name}`,
-                detail: `Extract as Text`
-            });
-          }
+    field.jsonb_properties.forEach(prop => {
+      const typeLabel = prop.isArray ? 'Array []' : 'Text';
 
-          // Add Object/Array Extraction (->)
-          options.push({
-            value: `${field.column_name}->'${prop.name}'`,
-            label: `${prop.name}`,
-            detail: `Extract as ${typeLabel}`
-          });
+      // Add Text Extraction (->>)
+      if (!prop.isArray) {
+        options.push({
+          value: `${field.column_name}->>'${prop.name}'`,
+          label: `${prop.name}`,
+          detail: `Extract as Text`
+        });
+      }
+
+      // Add Object/Array Extraction (->)
+      options.push({
+        value: `${field.column_name}->'${prop.name}'`,
+        label: `${prop.name}`,
+        detail: `Extract as ${typeLabel}`
       });
+    });
   }
 
   return options;
 };
 
-export function DataSourceConfiguration({ 
-  sources, 
-  onChange, 
-  documentTypes, 
-  tables = [], 
-  loadingTables = false, 
-  fetchFieldsForTable, 
-  getFieldsForTable, 
-  getLoadingForTable 
+export function DataSourceConfiguration({
+  sources,
+  onChange,
+  documentTypes,
+  tables = [],
+  loadingTables = false,
+  fetchFieldsForTable,
+  getFieldsForTable,
+  getLoadingForTable
 }: DataSourceConfigurationProps) {
 
   // Watcher - fetch fields when tables change
   useEffect(() => {
     sources.forEach((source, index) => {
-        if (!source.table || !fetchFieldsForTable) return;
-        const currentFields = getFieldsForTable?.(source.table, index) || [];
-        const isLoading = getLoadingForTable?.(source.table, index) || false;
-        const needsFetch = currentFields.length === 0 && !isLoading;
+      if (!source.table || !fetchFieldsForTable) return;
+      const currentFields = getFieldsForTable?.(source.table, index) || [];
+      const isLoading = getLoadingForTable?.(source.table, index) || false;
+      const needsFetch = currentFields.length === 0 && !isLoading;
 
-        if (needsFetch) {
-           fetchFieldsForTable(source.table, index);
-        }
+      if (needsFetch) {
+        fetchFieldsForTable(source.table, index);
+      }
     });
   }, [sources, fetchFieldsForTable, getFieldsForTable, getLoadingForTable]);
 
   // Sync - update sources when fields are loaded
   useEffect(() => {
     if (!getFieldsForTable || !getLoadingForTable) return;
-    
+
     let hasChanges = false;
     const updatedSources = sources.map((source, index) => {
-        if (!source.table) return source;
-        
-        const currentFields = getFieldsForTable(source.table, index);
-        const isLoading = getLoadingForTable(source.table, index);
-        const currentFieldCount = source.fields?.length || 0;
-        const currentLoading = source.loadingFields;
+      if (!source.table) return source;
 
-        if (currentFieldCount !== currentFields.length || currentLoading !== isLoading) {
-            hasChanges = true;
-            return { ...source, fields: currentFields, loadingFields: isLoading };
-        }
-        return source;
+      const currentFields = getFieldsForTable(source.table, index);
+      const isLoading = getLoadingForTable(source.table, index);
+      const currentFieldCount = source.fields?.length || 0;
+      const currentLoading = source.loadingFields;
+
+      if (currentFieldCount !== currentFields.length || currentLoading !== isLoading) {
+        hasChanges = true;
+        return { ...source, fields: currentFields, loadingFields: isLoading };
+      }
+      return source;
     });
 
     if (hasChanges) {
-        onChange(updatedSources);
+      onChange(updatedSources);
     }
   }, [sources, onChange, getFieldsForTable, getLoadingForTable]);
 
-  const addSource = () => onChange([...sources, { id: crypto.randomUUID(), source_type: "individual", table: "", path: "", priority: sources.length + 1, fields: [], linking_variable: "id" }])
-  
+  const addSource = () => onChange([...sources, {
+    id: crypto.randomUUID(),
+    source_type: "individual",
+    table: "",
+    path: "",
+    priority: sources.length + 1,
+    fields: [],
+    linking_variable: "id",
+    is_computed: false,
+    computed_function: "",
+    computed_config: {}
+  }])
+
   const removeSource = (index: number) => {
-     onChange(sources.filter((_, i) => i !== index));
+    onChange(sources.filter((_, i) => i !== index));
   }
-  
+
   const updateSource = (index: number, updates: Partial<SourceCardState>) => {
     const newSources = [...sources];
     if (updates.table && updates.table !== newSources[index].table && fetchFieldsForTable) {
-        newSources[index] = { ...newSources[index], ...updates, fields: [], path: "" };
-        fetchFieldsForTable(updates.table, index);
+      newSources[index] = { ...newSources[index], ...updates, fields: [], path: "" };
+      fetchFieldsForTable(updates.table, index);
     } else {
-        newSources[index] = { ...newSources[index], ...updates };
+      newSources[index] = { ...newSources[index], ...updates };
     }
     onChange(newSources);
   }
@@ -311,15 +336,15 @@ export function DataSourceConfiguration({
         // 1. Get List of Database Columns (Simple list)
         // This ensures the dropdown options are just "id", "name", "specialisation" etc.
         const simpleColumnOptions = (source.fields || []).map(f => ({
-            value: f.column_name,
-            label: f.column_name,
-            detail: f.data_type
+          value: f.column_name,
+          label: f.column_name,
+          detail: f.data_type
         }));
 
         // 2. Determine currently selected root column
         // We split by "->" or "->>" to get the base column name (e.g., "specialisation" from "specialisation->'core'")
         const selectedRootColumn = source.path ? source.path.split(/->>?/)[0] : "";
-        
+
         // 3. Find the full spec for that column to see if it's JSONB
         const columnSpec = source.fields?.find(f => f.column_name === selectedRootColumn);
         const fieldIsJsonb = columnSpec?.is_jsonb;
@@ -327,133 +352,298 @@ export function DataSourceConfiguration({
         return (
           <Card key={source.id || index} className="bg-slate-50 border-slate-200">
             <CardHeader className="pb-2 pt-3 px-3">
-               <div className="flex items-center justify-between">
-                <CardTitle className="text-xs font-bold text-slate-500 uppercase flex gap-2"><Database className="h-3 w-3"/> Source {index + 1}</CardTitle>
-                <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400 hover:bg-red-50" onClick={() => removeSource(index)}><Trash2 className="h-3 w-3"/></Button>
-               </div>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-xs font-bold text-slate-500 uppercase flex gap-2"><Database className="h-3 w-3" /> Source {index + 1}</CardTitle>
+                <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400 hover:bg-red-50" onClick={() => removeSource(index)}><Trash2 className="h-3 w-3" /></Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-3 px-3 pb-3">
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                    <Label className="text-[10px] font-bold uppercase text-slate-500">Type</Label>
-                    <SearchableSelect value={source.source_type} onValueChange={(v:any)=>updateSource(index, {source_type: v})} options={[{value:"individual", label:"Individual"},{value:"document", label:"Document"},{value:"company", label:"Company"}]}/>
+                  <Label className="text-[10px] font-bold uppercase text-slate-500">Type</Label>
+                  <SearchableSelect value={source.source_type} onValueChange={(v: any) => updateSource(index, { source_type: v })} options={[{ value: "individual", label: "Individual" }, { value: "document", label: "Document" }, { value: "company", label: "Company" }]} />
                 </div>
                 <div className="space-y-1">
-                    <Label className="text-[10px] font-bold uppercase text-slate-500">Priority</Label>
-                    <Input type="number" className="h-9 bg-white" value={source.priority} onChange={e => updateSource(index, {priority: parseInt(e.target.value)||1})} />
+                  <Label className="text-[10px] font-bold uppercase text-slate-500">Priority</Label>
+                  <Input type="number" className="h-9 bg-white" value={source.priority} onChange={e => updateSource(index, { priority: parseInt(e.target.value) || 1 })} />
                 </div>
               </div>
-              
+
               <div className="space-y-1">
                 <Label className="text-[10px] font-bold uppercase text-slate-500">Linking Variable</Label>
-                <SearchableSelect 
-                    value={source.linking_variable || "id"} 
-                    onValueChange={(v:any)=>updateSource(index, {linking_variable: v})} 
-                    options={[
-                        {value: "id", label: "ID"},
-                        {value: "individual_id", label: "Individual ID"},
-                        {value: "kyc_document_id", label: "KYC Document ID"},
-                        {value: "document_id", label: "Document ID"},
-                        {value: "director_id", label: "Director ID"},
-                        {value: "company_id", label: "Company ID"}
-                    ]} 
-                    placeholder="Select linking variable..." 
+                <SearchableSelect
+                  value={source.linking_variable || "id"}
+                  onValueChange={(v: any) => updateSource(index, { linking_variable: v })}
+                  options={[
+                    { value: "id", label: "ID" },
+                    { value: "individual_id", label: "Individual ID" },
+                    { value: "kyc_document_id", label: "KYC Document ID" },
+                    { value: "document_id", label: "Document ID" },
+                    { value: "director_id", label: "Director ID" },
+                    { value: "company_id", label: "Company ID" }
+                  ]}
+                  placeholder="Select linking variable..."
                 />
               </div>
-              
+
               {source.source_type === "document" && (
-                  <div className="space-y-1 bg-white p-2 border rounded"><Label className="text-[10px] font-bold uppercase text-slate-500">Documents</Label>
-                  <MultiSelectBox options={documentTypes} selectedValues={source.document_id||[]} onChange={(v:any)=>updateSource(index, {document_id:v})} /></div>
+                <div className="space-y-1 bg-white p-2 border rounded"><Label className="text-[10px] font-bold uppercase text-slate-500">Documents</Label>
+                  <MultiSelectBox options={documentTypes} selectedValues={source.document_id || []} onChange={(v: any) => updateSource(index, { document_id: v })} /></div>
               )}
 
               <div className="space-y-1">
-                 <Label className="text-[10px] font-bold uppercase text-slate-500">Table</Label>
-                 <SearchableSelect 
-                    value={source.table} 
-                    onValueChange={(v:any)=>updateSource(index, {table: v})} 
-                    loading={loadingTables} 
-                    options={tables.map(t=>({value: t.name, label: t.label}))} 
-                    placeholder="Search table..." 
-                 />
+                <Label className="text-[10px] font-bold uppercase text-slate-500">Table</Label>
+                <SearchableSelect
+                  value={source.table}
+                  onValueChange={(v: any) => updateSource(index, { table: v })}
+                  loading={loadingTables}
+                  options={tables.map(t => ({ value: t.name, label: t.label }))}
+                  placeholder="Search table..."
+                />
               </div>
 
               {source.table && (
                 <div className="space-y-1 animate-in fade-in slide-in-from-top-1">
-                   <Label className="text-[10px] font-bold uppercase text-slate-500">Column</Label>
-                   <SearchableSelect 
-                       value={selectedRootColumn} // Only bind to the ROOT column
-                       onValueChange={(v:any) => updateSource(index, { path: v })} // Reset path to just the column when changed
-                       loading={source.loadingFields} 
-                       options={simpleColumnOptions} // Only show simple columns
-                       placeholder={source.loadingFields ? "Fetching columns..." : "Select column..."}
-                       emptyMessage="No columns found"
-                   />
+                  <Label className="text-[10px] font-bold uppercase text-slate-500">Column</Label>
+                  <SearchableSelect
+                    value={selectedRootColumn} // Only bind to the ROOT column
+                    onValueChange={(v: any) => updateSource(index, { path: v })} // Reset path to just the column when changed
+                    loading={source.loadingFields}
+                    options={simpleColumnOptions} // Only show simple columns
+                    placeholder={source.loadingFields ? "Fetching columns..." : "Select column..."}
+                    emptyMessage="No columns found"
+                  />
                 </div>
               )}
 
               {fieldIsJsonb && columnSpec && (
-                 <div className="mt-2 p-2 bg-blue-50/50 rounded border border-blue-100">
-                    <div className="flex justify-between items-start mb-1">
-                        <div className="flex gap-2 items-center"><Settings2 className="w-3 h-3 text-blue-600"/><Label className="text-[10px] font-bold text-blue-600">JSON Path Selection</Label></div>
-                        <Badge variant="outline" className="text-[9px] bg-white text-blue-600 border-blue-200">
-                           {source.path.includes('->>') ? 'Text' : 'JSON Object'}
-                        </Badge>
+                <div className="mt-2 p-2 bg-blue-50/50 rounded border border-blue-100">
+                  <div className="flex justify-between items-start mb-1">
+                    <div className="flex gap-2 items-center"><Settings2 className="w-3 h-3 text-blue-600" /><Label className="text-[10px] font-bold text-blue-600">JSON Path Selection</Label></div>
+                    <Badge variant="outline" className="text-[9px] bg-white text-blue-600 border-blue-200">
+                      {source.path.includes('->>') ? 'Text' : 'JSON Object'}
+                    </Badge>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <Input
+                        value={source.path}
+                        onChange={e => updateSource(index, { path: e.target.value })}
+                        className="bg-white h-8 text-xs font-mono"
+                        placeholder={`e.g. ${columnSpec.column_name}->>'key'`}
+                      />
                     </div>
-                    
-                    <div className="flex gap-2">
-                         <div className="flex-1">
-                             <Input 
-                                 value={source.path} 
-                                 onChange={e=>updateSource(index, {path: e.target.value})} 
-                                 className="bg-white h-8 text-xs font-mono" 
-                                 placeholder={`e.g. ${columnSpec.column_name}->>'key'`}
-                             />
-                         </div>
-                         
-                         {/* JSON Helper Menu */}
-                         <Popover>
-                            <PopoverTrigger asChild>
-                                <Button variant="outline" size="icon" className="h-8 w-8 bg-white border-blue-200 shrink-0" title="Select key">
-                                    <ListTree className="h-4 w-4 text-blue-500" />
-                                </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-[300px] p-0" align="end">
-                                <Command>
-                                    <CommandInput placeholder="Search detected keys..." />
-                                    <CommandList>
-                                        <ScrollArea className="h-[200px]">
-                                            <CommandEmpty>No keys detected.</CommandEmpty>
-                                            <CommandGroup heading="Available Properties">
-                                                {getJsonPathOptions(columnSpec).map(opt => (
-                                                    <CommandItem 
-                                                        key={opt.value} 
-                                                        value={opt.label} 
-                                                        onSelect={() => updateSource(index, { path: opt.value.replace('?', '') })}
-                                                    >
-                                                        <div className="flex flex-col">
-                                                            <span>{opt.label}</span>
-                                                            <span className="text-[10px] text-slate-400">{opt.detail}</span>
-                                                        </div>
-                                                    </CommandItem>
-                                                ))}
-                                            </CommandGroup>
-                                        </ScrollArea>
-                                    </CommandList>
-                                </Command>
-                            </PopoverContent>
-                         </Popover>
+
+                    {/* JSON Helper Menu */}
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" size="icon" className="h-8 w-8 bg-white border-blue-200 shrink-0" title="Select key">
+                          <ListTree className="h-4 w-4 text-blue-500" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[300px] p-0" align="end">
+                        <Command>
+                          <CommandInput placeholder="Search detected keys..." />
+                          <CommandList>
+                            <ScrollArea className="h-[200px]">
+                              <CommandEmpty>No keys detected.</CommandEmpty>
+                              <CommandGroup heading="Available Properties">
+                                {getJsonPathOptions(columnSpec).map(opt => (
+                                  <CommandItem
+                                    key={opt.value}
+                                    value={opt.label}
+                                    onSelect={() => updateSource(index, { path: opt.value.replace('?', '') })}
+                                  >
+                                    <div className="flex flex-col">
+                                      <span>{opt.label}</span>
+                                      <span className="text-[10px] text-slate-400">{opt.detail}</span>
+                                    </div>
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </ScrollArea>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
+                    <Code className="w-3 h-3" />
+                    Type {'->'}{'key'} for arrays/objects, or {'->>'}{'key'} for text.
+                  </p>
+                </div>
+              )}
+
+              {/* Computed Function Toggle */}
+              <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-slate-500" />
+                  <h4 className="font-semibold text-slate-800 text-sm uppercase tracking-wide">Data & Logic</h4>
+                </div>
+                <div className="flex items-center gap-2 bg-purple-50 px-3 py-1 rounded-full border border-purple-100">
+                  <Label htmlFor={`computed-toggle-${index}`} className="text-xs font-bold text-purple-700 cursor-pointer">Enable Computed Function</Label>
+                  <Switch
+                    id={`computed-toggle-${index}`}
+                    checked={source.is_computed}
+                    onCheckedChange={(checked) => updateSource(index, {
+                      is_computed: checked,
+                      computed_function: checked ? 'concat' : '',
+                      computed_config: checked ? { arithmeticConfig: {} } : {}
+                    })}
+                  />
+                </div>
+              </div>
+              {/* Computed Function Configuration */}
+              {source.is_computed && (
+                <div className="mt-3 p-3 bg-slate-50 rounded border">
+                  <div className="space-y-3">
+                    <div>
+                      <Label className="text-xs font-medium">Function</Label>
+                      <Select
+                        value={source.computed_function || ''}
+                        onValueChange={(value) => {
+                          const func = getComputedFunction(value);
+                          updateSource(index, {
+                            computed_function: value,
+                            computed_config: func?.value === 'calculateArithmetic' || func?.value === 'calculateDateDifference' 
+                              ? { arithmeticConfig: {} }
+                              : {}
+                          });
+                        }}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Select a function" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">Select a function</SelectItem>
+                          {COMPUTED_FUNCTIONS.map((func) => (
+                            <SelectItem 
+                              key={func.value} 
+                              value={func.value}
+                              className="flex flex-col items-start"
+                            >
+                              <span className="font-medium">{func.label}</span>
+                              {func.description && (
+                                <span className="text-xs text-muted-foreground">
+                                  {func.description}
+                                </span>
+                              )}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
-                    <p className="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
-                        <Code className="w-3 h-3"/> 
-                        Type {'->'}{'key'} for arrays/objects, or {'->>'}{'key'} for text.
-                    </p>
-                 </div>
+
+                    {source.computed_function && (
+                      <div className="space-y-2">
+                        {['add', 'subtract', 'multiply', 'divide'].includes(source.computed_function) && (
+                          <>
+                            <div>
+                              <Label className="text-xs font-medium">First Field</Label>
+                              <Input
+                                placeholder="e.g., amount"
+                                value={source.computed_config?.arithmeticConfig?.field1Path || ''}
+                                onChange={(e) => updateSource(index, {
+                                  computed_config: {
+                                    ...source.computed_config,
+                                    arithmeticConfig: {
+                                      ...source.computed_config?.arithmeticConfig,
+                                      field1Path: e.target.value
+                                    }
+                                  }
+                                })}
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-xs font-medium">Second Field or Value</Label>
+                              <Input
+                                placeholder="e.g., tax or 0.2"
+                                value={source.computed_config?.arithmeticConfig?.field2Path || ''}
+                                onChange={(e) => updateSource(index, {
+                                  computed_config: {
+                                    ...source.computed_config,
+                                    arithmeticConfig: {
+                                      ...source.computed_config?.arithmeticConfig,
+                                      field2Path: e.target.value
+                                    }
+                                  }
+                                })}
+                              />
+                            </div>
+                          </>
+                        )}
+
+                        {source.computed_function === 'date_diff' && (
+                          <>
+                            <div>
+                              <Label className="text-xs font-medium">Start Date Field</Label>
+                              <Input
+                                placeholder="e.g., start_date"
+                                value={source.computed_config?.arithmeticConfig?.field1Path || ''}
+                                onChange={(e) => updateSource(index, {
+                                  computed_config: {
+                                    ...source.computed_config,
+                                    arithmeticConfig: {
+                                      ...source.computed_config?.arithmeticConfig,
+                                      field1Path: e.target.value
+                                    }
+                                  }
+                                })}
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-xs font-medium">End Date Field</Label>
+                              <Input
+                                placeholder="e.g., end_date"
+                                value={source.computed_config?.arithmeticConfig?.field2Path || ''}
+                                onChange={(e) => updateSource(index, {
+                                  computed_config: {
+                                    ...source.computed_config,
+                                    arithmeticConfig: {
+                                      ...source.computed_config?.arithmeticConfig,
+                                      field2Path: e.target.value
+                                    }
+                                  }
+                                })}
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-xs font-medium">Unit</Label>
+                              <Select
+                                value={source.computed_config?.arithmeticConfig?.unit || 'days'}
+                                onValueChange={(value) => updateSource(index, {
+                                  computed_config: {
+                                    ...source.computed_config,
+                                    arithmeticConfig: {
+                                      ...source.computed_config?.arithmeticConfig,
+                                      unit: value
+                                    }
+                                  }
+                                })}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select unit" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="days">Days</SelectItem>
+                                  <SelectItem value="months">Months</SelectItem>
+                                  <SelectItem value="years">Years</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
               )}
             </CardContent>
           </Card>
         )
       })}
-      <Button type="button" variant="outline" onClick={addSource} className="w-full border-dashed"><Plus className="mr-2 h-4 w-4"/> Add Source</Button>
+      <Button type="button" variant="outline" onClick={addSource} className="w-full border-dashed"><Plus className="mr-2 h-4 w-4" /> Add Source</Button>
     </div>
   )
 } 

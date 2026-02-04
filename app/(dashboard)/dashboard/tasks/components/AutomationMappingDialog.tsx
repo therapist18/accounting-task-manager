@@ -506,31 +506,18 @@ export const AutomationMappingDialog = ({
           const jobField = jobFields[mid];
           if (!jobField) return;
 
-          if (jobField.is_computed || jobField.computed_config?.is_computed) {
+          const computedSource = jobField.sources?.find((s: any) => s.is_computed === true);
+          if (computedSource) {
             const extractionMode = col.extractionMode || field.extractionMode || 'latest';
-            const config = jobField.computed_config || {};
-            (config.document_ids || []).forEach((did: string) => computedRequirements.documentIds.add(did));
+            (computedSource.document_id || []).forEach((did: string) => computedRequirements.documentIds.add(did));
             entityIds.forEach(id => {
               computedRequirements.individualIds.add(String(id));
-              computedMasterFields.push({ field: jobField, entityId: String(id), extractionMode });
-            });
-          }
-          else {
-            jobField.sources?.forEach((source: any) => {
-              if (source.table && entityIds.length > 0) {
-                let linkVar = source.linking_variable;
-                if (!linkVar) {
-                  if (source.table === 'acc_portal_directors_documents') linkVar = 'director_id';
-                  else if (source.table === 'acc_portal_company_documents') linkVar = 'company_id';
-                  else linkVar = 'id';
-                }
-
-                if (source.table === 'tm_tasks' && linkVar === 'id') {
-                  if (taskId) addToQueue('tm_tasks', 'id', String(taskId));
-                } else {
-                  entityIds.forEach(id => addToQueue(source.table, linkVar, String(id)));
-                }
-              }
+              computedMasterFields.push({ 
+                field: jobField, 
+                entityId: String(id), 
+                extractionMode,
+                computedSource // Pass the source config
+              });
             });
           }
         });
@@ -592,20 +579,24 @@ export const AutomationMappingDialog = ({
       if (computedMasterFields.length > 0) {
         const newComputedValues: Record<string, any> = {};
         for (const item of computedMasterFields) {
-          const { field, entityId, extractionMode } = item;
-          const config = field.computed_config || {};
-          const source = field.sources?.[0];
-
+          const { field, entityId, extractionMode, computedSource } = item;
+          
+          // CRITICAL FIX: If function is getLatestDocument but we have a path, use extractFieldFromLatestDocument instead
+          let functionToCall = computedSource.computed_function || 'extractFieldFromLatestDocument';
+          if (functionToCall === 'getLatestDocument' && computedSource.path) {
+            functionToCall = 'extractFieldFromLatestDocument';
+          }
+      
           const val = await executeComputedField(
-            config.computed_function || 'extractFieldFromLatestDocument',
+            functionToCall,
             entityId,
-            config.document_ids || [],
-            source?.path,
+            computedSource.document_id || [],
+            computedSource.path,
             extractionMode,
             documentCache,
-            config.arithmeticConfig
+            computedSource.computed_config?.arithmeticConfig
           );
-
+      
           newComputedValues[`${field.id}_${entityId}_${extractionMode}`] =
             (typeof val === 'object' && val !== null && !Array.isArray(val)) ? JSON.stringify(val) : val;
         }
@@ -677,8 +668,8 @@ export const AutomationMappingDialog = ({
     // --- STANDARD MASTER FIELD LOGIC ---
     const field = jobFields[fieldIdOrVariable];
     if (!field) return "Missing Config";
-
-    if (field.is_computed || field.computed_config?.is_computed) {
+    const hasComputedSource = field.sources?.some((s: any) => s.is_computed === true);
+    if (hasComputedSource) {
       const key = `${field.id}_${entityId}_${extractionMode}`;
       const val = masterFieldComputedValues[key];
       if (val === undefined) return "Computing...";

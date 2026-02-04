@@ -885,6 +885,44 @@ export async function extractCurrentJobDescription(
     }
 }
 
+/**
+ * NEW: Helper function to extract computation config from sources array
+ * Finds the first source with is_computed = true and returns its config
+ */
+async function getComputationConfigFromSources(fieldKey: string): Promise<{
+    computedFunction: string;
+    computedDocuments: string[];
+    fieldPath?: string;
+    arithmeticConfig?: any;
+    extractionMode?: 'latest' | 'all';
+} | null> {
+    try {
+        const fieldConfig = await getJobFieldDefinition(fieldKey);
+        if (!fieldConfig || !fieldConfig.sources || fieldConfig.sources.length === 0) {
+            return null;
+        }
+
+        // Find the first computed source (sorted by priority)
+        const sortedSources = [...fieldConfig.sources].sort((a, b) => (a.priority || 99) - (b.priority || 99));
+        const computedSource = sortedSources.find(source => source.is_computed === true);
+
+        if (!computedSource) {
+            return null;
+        }
+
+        return {
+            computedFunction: computedSource.computed_function || '',
+            computedDocuments: computedSource.document_id || [],
+            fieldPath: computedSource.path,
+            arithmeticConfig: computedSource.computed_config?.arithmeticConfig || {},
+            extractionMode: computedSource.computed_config?.extractionMode || 'latest'
+        };
+    } catch (error) {
+        console.error(`[Get Computation Config Error - ${fieldKey}]:`, error);
+        return null;
+    }
+}
+
 export async function executeComputedField(
     functionName: string,
     individualId: number | string,
@@ -894,7 +932,7 @@ export async function executeComputedField(
     cache?: DocumentCache,
     arithmeticConfig?: any,
     companyId?: string | number,
-    entityContext?: string  // NEW PARAMETER
+    entityContext?: string
 ): Promise<any> {
     const normalizedFunctionName = functionName.replace(/\(\)/g, '').trim();
 
@@ -937,10 +975,59 @@ export async function executeComputedField(
     }
 }
 
+/**
+ * NEW: Process computed fields by reading configuration from sources array
+ * This replaces the old approach of passing computedFieldsConfig directly
+ */
+export async function processComputedFieldsFromSources(
+    individualId: number | string,
+    fieldKeys: string[],
+    companyId?: string | number,
+    entityContext?: string
+): Promise<Record<string, string | string[]>> {
+    const results: Record<string, string | string[]> = {};
+    
+    for (const fieldKey of fieldKeys) {
+        try {
+            // Get computation config from sources
+            const config = await getComputationConfigFromSources(fieldKey);
+            
+            if (!config) {
+                results[fieldKey] = "No Computation Config";
+                continue;
+            }
+
+            // Execute the computed field
+            const value = await executeComputedField(
+                config.computedFunction,
+                individualId,
+                config.computedDocuments,
+                config.fieldPath,
+                config.extractionMode || 'latest',
+                undefined, // cache
+                config.arithmeticConfig,
+                companyId,
+                entityContext
+            );
+            
+            results[fieldKey] = value;
+        } catch (error) {
+            console.error(`[Process Computed Field Error - ${fieldKey}]:`, error);
+            results[fieldKey] = "Error";
+        }
+    }
+    
+    return results;
+}
+
+/**
+ * LEGACY: Kept for backward compatibility
+ * Use processComputedFieldsFromSources for new implementations
+ */
 export async function processComputedFields(
     individualId: number | string,
     computedFieldsConfig: any[],
-    companyId?: string | number // NEW PARAMETER
+    companyId?: string | number
 ): Promise<Record<string, string | string[]>> {
     const results: Record<string, string | string[]> = {};
     for (const config of computedFieldsConfig) {
@@ -953,7 +1040,7 @@ export async function processComputedFields(
                 config.extractionMode || 'latest',
                 config.cache,
                 config.arithmeticConfig,
-                companyId // Passed down
+                companyId
             );
             results[config.variableName] = value;
         } catch (error) {
