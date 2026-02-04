@@ -71,6 +71,7 @@ interface ExtractionPreviewProps {
   supabase?: any;
   onDownloadSuccess?: () => void;
   onDownloadError?: (error: Error) => void;
+  onDialogClose?: () => void;
 }
 
 // --- HELPER COMPONENTS MOVED OUTSIDE ---
@@ -212,6 +213,7 @@ export const ExtractionPreview = ({
   onDownloadSuccess,
   onDownloadError,
   onSave,
+  onDialogClose,
 }: ExtractionPreviewProps) => {
 
   const [isOpen, setIsOpen] = useState(expanded)
@@ -319,7 +321,15 @@ export const ExtractionPreview = ({
       };
       
       await onDelete(documentData);
+      
       toast.success('Document deleted successfully');
+      
+      // Close the dialog - use parent callback if available, otherwise internal state
+      if (onDialogClose) {
+        onDialogClose();
+      } else {
+        setIsOpen(false);
+      }
     } catch (error) {
       console.error('Error deleting document:', error);
       toast.error(error.message || 'Failed to delete document');

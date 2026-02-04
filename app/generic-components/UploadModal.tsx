@@ -499,7 +499,6 @@ export function UploadModal({
   companyAssetId,
   documentTypes,
   allowMultipleTypes = false,
-  // Table and field configuration
   targetTable = 'acc_portal_kyc_uploads',
   idFieldName = 'company_id',
   documentIdFieldName = 'kyc_document_id',
@@ -507,15 +506,6 @@ export function UploadModal({
   additionalFields = {},
   onBeforeUpload
 }: UploadModalProps) {
-  console.log('[UploadModal] Component props received:', {
-    entityId,
-    entityName,
-    selectedMember,
-    company,
-    isCompanyUpload
-  });
-    console.log('[UploadModal] Supabase import check:', supabase);
-  console.log('[UploadModal] Supabase storage available:', !!supabase?.storage);
   const [uploadedDocs, setUploadedDocs] = useState<Array<{
     id: string;
     file: File;
@@ -538,11 +528,6 @@ export function UploadModal({
   useEffect(() => {
     setCurrentDocumentName(documentName);
   }, [documentName]);
-
-  // Log when companyAssetId changes
-  useEffect(() => {
-    console.log('[UploadModal] companyAssetId prop:', companyAssetId);
-  }, [companyAssetId]);
   const [finalSelectedDoc, setFinalSelectedDoc] = useState(selectedDoc);
   const [validationDialog, setValidationDialog] = useState({
     isOpen: false,
