@@ -111,7 +111,7 @@ export const DocumentActions: React.FC<DocumentActionsProps> = ({
       if (showDeleteConfirmation) {
         setIsDeleteDialogOpen(false);
       }
-      toast.success('Document deleted successfully');
+      // Let the parent component handle success feedback
     } catch (error) {
       console.error('Error deleting document:', error);
       toast.error(error.message || 'Failed to delete document');

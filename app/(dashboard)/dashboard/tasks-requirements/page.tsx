@@ -231,6 +231,65 @@ const [internalStaff, setInternalStaff] = useState({ users: [], officers: [] });
     setStageUploadDialogOpen(true);
   };
 
+  const handleDeleteDocument = async (document: any) => {
+    if (!document?.id) {
+      toast({ title: 'Error', description: 'Document ID is required for deletion', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      // Determine which table to delete from based on document structure
+      const isCompanyDocument = document.company_id || document.kyc_document_id;
+      const tableName = isCompanyDocument ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents';
+      const idField = isCompanyDocument ? 'id' : 'id';
+
+      // Delete from storage bucket first
+      if (document.file_path) {
+        const { error: storageError } = await supabase.storage
+          .from('kyc-documents')
+          .remove([document.file_path]);
+
+        if (storageError) {
+          console.error('Storage delete error:', storageError);
+          toast({ 
+            title: 'Warning', 
+            description: 'Document deleted from database but failed to delete from storage', 
+            variant: 'destructive' 
+          });
+        }
+      }
+
+      // Delete from database
+      const { error } = await supabase
+        .from(tableName)
+        .delete()
+        .eq(idField, document.id);
+
+      if (error) {
+        console.error('Delete error:', error);
+        toast({ 
+          title: 'Error deleting document', 
+          description: error.message || 'Failed to delete document', 
+          variant: 'destructive' 
+        });
+        return;
+      }
+
+      toast({ title: 'Success', description: 'Document deleted successfully' });
+      
+      // Refresh tasks and stages to update the UI
+      await loadTasksAndStages(selectedDepartment, selectedSubdepartment);
+      
+    } catch (error) {
+      console.error('Unexpected error during deletion:', error);
+      toast({ 
+        title: 'Error', 
+        description: 'An unexpected error occurred while deleting the document', 
+        variant: 'destructive' 
+      });
+    }
+  };
+
   const handleNewEnquiryClick = () => {
     console.log('🔹 [handleNewEnquiryClick] Triggered');
     console.log('   [handleNewEnquiryClick] Selected Department ID:', selectedDepartment);
@@ -353,13 +412,13 @@ const [internalStaff, setInternalStaff] = useState({ users: [], officers: [] });
               </TabsList>
 
               <TabsContent value="enquiries">
-                <RequirementsTable tasks={enquiryTasks} loading={false} error={null} />
+                <RequirementsTable tasks={enquiryTasks} loading={false} error={null} handleDeleteDocument={handleDeleteDocument} />
               </TabsContent>
               <TabsContent value="wip">
-                <RequirementsTable tasks={wipTasks} loading={false} error={null} />
+                <RequirementsTable tasks={wipTasks} loading={false} error={null} handleDeleteDocument={handleDeleteDocument} />
               </TabsContent>
               <TabsContent value="completed">
-                <RequirementsTable tasks={completedTasks} loading={false} error={null} />
+                <RequirementsTable tasks={completedTasks} loading={false} error={null} handleDeleteDocument={handleDeleteDocument} />
               </TabsContent>
             </Tabs>
           ) : (

@@ -160,9 +160,7 @@ useEffect(() => {
       let query = supabase
         .from('acc_portal_templates')
         .select('*')
-        .in('document_id', docIds) // Use docIds here
-        // Logic: No bank association restriction
-        .or(`banks_associated.is.null,banks_associated.eq.[]`);
+        .in('document_id', docIds);
 
       // Logic: Must match the entity type
       if (entityFilters) {
