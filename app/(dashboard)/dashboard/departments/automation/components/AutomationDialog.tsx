@@ -51,7 +51,8 @@ import {
   ArrowRight,
   Eye,
   EyeOff,
-  HelpCircle
+  HelpCircle,
+  Zap
 } from "lucide-react"
 import * as z from "zod"
 import { useForm } from "react-hook-form"
@@ -1541,15 +1542,17 @@ function AddDataFieldDialog({
   onOpenBulkPaste,
   masterFields,
   kycDocuments,
-  jobQuestions
+  jobQuestions,
+  classRequirements,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAdd: (type: 'text' | 'document' | 'computed' | 'db' | 'job_question', data?: any) => void;
+  onAdd: (type: 'text' | 'document' | 'computed' | 'db' | 'job_question' | 'requirement', data?: any) => void;
   onOpenBulkPaste: () => void;
   masterFields: JobField[];
   kycDocuments: KYCDocument[];
   jobQuestions: any[];
+  classRequirements: any;
 }) {
   const [selectedTab, setSelectedTab] = useState("db");
   const [dbFieldOpen, setDbFieldOpen] = useState(false);
@@ -1558,6 +1561,8 @@ function AddDataFieldDialog({
   const [selectedDocuments, setSelectedDocuments] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [docSearchTerm, setDocSearchTerm] = useState("");
+  const [reqSearchTerm, setReqSearchTerm] = useState("");
+  const [selectedReqIds, setSelectedReqIds] = useState<string[]>([]);
 
   const filteredFields = masterFields.filter(field =>
     field.label.toLowerCase().includes(searchTerm.toLowerCase())
@@ -1567,9 +1572,21 @@ function AddDataFieldDialog({
     (doc.display_name || '').toLowerCase().includes(docSearchTerm.toLowerCase())
   );
 
+  const filteredRequirements = (classRequirements?.requirements || []).filter(req =>
+    req.name.toLowerCase().includes(reqSearchTerm.toLowerCase()) ||
+    req.category?.toLowerCase().includes(reqSearchTerm.toLowerCase())
+  );
+
+  const groupedRequirements = filteredRequirements.reduce((acc, req) => {
+    const category = req.category || 'General';
+    if (!acc[category]) acc[category] = [];
+    acc[category].push(req);
+    return acc;
+  }, {} as Record<string, any[]>);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[500px] p-0 gap-0 overflow-hidden">
+      <DialogContent className="max-w-[750px] p-0 gap-0 overflow-hidden">
         <DialogHeader className="px-6 py-4 border-b bg-slate-50/50">
           <DialogTitle>Add Data Field</DialogTitle>
           <DialogDescription>Select the type of data to map.</DialogDescription>
@@ -1579,7 +1596,8 @@ function AddDataFieldDialog({
           <TabsList className="w-full justify-start rounded-none border-b bg-white px-6 h-12 gap-6">
             <TabsTrigger value="db" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none h-full px-0">Database</TabsTrigger>
             <TabsTrigger value="doc" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-amber-500 rounded-none h-full px-0">Document</TabsTrigger>
-            <TabsTrigger value="job" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-amber-500 rounded-none h-full px-0">Job Question</TabsTrigger>
+            <TabsTrigger value="requirements" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-green-600 rounded-none h-full px-0">Requirements</TabsTrigger>
+            <TabsTrigger value="job" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-purple-600 rounded-none h-full px-0">Job Question</TabsTrigger>
             <TabsTrigger value="manual" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-slate-600 rounded-none h-full px-0">Manual / Computed</TabsTrigger>
           </TabsList>
 
@@ -1785,6 +1803,126 @@ function AddDataFieldDialog({
               </button>
             </TabsContent>
 
+            <TabsContent value="requirements" className="mt-0 space-y-4">
+              <div className="bg-green-50/50 p-3 rounded-lg border border-green-100 mb-4 flex gap-3">
+                <Shield className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-green-900">Map Mandatory Requirements</h4>
+                    <div className="flex gap-2">
+                      {filteredRequirements.length > 0 && (
+                        <Button 
+                          size="sm" 
+                          variant="ghost" 
+                          className="h-7 text-[11px] font-bold text-green-700 hover:bg-green-100 uppercase"
+                          onClick={() => {
+                            if (selectedReqIds.length === filteredRequirements.length) {
+                              setSelectedReqIds([]);
+                            } else {
+                              setSelectedReqIds(filteredRequirements.map(r => r.id));
+                            }
+                          }}
+                        >
+                          {selectedReqIds.length === filteredRequirements.length ? "Deselect All" : `Select All (${filteredRequirements.length})`}
+                        </Button>
+                      )}
+                      {selectedReqIds.length > 0 && (
+                        <Button 
+                          size="sm" 
+                          className="h-7 text-[11px] font-bold bg-green-600 hover:bg-green-700 text-white uppercase"
+                          onClick={() => {
+                            selectedReqIds.forEach(id => {
+                              const req = classRequirements.requirements.find(r => r.id === id);
+                              if (req) onAdd('requirement', req);
+                            });
+                            setSelectedReqIds([]);
+                          }}
+                        >
+                          Add Selected ({selectedReqIds.length})
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-xs text-green-700">Quickly add mandatory documents defined for this job level.</p>
+                </div>
+              </div>
+
+              <div className="relative mb-2">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <Input
+                  placeholder="Search requirements or categories..."
+                  className="pl-9 h-10 text-sm border-slate-200"
+                  value={reqSearchTerm}
+                  onChange={(e) => setReqSearchTerm(e.target.value)}
+                />
+              </div>
+
+              <ScrollArea className="h-[350px] border rounded-md bg-white">
+                {Object.keys(groupedRequirements).length === 0 ? (
+                  <div className="p-12 text-center text-slate-400">
+                    <Shield className="h-10 w-10 mx-auto mb-2 opacity-10" />
+                    <p>No requirements found matching your search.</p>
+                  </div>
+                ) : (
+                  <div className="p-2 space-y-4">
+                    {Object.entries(groupedRequirements).map(([category, reqs]) => (
+                      <div key={category} className="space-y-1.5">
+                        <div className="px-2 py-1 flex items-center justify-between">
+                          <Label className="text-[11px] font-extrabold text-slate-900 uppercase tracking-widest">{category}</Label>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="h-5 px-2 text-[9px] text-blue-600 hover:bg-blue-50"
+                            onClick={() => reqs.forEach(req => onAdd('requirement', req))}
+                          >
+                            Add Category
+                          </Button>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          {reqs.map(req => {
+                            const isSelected = selectedReqIds.includes(req.id);
+                            return (
+                              <div
+                                key={req.id}
+                                className={cn(
+                                  "p-3 bg-white border rounded-lg transition-all cursor-pointer group relative flex items-center gap-3",
+                                  isSelected ? "border-green-500 bg-green-50/30" : "border-slate-100 hover:border-green-300 hover:shadow-md hover:shadow-green-50"
+                                )}
+                                onClick={() => {
+                                  setSelectedReqIds(prev => 
+                                    prev.includes(req.id) 
+                                      ? prev.filter(id => id !== req.id) 
+                                      : [...prev, req.id]
+                                  );
+                                }}
+                              >
+                                <Checkbox 
+                                  checked={isSelected}
+                                  onCheckedChange={() => {}} // logic handled by parent div
+                                  className="data-[state=checked]:bg-green-600 data-[state=checked]:border-green-600"
+                                />
+                                <div className="h-8 w-8 rounded bg-green-50 text-green-600 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
+                                  <FileText className="h-4 w-4" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-sm font-semibold text-slate-800 truncate">{req.name}</div>
+                                  <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1.5">
+                                    <span className="bg-slate-100 px-1 rounded">{req.kyc_document_ids?.length || 0} Docs</span>
+                                    <span className="w-1 h-1 bg-slate-300 rounded-full" />
+                                    <span className="truncate">{req.applicantTypes?.join(', ')}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </ScrollArea>
+            </TabsContent>
+
             <TabsContent value="job" className="mt-0 space-y-4">
               <div className="bg-purple-50/50 p-3 rounded-lg border border-purple-100 mb-4 flex gap-3">
                 <HelpCircle className="h-5 w-5 text-purple-600 flex-shrink-0 mt-0.5" />
@@ -1862,6 +2000,7 @@ export function AutomationDialog({
   const [masterFields, setMasterFields] = useState<JobField[]>([])
   const [kycDocuments, setKycDocuments] = useState<KYCDocument[]>([])
  const [jobQuestions, setJobQuestions] = useState<any[]>([]);
+  const [classRequirements, setClassRequirements] = useState<any>(null);
   const [isAddFieldOpen, setIsAddFieldOpen] = useState(false)
   const [isBulkPasteOpen, setIsBulkPasteOpen] = useState(false)
   const [fieldSearch, setFieldSearch] = useState('')
@@ -1932,18 +2071,20 @@ export function AutomationDialog({
     if (initialData?.job_level) {
       const { data, error } = await supabase
         .from('tm_class_requirements')
-        .select('job_specific_questions')
+        .select('*')
         // Match the JSON object exactly
         .eq('job_level', JSON.stringify(initialData.job_level))
         .maybeSingle();
 
       if (error) {
-        console.error("Error fetching contextual questions:", error);
+        console.error("Error fetching contextual requirements:", error);
       } else {
         setJobQuestions(data?.job_specific_questions || []);
+        setClassRequirements(data || null);
       }
     } else {
       setJobQuestions([]);
+      setClassRequirements(null);
     }
   };
 
@@ -2171,7 +2312,7 @@ export function AutomationDialog({
     }
   };
 
-  const handleAddData = (type: 'text' | 'document' | 'computed' | 'db' | 'job_question', data?: any) => {
+  const handleAddData = (type: 'text' | 'document' | 'computed' | 'db' | 'job_question' | 'requirement', data?: any) => {
     if (type === 'db' && data) {
       setWebDataGroups(prev => [...prev, {
         id: crypto.randomUUID(),
@@ -2203,6 +2344,18 @@ export function AutomationDialog({
         fieldType: 'text',
         entityTypes: ['principal'],
         linkedMasterFields: [],
+        linkedJobQuestionId: data.id
+      }]);
+    } else if (type === 'requirement' && data) {
+      setWebDataGroups(prev => [...prev, {
+        id: crypto.randomUUID(),
+        efnsDisplayName: formatDisplayName(data.name),
+        variableName: formatVariableName(data.name),
+        fieldType: 'document',
+        entityTypes: (data.applicantTypes && data.applicantTypes.length > 0) ? data.applicantTypes : ['principal'],
+        linkedMasterFields: [],
+        linkedKycDocuments: data.kyc_document_ids || [],
+        documentLogic: 'merge',
         linkedJobQuestionId: data.id
       }]);
     } else {
@@ -2313,6 +2466,16 @@ export function AutomationDialog({
                     <Badge className={cn("ml-1 h-4 px-1 rounded text-[9px]", activeTab === 'webdata' ? "bg-blue-100 text-blue-700 hover:bg-blue-200" : "bg-slate-200 text-slate-600")}>
                       {webDataGroups.length}
                     </Badge>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('requirements')}
+                    className={cn(
+                      "px-6 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2",
+                      activeTab === 'requirements' ? "bg-white shadow-sm text-blue-700" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50"
+                    )}
+                  >
+                    <Shield className="h-3.5 w-3.5" /> Requirements
                   </button>
                 </div>
               </div>
@@ -2753,6 +2916,124 @@ export function AutomationDialog({
                     </div>
                   </div>
                 )}
+
+                {activeTab === 'requirements' && (
+                  <ScrollArea className="h-full">
+                    <div className="p-8 mx-auto space-y-6">
+                      {!classRequirements ? (
+                        <div className="flex flex-col items-center justify-center p-12 text-slate-400 bg-white rounded-xl border border-dashed">
+                          <AlertCircle className="h-10 w-10 mb-4 opacity-20" />
+                          <p className="text-lg font-medium">No Class Requirements Linked</p>
+                          <p className="text-sm">This automation dose not have a specific job level defined yet.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-6">
+                          <Card className="border-none shadow-sm ring-1 ring-slate-200">
+                            <CardHeader className="pb-4 border-b bg-slate-50/50">
+                              <CardTitle className="font-bold flex items-center gap-2">
+                                <Shield className="h-6 w-6 text-green-500" /> Mandatory Documents
+                              </CardTitle>
+                            </CardHeader>
+                            <CardContent className="p-0">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow className="bg-slate-50/50">
+                                    <TableHead className="w-[300px] text-xs font-bold uppercase">Requirement</TableHead>
+                                    <TableHead className="text-xs font-bold uppercase">Applies To</TableHead>
+                                    <TableHead className="text-xs font-bold uppercase">Document Type</TableHead>
+                                    <TableHead className="text-xs font-bold uppercase">Automation</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {(classRequirements.requirements || []).length === 0 ? (
+                                    <TableRow>
+                                      <TableCell colSpan={4} className="text-center py-8 text-slate-400">No specific requirements defined.</TableCell>
+                                    </TableRow>
+                                  ) : (
+                                    classRequirements.requirements.map((req, idx) => (
+                                      <TableRow key={idx}>
+                                        <TableCell className="font-medium text-slate-700">{req.name}</TableCell>
+                                        <TableCell>
+                                          <div className="flex flex-wrap gap-1">
+                                            {(req.applicantTypes || []).map(t => (
+                                              <Badge key={t} variant="outline" className="text-[10px] capitalize bg-blue-50/50 border-blue-100 text-blue-700">{t}</Badge>
+                                            ))}
+                                          </div>
+                                        </TableCell>
+                                        <TableCell>
+                                          <div className="flex flex-col gap-1">
+                                            {(req.kyc_document_ids || []).map(id => {
+                                              const doc = kycDocuments.find(d => d.id === id);
+                                              return (
+                                                <div key={id} className="flex items-center gap-2 text-xs text-slate-600">
+                                                  <FileText className="h-3 w-3 text-amber-500" />
+                                                  {doc?.display_name || doc?.name || id}
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        </TableCell>
+                                        <TableCell>
+                                          {req.web_automation?.automationId ? (
+                                            <Badge className="bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200">
+                                              <Zap className="h-3 w-3 mr-1" /> Linked
+                                            </Badge>
+                                          ) : (
+                                            <span className="text-slate-300">-</span>
+                                          )}
+                                        </TableCell>
+                                      </TableRow>
+                                    ))
+                                  )}
+                                </TableBody>
+                              </Table>
+                            </CardContent>
+                          </Card>
+
+                          {classRequirements.job_specific_questions && classRequirements.job_specific_questions.length > 0 && (
+                            <Card className="border-none shadow-sm ring-1 ring-slate-200">
+                              <CardHeader className="pb-4 border-b bg-slate-50/50">
+                                <CardTitle className="font-bold flex items-center gap-2">
+                                  <HelpCircle className="h-6 w-6 text-purple-500" /> Job Specific Questions
+                                </CardTitle>
+                              </CardHeader>
+                              <CardContent className="p-0">
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow className="bg-slate-50/50">
+                                      <TableHead className="text-xs font-bold uppercase">Question Label</TableHead>
+                                      <TableHead className="text-xs font-bold uppercase w-[150px]">Type</TableHead>
+                                      <TableHead className="text-xs font-bold uppercase">Options</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {classRequirements.job_specific_questions.map((q, idx) => (
+                                      <TableRow key={idx}>
+                                        <TableCell className="font-medium text-slate-700">{q.label}</TableCell>
+                                        <TableCell>
+                                          <Badge variant="secondary" className="capitalize text-[10px]">{q.type}</Badge>
+                                        </TableCell>
+                                        <TableCell className="text-slate-500">
+                                          {q.options && q.options.length > 0 ? (
+                                            <div className="flex flex-wrap gap-1">
+                                              {q.options.map((opt, i) => (
+                                                <Badge key={i} variant="outline" className="text-[9px] border-slate-200">{opt}</Badge>
+                                              ))}
+                                            </div>
+                                          ) : "-"}
+                                        </TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              </CardContent>
+                            </Card>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </ScrollArea>
+                )}
               </div>
 
               <DialogFooter className="px-6 py-4 bg-white border-t flex-shrink-0 z-20">
@@ -2817,6 +3098,7 @@ export function AutomationDialog({
         masterFields={masterFields}
         kycDocuments={kycDocuments}
         jobQuestions={jobQuestions}
+        classRequirements={classRequirements}
       />
 
       {/* Bulk Paste Fields Dialog */}
