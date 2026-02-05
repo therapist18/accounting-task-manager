@@ -507,9 +507,18 @@ export async function getLatestDocumentStartDate(individualId: string | number, 
 }
 
 export async function determineImmigrationStatus(individualId: string | number, computedDocuments: string[], cache?: DocumentCache): Promise<string> {
+    console.log(`[Immigration Status] === START determineImmigrationStatus ===`);
+    console.log(`[Immigration Status] Individual: ${individualId}`);
+    console.log(`[Immigration Status] Documents: ${computedDocuments?.join(', ')}`);
+    
     try {
         const { docs, types } = await fetchDocsAndTypes(individualId, computedDocuments, cache);
-        if (docs.length === 0) return "No Status Doc";
+        console.log(`[Immigration Status] Found ${docs.length} documents and ${types.length} types`);
+        
+        if (docs.length === 0) {
+            console.log(`[Immigration Status] No documents found, returning "No Status Doc"`);
+            return "No Status Doc";
+        }
         
         const sorted = docs.map(doc => {
             const type = types.find((t: any) => t.id === doc.document_id);
@@ -547,7 +556,30 @@ export async function determineImmigrationStatus(individualId: string | number, 
         const now = new Date();
         const details = current.details;
         
-        // PRIORITY 1: Extract permit/pass type from extracted_details
+        console.log(`[Immigration Status] Latest document ID: ${current.doc.id}`);
+        console.log(`[Immigration Status] Document document_id: ${current.doc.document_id}`);
+        console.log(`[Immigration Status] Document type:`, current.type);
+        
+        // PRIORITY 1: Use immigration_status from document type definition (from acc_portal_kyc)
+        let typeBasedStatus = null;
+        const immigrationStatus = current.type?.immigration_status;
+        
+        console.log(`[Immigration Status] Raw immigration_status from KYC:`, immigrationStatus);
+        
+        if (typeof immigrationStatus === 'string') {
+            typeBasedStatus = immigrationStatus;
+            console.log(`[Immigration Status] Using string immigration_status: ${typeBasedStatus}`);
+        } else if (typeof immigrationStatus === 'object' && immigrationStatus !== null) {
+            if ('en' in immigrationStatus) {
+                typeBasedStatus = String(immigrationStatus.en);
+                console.log(`[Immigration Status] Using immigration_status.en: ${typeBasedStatus}`);
+            } else if ('name' in immigrationStatus) {
+                typeBasedStatus = String(immigrationStatus.name);
+                console.log(`[Immigration Status] Using immigration_status.name: ${typeBasedStatus}`);
+            }
+        }
+        
+        // PRIORITY 2: Extract permit/pass type from extracted_details (fallback)
         const permitTypeFieldNames = [
             'Permit_Type', 'permit_type', 'PermitType',
             'Pass_Type', 'pass_type', 'PassType',
@@ -564,29 +596,16 @@ export async function determineImmigrationStatus(individualId: string | number, 
             }
         }
         
-        // PRIORITY 2: Use the immigration_status from the document type definition
-        let typeBasedStatus = null;
-        const immigrationStatus = current.type?.immigration_status;
-        
-        if (typeof immigrationStatus === 'string') {
-            typeBasedStatus = immigrationStatus;
-        } else if (typeof immigrationStatus === 'object' && immigrationStatus !== null) {
-            if ('en' in immigrationStatus) {
-                typeBasedStatus = String(immigrationStatus.en);
-            } else if ('name' in immigrationStatus) {
-                typeBasedStatus = String(immigrationStatus.name);
-            }
-        }
-        
         // PRIORITY 3: Use document type name as fallback
         const fallbackStatus = current.type?.name || current.type?.id || "Unknown Status";
         
-        // Determine final status (prefer extracted permit type if available)
-        const finalStatus = extractedPermitType || typeBasedStatus || fallbackStatus;
+        // Determine final status (prefer KYC immigration_status first, then extracted permit type)
+        const finalStatus = typeBasedStatus || extractedPermitType || fallbackStatus;
+        console.log(`[Immigration Status] Final status: ${finalStatus}`);
         
         // Check if expired
         if (current.expiryDate.getTime() > 0 && current.expiryDate < now) {
-            return `${finalStatus} (Expired)`;
+            return `${finalStatus}`;
         }
 
         return finalStatus;
@@ -1061,8 +1080,7 @@ export async function executeComputedField(
     console.log(`[ExecuteComputedField] Executing function: ${normalizedFunctionName} with path: ${fieldPath}`);
 
     // Handle extractFieldFromLatestDocument specifically
-    if (normalizedFunctionName === 'extractFieldFromLatestDocument' || 
-        (fieldPath && !arithmeticConfig)) {
+    if (normalizedFunctionName === 'extractFieldFromLatestDocument') {
         if (extractionMode === 'all') {
             return await extractFieldFromAllDocuments(individualId, computedDocuments, fieldPath || '', cache);
         } else {

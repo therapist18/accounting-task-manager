@@ -68,41 +68,28 @@ const parseJsonValue = (data: any, path: string, extractionMode?: 'latest' | 'al
     const jsonPath = parts[2].trim().replace(/['"]/g, '');
     const jsonData = data[column];
 
-    console.log(`[parseJsonValue] Column: ${column}, JSONPath: ${jsonPath}, Data exists: ${!!jsonData}, ExtractionMode: ${extractionMode || 'all'}`);
-
     if (jsonData === undefined || jsonData === null) return undefined;
 
     // Handle array syntax like associations[].field
     if (jsonPath.includes('[]')) {
-      console.log(`[parseJsonValue] Processing array path: ${jsonPath}`);
       const [arrayPath, ...fieldPathParts] = jsonPath.split('[]');
       const fieldPath = fieldPathParts.join('').replace(/^\./, ''); // Remove leading dot
-      console.log(`[parseJsonValue] ArrayPath: ${arrayPath}, FieldPath: ${fieldPath}`);
 
       const arrayData = arrayPath.split('.').reduce((acc, key) => {
         if (key === '' || key === '[]') return acc;
-        console.log(`[parseJsonValue] Navigating to key: ${key}, Current:`, acc);
         return (acc && typeof acc === 'object') ? acc[key] : undefined;
       }, jsonData);
-
-      console.log(`[parseJsonValue] ArrayData:`, arrayData);
 
       if (Array.isArray(arrayData)) {
         if (fieldPath) {
           // Extract the field from all array items
           const values = arrayData.map((item, index) => {
             const value = fieldPath.split('.').reduce((acc, key) => (acc && typeof acc === 'object') ? acc[key] : undefined, item);
-            console.log(`[parseJsonValue] Item ${index} field "${fieldPath}":`, value);
             return { value, item, index };
           }).filter(({ value }) => value !== undefined && value !== null && value !== '');
-
-          console.log(`[parseJsonValue] Filtered values:`, values.map(v => v.value));
-
-          // If extraction mode is 'latest' and we have date fields, filter to get the latest
           if (extractionMode === 'latest' && values.length > 1) {
             // Try to find date fields for sorting
             const sortedValues = sortArrayItemsByDate(values, fieldPath);
-            console.log(`[parseJsonValue] Sorted values for latest mode:`, sortedValues.map(v => v.value));
             return sortedValues.length > 0 ? String(sortedValues[0].value) : undefined;
           }
 
@@ -1941,9 +1928,7 @@ export const AutomationMappingDialog = ({
                                     .replace('job[]', 'job');   // Flatten the job[] template to job object
 
                                   finalPath = column ? `${column}->>${resolvedJsonPath}` : resolvedJsonPath;
-
-                                  console.log(`[Persistence] Targeted Index: ${assocIdx} | Entity: ${targetRegistryType} | Path: ${finalPath}`);
-                                }
+   }
                               }
 
                               startEditing(

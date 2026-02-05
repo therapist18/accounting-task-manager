@@ -1209,6 +1209,25 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
         }
     }, [isOpen, selectedTemplate, entityIdMap]);
 
+    const groupedPlaceholders = useMemo(() => {
+        if (!selectedTemplate?.placeholders) return { topLevel: [], blocks: {} };
+
+        const topLevel = [];
+        const blocks = {};
+
+        selectedTemplate.placeholders.forEach(p => {
+            if (p.is_block_start) {
+                blocks[p.name] = { config: p, children: [] };
+            } else if (p.parent_name && blocks[p.parent_name]) {
+                blocks[p.parent_name].children.push(p);
+            } else if (!p.parent_name) {
+                topLevel.push(p);
+            }
+        });
+
+        return { topLevel, blocks };
+    }, [selectedTemplate]);
+    
     const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) => {
         const conflicts: Array<{
             field: string;
@@ -1216,6 +1235,8 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
             liveValue: any;
             source: string;
         }> = [];
+
+        // Check top-level placeholders
         selectedTemplate?.placeholders?.forEach(placeholder => {
             const fieldName = placeholder.name;
             const draftValue = draftFormData[fieldName];
@@ -1236,11 +1257,48 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                 });
             }
         });
+
+        // Check array items fields
+        Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
+            const draftArray = draftFormData[blockName] || [];
+            const liveArray = liveFormData[blockName] || [];
+            const children = groupedPlaceholders.blocks[blockName].children;
+
+            // Check each row in the array
+            const maxRows = Math.max(draftArray.length, liveArray.length);
+            for (let i = 0; i < maxRows; i++) {
+                const draftRow = draftArray[i] || {};
+                const liveRow = liveArray[i] || {};
+
+                children.forEach(child => {
+                    const fieldName = `${blockName}[${i}].${child.name}`;
+                    const draftValue = draftRow[child.name];
+                    const liveValue = liveRow[child.name];
+
+                    if (!draftValue && !liveValue) return;
+                    const draftStr = typeof draftValue === 'object'
+                        ? JSON.stringify(draftValue)
+                        : String(draftValue || '');
+                    const liveStr = typeof liveValue === 'object'
+                        ? JSON.stringify(liveValue)
+                        : String(liveValue || '');
+                    if (liveValue && draftStr !== liveStr) {
+                        conflicts.push({
+                            field: fieldName,
+                            draftValue,
+                            liveValue,
+                            source: 'Database'
+                        });
+                    }
+                });
+            }
+        });
+
         setDataConflicts(conflicts);
         setShowConflictBanner(conflicts.length > 0);
 
         return conflicts;
-    }, [selectedTemplate]);
+    }, [selectedTemplate, groupedPlaceholders]);
 
     const parseDraftAndPopulateForm = useCallback(async (draft: any) => {
         try {
@@ -1275,6 +1333,26 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                                 liveData[p.name] = smartMatch.value;
                                 liveAutoMap.set(p.name, smartMatch.source);
                             }
+                        }
+                    });
+                    
+                    // Generate live data for array items fields
+                    Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
+                        const blockConfig = groupedPlaceholders.blocks[blockName].config;
+                        const children = groupedPlaceholders.blocks[blockName].children;
+                        const resolvedArray = resolveArrayData(
+                            blockConfig,
+                            selectedTemplate.placeholders,
+                            combinedCache,
+                            masterFields,
+                            entityIdMap,
+                            relationshipData,
+                            extractedData,
+                            companyData
+                        );
+                        
+                        if (resolvedArray.length > 0) {
+                            liveData[blockName] = resolvedArray;
                         }
                     });
                     const conflicts = await detectDataConflicts(draftFormData, liveData);
@@ -1358,25 +1436,6 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
             loadExistingDraft();
         }
     }, [isOpen, selectedTemplate?.id, entityIdMap]);
-
-    const groupedPlaceholders = useMemo(() => {
-        if (!selectedTemplate?.placeholders) return { topLevel: [], blocks: {} };
-
-        const topLevel = [];
-        const blocks = {};
-
-        selectedTemplate.placeholders.forEach(p => {
-            if (p.is_block_start) {
-                blocks[p.name] = { config: p, children: [] };
-            } else if (p.parent_name && blocks[p.parent_name]) {
-                blocks[p.parent_name].children.push(p);
-            } else if (!p.parent_name) {
-                topLevel.push(p);
-            }
-        });
-
-        return { topLevel, blocks };
-    }, [selectedTemplate]);
 
     const combinedCache = useMemo(() => ({
         ...sourceDataCache,
@@ -2651,14 +2710,20 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
             const isCompany = applicantType.toLowerCase() === 'company';
             const targetTable = isCompany ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents';
             const kycDocId = template?.document_id;
+
             const draftMetadata = {
                 formData: formData,
                 imageStyles: imageStyles,
                 savedAt: new Date().toISOString(),
                 templateId: selectedTemplate?.id,
                 documentName: documentName,
-                version: 1
+                version: 1,
+                arrayFields: Object.keys(formData).filter(key => 
+                    Array.isArray(formData[key]) && 
+                    formData[key].some(item => typeof item === 'object' && item !== null)
+                )
             };
+
             const insertPayload = {
                 file_path: null,
                 file_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

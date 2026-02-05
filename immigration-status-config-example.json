@@ -1,0 +1,16 @@
+{
+  "fieldType": "computed",
+  "label": "Immigration Status",
+  "field_key": "immigration_status",
+  "computedFunction": "determineImmigrationStatus",
+  "computedDocuments": [
+    "a7a51bf5-606e-4a8d-abc6-ecbfaed50b32",
+    "9b5145d0-da13-4e84-9e67-50fbb7570ab6", 
+    "7d273114-abb9-423c-a05d-fd655542a889",
+    "773a3a84-13cd-48df-8902-858945d9d9ee",
+    "a78f26f2-8c89-4ef3-a7d6-f953e27c5eee",
+    "2c74c6c6-0764-4ba0-abaa-dcd1de203b28"
+  ],
+  "type": "text",
+  "is_required": false
+}
