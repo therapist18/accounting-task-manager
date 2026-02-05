@@ -1,3 +1,5 @@
+// --- START OF FILE Paste February 05, 2026 - 8:34AM ---
+
 // @ts-nocheck
 "use client"
 
@@ -38,7 +40,7 @@ import {
 } from "@/components/ui/popover"
 import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { getComputedFunction, COMPUTED_FUNCTIONS } from "@/lib/constants/computed-functions"
+import * as ComputedConstants from "@/lib/constants/computed-functions"
 
 interface JsonbArrayConfig {
   fields: Array<{ id: string; name: string; type: string; parentField: string }>
@@ -68,8 +70,11 @@ export type SourceCardState = {
       operation?: string
       field1Path?: string
       field2Path?: string
-      operand?: number
+    }
+    dateDiffConfig?: {
       unit?: string
+      startDatePath?: string
+      endDatePath?: string
     }
   }
 }
@@ -83,6 +88,7 @@ interface DataSourceConfigurationProps {
   fetchFieldsForTable?: (tableName: string, index?: number) => void
   getFieldsForTable?: (tableName: string, index?: number) => TableColumn[]
   getLoadingForTable?: (tableName: string, index?: number) => boolean
+  masterFields?: Array<{ id: string; label: string; field_key: string }>
 }
 
 // --- 1. MultiSelect Component ---
@@ -90,10 +96,16 @@ function MultiSelectBox({ options, selectedValues, onChange, placeholder = "Sele
   const [open, setOpen] = useState(false)
 
   const handleSelect = (value: string) => {
-    if (selectedValues.includes(value)) onChange(selectedValues.filter((item: string) => item !== value))
-    else onChange([...selectedValues, value])
+    if (selectedValues.includes(value)) {
+      onChange(selectedValues.filter((item: any) => item !== value))
+    } else {
+      onChange([...selectedValues, value])
+    }
   }
-  const handleRemove = (value: string) => onChange(selectedValues.filter((item: string) => item !== value))
+
+  const handleRemove = (value: string) => {
+    onChange(selectedValues.filter((item: any) => item !== value))
+  }
 
   return (
     <div className="space-y-2">
@@ -144,6 +156,9 @@ function MultiSelectBox({ options, selectedValues, onChange, placeholder = "Sele
 
 // --- 2. SearchableSelect Component ---
 function SearchableSelect({ value, onValueChange, options, placeholder = "Select...", searchPlaceholder = "Search...", loading = false, emptyMessage = "No results found." }: any) {
+  // ... (SearchableSelect implementation remains the same)
+  // ... (rest of SearchableSelect implementation)
+  // ... (SearchableSelect implementation remains the same)
   const [open, setOpen] = useState(false)
 
   // Find label from options to display in the closed button
@@ -260,7 +275,8 @@ export function DataSourceConfiguration({
   loadingTables = false,
   fetchFieldsForTable,
   getFieldsForTable,
-  getLoadingForTable
+  getLoadingForTable,
+  masterFields = []
 }: DataSourceConfigurationProps) {
 
   // Watcher - fetch fields when tables change
@@ -503,12 +519,19 @@ export function DataSourceConfiguration({
                       <Select
                         value={source.computed_function || ''}
                         onValueChange={(value) => {
-                          const func = getComputedFunction(value);
+                          // FIXED: Use namespace import for getComputedFunction
+                          const func = ComputedConstants.getComputedFunction(value);
+                          const newConfig: any = {};
+
+                          if (func?.value === 'calculateArithmetic') {
+                            newConfig.arithmeticConfig = {};
+                          } else if (func?.value === 'calculateDateDifference') {
+                            newConfig.dateDiffConfig = {};
+                          }
+
                           updateSource(index, {
                             computed_function: value,
-                            computed_config: func?.value === 'calculateArithmetic' || func?.value === 'calculateDateDifference' 
-                              ? { arithmeticConfig: {} }
-                              : {}
+                            computed_config: newConfig
                           });
                         }}
                       >
@@ -516,10 +539,10 @@ export function DataSourceConfiguration({
                           <SelectValue placeholder="Select a function" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="none">Select a function</SelectItem>
-                          {COMPUTED_FUNCTIONS.map((func) => (
-                            <SelectItem 
-                              key={func.value} 
+                          {/* FIXED: Use namespace import for COMPUTED_FUNCTIONS */}
+                          {ComputedConstants.COMPUTED_FUNCTIONS.map((func) => (
+                            <SelectItem
+                              key={func.value}
                               value={func.value}
                               className="flex flex-col items-start"
                             >
@@ -535,105 +558,134 @@ export function DataSourceConfiguration({
                       </Select>
                     </div>
 
-                    {source.computed_function && (
-                      <div className="space-y-2">
-                        {['add', 'subtract', 'multiply', 'divide'].includes(source.computed_function) && (
-                          <>
-                            <div>
-                              <Label className="text-xs font-medium">First Field</Label>
-                              <Input
-                                placeholder="e.g., amount"
-                                value={source.computed_config?.arithmeticConfig?.field1Path || ''}
-                                onChange={(e) => updateSource(index, {
-                                  computed_config: {
-                                    ...source.computed_config,
-                                    arithmeticConfig: {
-                                      ...source.computed_config?.arithmeticConfig,
-                                      field1Path: e.target.value
-                                    }
-                                  }
-                                })}
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-xs font-medium">Second Field or Value</Label>
-                              <Input
-                                placeholder="e.g., tax or 0.2"
-                                value={source.computed_config?.arithmeticConfig?.field2Path || ''}
-                                onChange={(e) => updateSource(index, {
-                                  computed_config: {
-                                    ...source.computed_config,
-                                    arithmeticConfig: {
-                                      ...source.computed_config?.arithmeticConfig,
-                                      field2Path: e.target.value
-                                    }
-                                  }
-                                })}
-                              />
-                            </div>
-                          </>
-                        )}
+                    {source.computed_function === 'calculateArithmetic' && (
+                      <div className="space-y-3 pt-3 border-t border-purple-200">
+                        <Label className="text-xs font-bold text-purple-900 uppercase">Arithmetic Configuration</Label>
+                        <Select
+                          value={source.computed_config?.arithmeticConfig?.operation || ""}
+                          onValueChange={(v) => updateSource(index, {
+                            computed_config: {
+                              ...source.computed_config,
+                              arithmeticConfig: {
+                                ...source.computed_config?.arithmeticConfig,
+                                operation: v
+                              }
+                            }
+                          })}
+                        >
+                          <SelectTrigger className="bg-white">
+                            <SelectValue placeholder="Select operation" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ComputedConstants.ARITHMETIC_OPERATIONS.map(op => (
+                              <SelectItem key={`${source.id}-${op.value}`} value={op.value}>{op.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
 
-                        {source.computed_function === 'date_diff' && (
-                          <>
-                            <div>
-                              <Label className="text-xs font-medium">Start Date Field</Label>
-                              <Input
-                                placeholder="e.g., start_date"
-                                value={source.computed_config?.arithmeticConfig?.field1Path || ''}
-                                onChange={(e) => updateSource(index, {
-                                  computed_config: {
-                                    ...source.computed_config,
-                                    arithmeticConfig: {
-                                      ...source.computed_config?.arithmeticConfig,
-                                      field1Path: e.target.value
-                                    }
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-2">
+                            <Label className="text-[10px] font-bold uppercase text-purple-700">Field 1 Path</Label>
+                            <SearchableSelect
+                              value={source.computed_config?.arithmeticConfig?.field1Path || ""}
+                              onValueChange={(v: any) => updateSource(index, {
+                                computed_config: {
+                                  ...source.computed_config,
+                                  arithmeticConfig: {
+                                    ...source.computed_config?.arithmeticConfig,
+                                    field1Path: v
                                   }
-                                })}
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-xs font-medium">End Date Field</Label>
-                              <Input
-                                placeholder="e.g., end_date"
-                                value={source.computed_config?.arithmeticConfig?.field2Path || ''}
-                                onChange={(e) => updateSource(index, {
-                                  computed_config: {
-                                    ...source.computed_config,
-                                    arithmeticConfig: {
-                                      ...source.computed_config?.arithmeticConfig,
-                                      field2Path: e.target.value
-                                    }
+                                }
+                              })}
+                              options={masterFields.map(f => ({ label: f.label, value: f.field_key }))}
+                              placeholder="Select Field 1"
+                              searchPlaceholder="Search master fields..."
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-[10px] font-bold uppercase text-purple-700">Field 2 Path</Label>
+                            <SearchableSelect
+                              value={source.computed_config?.arithmeticConfig?.field2Path || ""}
+                              onValueChange={(v: any) => updateSource(index, {
+                                computed_config: {
+                                  ...source.computed_config,
+                                  arithmeticConfig: {
+                                    ...source.computed_config?.arithmeticConfig,
+                                    field2Path: v
                                   }
-                                })}
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-xs font-medium">Unit</Label>
-                              <Select
-                                value={source.computed_config?.arithmeticConfig?.unit || 'days'}
-                                onValueChange={(value) => updateSource(index, {
-                                  computed_config: {
-                                    ...source.computed_config,
-                                    arithmeticConfig: {
-                                      ...source.computed_config?.arithmeticConfig,
-                                      unit: value
-                                    }
-                                  }
-                                })}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select unit" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="days">Days</SelectItem>
-                                  <SelectItem value="months">Months</SelectItem>
-                                  <SelectItem value="years">Years</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </>
-                        )}
+                                }
+                              })}
+                              options={masterFields.map(f => ({ label: f.label, value: f.field_key }))}
+                              placeholder="Select Field 2"
+                              searchPlaceholder="Search master fields..."
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {source.computed_function === 'calculateDateDifference' && (
+                      <div className="space-y-3 pt-3 border-t border-purple-200">
+                        <Label className="text-xs font-bold text-purple-900 uppercase">Date Difference Configuration</Label>
+                        <Select
+                          value={source.computed_config?.dateDiffConfig?.unit || ""}
+                          onValueChange={(v) => updateSource(index, {
+                            computed_config: {
+                              ...source.computed_config,
+                              dateDiffConfig: {
+                                ...source.computed_config?.dateDiffConfig,
+                                unit: v
+                              }
+                            }
+                          })}
+                        >
+                          <SelectTrigger className="bg-white">
+                            <SelectValue placeholder="Select unit" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ComputedConstants.DATE_DIFF_UNITS.map(unit => (
+                              <SelectItem key={`${source.id}-${unit.value}`} value={unit.value}>{unit.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                       <div className="flex justify-between">
+                         <div className="space-y-2">
+                          <Label className="text-[10px] font-bold uppercase text-purple-700">Start Date Path</Label>
+                          <SearchableSelect
+                            value={source.computed_config?.dateDiffConfig?.startDatePath || ""}
+                            onValueChange={(v: any) => updateSource(index, {
+                              computed_config: {
+                                ...source.computed_config,
+                                dateDiffConfig: {
+                                  ...source.computed_config?.dateDiffConfig,
+                                  startDatePath: v
+                                }
+                              }
+                            })}
+                            options={masterFields.map(f => ({ label: f.label, value: f.field_key }))}
+                            placeholder="Select Start Date Field"
+                            searchPlaceholder="Search master fields..."
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-[10px] font-bold uppercase text-purple-700">End Date Path</Label>
+                          <SearchableSelect
+                            value={source.computed_config?.dateDiffConfig?.endDatePath || ""}
+                            onValueChange={(v: any) => updateSource(index, {
+                              computed_config: {
+                                ...source.computed_config,
+                                dateDiffConfig: {
+                                  ...source.computed_config?.dateDiffConfig,
+                                  endDatePath: v
+                                }
+                              }
+                            })}
+                            options={masterFields.map(f => ({ label: f.label, value: f.field_key }))}
+                            placeholder="Select End Date Field"
+                            searchPlaceholder="Search master fields..."
+                          />
+                        </div>
+                       </div>
                       </div>
                     )}
                   </div>
@@ -646,4 +698,4 @@ export function DataSourceConfiguration({
       <Button type="button" variant="outline" onClick={addSource} className="w-full border-dashed"><Plus className="mr-2 h-4 w-4" /> Add Source</Button>
     </div>
   )
-} 
+}

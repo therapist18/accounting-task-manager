@@ -113,9 +113,12 @@ const DocumentPreview = ({ fileUrl, fileName, documentName }) => {
     setRotation(0);
   };
 
+  // Only reset when fileUrl actually changes, not on every render
   useEffect(() => {
-    handleReset();
-  }, [fileUrl]);
+    if (fileUrl) {
+      handleReset();
+    }
+  }, [fileUrl]); // This is fine as long as fileUrl is stable
 
   const displayUrl = fileUrl?.startsWith('blob:')
     ? fileUrl
@@ -290,13 +293,31 @@ export const ExtractionPreview = ({
   }, [extractedData, fields]);
 
   useEffect(() => {
-    setLocalData(prevData => ({
-      ...prevData,
-      ...Object.fromEntries(
-        Object.entries(formattedData).filter(([key]) => prevData[key] === undefined || prevData[key] === '')
-      )
-    }));
-  }, [formattedData]);
+    if (extractedData && fields.length > 0) {
+      setLocalData(prevData => {
+        const newData = { ...prevData };
+        fields.forEach(field => {
+          if (!field || !field.name) return;
+          
+          const snakeCase = String(field.name || '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+(.)/g, (_, chr) => '_' + (chr || '').toLowerCase())
+            .replace(/^_/, '');
+
+          const value = extractedData[snakeCase] ||
+            extractedData[field.id] ||
+            extractedData[field.name] ||
+            '';
+            
+          // Only update if the value is different to prevent unnecessary re-renders
+          if (newData[field.name] !== value) {
+            newData[field.name] = value;
+          }
+        });
+        return newData;
+      });
+    }
+  }, [extractedData, fields]);
 
   const handleFieldChange = (field: string, value: any) => {
     setLocalData(prev => ({

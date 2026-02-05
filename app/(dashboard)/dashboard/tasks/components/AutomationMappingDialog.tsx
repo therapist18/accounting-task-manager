@@ -60,7 +60,7 @@ interface EntityAutomationMapping {
 }
 
 // --- UTILS ---
-const parseJsonValue = (data: any, path: string): any => {
+const parseJsonValue = (data: any, path: string, extractionMode?: 'latest' | 'all'): any => {
   if (!data || !path) return undefined;
   if (path.includes('->>') || path.includes('->')) {
     const parts = path.split(/(->>|->)/);
@@ -68,7 +68,7 @@ const parseJsonValue = (data: any, path: string): any => {
     const jsonPath = parts[2].trim().replace(/['"]/g, '');
     const jsonData = data[column];
 
-    console.log(`[parseJsonValue] Column: ${column}, JSONPath: ${jsonPath}, Data exists: ${!!jsonData}`);
+    console.log(`[parseJsonValue] Column: ${column}, JSONPath: ${jsonPath}, Data exists: ${!!jsonData}, ExtractionMode: ${extractionMode || 'all'}`);
 
     if (jsonData === undefined || jsonData === null) return undefined;
 
@@ -78,27 +78,42 @@ const parseJsonValue = (data: any, path: string): any => {
       const [arrayPath, ...fieldPathParts] = jsonPath.split('[]');
       const fieldPath = fieldPathParts.join('').replace(/^\./, ''); // Remove leading dot
       console.log(`[parseJsonValue] ArrayPath: ${arrayPath}, FieldPath: ${fieldPath}`);
-      
+
       const arrayData = arrayPath.split('.').reduce((acc, key) => {
         if (key === '' || key === '[]') return acc;
         console.log(`[parseJsonValue] Navigating to key: ${key}, Current:`, acc);
         return (acc && typeof acc === 'object') ? acc[key] : undefined;
       }, jsonData);
-      
+
       console.log(`[parseJsonValue] ArrayData:`, arrayData);
-      
+
       if (Array.isArray(arrayData)) {
         if (fieldPath) {
           // Extract the field from all array items
           const values = arrayData.map((item, index) => {
             const value = fieldPath.split('.').reduce((acc, key) => (acc && typeof acc === 'object') ? acc[key] : undefined, item);
             console.log(`[parseJsonValue] Item ${index} field "${fieldPath}":`, value);
-            return value;
-          }).filter(val => val !== undefined && val !== null && val !== '');
-          console.log(`[parseJsonValue] Filtered values:`, values);
-          return values.length > 0 ? values.join(', ') : undefined;
+            return { value, item, index };
+          }).filter(({ value }) => value !== undefined && value !== null && value !== '');
+
+          console.log(`[parseJsonValue] Filtered values:`, values.map(v => v.value));
+
+          // If extraction mode is 'latest' and we have date fields, filter to get the latest
+          if (extractionMode === 'latest' && values.length > 1) {
+            // Try to find date fields for sorting
+            const sortedValues = sortArrayItemsByDate(values, fieldPath);
+            console.log(`[parseJsonValue] Sorted values for latest mode:`, sortedValues.map(v => v.value));
+            return sortedValues.length > 0 ? String(sortedValues[0].value) : undefined;
+          }
+
+          const finalValues = values.map(v => v.value);
+          return finalValues.length > 0 ? finalValues.join(', ') : undefined;
         } else {
-          // Return the entire array
+          // Return the entire array (or latest item if extraction mode is latest)
+          if (extractionMode === 'latest' && arrayData.length > 1) {
+            const sortedArray = sortArrayItemsByDate(arrayData.map((item, index) => ({ value: item, item, index })));
+            return sortedArray.length > 0 ? sortedArray[0].value : arrayData;
+          }
           return arrayData;
         }
       }
@@ -108,6 +123,40 @@ const parseJsonValue = (data: any, path: string): any => {
     return jsonPath.split('.').reduce((acc, key) => (acc && typeof acc === 'object') ? acc[key] : undefined, jsonData);
   }
   return path.split('.').reduce((acc, key) => (acc && typeof acc === 'object') ? acc[key] : undefined, data);
+};
+
+// Helper function to sort array items by date fields
+const sortArrayItemsByDate = <T extends { value: any; item: any; index: number }>(items: T, fieldPath?: string): T => {
+  // Try to find date fields in the items for sorting
+  const dateFields = ['end_date', 'start_date', 'date', 'created_at', 'updated_at'];
+
+  return items.sort((a, b) => {
+    const itemA = a.item;
+    const itemB = b.item;
+
+    // Look for date fields in priority order
+    for (const dateField of dateFields) {
+      const dateA = itemA[dateField];
+      const dateB = itemB[dateField];
+
+      if (dateA && dateB) {
+        try {
+          const parsedDateA = new Date(dateA);
+          const parsedDateB = new Date(dateB);
+
+          if (!isNaN(parsedDateA.getTime()) && !isNaN(parsedDateB.getTime())) {
+            // Sort by date descending (latest first)
+            return parsedDateB.getTime() - parsedDateA.getTime();
+          }
+        } catch (e) {
+          // Continue to next date field if parsing fails
+        }
+      }
+    }
+
+    // If no valid dates found, maintain original order
+    return a.index - b.index;
+  });
 };
 
 const updateJsonValue = (existingData: any, path: string, newValue: any): any => {
@@ -242,7 +291,7 @@ export const AutomationMappingDialog = ({
     }
 
     const type = entityType?.toLowerCase();
-    
+
     if (type === 'company') {
       return {
         name: relationshipData?.company?.company_name || task?.company_name || `Company ${relationshipData?.company?.id || task?.company_id || ''}`,
@@ -253,9 +302,9 @@ export const AutomationMappingDialog = ({
     if (type === 'director') {
       const director = relationshipData?.directors?.[0];
       if (director) {
-        const name = director.full_name || 
-          (director.first_name && director.last_name ? `${director.first_name} ${director.last_name}` : 
-          `Director ${director.id}`);
+        const name = director.full_name ||
+          (director.first_name && director.last_name ? `${director.first_name} ${director.last_name}` :
+            `Director ${director.id}`);
         return { name, id: String(director.id) };
       }
     }
@@ -263,9 +312,9 @@ export const AutomationMappingDialog = ({
     if (type === 'understudy') {
       const understudy = relationshipData?.understudy;
       if (understudy) {
-        const name = understudy.full_name || 
-          (understudy.first_name && understudy.last_name ? `${understudy.first_name} ${understudy.last_name}` : 
-          `Understudy ${understudy.id}`);
+        const name = understudy.full_name ||
+          (understudy.first_name && understudy.last_name ? `${understudy.first_name} ${understudy.last_name}` :
+            `Understudy ${understudy.id}`);
         return { name, id: String(understudy.id) };
       }
     }
@@ -273,9 +322,9 @@ export const AutomationMappingDialog = ({
     if (type === 'dependant') {
       const dependant = relationshipData?.dependants?.[0];
       if (dependant) {
-        const name = dependant.full_name || 
-          (dependant.first_name && dependant.last_name ? `${dependant.first_name} ${dependant.last_name}` : 
-          `Dependant ${dependant.id}`);
+        const name = dependant.full_name ||
+          (dependant.first_name && dependant.last_name ? `${dependant.first_name} ${dependant.last_name}` :
+            `Dependant ${dependant.id}`);
         return { name, id: String(dependant.id) };
       }
     }
@@ -291,7 +340,7 @@ export const AutomationMappingDialog = ({
   const getPrimaryEntityType = useCallback(() => {
     const activeAutomation = webData.find(w => w.automationId === selectedAutomationId);
     if (!activeAutomation?.fields) return 'principal';
-    
+
     // Check entity types in fields to determine primary entity
     const entityTypes = new Set<string>();
     activeAutomation.fields.forEach((field: any) => {
@@ -299,7 +348,7 @@ export const AutomationMappingDialog = ({
         field.entityTypes.forEach((type: string) => entityTypes.add(type));
       }
     });
-    
+
     // Priority order: company > director > understudy > dependant > principal
     if (entityTypes.has('company')) return 'company';
     if (entityTypes.has('director')) return 'director';
@@ -512,14 +561,30 @@ export const AutomationMappingDialog = ({
             (computedSource.document_id || []).forEach((did: string) => computedRequirements.documentIds.add(did));
             entityIds.forEach(id => {
               computedRequirements.individualIds.add(String(id));
-              computedMasterFields.push({ 
-                field: jobField, 
-                entityId: String(id), 
+              computedMasterFields.push({
+                field: jobField,
+                entityId: String(id),
                 extractionMode,
                 computedSource // Pass the source config
               });
             });
           }
+
+          // FIXED: Queue standard sources for fetching
+          jobField.sources?.forEach((source: any) => {
+            if (source.is_computed) return;
+            if (!source.table) return;
+            const linkingVar = source.linking_variable || 'id';
+            if (source.table === 'tm_tasks' && (!source.linking_variable || source.linking_variable === 'id')) {
+              if (taskId) {
+                addToQueue(source.table, linkingVar, String(taskId));
+              }
+            } else {
+              entityIds.forEach(id => {
+                addToQueue(source.table, linkingVar, String(id));
+              });
+            }
+          });
         });
       });
 
@@ -542,13 +607,10 @@ export const AutomationMappingDialog = ({
                 data.forEach(record => {
                   const recordKey = String(record[linkingVariable]);
                   newSourceData[table][recordKey] = record;
-
-                  // Ensure tm_tasks records are indexed by 'id' specifically
                   if (table === 'tm_tasks' && record.id) {
                     newSourceData[table][String(record.id)] = record;
                   }
                 });
-
                 if (table === 'acc_portal_directors_documents') {
                   documentCache.documents.push(...data);
                 }
@@ -556,11 +618,7 @@ export const AutomationMappingDialog = ({
             })
         );
       }
-
       await Promise.all(fetchPromises);
-
-
-      // Handle remaining computed logic (Documents/Functions)
       const neededDocTypes = Array.from(computedRequirements.documentIds);
       if (neededDocTypes.length > 0) {
         const remainingPeople = Array.from(computedRequirements.individualIds);
@@ -580,13 +638,10 @@ export const AutomationMappingDialog = ({
         const newComputedValues: Record<string, any> = {};
         for (const item of computedMasterFields) {
           const { field, entityId, extractionMode, computedSource } = item;
-          
-          // CRITICAL FIX: If function is getLatestDocument but we have a path, use extractFieldFromLatestDocument instead
           let functionToCall = computedSource.computed_function || 'extractFieldFromLatestDocument';
           if (functionToCall === 'getLatestDocument' && computedSource.path) {
             functionToCall = 'extractFieldFromLatestDocument';
           }
-      
           const val = await executeComputedField(
             functionToCall,
             entityId,
@@ -596,7 +651,7 @@ export const AutomationMappingDialog = ({
             documentCache,
             computedSource.computed_config?.arithmeticConfig
           );
-      
+
           newComputedValues[`${field.id}_${entityId}_${extractionMode}`] =
             (typeof val === 'object' && val !== null && !Array.isArray(val)) ? JSON.stringify(val) : val;
         }
@@ -613,122 +668,96 @@ export const AutomationMappingDialog = ({
     }
   }, [jobFields, selectedAutomationId, webData, resolveTargetEntityId, relationshipData, isOpen, taskId]);
 
-  const getSourceValue = (table: string, path: string, entityId: string) => {
-    console.log(`[getSourceValue] Looking up: ${table}.${path} for entity ${entityId}`);
-    
+  const getSourceValue = (table: string, path: string, entityId: string, extractionMode?: 'latest' | 'all') => {
     const tableData = sourceData[table];
     if (!tableData) {
-      console.log(`[getSourceValue] No data found for table: ${table}. Available tables:`, Object.keys(sourceData));
       return "Missing";
     }
-
     const record = tableData[entityId];
     if (!record) {
-      console.log(`[getSourceValue] No record found for entity ${entityId} in table ${table}. Available entities:`, Object.keys(tableData));
       return "Missing";
     }
-    
-    console.log(`[getSourceValue] Found record:`, record);
-    const val = parseJsonValue(record, path);
-    console.log(`[getSourceValue] Parsed value from path "${path}":`, val);
+    const val = parseJsonValue(record, path, extractionMode);
     return val !== undefined && val !== null ? String(val) : "Missing";
   };
 
   const getFieldValue = (fieldIdOrVariable: string, entityId: string, sourceIdx: number = 0, extractionMode: string = 'latest', preserveArray: boolean = false) => {
     const activeAuto = webData.find(w => w.automationId === selectedAutomationId);
-
-    // Look up field by variableName OR ID
     const fieldDef = activeAuto?.fields?.find(f =>
       f.variableName === fieldIdOrVariable ||
       String(f.id) === String(fieldIdOrVariable)
     );
-
-    // --- JOB QUESTION LOGIC ---
     if (fieldDef?.linkedJobQuestionId) {
-
       const taskRecord = sourceData['tm_tasks']?.[String(taskId)];
-
       if (!taskRecord) {
+        if (isLoadingData) return "Loading Task Data...";
         console.warn(`[getFieldValue] NO Task Record found in sourceData for Task ID: ${taskId}. Available Task records:`, Object.keys(sourceData['tm_tasks'] || {}));
         return "Missing Task Data";
       }
-
       const answers = taskRecord.job_specific_answers || {};
       const questionId = String(fieldDef.linkedJobQuestionId);
-
-      // Robust lookup: try string key, then try number key
       let answer = answers[questionId];
       if (answer === undefined || answer === null) {
         answer = answers[Number(questionId)];
       }
-
       return (answer !== undefined && answer !== null) ? String(answer) : "Missing";
     }
-
-    // --- STANDARD MASTER FIELD LOGIC ---
     const field = jobFields[fieldIdOrVariable];
-    if (!field) return "Missing Config";
-    const hasComputedSource = field.sources?.some((s: any) => s.is_computed === true);
-    if (hasComputedSource) {
-      const key = `${field.id}_${entityId}_${extractionMode}`;
-      const val = masterFieldComputedValues[key];
-      if (val === undefined) return "Computing...";
-      
-      // Check if computed value is valid, if not, fall back to source-based lookup
-      if (val === null || val === undefined || val === '' || val === 'Number Not Found' || val === 'Missing' || val === 'No Source') {
-        console.log(`[getFieldValue] Computed value "${val}" is invalid, falling back to source-based lookup for field: ${field.field_key || fieldIdOrVariable}`);
-        // Continue to source-based logic below instead of returning
-      } else {
-        if (typeof val === 'object' && val !== null) {
-          return val.en || val.name || val.title || String(Object.values(val)[0]);
-        }
-        return String(val);
-      }
-    }
-
-    let entityCategory = (entityId === String(relationshipData?.company?.id) || entityId === String(task?.company_id))
-      ? 'company' : 'individual';
-
-    // ... (rest of the code remains the same)
-    // Sort sources by priority (lower number = higher priority)
+    if (!field) return isLoading ? "Loading Config..." : "Missing Config";
     const sortedSources = field.sources?.sort((a: any, b: any) => (a.priority || 999) - (b.priority || 999)) || [];
-
-    console.log(`[getFieldValue] Field: ${field.field_key || fieldIdOrVariable}, Entity: ${entityId}, EntityCategory: ${entityCategory}`);
-    console.log(`[getFieldValue] Available sources:`, sortedSources.map(s => ({ 
-      table: s.table, 
-      path: s.path, 
-      priority: s.priority, 
-      source_type: s.source_type 
-    })));
-
-    // Try each source in priority order until we find one with data
     for (let i = 0; i < sortedSources.length; i++) {
       const source = sortedSources[i];
       if (!source) continue;
+      if (source.is_computed) {
+        const key = `${field.id}_${entityId}_${extractionMode}`;
+        const val = masterFieldComputedValues[key];
+        if (val === undefined) {
+          return isLoadingData ? "Computing..." : "Computing...";
+        }
+        let parsedVal = val;
+        if (typeof val === 'string' && val.startsWith('{')) {
+          try {
+            parsedVal = JSON.parse(val);
+          } catch (e) {
+          }
+        }
+        if (typeof parsedVal === 'object' && parsedVal !== null && source.path) {
+          const pathMatch = source.path.match(/['"]([\w_]+)['"]$/);
+          const fieldName = pathMatch ? pathMatch[1] : null;
+          if (fieldName && parsedVal[fieldName]) {
+            const extractedValue = String(parsedVal[fieldName]);
+            return extractedValue;
+          }
+        }
 
+        // Check if computed value is valid (including proper handling of empty arrays)
+        const isValidValue = val !== null && val !== undefined &&
+          val !== 'Number Not Found' && val !== 'Missing' && val !== 'No Source' &&
+          val !== 'Document Not Found' && val !== 'Field Not Found' &&
+          !((Array.isArray(val) && val.length === 0) || val === '');
+
+        if (isValidValue) {
+          if (typeof parsedVal === 'object' && parsedVal !== null) {
+            return parsedVal.en || parsedVal.name || parsedVal.title || String(Object.values(parsedVal)[0]);
+          }
+          return String(val);
+        } else {
+          continue; // Try next source
+        }
+      }
       let lookupId = String(entityId);
       if (source.table === 'tm_tasks' && (!source.linking_variable || source.linking_variable === 'id')) {
         lookupId = String(taskId);
       }
-
-      const value = getSourceValue(source.table, source.path, lookupId);
-      
-      console.log(`[getFieldValue] Source ${i + 1} (Priority: ${source.priority}): ${source.table}.${source.path} -> ${value}`);
-
-      // If we get a valid value (not null, undefined, or empty string), return it
+      const value = getSourceValue(source.table, source.path, lookupId, extractionMode as 'latest' | 'all');
       if (value !== null && value !== undefined && value !== '' && value !== 'No Source' && value !== 'Missing') {
-        console.log(`[getFieldValue] Using source ${i + 1} with value: ${value}`);
         return value;
-      } else {
-        console.log(`[getFieldValue] Source ${i + 1} failed or returned empty, trying next...`);
       }
     }
-
-    console.log(`[getFieldValue] All sources failed for field: ${field.field_key || fieldIdOrVariable}`);
+    if (isLoadingData) return "Loading Data...";
     return "No Source";
   };
 
-  // --- DOCUMENT FETCHER ---
   const fetchDocumentFiles = useCallback(async () => {
     if (!isOpen || !selectedAutomationId || !webData.length) return;
     if (isLoadingDocuments) return;
@@ -864,18 +893,18 @@ export const AutomationMappingDialog = ({
   useEffect(() => {
     const fetchIndividualName = async () => {
       if (!currentIndividualId) return;
-      
+
       // If we already have name from relationship data, use it
       if (relationshipData?.principal?.full_name) {
         setIndividualName(relationshipData.principal.full_name);
         return;
       }
-      
+
       if (relationshipData?.principal?.first_name && relationshipData?.principal?.last_name) {
         setIndividualName(`${relationshipData.principal.first_name} ${relationshipData.principal.last_name}`);
         return;
       }
-      
+
       // Otherwise, fetch from database
       try {
         const { data: individual } = await supabase
@@ -883,11 +912,11 @@ export const AutomationMappingDialog = ({
           .select('first_name, last_name, full_name')
           .eq('id', currentIndividualId)
           .single();
-        
+
         if (individual) {
-          const name = individual.full_name || 
-            (individual.first_name && individual.last_name ? 
-              `${individual.first_name} ${individual.last_name}` : 
+          const name = individual.full_name ||
+            (individual.first_name && individual.last_name ?
+              `${individual.first_name} ${individual.last_name}` :
               currentIndividualId);
           setIndividualName(name);
         }
@@ -896,7 +925,7 @@ export const AutomationMappingDialog = ({
         setIndividualName(currentIndividualId);
       }
     };
-    
+
     fetchIndividualName();
   }, [currentIndividualId, relationshipData]);
 
@@ -965,7 +994,7 @@ export const AutomationMappingDialog = ({
   const handleRunAutomation = async () => {
     if (!selectedAutomationId) {
       toast({ title: "Validation Error", description: "Missing automation selection", variant: "destructive" });
-    // ...
+      // ...
       return;
     }
 
@@ -1416,136 +1445,78 @@ export const AutomationMappingDialog = ({
   }, [jobFields, getFieldValue]);
 
   const renderFieldsTable = () => {
-
     if (!activeWebEntry?.fields || activeWebEntry.fields.length === 0) {
 
-    return <div className="p-12 text-center text-slate-400 text-sm">No fields configured for this automation.</div>;
-  }
-
-  console.log(`[FieldProcessing] Processing ${activeWebEntry.fields.length} fields for automation: ${activeWebEntry.automationName || selectedAutomationId}`);
-  
-  // 1. PRE-PROCESS FIELDS (Calculate missing status for sorting)
-  const processedFields = activeWebEntry.fields.map((field, index) => {
-    let isMissing = false;
-    const targetId = resolveTargetEntityId(field);
-
-    // Log field details
-    console.log(`[FieldProcessing] Field ${index + 1}: ${field.variableName || field.efnsDisplayName || 'Unnamed'} (${field.fieldType})`);
-    
-    if (field.fieldType === 'array') {
-      const entityIds = resolveEntityIdsForArray(field, relationshipData);
-      console.log(`[FieldProcessing] Array field - Entity IDs: [${entityIds.join(', ')}], Items: ${field.arrayItems?.length || 0}`);
-      if (entityIds.length === 0) {
-        isMissing = true;
-        console.log(`[FieldProcessing] Array field marked as missing - no entity IDs found`);
-      }
-    } else if (field.fieldType === 'document') {
-      const foundDoc = documentFiles.find(d => d.document_id === field.kycDocumentId && String(d.owner_id) === String(targetId));
-      console.log(`[FieldProcessing] Document field - KYC Doc ID: ${field.kycDocumentId}, Target ID: ${targetId}, Found: ${!!foundDoc}`);
-      if (!foundDoc) isMissing = true;
-    } else if (field.fieldType === 'computed') {
-      const val = computedFieldsPreview[field.variableName];
-      console.log(`[FieldProcessing] Computed field - Value: ${val}, Function: ${field.computedFunction}`);
-      if (!val || val === 'Pending...' || val === 'Missing' || val === '') isMissing = true;
-    } else if (field.linkedJobQuestionId) {
-      const val = getFieldValue(field.variableName, "");
-      console.log(`[FieldProcessing] Job question field - Question ID: ${field.linkedJobQuestionId}, Value: ${val}`);
-      if (!val || val === 'Missing' || val === 'Missing Task Data') isMissing = true;
-    } else {
-      const masterIds = field.linkedMasterFields || field.masterFieldIds || [];
-      console.log(`[FieldProcessing] Standard field - Master IDs: [${masterIds.join(', ')}], Target ID: ${targetId}`);
-      const mergedValue = masterIds.map((mid: string | number) => {
-        const v = getFieldValue(String(mid), String(targetId), 0, field.extractionMode || 'latest');
-        return Array.isArray(v) ? v.join(', ') : v;
-      }).join(' ').trim();
-      console.log(`[FieldProcessing] Standard field - Merged value: "${mergedValue}"`);
-      if (!mergedValue || mergedValue === 'Missing' || mergedValue === 'Missing Config' || mergedValue === 'No Source') isMissing = true;
+      return <div className="p-12 text-center text-slate-400 text-sm">No fields configured for this automation.</div>;
     }
-    
-    console.log(`[FieldProcessing] Field ${index + 1} final status - Missing: ${isMissing}`);
-    return { ...field, isMissing };
-  });
+    const processedFields = activeWebEntry.fields.map((field, index) => {
+      let isMissing = false;
+      const targetId = resolveTargetEntityId(field);
+      if (field.fieldType === 'array') {
+        const entityIds = resolveEntityIdsForArray(field, relationshipData);
+        if (entityIds.length === 0) {
+          isMissing = true;
+        }
+      } else if (field.fieldType === 'document') {
+        const foundDoc = documentFiles.find(d => d.document_id === field.kycDocumentId && String(d.owner_id) === String(targetId));
+        if (!foundDoc) isMissing = true;
+      } else if (field.fieldType === 'computed') {
+        const val = computedFieldsPreview[field.variableName];
+        if (!val || val === 'Pending...' || val === 'Missing' || val === '') isMissing = true;
+      } else if (field.linkedJobQuestionId) {
+        const val = getFieldValue(field.variableName, "");
+        if (!val || val === 'Missing' || val === 'Missing Task Data') isMissing = true;
+      } else {
+        const masterIds = field.linkedMasterFields || field.masterFieldIds || [];
+        const mergedValue = masterIds.map((mid: string | number) => {
+          const v = getFieldValue(String(mid), String(targetId), 0, field.extractionMode || 'latest');
+          return Array.isArray(v) ? v.join(', ') : v;
+        }).join(' ').trim();
+        if (!mergedValue || mergedValue === 'Missing' || mergedValue === 'Missing Config' || mergedValue === 'No Source') isMissing = true;
+      }
+      return { ...field, isMissing };
+    });
 
     const sortedFields = sortMissingFirst
 
       ? [...processedFields].sort((a, b) => (a.isMissing === b.isMissing ? 0 : a.isMissing ? -1 : 1))
 
       : processedFields;
-
-
-
     return (
-
       <div className="flex flex-col h-full">
-
-        {/* STATS & FILTER BAR */}
-
         <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-slate-200">
-
           <div className="flex items-center gap-3">
-
             <span className="text-sm font-semibold text-slate-600">{processedFields.length} Fields Total</span>
-
             {processedFields.filter(f => f.isMissing).length > 0 && (
-
               <Badge variant="destructive" className="h-6 px-2 text-xs">
-
                 {processedFields.filter(f => f.isMissing).length} Missing
-
               </Badge>
-
             )}
-
           </div>
-
           <Button variant={sortMissingFirst ? "default" : "outline"} size="sm" onClick={() => setSortMissingFirst(!sortMissingFirst)} className="h-8 text-xs">
-
             <Filter className="h-3 w-3 mr-2" />
-
             {sortMissingFirst ? "Show All" : "Show Missing First"}
-
           </Button>
-
         </div>
 
-
-
         <div className="flex-1 overflow-hidden bg-white">
-
           <ScrollArea className="h-full">
-
             <Table>
-
               <TableHeader className="sticky top-0 z-10 bg-slate-100 border-b-2 border-slate-300">
-
                 <TableRow>
-
                   <TableHead className="w-12 px-2 py-3 text-center text-xs font-bold text-slate-600 border-r border-slate-200">#</TableHead>
-
                   <TableHead className="w-80 px-4 py-3 text-left text-xs font-bold text-slate-700 border-r border-slate-200">FIELD NAME</TableHead>
-
                   <TableHead className="px-4 py-3 text-left text-xs font-bold text-slate-700">SOURCE</TableHead>
-
                   <TableHead className="px-4 py-3 text-left text-xs font-bold text-slate-700 border-r border-slate-200">CURRENT VALUE</TableHead>
-
                 </TableRow>
-
               </TableHeader>
 
-
-
               <TableBody>
-
                 {sortedFields.map((field, fIdx) => {
-
                   const isEditing = editingCell?.fieldId === field.variableName;
-
                   const isJobQuestion = !!field.linkedJobQuestionId;
-
                   const targetId = resolveTargetEntityId(field);
-
                   const entityCategory = field.entityTypes?.includes('company') ? 'company' : 'individual';
-
                   const targetCompanyId = String(relationshipData?.company?.id || task?.company_id);
 
                   // --- DATA RESOLUTION ---
@@ -2127,7 +2098,12 @@ export const AutomationMappingDialog = ({
               <div className="flex-1 overflow-hidden">
                 <Tabs value={activeTab} className="h-full">
                   <TabsContent value="fields" className="h-full m-0">
-                    {renderFieldsTable()}
+                    {isLoading ? (
+                      <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                        <Loader2 className="h-8 w-8 animate-spin mb-2" />
+                        <p>Loading configuration...</p>
+                      </div>
+                    ) : renderFieldsTable()}
                   </TabsContent>
                   <TabsContent value="documents" className="h-full p-6 overflow-auto">
                     {renderDocumentsSection()}

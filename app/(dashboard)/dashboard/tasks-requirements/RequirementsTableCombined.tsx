@@ -637,7 +637,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     };
 
     calculateAllStatuses();
-  }, [documentMetadataCache, allCompanyDocuments, allIndividualDocuments, columnDefinitions]);
+  }, [documentMetadataCache.size, columnDefinitions.length, allCompanyDocuments, allIndividualDocuments]); // Use sizes instead of objects to prevent infinite loops
 
   const companySpans = useMemo(() => {
     const spans = [];
@@ -710,11 +710,14 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
           .from('acc_portal_kyc')
           .select('*')
           .in('id', Array.from(allDocIds));
-
-        if (error) throw error;
-
-        const metadataMap = new Map(data.map(doc => [doc.id, doc]));
-        setDocumentMetadataCache(metadataMap);
+        
+        if (data && !error) {
+          setDocumentMetadataCache(prev => {
+            const newCache = new Map(prev);
+            data.forEach(doc => newCache.set(doc.id, doc));
+            return newCache;
+          });
+        }
       } catch (error) {
         console.error('Error fetching document metadata:', error);
       }

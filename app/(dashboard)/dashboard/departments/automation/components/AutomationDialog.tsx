@@ -852,11 +852,10 @@ function WebDataGroupEditDialog({
   const isDocument = editingGroup.fieldType === 'document';
   const isComputed = editingGroup.fieldType === 'computed';
   
-  // Show extraction mode if it's a job question or a computed field
-  const showExtractionMode = editingGroup.linkedJobQuestionId || isComputed || editingGroup.linkedMasterFields?.some(fieldId => {
-    const field = masterFields.find(f => f.id === fieldId);
-    return field?.is_computed || field?.computed_config?.is_computed;
-  });
+  // Show extraction mode if it's a job question, computed field, or any field with linked master fields
+  const showExtractionMode = editingGroup.linkedJobQuestionId || isComputed || 
+    (editingGroup.linkedMasterFields && editingGroup.linkedMasterFields.length > 0) ||
+    (editingGroup.fieldType === 'array' && editingGroup.arrayItems && editingGroup.arrayItems.length > 0);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1069,7 +1068,7 @@ function WebDataGroupEditDialog({
               )}
 
               {/* Extraction Mode Select */}
-              {showExtractionMode && !isDocument && editingGroup.fieldType !== 'array' && (
+              {showExtractionMode && !isDocument && (
                 <div className="flex items-center gap-2 pt-4 border-t mt-4">
                   <Label className="text-xs font-semibold text-slate-600">Extraction Mode:</Label>
                   <Select

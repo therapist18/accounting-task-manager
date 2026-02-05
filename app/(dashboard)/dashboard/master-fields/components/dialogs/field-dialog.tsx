@@ -21,7 +21,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import {
     Command,
     CommandEmpty,
-    CommandGroup, 
+    CommandGroup,
     CommandInput,
     CommandItem,
     CommandList
@@ -454,33 +454,33 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                     console.log("🔧 EDIT MODE - Loading sources:", field.sources)
                     const validSources = field.sources.filter(s => s.source_type !== 'field');
                     if (validSources.length > 0) {
-                        const processedSources = validSources.map(s => { 
-                            let sourceData = { 
-                                ...s, 
-                                id: crypto.randomUUID(), 
-                                fields: [], 
+                        const processedSources = validSources.map(s => {
+                            let sourceData = {
+                                ...s,
+                                id: crypto.randomUUID(),
+                                fields: [],
                                 loadingFields: false,
                                 document_id: s.document_id || []
                             };
-                            
+
                             // If this is a document source and has no document_id, 
                             // copy from computed_config.document_ids
                             if (s.source_type === 'document' && (!s.document_id || s.document_id.length === 0)) {
                                 console.log("📄 Copying document IDs from computed_config to source:", computedConfig.document_ids)
                                 sourceData.document_id = computedConfig.document_ids || [];
                             }
-                            
+
                             return sourceData;
                         });
                         console.log("✅ EDIT MODE - Processed sources:", processedSources)
                         setSources(processedSources);
-                    } else { 
+                    } else {
                         console.log("📝 EDIT MODE - No valid sources found")
-                        setSources([]); 
+                        setSources([]);
                     }
                 } else {
                     console.log("📝 EDIT MODE - No sources in field data")
-                    setSources([]); 
+                    setSources([]);
                 }
 
                 setIsDependent(isDep)
@@ -611,7 +611,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
             if (fieldCards.length > 0) {
                 console.log("🔥 FIELD CARDS SUBMISSION STARTED")
                 console.log("📋 Field Cards Data:", fieldCards)
-                
+
                 const fieldsToInsert = fieldCards.map(card => {
                     const fieldData = {
                         field_key: card.data.field_key,
@@ -637,29 +637,29 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                         static_options: null,
                         date_config: null
                     }
-                    
+
                     // Add computed configuration if present
                     if (card.data.is_computed) {
                         console.log("🧮 Adding computed config for card:", card.data.label)
-                        
+
                         // Extract document IDs from sources
                         const documentIdsFromSources = card.data.sources
                             .filter(source => source.source_type === 'document' && source.document_id && source.document_id.length > 0)
                             .flatMap(source => source.document_id || [])
-                        
+
                         console.log("📄 Document IDs for card:", documentIdsFromSources)
-                        
+
                         fieldData.computed_config = {
                             is_computed: true,
                             document_ids: documentIdsFromSources,
                             computed_function: card.data.computed_function
                         }
-                        
+
                         // Add arithmetic config if present
                         if (card.data.computed_config?.arithmeticConfig && Object.keys(card.data.computed_config.arithmeticConfig).length > 0) {
                             fieldData.computed_config.arithmeticConfig = card.data.computed_config.arithmeticConfig
                         }
-                        
+
                         // Add date diff config if present
                         if (card.data.computed_config?.dateDiffConfig && Object.keys(card.data.computed_config.dateDiffConfig).length > 0) {
                             fieldData.computed_config.dateDiffConfig = card.data.computed_config.dateDiffConfig
@@ -667,7 +667,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                     } else {
                         fieldData.computed_config = null
                     }
-                    
+
                     // Add data sources if present
                     if (card.data.sources && card.data.sources.length > 0) {
                         console.log("🔗 Adding data sources for card:", card.data.label)
@@ -683,7 +683,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                     } else {
                         fieldData.sources = []
                     }
-                    
+
                     console.log("✅ Final field data for", card.data.label, ":", fieldData)
                     return fieldData
                 })
@@ -928,7 +928,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
 
                                     {/* DATA & LOGIC SECTION FOR CARD */}
                                     <div className="space-y-4 pt-4 border-t border-slate-200">
-                                                                               {card.data.is_computed && (
+                                        {card.data.is_computed && (
                                             <div className="space-y-4 pt-2">
                                                 <div className="space-y-2">
                                                     <Label className="text-xs font-bold text-purple-900 uppercase">Computed Function</Label>
@@ -941,7 +941,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                                         </SelectTrigger>
                                                         <SelectContent>
                                                             {COMPUTED_FUNCTIONS.map((fn) => (
-                                                                <SelectItem key={fn.value} value={fn.value}>{fn.label}</SelectItem>
+                                                                <SelectItem key={`${card.id}-${fn.value}`} value={fn.value}>{fn.label}</SelectItem>
                                                             ))}
                                                         </SelectContent>
                                                     </Select>
@@ -968,7 +968,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                                             </SelectTrigger>
                                                             <SelectContent>
                                                                 {ARITHMETIC_OPERATIONS.map(op => (
-                                                                    <SelectItem key={op.value} value={op.value}>{op.label}</SelectItem>
+                                                                    <SelectItem key={`${card.id}-${op.value}`} value={op.value}>{op.label}</SelectItem>
                                                                 ))}
                                                             </SelectContent>
                                                         </Select>
@@ -1033,46 +1033,43 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                                             </SelectTrigger>
                                                             <SelectContent>
                                                                 {DATE_DIFF_UNITS.map(unit => (
-                                                                    <SelectItem key={unit.value} value={unit.value}>{unit.label}</SelectItem>
+                                                                    <SelectItem key={`${card.id}-${unit.value}`} value={unit.value}>{unit.label}</SelectItem>
                                                                 ))}
                                                             </SelectContent>
                                                         </Select>
-
-                                                        <div className="grid grid-cols-2 gap-3">
-                                                            <div className="space-y-2">
-                                                                <Label className="text-[10px] font-bold uppercase text-purple-700">Start Date Path</Label>
-                                                                <Input
-                                                                    className="h-9 bg-white text-xs font-mono"
-                                                                    placeholder="e.g. extracted_details->>'permit_wef'"
-                                                                    value={card.data.computed_config?.dateDiffConfig?.startDatePath || ""}
-                                                                    onChange={(e) => updateFieldCard(card.id, {
-                                                                        computed_config: {
-                                                                            ...card.data.computed_config,
-                                                                            dateDiffConfig: {
-                                                                                ...card.data.computed_config?.dateDiffConfig,
-                                                                                startDatePath: e.target.value
-                                                                            }
+                                                        <div className="space-y-2">
+                                                            <Label className="text-[10px] font-bold uppercase text-purple-700">Start Date Path</Label>
+                                                            <Input
+                                                                className="h-9 bg-white text-xs font-mono"
+                                                                placeholder="e.g. extracted_details->>'permit_wef'"
+                                                                value={card.data.computed_config?.dateDiffConfig?.startDatePath || ""}
+                                                                onChange={(e) => updateFieldCard(card.id, {
+                                                                    computed_config: {
+                                                                        ...card.data.computed_config,
+                                                                        dateDiffConfig: {
+                                                                            ...card.data.computed_config?.dateDiffConfig,
+                                                                            startDatePath: e.target.value
                                                                         }
-                                                                    })}
-                                                                />
-                                                            </div>
-                                                            <div className="space-y-2">
-                                                                <Label className="text-[10px] font-bold uppercase text-purple-700">End Date Path</Label>
-                                                                <Input
-                                                                    className="h-9 bg-white text-xs font-mono"
-                                                                    placeholder="e.g. extracted_details->>'permit_wet'"
-                                                                    value={card.data.computed_config?.dateDiffConfig?.endDatePath || ""}
-                                                                    onChange={(e) => updateFieldCard(card.id, {
-                                                                        computed_config: {
-                                                                            ...card.data.computed_config,
-                                                                            dateDiffConfig: {
-                                                                                ...card.data.computed_config?.dateDiffConfig,
-                                                                                endDatePath: e.target.value
-                                                                            }
+                                                                    }
+                                                                })}
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                            <Label className="text-[10px] font-bold uppercase text-purple-700">End Date Path</Label>
+                                                            <Input
+                                                                className="h-9 bg-white text-xs font-mono"
+                                                                placeholder="e.g. extracted_details->>'permit_wet'"
+                                                                value={card.data.computed_config?.dateDiffConfig?.endDatePath || ""}
+                                                                onChange={(e) => updateFieldCard(card.id, {
+                                                                    computed_config: {
+                                                                        ...card.data.computed_config,
+                                                                        dateDiffConfig: {
+                                                                            ...card.data.computed_config?.dateDiffConfig,
+                                                                            endDatePath: e.target.value
                                                                         }
-                                                                    })}
-                                                                />
-                                                            </div>
+                                                                    }
+                                                                })}
+                                                            />
                                                         </div>
                                                     </div>
                                                 )}
@@ -1086,7 +1083,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                             <Link2 className="w-4 h-4 text-slate-500" />
                                             <h4 className="font-semibold text-slate-800 text-sm uppercase tracking-wide">Data Sources</h4>
                                         </div>
-                                        
+
                                         <DataSourceConfiguration
                                             sources={card.data.sources || []}
                                             onChange={(newSources) => updateFieldCard(card.id, { sources: newSources })}
@@ -1096,6 +1093,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                             fetchFieldsForTable={fetchFieldsForTable}
                                             getFieldsForTable={getFieldsForTable}
                                             getLoadingForTable={getLoadingForTable}
+                                            masterFields={masterFields}
                                         />
                                     </div>
                                 </Card>
@@ -1162,199 +1160,200 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                     {/* DATA LOGIC SECTION */}
                     {fieldCards.length === 0 && (
                         <div className="space-y-4">
-                     
 
-                        {!formData.is_computed && formData.fieldType === 'dropdown' && (
-                            <Card className="border shadow-sm">
-                                <CardDescription className="p-4 space-y-4">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                            <Link2 className="h-4 w-4 text-blue-600" />
-                                            <span className="font-bold text-slate-700 text-sm">Dropdown Options</span>
-                                        </div>
-                                        <div className="flex items-center space-x-2">
-                                            <Switch id="isDependent" checked={isDependent} onCheckedChange={setIsDependent} />
-                                            <Label htmlFor="isDependent" className="text-xs font-bold text-slate-600">Dependent Field?</Label>
-                                        </div>
-                                    </div>
 
-                                    <Separator />
-
-                                    {isDependent ? (
-                                        <div className="space-y-4 animate-in slide-in-from-top-2 duration-200">
-                                            <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
-                                                <Label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Parent Field (The Trigger)</Label>
-                                                <Popover open={openParentCombo} onOpenChange={setOpenParentCombo}>
-                                                    <PopoverTrigger asChild>
-                                                        <Button variant="outline" role="combobox" aria-expanded={openParentCombo} className="w-full justify-between bg-white">
-                                                            {formData.dependentFieldId ? dropdownFields.find((f) => f.id === formData.dependentFieldId)?.label : "Select parent field..."}
-                                                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                                        </Button>
-                                                    </PopoverTrigger>
-                                                    <PopoverContent className="w-[400px] p-0">
-                                                        <Command>
-                                                            <CommandInput placeholder="Search parent field..." />
-                                                            <CommandList>
-                                                                <CommandEmpty>No fields available.</CommandEmpty>
-                                                                <CommandGroup>
-                                                                    {dropdownFields.map((f) => (
-                                                                        <CommandItem key={f.id} value={f.label} onSelect={() => { setFormData(prev => ({ ...prev, dependentFieldId: f.id })); setOpenParentCombo(false) }}>
-                                                                            <Check className={cn("mr-2 h-4 w-4", formData.dependentFieldId === f.id ? "opacity-100" : "opacity-0")} />
-                                                                            {f.label}
-                                                                        </CommandItem>
-                                                                    ))}
-                                                                </CommandGroup>
-                                                            </CommandList>
-                                                        </Command>
-                                                    </PopoverContent>
-                                                </Popover>
+                            {!formData.is_computed && formData.fieldType === 'dropdown' && (
+                                <Card className="border shadow-sm">
+                                    <CardDescription className="p-4 space-y-4">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                <Link2 className="h-4 w-4 text-blue-600" />
+                                                <span className="font-bold text-slate-700 text-sm">Dropdown Options</span>
                                             </div>
+                                            <div className="flex items-center space-x-2">
+                                                <Switch id="isDependent" checked={isDependent} onCheckedChange={setIsDependent} />
+                                                <Label htmlFor="isDependent" className="text-xs font-bold text-slate-600">Dependent Field?</Label>
+                                            </div>
+                                        </div>
 
-                                            {formData.dependentFieldId && (
-                                                <div className="space-y-4 pt-4">
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                        <div className="space-y-4 border p-4 rounded-lg bg-slate-50">
-                                                            <h4 className="text-xs font-bold text-slate-600 uppercase flex items-center gap-2"><Plus className="w-3 h-3" /> Add Mapping Set</h4>
+                                        <Separator />
 
-                                                            <div className="space-y-2">
-                                                                <Label className="text-[10px] uppercase font-bold text-slate-500">1. Select Parent Value</Label>
-                                                                <div className="flex gap-2">
-                                                                    <Popover open={openParentValueCombo} onOpenChange={setOpenParentValueCombo}>
-                                                                        <PopoverTrigger asChild>
-                                                                            <Button variant="outline" role="combobox" aria-expanded={openParentValueCombo} className="w-full justify-between bg-white text-xs truncate">
-                                                                                {currentParentValue ? getParentLabel(currentParentValue) : "Select from list..."}
-                                                                                <ChevronsUpDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
-                                                                            </Button>
-                                                                        </PopoverTrigger>
-                                                                        <PopoverContent className="w-[200px] p-0">
-                                                                            <Command>
-                                                                                <CommandInput placeholder="Search parent option..." />
-                                                                                <CommandList>
-                                                                                    <ScrollArea className="h-[200px]">
-                                                                                        <CommandGroup>
-                                                                                            {parentFieldOptions.map((opt) => (
-                                                                                                <CommandItem key={opt.value} value={opt.value} onSelect={() => { setCurrentParentValue(opt.value); setOpenParentValueCombo(false); }}>
-                                                                                                    {opt.label}
-                                                                                                </CommandItem>
-                                                                                            ))}
-                                                                                        </CommandGroup>
-                                                                                    </ScrollArea>
-                                                                                </CommandList>
-                                                                            </Command>
-                                                                        </PopoverContent>
-                                                                    </Popover>
-                                                                    <Input className="w-1/2 h-9 text-xs" placeholder="ID/Value" value={currentParentValue} onChange={e => setCurrentParentValue(e.target.value)} />
-                                                                </div>
-                                                            </div>
-
-                                                            <div className="space-y-2">
-                                                                <div className="flex justify-between items-end">
-                                                                    <Label className="text-[10px] uppercase font-bold text-slate-500">2. Bulk Add Dependents</Label>
-                                                                    <span className="text-[9px] text-slate-400">Separate by comma or newline</span>
-                                                                </div>
-
-                                                                <Textarea className="h-24 text-xs bg-white font-mono" placeholder="Item 1, Item 2&#10;Item 3&#10;Item 4" value={currentChildInput} onChange={e => setCurrentChildInput(e.target.value)} />
-                                                                <Button size="sm" onClick={addValuesToCurrentList} variant="secondary" className="w-full h-7 text-xs gap-2" type="button"><ArrowDown className="w-3 h-3" /> Process to List</Button>
-
-                                                                <div className="flex flex-wrap gap-1 min-h-[40px] max-h-[100px] overflow-y-auto p-2 bg-white border rounded-md">
-                                                                    {currentChildList.length === 0 && <span className="text-[10px] text-slate-300 italic">No items pending...</span>}
-                                                                    {currentChildList.map(c => (
-                                                                        <Badge key={c.value} variant="outline" className="text-[10px] bg-slate-50 h-5 px-1 pr-0 gap-1">
-                                                                            <span title={c.value}>{c.label}</span>
-                                                                            <div className="h-full border-l px-1 hover:bg-red-100 cursor-pointer rounded-r" onClick={() => removeChildFromList(c.value)}><X className="w-3 h-3 text-slate-400 hover:text-red-500" /></div>
-                                                                        </Badge>
-                                                                    ))}
-                                                                </div>
-                                                            </div>
-
-                                                            <Button onClick={saveMappingSet} className="w-full bg-slate-800 text-white h-9 text-xs" disabled={!currentParentValue || currentChildList.length === 0}>
-                                                                <Save className="w-3 h-3 mr-2" /> Save this Mapping Set
+                                        {isDependent ? (
+                                            <div className="space-y-4 animate-in slide-in-from-top-2 duration-200">
+                                                <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+                                                    <Label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Parent Field (The Trigger)</Label>
+                                                    <Popover open={openParentCombo} onOpenChange={setOpenParentCombo}>
+                                                        <PopoverTrigger asChild>
+                                                            <Button variant="outline" role="combobox" aria-expanded={openParentCombo} className="w-full justify-between bg-white">
+                                                                {formData.dependentFieldId ? dropdownFields.find((f) => f.id === formData.dependentFieldId)?.label : "Select parent field..."}
+                                                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                                                             </Button>
-                                                        </div>
+                                                        </PopoverTrigger>
+                                                        <PopoverContent className="w-[400px] p-0">
+                                                            <Command>
+                                                                <CommandInput placeholder="Search parent field..." />
+                                                                <CommandList>
+                                                                    <CommandEmpty>No fields available.</CommandEmpty>
+                                                                    <CommandGroup>
+                                                                        {dropdownFields.map((f) => (
+                                                                            <CommandItem key={f.id} value={f.label} onSelect={() => { setFormData(prev => ({ ...prev, dependentFieldId: f.id })); setOpenParentCombo(false) }}>
+                                                                                <Check className={cn("mr-2 h-4 w-4", formData.dependentFieldId === f.id ? "opacity-100" : "opacity-0")} />
+                                                                                {f.label}
+                                                                            </CommandItem>
+                                                                        ))}
+                                                                    </CommandGroup>
+                                                                </CommandList>
+                                                            </Command>
+                                                        </PopoverContent>
+                                                    </Popover>
+                                                </div>
 
-                                                        <div className="border rounded-lg overflow-hidden flex flex-col h-[400px]">
-                                                            <div className="bg-slate-100 p-2 text-xs font-bold text-slate-600 border-b flex justify-between items-center">
-                                                                <span>Existing Mappings</span>
-                                                                <Badge variant="secondary" className="text-[10px]">{Object.keys(formData.manualMapping || {}).length} Sets</Badge>
-                                                            </div>
-                                                            <ScrollArea className="flex-1 bg-white">
-                                                                <div className="p-2 space-y-2">
-                                                                    {Object.entries(formData.manualMapping || {}).length === 0 && <div className="text-center p-8 text-slate-300 text-xs">No mappings configured yet.</div>}
-                                                                    {Object.entries(formData.manualMapping || {}).map(([parentVal, children]) => (
-                                                                        <div key={parentVal} className="border rounded p-2 text-xs group hover:border-blue-200 transition-colors bg-slate-50/50">
-                                                                            <div className="flex justify-between items-start mb-1">
-                                                                                <div className="flex flex-col">
-                                                                                    <span className="font-bold text-slate-700">{getParentLabel(parentVal)}</span>
-                                                                                    <span className="text-[9px] text-slate-400 font-mono">{parentVal}</span>
-                                                                                </div>
-                                                                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                                    <Edit2 className="w-3 h-3 text-blue-500 cursor-pointer" onClick={() => editMappingSet(parentVal)} />
-                                                                                    <Trash2 className="w-3 h-3 text-red-500 cursor-pointer" onClick={() => deleteMappingSet(parentVal)} />
-                                                                                </div>
-                                                                            </div>
-                                                                            <div className="text-slate-500 leading-relaxed pl-1 border-l-2 border-slate-200 flex flex-wrap gap-1 mt-2">
-                                                                                {children.map(c => (
-                                                                                    <span key={c.value} className="bg-white border px-1 rounded text-[10px]" title={c.value}>{c.label}</span>
-                                                                                ))}
-                                                                            </div>
-                                                                        </div>
-                                                                    ))}
+                                                {formData.dependentFieldId && (
+                                                    <div className="space-y-4 pt-4">
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                            <div className="space-y-4 border p-4 rounded-lg bg-slate-50">
+                                                                <h4 className="text-xs font-bold text-slate-600 uppercase flex items-center gap-2"><Plus className="w-3 h-3" /> Add Mapping Set</h4>
+
+                                                                <div className="space-y-2">
+                                                                    <Label className="text-[10px] uppercase font-bold text-slate-500">1. Select Parent Value</Label>
+                                                                    <div className="flex gap-2">
+                                                                        <Popover open={openParentValueCombo} onOpenChange={setOpenParentValueCombo}>
+                                                                            <PopoverTrigger asChild>
+                                                                                <Button variant="outline" role="combobox" aria-expanded={openParentValueCombo} className="w-full justify-between bg-white text-xs truncate">
+                                                                                    {currentParentValue ? getParentLabel(currentParentValue) : "Select from list..."}
+                                                                                    <ChevronsUpDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
+                                                                                </Button>
+                                                                            </PopoverTrigger>
+                                                                            <PopoverContent className="w-[200px] p-0">
+                                                                                <Command>
+                                                                                    <CommandInput placeholder="Search parent option..." />
+                                                                                    <CommandList>
+                                                                                        <ScrollArea className="h-[200px]">
+                                                                                            <CommandGroup>
+                                                                                                {parentFieldOptions.map((opt) => (
+                                                                                                    <CommandItem key={opt.value} value={opt.value} onSelect={() => { setCurrentParentValue(opt.value); setOpenParentValueCombo(false); }}>
+                                                                                                        {opt.label}
+                                                                                                    </CommandItem>
+                                                                                                ))}
+                                                                                            </CommandGroup>
+                                                                                        </ScrollArea>
+                                                                                    </CommandList>
+                                                                                </Command>
+                                                                            </PopoverContent>
+                                                                        </Popover>
+                                                                        <Input className="w-1/2 h-9 text-xs" placeholder="ID/Value" value={currentParentValue} onChange={e => setCurrentParentValue(e.target.value)} />
+                                                                    </div>
                                                                 </div>
-                                                            </ScrollArea>
+
+                                                                <div className="space-y-2">
+                                                                    <div className="flex justify-between items-end">
+                                                                        <Label className="text-[10px] uppercase font-bold text-slate-500">2. Bulk Add Dependents</Label>
+                                                                        <span className="text-[9px] text-slate-400">Separate by comma or newline</span>
+                                                                    </div>
+
+                                                                    <Textarea className="h-24 text-xs bg-white font-mono" placeholder="Item 1, Item 2&#10;Item 3&#10;Item 4" value={currentChildInput} onChange={e => setCurrentChildInput(e.target.value)} />
+                                                                    <Button size="sm" onClick={addValuesToCurrentList} variant="secondary" className="w-full h-7 text-xs gap-2" type="button"><ArrowDown className="w-3 h-3" /> Process to List</Button>
+
+                                                                    <div className="flex flex-wrap gap-1 min-h-[40px] max-h-[100px] overflow-y-auto p-2 bg-white border rounded-md">
+                                                                        {currentChildList.length === 0 && <span className="text-[10px] text-slate-300 italic">No items pending...</span>}
+                                                                        {currentChildList.map(c => (
+                                                                            <Badge key={c.value} variant="outline" className="text-[10px] bg-slate-50 h-5 px-1 pr-0 gap-1">
+                                                                                <span title={c.value}>{c.label}</span>
+                                                                                <div className="h-full border-l px-1 hover:bg-red-100 cursor-pointer rounded-r" onClick={() => removeChildFromList(c.value)}><X className="w-3 h-3 text-slate-400 hover:text-red-500" /></div>
+                                                                            </Badge>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+
+                                                                <Button onClick={saveMappingSet} className="w-full bg-slate-800 text-white h-9 text-xs" disabled={!currentParentValue || currentChildList.length === 0}>
+                                                                    <Save className="w-3 h-3 mr-2" /> Save this Mapping Set
+                                                                </Button>
+                                                            </div>
+
+                                                            <div className="border rounded-lg overflow-hidden flex flex-col h-[400px]">
+                                                                <div className="bg-slate-100 p-2 text-xs font-bold text-slate-600 border-b flex justify-between items-center">
+                                                                    <span>Existing Mappings</span>
+                                                                    <Badge variant="secondary" className="text-[10px]">{Object.keys(formData.manualMapping || {}).length} Sets</Badge>
+                                                                </div>
+                                                                <ScrollArea className="flex-1 bg-white">
+                                                                    <div className="p-2 space-y-2">
+                                                                        {Object.entries(formData.manualMapping || {}).length === 0 && <div className="text-center p-8 text-slate-300 text-xs">No mappings configured yet.</div>}
+                                                                        {Object.entries(formData.manualMapping || {}).map(([parentVal, children]) => (
+                                                                            <div key={parentVal} className="border rounded p-2 text-xs group hover:border-blue-200 transition-colors bg-slate-50/50">
+                                                                                <div className="flex justify-between items-start mb-1">
+                                                                                    <div className="flex flex-col">
+                                                                                        <span className="font-bold text-slate-700">{getParentLabel(parentVal)}</span>
+                                                                                        <span className="text-[9px] text-slate-400 font-mono">{parentVal}</span>
+                                                                                    </div>
+                                                                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                                        <Edit2 className="w-3 h-3 text-blue-500 cursor-pointer" onClick={() => editMappingSet(parentVal)} />
+                                                                                        <Trash2 className="w-3 h-3 text-red-500 cursor-pointer" onClick={() => deleteMappingSet(parentVal)} />
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div className="text-slate-500 leading-relaxed pl-1 border-l-2 border-slate-200 flex flex-wrap gap-1 mt-2">
+                                                                                    {children.map(c => (
+                                                                                        <span key={c.value} className="bg-white border px-1 rounded text-[10px]" title={c.value}>{c.label}</span>
+                                                                                    ))}
+                                                                                </div>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </ScrollArea>
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-2">
-                                            <Label htmlFor="options" className="text-xs font-bold text-slate-500 uppercase">Static Options</Label>
-                                            <Textarea id="options" value={optionsText} onChange={(e) => setOptionsText(e.target.value)} rows={3} placeholder='["Nairobi", "Mombasa"]' className="font-mono text-xs bg-slate-50" />
-                                            <p className="text-[10px] text-slate-500">JSON array or comma-separated list.</p>
-                                        </div>
-                                    )}
-                                </CardDescription>
-                            </Card>
-                        )}
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                <Label htmlFor="options" className="text-xs font-bold text-slate-500 uppercase">Static Options</Label>
+                                                <Textarea id="options" value={optionsText} onChange={(e) => setOptionsText(e.target.value)} rows={3} placeholder='["Nairobi", "Mombasa"]' className="font-mono text-xs bg-slate-50" />
+                                                <p className="text-[10px] text-slate-500">JSON array or comma-separated list.</p>
+                                            </div>
+                                        )}
+                                    </CardDescription>
+                                </Card>
+                            )}
 
-                        <div className="space-y-2 pt-2">
-                            <div className="flex items-center justify-between">
-                                <Label className="text-sm font-semibold text-slate-800">Data Sources</Label>
-                                {isDependent && <span className="text-xs text-blue-600 italic bg-blue-50 px-2 py-0.5 rounded">Source Table for Children (Manual Mapping)</span>}
+                            <div className="space-y-2 pt-2">
+                                <div className="flex items-center justify-between">
+                                    <Label className="text-sm font-semibold text-slate-800">Data Sources</Label>
+                                    {isDependent && <span className="text-xs text-blue-600 italic bg-blue-50 px-2 py-0.5 rounded">Source Table for Children (Manual Mapping)</span>}
+                                </div>
+                                {fieldCards.length === 0 && (
+                                    <DataSourceConfiguration
+                                        sources={sources}
+                                        onChange={setSources}
+                                        documentTypes={formData.documentTypes}
+                                        tables={tables}
+                                        loadingTables={loadingTables}
+                                        fetchFieldsForTable={fetchFieldsForTable}
+                                        getFieldsForTable={getFieldsForTable}
+                                        getLoadingForTable={getLoadingForTable}
+                                        masterFields={masterFields}
+                                    />
+                                )}
                             </div>
-                            {fieldCards.length === 0 && (
-                                <DataSourceConfiguration 
-                                    sources={sources} 
-                                    onChange={setSources} 
-                                    documentTypes={formData.documentTypes}
-                                    tables={tables}
-                                    loadingTables={loadingTables}
-                                    fetchFieldsForTable={fetchFieldsForTable}
-                                    getFieldsForTable={getFieldsForTable}
-                                    getLoadingForTable={getLoadingForTable}
-                                />
+
+                            {!formData.is_computed && formData.type === 'date' && (
+                                <div className="space-y-4 pt-4 border-t">
+                                    <Label className="text-sm font-bold text-slate-700">Date Formatting</Label>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="flex items-center space-x-2 p-3 border rounded-lg bg-slate-50">
+                                            <Checkbox id="use-current-date" checked={formData.date_config?.useCurrentDate ?? true} onCheckedChange={(c) => setFormData(p => ({ ...p, date_config: { ...p.date_config, useCurrentDate: c as boolean } }))} />
+                                            <Label htmlFor="use-current-date" className="text-xs">Default to Current Date</Label>
+                                        </div>
+                                        <Select value={formData.date_config?.format || 'YYYY-MM-DD'} onValueChange={(v) => setFormData(p => ({ ...p, date_config: { ...p.date_config, format: v } }))}>
+                                            <SelectTrigger><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="YYYY-MM-DD">YYYY-MM-DD</SelectItem>
+                                                <SelectItem value="DD/MM/YYYY">DD/MM/YYYY</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
                             )}
                         </div>
-
-                        {!formData.is_computed && formData.type === 'date' && (
-                            <div className="space-y-4 pt-4 border-t">
-                                <Label className="text-sm font-bold text-slate-700">Date Formatting</Label>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="flex items-center space-x-2 p-3 border rounded-lg bg-slate-50">
-                                        <Checkbox id="use-current-date" checked={formData.date_config?.useCurrentDate ?? true} onCheckedChange={(c) => setFormData(p => ({ ...p, date_config: { ...p.date_config, useCurrentDate: c as boolean } }))} />
-                                        <Label htmlFor="use-current-date" className="text-xs">Default to Current Date</Label>
-                                    </div>
-                                    <Select value={formData.date_config?.format || 'YYYY-MM-DD'} onValueChange={(v) => setFormData(p => ({ ...p, date_config: { ...p.date_config, format: v } }))}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="YYYY-MM-DD">YYYY-MM-DD</SelectItem>
-                                            <SelectItem value="DD/MM/YYYY">DD/MM/YYYY</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            </div>
-                        )}
-                    </div>
                     )}
 
                     <DialogFooter className="pt-4 border-t bg-white sticky bottom-0 z-10 -m-6 p-6 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">

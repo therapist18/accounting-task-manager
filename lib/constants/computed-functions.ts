@@ -47,3 +47,7 @@ export const EXECUTION_MODES = [
     { value: "all", label: "Fetch All Previous" },
     { value: "latest", label: "Latest Document Only" }
 ];
+
+export const getComputedFunction = (value: string) => {
+    return COMPUTED_FUNCTIONS.find(f => f.value === value);
+};

@@ -208,16 +208,29 @@ export async function extractFieldFromAllDocuments(
     cache?: DocumentCache
 ): Promise<string[]> {
     try {
+        console.log(`[Array-Extract] Starting extraction - Individual: ${individualId}, Docs: ${documentIds?.join(', ')}, Path: ${fieldPath}`);
+        
         const { docs, types } = await fetchDocsAndTypes(individualId, documentIds, cache);
-        if (docs.length === 0) return [];
+        if (docs.length === 0) {
+            console.log(`[Array-Extract] No documents found`);
+            return [];
+        }
 
         const sorted = sortDocsByRecency(docs, types);
         const results: string[] = [];
 
+        console.log(`[Array-Extract] Processing ${sorted.length} documents`);
+
         for (const item of sorted) {
+            console.log(`[Array-Extract] Processing document - ID: ${item.doc.id}, extracted_details keys:`, Object.keys(item.doc.extracted_details || {}));
+            
             const value = parseJsonPath(item.doc, fieldPath);
+            console.log(`[Array-Extract] Document ${item.doc.id} - Path: ${fieldPath}, Value:`, value);
+            
             results.push(value !== null && value !== undefined ? String(value) : "");
         }
+        
+        console.log(`[Array-Extract] Final results:`, results);
         return results;
     } catch (error) {
         console.error("[Array-Extract] Error:", error);
@@ -497,6 +510,7 @@ export async function determineImmigrationStatus(individualId: string | number, 
     try {
         const { docs, types } = await fetchDocsAndTypes(individualId, computedDocuments, cache);
         if (docs.length === 0) return "No Status Doc";
+        
         const sorted = docs.map(doc => {
             const type = types.find((t: any) => t.id === doc.document_id);
             const details = doc.extracted_details || {};
@@ -521,7 +535,7 @@ export async function determineImmigrationStatus(individualId: string | number, 
                 issueDate = new Date(doc.created_at);
             }
 
-            return { doc, type, expiryDate, issueDate };
+            return { doc, type, expiryDate, issueDate, details };
         }).sort((a, b) => {
             if (a.expiryDate.getTime() !== b.expiryDate.getTime()) {
                 return b.expiryDate.getTime() - a.expiryDate.getTime();
@@ -531,50 +545,53 @@ export async function determineImmigrationStatus(individualId: string | number, 
 
         const current = sorted[0];
         const now = new Date();
-        if (current.expiryDate.getTime() > 0 && current.expiryDate < now) {
-            const immigrationStatus = current.type?.immigration_status;
-            let immigrationStatusStr: string;
-
-            if (typeof immigrationStatus === 'string') {
-                immigrationStatusStr = immigrationStatus;
-            } else if (typeof immigrationStatus === 'object' && immigrationStatus !== null) {
-                if ('en' in immigrationStatus) {
-                    immigrationStatusStr = String(immigrationStatus.en);
-                } else if ('name' in immigrationStatus) {
-                    immigrationStatusStr = String(immigrationStatus.name);
-                } else {
-                    immigrationStatusStr = "Unknown";
-                }
-            } else {
-                immigrationStatusStr = "Unknown";
+        const details = current.details;
+        
+        // PRIORITY 1: Extract permit/pass type from extracted_details
+        const permitTypeFieldNames = [
+            'Permit_Type', 'permit_type', 'PermitType',
+            'Pass_Type', 'pass_type', 'PassType',
+            'Pass_type', 'Permit_type',
+            'Immigration_Status', 'immigration_status', 'Status', 'status'
+        ];
+        
+        let extractedPermitType = null;
+        for (const fieldName of permitTypeFieldNames) {
+            if (details[fieldName]) {
+                extractedPermitType = String(details[fieldName]);
+                console.log(`[Immigration Status] Found permit type in extracted_details: ${extractedPermitType}`);
+                break;
             }
-            const expiredResult = `${immigrationStatusStr}`;
-            return expiredResult;
         }
-
-        // CRITICAL FIX: Properly extract the immigration_status as a string
+        
+        // PRIORITY 2: Use the immigration_status from the document type definition
+        let typeBasedStatus = null;
         const immigrationStatus = current.type?.immigration_status;
-        let finalStatus: string;
-
+        
         if (typeof immigrationStatus === 'string') {
-            finalStatus = immigrationStatus;
+            typeBasedStatus = immigrationStatus;
         } else if (typeof immigrationStatus === 'object' && immigrationStatus !== null) {
             if ('en' in immigrationStatus) {
-                finalStatus = String(immigrationStatus.en);
+                typeBasedStatus = String(immigrationStatus.en);
             } else if ('name' in immigrationStatus) {
-                finalStatus = String(immigrationStatus.name);
-            } else {
-                finalStatus = current.type?.name || current.type?.id || "Unknown Status";
+                typeBasedStatus = String(immigrationStatus.name);
             }
-        } else {
-            finalStatus = "Unknown Status";
         }
-        if (typeof finalStatus !== 'string') {
-            return "Status Extraction Error";
+        
+        // PRIORITY 3: Use document type name as fallback
+        const fallbackStatus = current.type?.name || current.type?.id || "Unknown Status";
+        
+        // Determine final status (prefer extracted permit type if available)
+        const finalStatus = extractedPermitType || typeBasedStatus || fallbackStatus;
+        
+        // Check if expired
+        if (current.expiryDate.getTime() > 0 && current.expiryDate < now) {
+            return `${finalStatus} (Expired)`;
         }
 
         return finalStatus;
     } catch (e) {
+        console.error('[Immigration Status Error]:', e);
         return "COMPUTATION_RUNTIME_FAIL";
     }
 }
@@ -778,49 +795,116 @@ async function getJobFieldDefinition(fieldKey: string) {
 /**
  * Generic extractor that follows the "sources" configuration of a Master Field.
  * It now decides whether to use individualId or companyId based on the source_type.
+ * ENHANCED: Now supports fallback to lower priority sources if higher priority returns empty
  */
 async function extractFromMasterField(
     fieldKey: string, 
     individualId: string | number,
-    companyId: string | number
+    companyId: string | number,
+    extractionMode: 'latest' | 'all' = 'latest'
 ): Promise<string> {
     try {
         const fieldConfig = await getJobFieldDefinition(fieldKey);
         if (!fieldConfig || !fieldConfig.sources || fieldConfig.sources.length === 0) {
+            console.log(`[Extract Master Field] No sources found for field: ${fieldKey}`);
             return '';
         }
 
-        // Sort sources by priority
+        // Sort sources by priority (lower number = higher priority)
         const sortedSources = [...fieldConfig.sources].sort((a, b) => (a.priority || 99) - (b.priority || 99));
+        
+        console.log(`[Extract Master Field] Field: ${fieldKey}, Total sources: ${sortedSources.length}`);
 
-        for (const source of sortedSources) {
-            const { table, path, linking_variable = 'id', source_type } = source;
+        // Try each source in priority order
+        for (let i = 0; i < sortedSources.length; i++) {
+            const source = sortedSources[i];
+            const { table, path, linking_variable = 'id', source_type, is_computed, document_id } = source;
+            
+            console.log(`[Extract Master Field] Trying source ${i + 1} (Priority: ${source.priority || 99}): table=${table}, path=${path}, source_type=${source_type}, is_computed=${is_computed}`);
             
             // Determine which ID to use based on source type
             const targetId = source_type === 'company' ? companyId : individualId;
-            if (!targetId) continue;
+            if (!targetId) {
+                console.log(`[Extract Master Field] Skipping source ${i + 1} - no target ID for source_type: ${source_type}`);
+                continue;
+            }
 
-            // 1. Fetch the record from the specified table
+            // Handle computed sources (document extraction)
+            if (is_computed && document_id && document_id.length > 0) {
+                console.log(`[Extract Master Field] Source ${i + 1} is computed, extracting from documents: ${document_id.join(', ')}, mode: ${extractionMode}`);
+                
+                let value: any;
+                if (extractionMode === 'all') {
+                    value = await extractFieldFromAllDocuments(targetId, document_id, path || '');
+                } else {
+                    value = await extractFieldFromLatestDocument(targetId, document_id, path || '');
+                }
+                
+                // Check if the result is valid (not empty array for array fields, not empty string for single fields)
+                const isValidResult = (extractionMode === 'all' && Array.isArray(value) && value.length > 0) ||
+                                   (extractionMode === 'latest' && value && value !== '' && value !== 'Document Not Found' && value !== 'Field Not Found' && value !== 'No Document Specified');
+                
+                if (isValidResult) {
+                    console.log(`[Extract Master Field] Source ${i + 1} SUCCESS - Got value:`, value);
+                    
+                    // Handle arrays (return as-is for array fields)
+                    if (Array.isArray(value)) {
+                        return value;
+                    }
+                    
+                    // Handle objects (like translations {en: "..."})
+                    if (typeof value === 'object' && value !== null) {
+                        try {
+                            const parsed = JSON.parse(value);
+                            return parsed.en || parsed.name || parsed.title || String(Object.values(parsed)[0]);
+                        } catch {
+                            return String(value);
+                        }
+                    }
+                    return String(value);
+                } else {
+                    console.log(`[Extract Master Field] Source ${i + 1} returned empty or error: ${value}, trying next source...`);
+                }
+                continue;
+            }
+
+            // Handle standard sources (direct table lookups)
+            console.log(`[Extract Master Field] Source ${i + 1} is standard, querying table: ${table} with ${linking_variable}=${targetId}`);
+            
             const { data: record, error } = await supabase
                 .from(table)
                 .select('*')
                 .eq(linking_variable, targetId)
                 .maybeSingle();
 
-            if (error || !record) continue;
+            if (error) {
+                console.log(`[Extract Master Field] Source ${i + 1} query error:`, error);
+                continue;
+            }
+            
+            if (!record) {
+                console.log(`[Extract Master Field] Source ${i + 1} - no record found, trying next source...`);
+                continue;
+            }
 
-            // 2. Extract value via the path
+            // Extract value via the path
             const value = parseJsonPath(record, path);
+            console.log(`[Extract Master Field] Source ${i + 1} extracted value:`, value);
 
             if (value !== null && value !== undefined && value !== '') {
+                console.log(`[Extract Master Field] Source ${i + 1} SUCCESS - Got value: ${value}`);
+                
                 // Handle objects (like translations {en: "..."})
                 if (typeof value === 'object') {
                     return value.en || value.name || value.title || String(Object.values(value)[0]);
                 }
                 return String(value);
+            } else {
+                console.log(`[Extract Master Field] Source ${i + 1} returned empty, trying next source...`);
             }
         }
 
+        console.log(`[Extract Master Field] All sources exhausted for field: ${fieldKey}, returning empty string`);
         return '';
     } catch (error) {
         console.error(`[Extract Master Field Error - ${fieldKey}]:`, error);
