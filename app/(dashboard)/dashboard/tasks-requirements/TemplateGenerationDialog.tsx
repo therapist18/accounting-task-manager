@@ -584,6 +584,10 @@ const processTextField = (placeholder, targetEntity, combinedCache, masterFields
 };
 
 const processPlaceholderValue = (placeholder, relationshipData, combinedCache, masterFields, entityIdMap = null, extractedData, companyData, arrayIndex = null, sourceArray = null) => {
+    if (placeholder.name === 'DIR OCCUPATION') {
+        console.log('Processing DIR OCCUPATION placeholder:', placeholder);
+        console.log('Target entity:', getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData));
+    }
     // console.group(`🔍 Processing: ${placeholder.name} (${placeholder.type || 'text'})`);
     if (placeholder.master_field_ids?.length) {
         const dateResult = processCurrentDateField(placeholder, masterFields);
@@ -681,7 +685,7 @@ const extractDisplayValue = (value) => {
             return String(value.value);
         }
 
-        console.warn('Unexpected object value:', value);
+        console.warn('Unexpected object value in extractDisplayValue:', value, 'for placeholder name check');
         return '';
     }
 
@@ -1355,6 +1359,8 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                             liveData[blockName] = resolvedArray;
                         }
                     });
+                    console.log('Draft Form Data:', draftFormData);
+                    console.log('Live Data:', liveData);
                     const conflicts = await detectDataConflicts(draftFormData, liveData);
                     setFormData(draftFormData);
                     setOriginalFormData(JSON.parse(JSON.stringify(draftFormData)));

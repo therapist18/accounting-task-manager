@@ -300,6 +300,44 @@ export async function extractFieldFromLatestDocument(
             console.log(`[Extract Debug] No document IDs provided`);
             return "No Document Specified";
         }
+        
+        // --- START MODIFICATION 2: Handle Master Field Key/ID resolution ---
+        if (!fieldPath.includes('->>') && !fieldPath.includes('->') && fieldPath !== '') {
+            let fieldKeyToExtract = fieldPath;
+
+            // Attempt to resolve ID to key if it looks like an ID
+            if (!isNaN(Number(fieldPath))) {
+                const { data: masterField } = await supabase
+                    .from('tm_job_fields')
+                    .select('field_key')
+                    .eq('id', fieldPath)
+                    .maybeSingle();
+                
+                if (masterField?.field_key) {
+                    fieldKeyToExtract = masterField.field_key;
+                }
+            }
+
+            // If we have a key, extract the value from that master field's sources recursively
+            if (fieldKeyToExtract) {
+                console.log(`[Extract Debug] Field Path identified as Master Field Key/ID (${fieldKeyToExtract}), delegating to extractFromMasterField.`);
+                
+                const result = await extractFromMasterField(
+                    fieldKeyToExtract, 
+                    individualId, 
+                    null // Company ID null
+                );
+                
+                if (result !== '' && result !== 'No Computation Config') {
+                    // Return the value found by the master field extraction chain
+                    return String(result);
+                }
+                
+                console.log(`[Extract Debug] Master Field extraction failed for ${fieldKeyToExtract}. Continuing with document path logic.`);
+            }
+        }
+        // --- END MODIFICATION 2 ---
+
 
         const { docs, types } = await fetchDocsAndTypes(individualId, documentIds, cache);
      
@@ -701,7 +739,15 @@ export async function calculateArithmetic(
         return "Calculation Error";
     }
 }
+// @ts-nocheck
+// ... (keep existing imports and previous functions)
 
+/* 
+ * FIXED FUNCTION: calculateDateDifference
+ * Simplified to rely on extractFieldFromLatestDocument's built-in Master Field ID resolution.
+ * This ensures it uses the source documents defined in the referenced fields (83/30) 
+ * rather than the documents of the parent field (96).
+ */
 export async function calculateDateDifference(
     individualId: string | number,
     computedDocuments: string[],
@@ -711,85 +757,119 @@ export async function calculateDateDifference(
     cache?: DocumentCache
 ): Promise<string> {
     try {
-        // Helper function to resolve master field ID to actual document path using linked sources
-        const resolveFieldPath = async (fieldPathOrId: any): Promise<string> => {
-            // Convert to string first to handle all input types
-            const fieldPathStr = String(fieldPathOrId);
+        console.log(`[Date Debug] === START calculateDateDifference ===`);
+        console.log(`[Date Debug] Individual: ${individualId}`);
+        console.log(`[Date Debug] StartPath: ${startDatePath}, EndPath: ${endDatePath}, Unit: ${unit}`);
+        
+        // Helper function to resolve master field ID to actual field path
+        const resolveFieldPath = async (pathOrId: string | number): Promise<string> => {
+            const pathOrIdStr = String(pathOrId);
             
-            // If it's already a document path (contains ->>), return as-is
-            if (fieldPathStr.includes('->>')) {
-                return fieldPathStr;
+            // If it's already a path (contains -> or .), return as-is
+            if (pathOrIdStr.includes('->') || pathOrIdStr.includes('.')) {
+                return pathOrIdStr;
             }
-
-            // If it's a numeric ID, look up the master field and get its linked sources
-            if (!isNaN(Number(fieldPathStr))) {
-                try {
-                    const { data: masterField } = await supabase
-                        .from('tm_job_fields')
-                        .select('*')
-                        .eq('id', fieldPathOrId)
-                        .maybeSingle();
-                    if (masterField?.sources?.length > 0) {
-                        // Find the source that matches document extraction
-                        const documentSource = masterField.sources.find(source => 
-                            source.table === 'acc_portal_directors_documents' && 
-                            source.path
-                        );
-                        
-                        if (documentSource?.path) {
-                             return documentSource.path;
-                        }
-                    }
-                } catch (error) {
-                    console.error(`[Date Debug] Error looking up master field ${fieldPathOrId}:`, error);
+            
+            // Otherwise, treat as master field ID and resolve to field path
+            try {
+                const fieldConfig = await getJobFieldDefinition(pathOrIdStr);
+                if (!fieldConfig || !fieldConfig.sources || fieldConfig.sources.length === 0) {
+                    console.log(`[Date Debug] No sources found for master field: ${pathOrIdStr}`);
+                    return '';
                 }
+                
+                // Find the first source with a path (computed or non-computed)
+                const source = fieldConfig.sources.find(s => s.path);
+                if (source && source.path) {
+                    console.log(`[Date Debug] Resolved master field ${pathOrIdStr} to path: ${source.path}`);
+                    return source.path;
+                }
+                
+                console.log(`[Date Debug] No valid path found for master field: ${pathOrIdStr}`);
+                return '';
+            } catch (error) {
+                console.error(`[Date Debug] Error resolving master field ${pathOrIdStr}:`, error);
+                return '';
             }
-
-           return fieldPathOrId;
         };
+        
+        // Resolve the paths
+        const resolvedStartPath = await resolveFieldPath(startDatePath);
+        const resolvedEndPath = await resolveFieldPath(endDatePath);
+        
+        console.log(`[Date Debug] Resolved paths - Start: ${resolvedStartPath}, End: ${resolvedEndPath}`);
+        
+        if (!resolvedStartPath || !resolvedEndPath) {
+            return "Invalid Field Paths";
+        }
+        
+        // 1. Extract Start Date
+        const startDateValue = await extractFieldFromLatestDocument(individualId, computedDocuments, resolvedStartPath, cache);
+        console.log(`[Date Debug] Extracted Start Date Value: "${startDateValue}"`);
 
-        // Resolve the actual paths
-        const resolvedStartDatePath = await resolveFieldPath(startDatePath);
-        const resolvedEndDatePath = await resolveFieldPath(endDatePath);
-const startDateValue = await extractFieldFromLatestDocument(individualId, computedDocuments, resolvedStartDatePath, cache);
-        if (startDateValue === "Field Not Found" || startDateValue === "Missing Document") {
+        // Check for common error responses or JSON objects
+        if (startDateValue === "Field Not Found" || startDateValue === "Missing Document" || !startDateValue || startDateValue === "") {
             return "Start Date Not Found";
         }
-
-        const endDateValue = await extractFieldFromLatestDocument(individualId, computedDocuments, resolvedEndDatePath, cache);
-        if (endDateValue === "Field Not Found" || endDateValue === "Missing Document") {
-            return "End Date Not Found";
+        if (typeof startDateValue === 'string' && (startDateValue.trim().startsWith('{') || startDateValue.trim().startsWith('['))) {
+             console.log(`[Date Debug] Start date is complex object:`, startDateValue);
+             return "Invalid Start Date Format";
         }
 
-        // Convert string numbers to actual numbers if needed
+        // 2. Extract End Date
+        const endDateValue = await extractFieldFromLatestDocument(individualId, computedDocuments, resolvedEndPath, cache);
+        console.log(`[Date Debug] Extracted End Date Value: "${endDateValue}"`);
+
+        if (endDateValue === "Field Not Found" || endDateValue === "Missing Document" || !endDateValue || endDateValue === "") {
+            return "End Date Not Found";
+        }
+        if (typeof endDateValue === 'string' && (endDateValue.trim().startsWith('{') || endDateValue.trim().startsWith('['))) {
+             console.log(`[Date Debug] End date is complex object:`, endDateValue);
+             return "Invalid End Date Format";
+        }
+
+        // 3. Parse Dates
         const startDateStr = typeof startDateValue === 'string' && !isNaN(Number(startDateValue)) ? Number(startDateValue) : startDateValue;
         const endDateStr = typeof endDateValue === 'string' && !isNaN(Number(endDateValue)) ? Number(endDateValue) : endDateValue;
 
         const startDate = parseDateString(startDateStr);
         const endDate = parseDateString(endDateStr);
+
         if (!startDate || !endDate) {
+            console.log(`[Date Debug] Parsing failed - Start: ${startDate}, End: ${endDate}`);
             return "Invalid Date Format";
         }
 
+        // 4. Calculate Difference
         let difference: number;
-
         switch (unit) {
             case 'days':
                 const diffTime = endDate.getTime() - startDate.getTime();
                 difference = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
                 break;
             case 'months':
-                const months = (endDate.getFullYear() - startDate.getFullYear()) * 12 +
-                    (endDate.getMonth() - startDate.getMonth());
-                difference = months;
+                // Precise month calculation
+                difference = (endDate.getFullYear() - startDate.getFullYear()) * 12 + (endDate.getMonth() - startDate.getMonth());
+                // Adjust if day of month is earlier
+                if (endDate.getDate() < startDate.getDate()) {
+                    difference--;
+                }
                 break;
             case 'years':
                 difference = endDate.getFullYear() - startDate.getFullYear();
+                // Adjust if month/day is earlier
+                const m = endDate.getMonth() - startDate.getMonth();
+                if (m < 0 || (m === 0 && endDate.getDate() < startDate.getDate())) {
+                    difference--;
+                }
                 break;
             default:
                 difference = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
         }
-         return String(difference);
+
+        console.log(`[Date Debug] Calculated Difference: ${difference} ${unit}`);
+        return String(difference);
+
     } catch (error) {
         console.error("[Date Difference Error]:", error);
         return "Date Calculation Error";
@@ -800,15 +880,55 @@ export async function getLatestWorkPermit(individualId: string | number, compute
     return await getLatestDocumentNumber(individualId, computedDocuments, fieldPath, cache);
 }
 
-async function getJobFieldDefinition(fieldKey: string) {
-    const { data, error } = await supabase
-        .from('tm_job_fields')
-        .select('*')
-        .eq('field_key', fieldKey)
-        .maybeSingle();
+// Cache for storing bulk fetched job field definitions
+const jobFieldsCache: Record<string, any> = {};
+let bulkFetchPromise: Promise<any> | null = null;
+
+// Bulk fetch all job fields at once
+async function bulkFetchJobFields(): Promise<Record<string, any>> {
+    if (bulkFetchPromise) {
+        return bulkFetchPromise;
+    }
     
-    if (error || !data) return null;
-    return data;
+    bulkFetchPromise = (async () => {
+        try {
+            const { data, error } = await supabase
+                .from('tm_job_fields')
+                .select('*');
+            
+            if (error) {
+                console.error('Bulk fetch job fields error:', error);
+                return {};
+            }
+            
+            const fieldsMap: Record<string, any> = {};
+            if (data) {
+                data.forEach(field => {
+                    // Index by both id and field_key for easy lookup
+                    fieldsMap[String(field.id)] = field;
+                    if (field.field_key) {
+                        fieldsMap[field.field_key] = field;
+                    }
+                });
+            }
+            
+            console.log(`[Bulk Fetch] Loaded ${data?.length || 0} job fields into cache`);
+            return fieldsMap;
+        } catch (error) {
+            console.error('Bulk fetch job fields error:', error);
+            return {};
+        }
+    })();
+    
+    return bulkFetchPromise;
+}
+
+async function getJobFieldDefinition(fieldKey: string) {
+    // Ensure bulk data is loaded
+    const fieldsMap = await bulkFetchJobFields();
+    
+    // Return from cache
+    return fieldsMap[fieldKey] || null;
 }
 
 /**
@@ -1049,7 +1169,10 @@ async function getComputationConfigFromSources(fieldKey: string): Promise<{
             computedFunction: computedSource.computed_function || '',
             computedDocuments: computedSource.document_id || [],
             fieldPath: computedSource.path,
-            arithmeticConfig: computedSource.computed_config?.arithmeticConfig || {},
+            arithmeticConfig: {
+                ...computedSource.computed_config?.arithmeticConfig,
+                ...computedSource.computed_config?.dateDiffConfig
+            } || {},
             extractionMode: computedSource.computed_config?.extractionMode || 'latest'
         };
     } catch (error) {
@@ -1078,6 +1201,16 @@ export async function executeComputedField(
     // Normalize the function name by removing any trailing parentheses and trimming whitespace
     const normalizedFunctionName = functionName.replace(/\(\).*$/, '').trim();
     console.log(`[ExecuteComputedField] Executing function: ${normalizedFunctionName} with path: ${fieldPath}`);
+    console.log(`[ExecuteComputedField] Full params:`, {
+        functionName: normalizedFunctionName,
+        individualId,
+        computedDocuments,
+        fieldPath,
+        extractionMode,
+        arithmeticConfig,
+        companyId,
+        entityContext
+    });
 
     // Handle extractFieldFromLatestDocument specifically
     if (normalizedFunctionName === 'extractFieldFromLatestDocument') {
@@ -1120,18 +1253,29 @@ export async function executeComputedField(
                 arithmeticConfig?.operand,
                 cache
             );
-        case 'calculateDateDifference':
+       case 'calculateDateDifference':
+            console.log(`[ExecuteComputedField] calculateDateDifference case - arithmeticConfig:`, arithmeticConfig);
+            // FIX: The arithmeticConfig might be nested (dateDiffConfig) or flat.
+            // We check both. We also remove the fallback to 'fieldPath' because
+            // fieldPath is often the root path (extracted_details) which isn't a valid date source.
+            const diffConfig = arithmeticConfig?.dateDiffConfig || arithmeticConfig || {};
+            console.log(`[ExecuteComputedField] diffConfig extracted:`, diffConfig);
+            
+            // IMPORTANT: Removed fallback to fieldPath. 
+            // fieldPath usually points to the parent container (extracted_details) which is NOT a valid date path.
+            // If the specific start/end paths are missing in the config, we should fail gracefully (Start Date Not Found)
+            // rather than trying to parse the entire JSON object as a date.
             return await calculateDateDifference(
                 individualId, 
                 computedDocuments, 
-                arithmeticConfig?.startDatePath || fieldPath || '',
-                arithmeticConfig?.endDatePath || '',
-                arithmeticConfig?.unit || 'days',
+                diffConfig.startDatePath || '', 
+                diffConfig.endDatePath || '', 
+                diffConfig.unit || 'days', 
                 cache
             );
         default:
-            console.warn(`[ExecuteComputedField] Unknown function: ${normalizedFunctionName}`);
-            return `Unknown Function: ${normalizedFunctionName}`;
+            console.error(`[ExecuteComputedField] Unknown function: ${normalizedFunctionName}`);
+            return "Unknown function";
     }
 }
 

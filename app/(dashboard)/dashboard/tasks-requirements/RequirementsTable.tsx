@@ -328,22 +328,8 @@ export function RequirementsTable({
         const uniqueSubdepartmentIds = [...new Set(filteredTasks.map(t => t.subdepartment_id).filter(id => id != null && id !== ''))];
         const uniqueDepartmentIds = [...new Set(filteredTasks.map(t => t.department_id).filter(id => id != null && id !== ''))];
 
-        // 2. Build Query with AND logic for exact matching
         let reqQuery = supabase.from('tm_class_requirements').select('*');
-        
-        // Debug: Log the query being built
-        console.log('🔍 Class Requirements Query:', {
-            uniqueClassIds,
-            uniqueSubdepartmentIds, 
-            uniqueDepartmentIds,
-            sampleTaskData: filteredTasks.slice(0, 2).map(t => ({
-                id: t.id,
-                class_id: t.class_id,
-                subdepartment_id: t.subdepartment_id,
-                department_id: t.department_id
-            }))
-        });
-
+       
         // Build AND conditions for exact matching
         let filterConditions = {};
         if (uniqueClassIds.length > 0) {
@@ -382,27 +368,9 @@ export function RequirementsTable({
           
           // ALL criteria must match (AND logic)
           const hasMatch = matchesClass && matchesSubdept && matchesDept;
-          
-          // Debug: Log what we're filtering
-          console.log('🔍 Checking record:', {
-            recordId: req.id,
-            jobLevel,
-            matchesClass,
-            matchesSubdept,
-            matchesDept,
-            hasMatch,
-            criteria: { uniqueClassIds, uniqueSubdepartmentIds, uniqueDepartmentIds }
-          });
-          
+                    
           return hasMatch;
         });
-
-        console.log('🔍 Filtered requirements:', {
-          original: classRequirementsRes.data?.length || 0,
-          filtered: filteredRequirements.length,
-          criteria: { uniqueClassIds, uniqueSubdepartmentIds, uniqueDepartmentIds }
-        });
-
         setDocuments((metadataRes.data || []).map(doc => ({ ...doc, display_name: doc.display_name || doc.name })));
 
         // 3. Map Requirements Logic (Hierarchy: Class > Subdept > Dept)

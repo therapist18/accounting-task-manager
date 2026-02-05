@@ -597,7 +597,7 @@ export function DataSourceConfiguration({
                                   }
                                 }
                               })}
-                              options={masterFields.map(f => ({ label: f.label, value: f.field_key }))}
+                              options={masterFields.map(f => ({ label: f.label, value: f.id }))}
                               placeholder="Select Field 1"
                               searchPlaceholder="Search master fields..."
                             />
@@ -615,8 +615,8 @@ export function DataSourceConfiguration({
                                   }
                                 }
                               })}
-                              options={masterFields.map(f => ({ label: f.label, value: f.field_key }))}
-                              placeholder="Select Field 2"
+                              options={masterFields.map(f => ({ label: f.label, value: f.id }))}
+                                 placeholder="Select Field 2"
                               searchPlaceholder="Search master fields..."
                             />
                           </div>
@@ -662,7 +662,7 @@ export function DataSourceConfiguration({
                                 }
                               }
                             })}
-                            options={masterFields.map(f => ({ label: f.label, value: f.field_key }))}
+                             options={masterFields.map(f => ({ label: f.label, value: f.id }))}
                             placeholder="Select Start Date Field"
                             searchPlaceholder="Search master fields..."
                           />
@@ -680,7 +680,7 @@ export function DataSourceConfiguration({
                                 }
                               }
                             })}
-                            options={masterFields.map(f => ({ label: f.label, value: f.field_key }))}
+                             options={masterFields.map(f => ({ label: f.label, value: f.id }))}
                             placeholder="Select End Date Field"
                             searchPlaceholder="Search master fields..."
                           />

@@ -1038,43 +1038,61 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                                             </SelectContent>
                                                         </Select>
                                                         <div className="space-y-2">
-                                                            <Label className="text-[10px] font-bold uppercase text-purple-700">Start Date Path</Label>
-                                                            <Input
-                                                                className="h-9 bg-white text-xs font-mono"
-                                                                placeholder="e.g. extracted_details->>'permit_wef'"
+                                                            <Label className="text-[10px] font-bold uppercase text-purple-700">Start Date Field</Label>
+                                                            <Select
                                                                 value={card.data.computed_config?.dateDiffConfig?.startDatePath || ""}
-                                                                onChange={(e) => updateFieldCard(card.id, {
+                                                                onValueChange={(v) => updateFieldCard(card.id, {
                                                                     computed_config: {
                                                                         ...card.data.computed_config,
                                                                         dateDiffConfig: {
                                                                             ...card.data.computed_config?.dateDiffConfig,
-                                                                            startDatePath: e.target.value
+                                                                            startDatePath: v
                                                                         }
                                                                     }
                                                                 })}
-                                                            />
+                                                            >
+                                                                <SelectTrigger className="bg-white">
+                                                                    <SelectValue placeholder="Select start date field" />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    {masterFields.map(field => (
+                                                                        <SelectItem key={`${card.id}-start-${field.id}`} value={field.id}>
+                                                                            {field.label}
+                                                                        </SelectItem>
+                                                                    ))}
+                                                                </SelectContent>
+                                                            </Select>
                                                         </div>
                                                         <div className="space-y-2">
-                                                            <Label className="text-[10px] font-bold uppercase text-purple-700">End Date Path</Label>
-                                                            <Input
-                                                                className="h-9 bg-white text-xs font-mono"
-                                                                placeholder="e.g. extracted_details->>'permit_wet'"
+                                                            <Label className="text-[10px] font-bold uppercase text-purple-700">End Date Field</Label>
+                                                            <Select
                                                                 value={card.data.computed_config?.dateDiffConfig?.endDatePath || ""}
-                                                                onChange={(e) => updateFieldCard(card.id, {
+                                                                onValueChange={(v) => updateFieldCard(card.id, {
                                                                     computed_config: {
                                                                         ...card.data.computed_config,
                                                                         dateDiffConfig: {
                                                                             ...card.data.computed_config?.dateDiffConfig,
-                                                                            endDatePath: e.target.value
+                                                                            endDatePath: v
                                                                         }
                                                                     }
                                                                 })}
-                                                            />
+                                                            >
+                                                                <SelectTrigger className="bg-white">
+                                                                    <SelectValue placeholder="Select end date field" />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                  {masterFields.map(field => (
+                                                                        <SelectItem key={`${card.id}-end-${field.id}`} value={field.id}>
+                                                                            {field.label}
+                                                                        </SelectItem>
+                                                                    ))}
+                                                                </SelectContent>
+                                                            </Select>
                                                         </div>
                                                     </div>
                                                 )}
                                             </div>
-                                        )}
+                                        )} 
                                     </div>
 
                                     {/* DATA SOURCES SECTION FOR CARD */}

@@ -2201,7 +2201,6 @@ export function AutomationDialog({
     [newGroups[index], newGroups[targetIndex]] = [newGroups[targetIndex], newGroups[index]];
     setWebDataGroups(newGroups);
   };
-  // --- End re-introduced moveRow ---
 
   const processedWebDataGroups = useMemo(() => {
     let groups = [...webDataGroups];
@@ -2210,8 +2209,8 @@ export function AutomationDialog({
     if (fieldSearch) {
       const lower = fieldSearch.toLowerCase();
       groups = groups.filter(g =>
-        g.variableName.toLowerCase().includes(lower) ||
-        g.efnsDisplayName.toLowerCase().includes(lower)
+        (g.variableName && g.variableName.toLowerCase().includes(lower)) ||
+        (g.efnsDisplayName && g.efnsDisplayName.toLowerCase().includes(lower))
       );
     }
 

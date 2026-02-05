@@ -67,19 +67,14 @@ const parseJsonValue = (data: any, path: string, extractionMode?: 'latest' | 'al
     const column = parts[0].trim().replace(/['"]/g, '');
     const jsonPath = parts[2].trim().replace(/['"]/g, '');
     const jsonData = data[column];
-
     if (jsonData === undefined || jsonData === null) return undefined;
-
-    // Handle array syntax like associations[].field
     if (jsonPath.includes('[]')) {
       const [arrayPath, ...fieldPathParts] = jsonPath.split('[]');
       const fieldPath = fieldPathParts.join('').replace(/^\./, ''); // Remove leading dot
-
       const arrayData = arrayPath.split('.').reduce((acc, key) => {
         if (key === '' || key === '[]') return acc;
         return (acc && typeof acc === 'object') ? acc[key] : undefined;
       }, jsonData);
-
       if (Array.isArray(arrayData)) {
         if (fieldPath) {
           // Extract the field from all array items
@@ -88,7 +83,6 @@ const parseJsonValue = (data: any, path: string, extractionMode?: 'latest' | 'al
             return { value, item, index };
           }).filter(({ value }) => value !== undefined && value !== null && value !== '');
           if (extractionMode === 'latest' && values.length > 1) {
-            // Try to find date fields for sorting
             const sortedValues = sortArrayItemsByDate(values, fieldPath);
             return sortedValues.length > 0 ? String(sortedValues[0].value) : undefined;
           }
@@ -96,7 +90,6 @@ const parseJsonValue = (data: any, path: string, extractionMode?: 'latest' | 'al
           const finalValues = values.map(v => v.value);
           return finalValues.length > 0 ? finalValues.join(', ') : undefined;
         } else {
-          // Return the entire array (or latest item if extraction mode is latest)
           if (extractionMode === 'latest' && arrayData.length > 1) {
             const sortedArray = sortArrayItemsByDate(arrayData.map((item, index) => ({ value: item, item, index })));
             return sortedArray.length > 0 ? sortedArray[0].value : arrayData;
@@ -636,11 +629,10 @@ export const AutomationMappingDialog = ({
             computedSource.path,
             extractionMode,
             documentCache,
-            computedSource.computed_config?.arithmeticConfig
+            computedSource.computed_config
           );
 
-          newComputedValues[`${field.id}_${entityId}_${extractionMode}`] =
-            (typeof val === 'object' && val !== null && !Array.isArray(val)) ? JSON.stringify(val) : val;
+          newComputedValues[`${field.id}_${entityId}_${extractionMode}`] = val;
         }
         setMasterFieldComputedValues(newComputedValues);
       }
@@ -701,6 +693,12 @@ export const AutomationMappingDialog = ({
         if (val === undefined) {
           return isLoadingData ? "Computing..." : "Computing...";
         }
+        
+        // For simple strings like "2 years", return as-is without JSON parsing
+        if (typeof val === 'string' && !val.startsWith('{')) {
+          return val;
+        }
+        
         let parsedVal = val;
         if (typeof val === 'string' && val.startsWith('{')) {
           try {
@@ -943,7 +941,7 @@ export const AutomationMappingDialog = ({
           null, // fieldPath
           'latest',
           null, // cache
-          null, // arithmetic
+          f.computed_config, // PASS THE ACTUAL CONFIG
           cid,  // PASS TARGET COMPANY
           f.entityTypes?.[0] // PASS ENTITY TYPE (e.g. 'employee')
         );
@@ -954,6 +952,8 @@ export const AutomationMappingDialog = ({
       try {
         const results = {};
         for (const config of computedFields) {
+          // Find the original field config that has computed_config
+          const originalField = computedConfigs.find(f => f.variableName === config.variableName);
           const val = await executeComputedField(
             config.computedFunction,
             currentIndividualId,
@@ -961,7 +961,7 @@ export const AutomationMappingDialog = ({
             null, // fieldPath
             'latest',
             null, // cache
-            null, // arithmetic
+            originalField?.computed_config, // PASS THE ACTUAL CONFIG FROM ORIGINAL FIELD
             cid,
             config.entityContext // PASSING THE CONTEXT HERE
           );
@@ -1102,11 +1102,20 @@ export const AutomationMappingDialog = ({
           variableName: f.variableName,
           computedFunction: f.computedFunction,
           computedDocuments: f.computedDocuments || [],
-          entityContext: f.entityTypes?.[0] // Pass entity type
+          entityContext: f.entityTypes?.[0], // Pass entity type
+          computed_config: f.computed_config // Include the computed configuration
         })) || [];
       if (computedFields.length > 0) {
         const cid = relationshipData?.company?.id || task?.company_id;
+        console.log(`[Dialog] Processing ${computedFields.length} computed fields`);
         for (const config of computedFields) {
+          console.log(`[Dialog] Processing computed field:`, {
+            variableName: config.variableName,
+            computedFunction: config.computedFunction,
+            computedDocuments: config.computedDocuments,
+            entityContext: config.entityContext,
+            computed_config: config.computed_config
+          });
           const val = await executeComputedField(
             config.computedFunction,
             currentIndividualId,
@@ -1114,7 +1123,7 @@ export const AutomationMappingDialog = ({
             null,
             'latest',
             null,
-            null,
+            config.computed_config,
             cid,
             config.entityContext // Ensure this matches your computed Function's new signature
           );
@@ -1524,6 +1533,9 @@ export const AutomationMappingDialog = ({
 
                     mergedValue = computedFieldsPreview[field.variableName] || "";
 
+                    // Computed fields should not be treated as dropdowns
+                    isDropdown = false;
+
                     const mappingKey = field.computedFunction === 'extractCurrentJobTitle' ? 'job_title' :
 
                       field.computedFunction === 'extractCurrentJobDescription' ? 'job_description' : null;
@@ -1913,12 +1925,6 @@ export const AutomationMappingDialog = ({
                                 );
 
                                 if (assocIdx !== -1) {
-                                  /** 
-                                   * Transform generic path: 
-                                   * "employment_data->>'associations[].job[].title'" 
-                                   * to: 
-                                   * "employment_data->>associations.0.job.title"
-                                   */
                                   const rawPath = finalPath.includes('->>') ? finalPath.split('->>')[1] : finalPath;
                                   const column = finalPath.includes('->>') ? finalPath.split('->>')[0] : '';
 
@@ -1928,7 +1934,9 @@ export const AutomationMappingDialog = ({
                                     .replace('job[]', 'job');   // Flatten the job[] template to job object
 
                                   finalPath = column ? `${column}->>${resolvedJsonPath}` : resolvedJsonPath;
-   }
+
+                                  console.log(`[Persistence] Targeted Index: ${assocIdx} | Entity: ${targetRegistryType} | Path: ${finalPath}`);
+                                }
                               }
 
                               startEditing(
