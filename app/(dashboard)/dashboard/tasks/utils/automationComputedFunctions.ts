@@ -167,6 +167,26 @@ function parseJsonPath(doc: any, fieldPath: string | number): any {
     // Convert to string if it's a number
     const pathStr = String(fieldPath);
 
+    // Helper function for case-insensitive key lookup
+    const findKeyCaseInsensitive = (obj: any, targetKey: string): any => {
+        if (!obj || typeof obj !== 'object') return undefined;
+        
+        // First try exact match
+        if (targetKey in obj) {
+            return obj[targetKey];
+        }
+        
+        // Try case-insensitive match
+        const lowerTargetKey = targetKey.toLowerCase();
+        for (const key in obj) {
+            if (key.toLowerCase() === lowerTargetKey) {
+                return obj[key];
+            }
+        }
+        
+        return undefined;
+    };
+
     // Handle ->> operator (PostgreSQL text extraction)
     if (pathStr.includes("->>")) {
         const parts = pathStr.split("->>");
@@ -175,7 +195,7 @@ function parseJsonPath(doc: any, fieldPath: string | number): any {
             const key = parts[1].trim().replace(/['"]/g, '');
             const columnData = doc[column];
             if (columnData && typeof columnData === 'object') {
-                return columnData[key];
+                return findKeyCaseInsensitive(columnData, key);
             }
         }
         return null;
@@ -189,14 +209,14 @@ function parseJsonPath(doc: any, fieldPath: string | number): any {
             const key = parts[1].trim().replace(/['"]/g, '');
             const columnData = doc[column];
             if (columnData && typeof columnData === 'object') {
-                return columnData[key];
+                return findKeyCaseInsensitive(columnData, key);
             }
         }
         return null;
     }
 
     // Handle direct column access
-    return doc[pathStr];
+    return findKeyCaseInsensitive(doc, pathStr);
 }
 
 // --- ARRAY EXTRACTION ---
@@ -371,12 +391,29 @@ export async function extractFieldFromLatestDocument(
             // Remove empty strings from the path parts
             const cleanPathParts = pathParts.filter(part => part.trim() !== '');
             
-            // Traverse the object using the path parts
-            value = cleanPathParts.reduce((obj, key) => {
-                if (obj && typeof obj === 'object' && key in obj) {
-                    return obj[key];
+            // Helper function for case-insensitive key lookup
+            const findKeyCaseInsensitive = (obj: any, targetKey: string): any => {
+                if (!obj || typeof obj !== 'object') return undefined;
+                
+                // First try exact match
+                if (targetKey in obj) {
+                    return obj[targetKey];
                 }
+                
+                // Try case-insensitive match
+                const lowerTargetKey = targetKey.toLowerCase();
+                for (const key in obj) {
+                    if (key.toLowerCase() === lowerTargetKey) {
+                        return obj[key];
+                    }
+                }
+                
                 return undefined;
+            };
+            
+            // Traverse the object using the path parts with case-insensitive matching
+            value = cleanPathParts.reduce((obj, key) => {
+                return findKeyCaseInsensitive(obj, key);
             }, latestDoc);
         }
 

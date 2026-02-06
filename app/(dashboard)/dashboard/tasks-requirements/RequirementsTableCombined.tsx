@@ -326,6 +326,18 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       }
 
       const expiry = new Date(expiryDate);
+
+      if (isNaN(expiry.getTime())) {
+        console.error('[Date Bug] Invalid expiry date detected:', {
+          expiryDate,
+          rawExpiry: expiry,
+          docId,
+          personId,
+          personType,
+          taskName: task.title || task.id
+        });
+      }
+
       const now = new Date();
       const thirtyDaysFromNow = new Date();
       thirtyDaysFromNow.setDate(now.getDate() + 30);
@@ -466,14 +478,33 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             priority: 1 // Company gets highest priority
           });
         } else if (applicant.type === 'individual') {
+          // Determine the correct type based on the applicant's role
+          let columnType = 'principal';
+          let priority = 2;
+
+          if (applicant.role) {
+            const roles = Array.isArray(applicant.role) ? applicant.role : [applicant.role];
+
+            if (roles.includes('dependant') || roles.includes('dependent')) {
+              columnType = 'dependant';
+              priority = 4;
+            } else if (roles.includes('director') || roles.includes('shareholder')) {
+              columnType = 'director';
+              priority = 3;
+            } else if (roles.includes('understudy')) {
+              columnType = 'understudy';
+              priority = 5;
+            }
+          }
+
           groupCols.push({
-            type: 'principal',
+            type: columnType,
             id: applicant.id,
             label: applicant.name,
             subLabel: applicant.role?.toUpperCase() || 'PRINCIPAL',
             task,
             groupIndex,
-            priority: 2 // Principal gets second priority
+            priority
           });
         }
       }
@@ -519,7 +550,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         p.type === 'individual' &&
         (Array.isArray(p.role) ? p.role.includes('director') || p.role.includes('shareholder') : p.role === 'director' || p.role === 'shareholder')
       );
-      
+
       directors.forEach(d => {
         // Avoid duplicates
         if (!groupCols.find(col => col.id === d.id && col.groupIndex === groupIndex)) {
@@ -710,7 +741,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
           .from('acc_portal_kyc')
           .select('*')
           .in('id', Array.from(allDocIds));
-        
+
         if (data && !error) {
           setDocumentMetadataCache(prev => {
             const newCache = new Map(prev);
@@ -765,11 +796,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       setDocumentMetadataCache(new Map());
       setDocumentStatusCache(new Map());
       setCompositeStatusCache(new Map());
-      
+
       // The useEffect hooks will automatically re-fetch data when caches are cleared
-      
+
       toast({
-        title: "Data Refreshed", 
+        title: "Data Refreshed",
         description: "Document states have been updated",
       });
     } catch (error) {
@@ -1495,14 +1526,13 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                       </Button>
                                     </div>
                                   ) : (
-                                    <span className={`text-xs font-bold uppercase ${
-                                      statusToDisplay.type === 'missing' ? 'text-amber-600' : 
+                                    <span className={`text-xs font-bold uppercase ${statusToDisplay.type === 'missing' ? 'text-amber-600' :
                                       statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'text-red-600' :
-                                      'text-amber-600'
-                                    }`}>
-                                      {statusToDisplay.type === 'missing' ? 'Missing' : 
-                                       statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'Invalid' :
-                                       'No Status'}
+                                        'text-amber-600'
+                                      }`}>
+                                      {statusToDisplay.type === 'missing' ? 'Missing' :
+                                        statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'Invalid' :
+                                          'No Status'}
                                     </span>
                                   )}
                                 </>
@@ -1642,7 +1672,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                         display_name: documentName // Ensure we have a display_name
                                       },
                                       fields: docMetadata.fields,
-                                      person: { 
+                                      person: {
                                         full_name: personName,
                                         id: col.id,  // This is the director ID!
                                         type: 'individual'
@@ -1871,14 +1901,13 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                 </Button>
                               </div>
                             ) : (
-                              <span className={`text-xs font-bold uppercase ${
-                                statusToDisplay.type === 'missing' ? 'text-amber-600' : 
+                              <span className={`text-xs font-bold uppercase ${statusToDisplay.type === 'missing' ? 'text-amber-600' :
                                 statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'text-red-600' :
-                                'text-amber-600'
-                              }`}>
-                                {statusToDisplay.type === 'missing' ? 'Missing' : 
-                                 statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'Invalid' :
-                                 'No Status'}
+                                  'text-amber-600'
+                                }`}>
+                                {statusToDisplay.type === 'missing' ? 'Missing' :
+                                  statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'Invalid' :
+                                    'No Status'}
                               </span>
                             )}
                           </>
@@ -2011,7 +2040,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                   display_name: documentName // Ensure we have a display_name
                                 },
                                 fields: docMetadata.fields,
-                                person: { 
+                                person: {
                                   full_name: personName,
                                   id: col.id,  // This is the director ID!
                                   type: 'individual'

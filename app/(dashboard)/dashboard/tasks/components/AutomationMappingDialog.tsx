@@ -666,6 +666,13 @@ export const AutomationMappingDialog = ({
       f.variableName === fieldIdOrVariable ||
       String(f.id) === String(fieldIdOrVariable)
     );
+    
+    // Log field information
+    console.log(`[Field Debug] ===== Processing Field: ${fieldIdOrVariable} =====`);
+    console.log(`[Field Debug] Entity ID: ${entityId}`);
+    console.log(`[Field Debug] Extraction Mode: ${extractionMode}`);
+    console.log(`[Field Debug] Field Definition:`, fieldDef);
+    
     if (fieldDef?.linkedJobQuestionId) {
       const taskRecord = sourceData['tm_tasks']?.[String(taskId)];
       if (!taskRecord) {
@@ -679,23 +686,55 @@ export const AutomationMappingDialog = ({
       if (answer === undefined || answer === null) {
         answer = answers[Number(questionId)];
       }
+      console.log(`[Field Debug] Linked Job Question ID: ${questionId}, Answer: ${answer}`);
       return (answer !== undefined && answer !== null) ? String(answer) : "Missing";
     }
+    
     const field = jobFields[fieldIdOrVariable];
-    if (!field) return isLoading ? "Loading Config..." : "Missing Config";
+    if (!field) {
+      console.log(`[Field Debug] Field not found in jobFields. Available fields:`, Object.keys(jobFields));
+      return isLoading ? "Loading Config..." : "Missing Config";
+    }
+    
+    console.log(`[Field Debug] Field Config:`, {
+      id: field.id,
+      variableName: field.variableName,
+      fieldLabel: field.fieldLabel,
+      fieldType: field.fieldType,
+      sourcesCount: field.sources?.length || 0
+    });
+    
     const sortedSources = field.sources?.sort((a: any, b: any) => (a.priority || 999) - (b.priority || 999)) || [];
+    console.log(`[Field Debug] Processing ${sortedSources.length} sources in priority order:`);
+    
     for (let i = 0; i < sortedSources.length; i++) {
       const source = sortedSources[i];
       if (!source) continue;
+      
+      console.log(`[Field Debug] --- Source ${i + 1} ---`);
+      console.log(`[Field Debug] Source:`, {
+        table: source.table,
+        path: source.path,
+        entityType: source.entity_type,
+        linkingVariable: source.linking_variable,
+        isComputed: source.is_computed,
+        priority: source.priority,
+        computationConfig: source.computation_config
+      });
+      
       if (source.is_computed) {
         const key = `${field.id}_${entityId}_${extractionMode}`;
         const val = masterFieldComputedValues[key];
+        console.log(`[Field Debug] Computed field key: ${key}, Value:`, val);
+        
         if (val === undefined) {
+          console.log(`[Field Debug] Computed value still loading...`);
           return isLoadingData ? "Computing..." : "Computing...";
         }
         
         // For simple strings like "2 years", return as-is without JSON parsing
         if (typeof val === 'string' && !val.startsWith('{')) {
+          console.log(`[Field Debug] Returning simple string value: ${val}`);
           return val;
         }
         
@@ -703,7 +742,9 @@ export const AutomationMappingDialog = ({
         if (typeof val === 'string' && val.startsWith('{')) {
           try {
             parsedVal = JSON.parse(val);
+            console.log(`[Field Debug] Parsed JSON value:`, parsedVal);
           } catch (e) {
+            console.log(`[Field Debug] Failed to parse JSON:`, e);
           }
         }
         if (typeof parsedVal === 'object' && parsedVal !== null && source.path) {
@@ -711,6 +752,7 @@ export const AutomationMappingDialog = ({
           const fieldName = pathMatch ? pathMatch[1] : null;
           if (fieldName && parsedVal[fieldName]) {
             const extractedValue = String(parsedVal[fieldName]);
+            console.log(`[Field Debug] Extracted field value from object: ${fieldName} = ${extractedValue}`);
             return extractedValue;
           }
         }
@@ -721,24 +763,46 @@ export const AutomationMappingDialog = ({
           val !== 'Document Not Found' && val !== 'Field Not Found' &&
           !((Array.isArray(val) && val.length === 0) || val === '');
 
+        console.log(`[Field Debug] Computed value validation:`, {
+          value: val,
+          isValid: isValidValue,
+          type: typeof val,
+          isArray: Array.isArray(val),
+          isEmpty: val === ''
+        });
+
         if (isValidValue) {
           if (typeof parsedVal === 'object' && parsedVal !== null) {
-            return parsedVal.en || parsedVal.name || parsedVal.title || String(Object.values(parsedVal)[0]);
+            const finalValue = parsedVal.en || parsedVal.name || parsedVal.title || String(Object.values(parsedVal)[0]);
+            console.log(`[Field Debug] Returning object value: ${finalValue}`);
+            return finalValue;
           }
+          console.log(`[Field Debug] Returning valid computed value: ${val}`);
           return String(val);
         } else {
+          console.log(`[Field Debug] Computed value invalid, trying next source...`);
           continue; // Try next source
         }
       }
+      
       let lookupId = String(entityId);
       if (source.table === 'tm_tasks' && (!source.linking_variable || source.linking_variable === 'id')) {
         lookupId = String(taskId);
       }
+      
+      console.log(`[Field Debug] Looking up value from table: ${source.table}, path: ${source.path}, lookupId: ${lookupId}`);
       const value = getSourceValue(source.table, source.path, lookupId, extractionMode as 'latest' | 'all');
+      console.log(`[Field Debug] Retrieved value:`, value);
+      
       if (value !== null && value !== undefined && value !== '' && value !== 'No Source' && value !== 'Missing') {
+        console.log(`[Field Debug] ✓ Found valid value: ${value}`);
         return value;
+      } else {
+        console.log(`[Field Debug] ✗ Invalid/missing value, trying next source...`);
       }
     }
+    
+    console.log(`[Field Debug] No valid sources found for field: ${fieldIdOrVariable}`);
     if (isLoadingData) return "Loading Data...";
     return "No Source";
   };

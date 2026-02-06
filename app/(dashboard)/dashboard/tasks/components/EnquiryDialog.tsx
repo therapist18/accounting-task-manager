@@ -87,17 +87,29 @@ export function EnquiryDialog({
     const [includeReferences, setIncludeReferences] = useState(false)
     const [availableReferences, setAvailableReferences] = useState<any[]>([])
     const [selectedReferences, setSelectedReferences] = useState<string[]>([])
-const [formData, setFormData] = useState({
+    const [formData, setFormData] = useState({
         job_description: '',
         department_id: '',
         subdepartment_id: '',
         class_id: '',
-        subclass_id: '',
         officer_id: '',
         task_manager_id: '',
-        enquiry_date: new Date().toISOString().split('T')[0]
-    })
-    const [isIndividualPopoverOpen, setIsIndividualPopoverOpen] = useState(false)
+        task_assistant_id: '',
+        enquiry_date: new Date().toISOString().split('T')[0],
+        job_level: {
+            level: 1,
+            department_id: null,
+            subdepartment_id: null,
+            class_id: null,
+            subclass_id: null
+        }
+    });
+    
+    // State for available staff
+    const [availableOfficers, setAvailableOfficers] = useState<any[]>([]);
+    const [availableManagers, setAvailableManagers] = useState<any[]>([]);
+    const [availableAssistants, setAvailableAssistants] = useState<any[]>([]);
+    const [isIndividualPopoverOpen, setIsIndividualPopoverOpen] = useState(false);
 
     // --- Form Reset Logic ---
     const resetForm = useCallback(() => {
@@ -106,10 +118,17 @@ const [formData, setFormData] = useState({
             department_id: '',
             subdepartment_id: '',
             class_id: '',
-            subclass_id: '',
             officer_id: '',
             task_manager_id: '',
-            enquiry_date: new Date().toISOString().split('T')[0]
+            task_assistant_id: '',
+            enquiry_date: new Date().toISOString().split('T')[0],
+            job_level: {
+                level: 1,
+                department_id: null,
+                subdepartment_id: null,
+                class_id: null,
+                subclass_id: null
+            }
         })
         setSelectedIndividual(null)
         setSelectedCompany('')
@@ -124,17 +143,24 @@ const [formData, setFormData] = useState({
         setIncludeReferences(false)
     }, [])
 
-   useEffect(() => {
+    useEffect(() => {
         if (!open) {
             setFormData({
                 job_description: '',
                 department_id: '',
                 subdepartment_id: '',
                 class_id: '',
-                subclass_id: '',
                 officer_id: '',
                 task_manager_id: '',
-                enquiry_date: new Date().toISOString().split('T')[0]
+                task_assistant_id: '',
+                enquiry_date: new Date().toISOString().split('T')[0],
+                job_level: {
+                    level: 1,
+                    department_id: null,
+                    subdepartment_id: null,
+                    class_id: null,
+                    subclass_id: null
+                }
             })
             setSelectedIndividual(null)
             setSelectedCompany('')
@@ -161,7 +187,7 @@ const [formData, setFormData] = useState({
             const { data, error } = await supabase
                 .from('tm_class_requirements')
                 .select('job_specific_questions')
-                .contains('job_level', levelObj) 
+                .contains('job_level', levelObj)
                 .maybeSingle()
 
             if (data?.job_specific_questions) {
@@ -198,13 +224,60 @@ const [formData, setFormData] = useState({
     }, [formData.department_id, formData.subdepartment_id, formData.class_id, fetchJobQuestions])
 
     useEffect(() => {
+        console.group('🔹 Staff Data Initialization');
+        console.log('🔹 Officers prop received:', officers);
+        console.log('🔹 Users prop received:', users);
+        
+        // Log component props for debugging
+        console.log('🔹 Component props:', {
+            open,
+            onOpenChange: typeof onOpenChange,
+            onEnquiryCreated: typeof onEnquiryCreated,
+            departmentsLength: departments?.length,
+            usersLength: users?.length,
+            officersLength: officers?.length
+        });
+
+        // Set available officers from props
+        console.log(`✅ [Officers] Loading ${officers?.length || 0} officers from props`);
+        if (officers?.length) {
+            console.log('📋 First 3 officers:', officers.slice(0, 3).map((o: any) => ({
+                id: o.id,
+                name: o.name,
+                full_name: o.full_name,
+                email: o.email
+            })));
+            setAvailableOfficers(officers);
+        } else {
+            console.warn('⚠️ No officers data received from props');
+        }
+        
+        // Set available managers and assistants from users prop
+        console.log(`✅ [Users] Loading ${users?.length || 0} users from props`);
+        if (users?.length) {
+            console.log('📋 First 3 users:', users.slice(0, 3).map((u: any) => ({
+                id: u.id,
+                name: u.name,
+                full_name: u.full_name,
+                email: u.email
+            })));
+            setAvailableManagers(users);
+            setAvailableAssistants(users);
+        } else {
+            console.warn('⚠️ No users data received from props');
+        }
+
+        console.groupEnd();
+    }, [officers, users, open, onOpenChange, onEnquiryCreated, departments]);
+
+    useEffect(() => {
         if (open) {
             setSearchLoading(true)
             supabase.from('registry_individuals')
                 .select('id, full_name, contact_details, individual_type, relationships, employment_data')
                 .eq('individual_type', applicantType)
                 .order('full_name')
-                .then(({ data }) => { 
+                .then(({ data }) => {
                     setIndividuals(data || [])
                     setSearchLoading(false)
                 })
@@ -298,31 +371,41 @@ const [formData, setFormData] = useState({
         fetchUnderstudies(value)
     }
 
-   const handleSubmit = async (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!selectedIndividual || !formData.department_id) return
 
         setLoading(true)
         try {
-            const participants = [
-                { 
-                    id: selectedIndividual.id, 
-                    name: selectedIndividual.full_name, 
-                    role: [applicantType], 
-                    type: "individual", 
-                    is_primary: true 
-                }
-            ]
+            const participants: any[] = []
+
+            if (applicantType === 'principal') {
+                participants.push({
+                    id: selectedIndividual.id,
+                    name: selectedIndividual.full_name,
+                    role: ['principal'],
+                    type: "individual",
+                    is_primary: true
+                })
+            } else if (applicantType === 'dependant' && principalForDependant) {
+                participants.push({
+                    id: principalForDependant.id,
+                    name: principalForDependant.full_name,
+                    role: ['principal'],
+                    type: "individual",
+                    is_primary: true
+                })
+            }
 
             if (selectedCompany) {
                 const c = companies.find(x => x.id.toString() === selectedCompany)
-                participants.push({ id: c.id, name: c.company_name, role: ['company'], type: "company" })
+                if (c) participants.push({ id: c.id, name: c.company_name, role: ['company'], type: "company" })
             }
 
             // Only include understudy if the specific class is selected
             if (selectedUnderstudy && formData.class_id === CLASS_D_ID) {
                 const u = understudies.find(x => x.id.toString() === selectedUnderstudy)
-                participants.push({ id: u.id, name: u.full_name, role: ['understudy'], type: "individual" })
+                if (u) participants.push({ id: u.id, name: u.full_name, role: ['understudy'], type: "individual" })
             }
 
             const payload = {
@@ -334,7 +417,8 @@ const [formData, setFormData] = useState({
                 company_id: selectedCompany ? Number(selectedCompany) : null,
                 officer_id: formData.officer_id ? Number(formData.officer_id) : null,
                 task_manager_id: formData.task_manager_id ? Number(formData.task_manager_id) : null,
-                
+                task_assistant_id: formData.task_assistant_id ? Number(formData.task_assistant_id) : null,
+
                 job_level: {
                     level: formData.class_id ? 3 : formData.subdepartment_id ? 2 : 1,
                     department_id: Number(formData.department_id),
@@ -342,11 +426,11 @@ const [formData, setFormData] = useState({
                     class_id: formData.class_id ? Number(formData.class_id) : null
                 },
                 // --- UPDATED: Include role in applicant_details ---
-                applicant_details: { 
-                    id: selectedIndividual.id, 
-                    name: selectedIndividual.full_name, 
+                applicant_details: {
+                    id: selectedIndividual.id,
+                    name: selectedIndividual.full_name,
                     type: "individual",
-                    role: applicantType 
+                    role: applicantType
                 },
                 participants_details: participants,
                 job_specific_answers: jobAnswers,
@@ -356,7 +440,7 @@ const [formData, setFormData] = useState({
 
             const { data, error } = await supabase.from('tm_tasks').insert([payload]).select().single()
             if (error) throw error
-            
+
             onEnquiryCreated(data) // This updates state in TasksPage
             onOpenChange(false)
         } catch (error) {
@@ -383,12 +467,12 @@ const [formData, setFormData] = useState({
                 <ScrollArea className="flex-1 bg-slate-50/50">
                     <form id="enquiry-form" onSubmit={handleSubmit} className="p-8 space-y-8">
                         <div className="grid grid-cols-12 gap-8">
-                            
+
                             <div className="col-span-12 lg:col-span-4 space-y-6">
                                 <h3 className="text-xs font-bold uppercase tracking-wider text-blue-600 flex items-center gap-2">
                                     <User className="h-4 w-4" /> Client Identification
                                 </h3>
-                                
+
                                 <Card className="border-blue-100 shadow-sm overflow-hidden">
                                     <CardHeader className="bg-blue-50/50 py-3 border-b border-blue-100">
                                         <CardTitle className="text-xs font-bold text-blue-800">Primary Applicant</CardTitle>
@@ -435,28 +519,28 @@ const [formData, setFormData] = useState({
                                         </div>
 
                                         <div className="space-y-3 pt-2">
-                                        <Label className="text-[11px] font-bold text-slate-500 uppercase">Employment Entity</Label>
-                                        <Select value={selectedCompany} onValueChange={handleCompanyChange}>
-                                            <SelectTrigger className="h-11 border-blue-100 bg-blue-50/20"><SelectValue placeholder="Linked Company..." /></SelectTrigger>
-                                            <SelectContent>
-                                                {companies.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.company_name}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
+                                            <Label className="text-[11px] font-bold text-slate-500 uppercase">Employment Entity</Label>
+                                            <Select value={selectedCompany} onValueChange={handleCompanyChange}>
+                                                <SelectTrigger className="h-11 border-blue-100 bg-blue-50/20"><SelectValue placeholder="Linked Company..." /></SelectTrigger>
+                                                <SelectContent>
+                                                    {companies.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.company_name}</SelectItem>)}
+                                                </SelectContent>
+                                            </Select>
 
                                             {/* Logic Update: Only show if class matches Class D ID */}
-                                           {formData.class_id === CLASS_D_ID && understudies.length > 0 && (
-                                            <div className="space-y-2 mt-4 animate-in fade-in slide-in-from-top-1">
-                                                <Label className="text-[11px] font-bold text-slate-500 uppercase">Related Understudy</Label>
-                                                <Select value={selectedUnderstudy} onValueChange={setSelectedUnderstudy}>
-                                                    <SelectTrigger className="h-11 border-amber-200 bg-amber-50/20">
-                                                        <SelectValue placeholder="Select understudy..." />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {understudies.map(u => <SelectItem key={u.id} value={u.id.toString()}>{u.full_name}</SelectItem>)}
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
-                                        )}
+                                            {formData.class_id === CLASS_D_ID && understudies.length > 0 && (
+                                                <div className="space-y-2 mt-4 animate-in fade-in slide-in-from-top-1">
+                                                    <Label className="text-[11px] font-bold text-slate-500 uppercase">Related Understudy</Label>
+                                                    <Select value={selectedUnderstudy} onValueChange={setSelectedUnderstudy}>
+                                                        <SelectTrigger className="h-11 border-amber-200 bg-amber-50/20">
+                                                            <SelectValue placeholder="Select understudy..." />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {understudies.map(u => <SelectItem key={u.id} value={u.id.toString()}>{u.full_name}</SelectItem>)}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                            )}
                                         </div>
                                     </CardContent>
                                 </Card>
@@ -525,32 +609,95 @@ const [formData, setFormData] = useState({
                                         </Card>
                                     </div>
 
-                                   <div className="space-y-4">
-                                    <h3 className="text-xs font-bold uppercase tracking-wider text-blue-600 flex items-center gap-2">
-                                        <UserCheck className="h-4 w-4" /> Internal Processing
-                                    </h3>
-                                    <Card className="border-blue-100 shadow-sm bg-white">
-                                        <CardContent className="p-5 space-y-4">
-                                            <div className="space-y-1.5">
-                                                <Label className="text-[10px] font-bold text-slate-400">ASSIGNED MANAGER</Label>
-                                                <Select value={formData.task_manager_id} onValueChange={id => setFormData(prev => ({ ...prev, task_manager_id: id }))}>
-                                                    <SelectTrigger className="h-10 border-blue-50 bg-blue-50/10"><SelectValue placeholder="Select Staff" /></SelectTrigger>
-                                                    <SelectContent>
-                                                        {/* FIXED: Check for u.full_name as well */}
-                                                        {users.map(u => <SelectItem key={u.id} value={u.id.toString()}>{u.full_name || u.name}</SelectItem>)}
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
-                                            <div className="space-y-1.5">
-                                                <Label className="text-[10px] font-bold text-slate-400">CLIENT OFFICER</Label>
-                                                <Select value={formData.officer_id} onValueChange={id => setFormData(prev => ({ ...prev, officer_id: id }))}>
-                                                    <SelectTrigger className="h-10 border-blue-50 bg-blue-50/10"><SelectValue placeholder="Select Officer" /></SelectTrigger>
-                                                    <SelectContent>
-                                                        {/* FIXED: Check for o.full_name as well */}
-                                                        {officers.map(o => <SelectItem key={o.id} value={o.id.toString()}>{o.full_name || o.name}</SelectItem>)}
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
+                                    <div className="space-y-4">
+                                        <h3 className="text-xs font-bold uppercase tracking-wider text-blue-600 flex items-center gap-2">
+                                            <UserCheck className="h-4 w-4" /> Internal Processing
+                                        </h3>
+                                        <Card className="border-blue-100 shadow-sm bg-white">
+                                            <CardContent className="p-5 space-y-4">
+                                                <div className="space-y-1.5">
+                                                    <Label className="text-[10px] font-bold text-slate-400">CLIENT OFFICER</Label>
+                                                    <Select 
+                                                        value={formData.officer_id} 
+                                                        onValueChange={id => setFormData(prev => ({ ...prev, officer_id: id }))}
+                                                    >
+                                                        <SelectTrigger className="h-10 border-blue-50 bg-blue-50/10">
+                                                            <SelectValue placeholder="Select Officer" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {(() => {
+                                                                console.log('🔹 Rendering officers dropdown with:', {
+                                                                    availableOfficersCount: availableOfficers.length,
+                                                                    hasOfficers: availableOfficers.length > 0,
+                                                                    firstOfficer: availableOfficers[0]
+                                                                });
+                                                                
+                                                                if (availableOfficers.length === 0) {
+                                                                    console.warn('⚠️ No officers available to render in dropdown');
+                                                                    return (
+                                                                        <div className="p-2 text-xs text-slate-500">
+                                                                            No officers available
+                                                                        </div>
+                                                                    );
+                                                                }
+
+                                                                return availableOfficers.map((officer) => {
+                                                                    const displayName = officer.full_name || officer.name || `Officer ${officer.id}`;
+                                                                    console.log(`👤 Rendering officer option:`, {
+                                                                        id: officer.id,
+                                                                        displayName,
+                                                                        rawData: officer
+                                                                    });
+                                                                    
+                                                                    return (
+                                                                        <SelectItem 
+                                                                            key={officer.id} 
+                                                                            value={officer.id.toString()}
+                                                                        >
+                                                                            {displayName}
+                                                                        </SelectItem>
+                                                                    );
+                                                                });
+                                                            })()}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                                <div className="space-y-1.5">
+                                                    <Label className="text-[10px] font-bold text-slate-400">ASSIGNED MANAGER</Label>
+                                                    <Select 
+                                                        value={formData.task_manager_id} 
+                                                        onValueChange={id => setFormData(prev => ({ ...prev, task_manager_id: id }))}
+                                                    >
+                                                        <SelectTrigger className="h-10 border-blue-50 bg-blue-50/10">
+                                                            <SelectValue placeholder="Select Manager" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {availableManagers.map(manager => (
+                                                                <SelectItem key={manager.id} value={manager.id.toString()}>
+                                                                    {manager.full_name || manager.name}
+                                                                </SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                                <div className="space-y-1.5">
+                                                    <Label className="text-[10px] font-bold text-slate-400">ASSISTANT</Label>
+                                                    <Select 
+                                                        value={formData.task_assistant_id} 
+                                                        onValueChange={id => setFormData(prev => ({ ...prev, task_assistant_id: id }))}
+                                                    >
+                                                        <SelectTrigger className="h-10 border-blue-50 bg-blue-50/10">
+                                                            <SelectValue placeholder="Select Assistant" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {availableAssistants.map(assistant => (
+                                                                <SelectItem key={assistant.id} value={assistant.id.toString()}>
+                                                                    {assistant.full_name || assistant.name}
+                                                                </SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
                                                 <div className="space-y-1.5"><Label className="text-[10px] font-bold text-slate-400">ENQUIRY DATE</Label><div className="relative"><Input type="date" value={formData.enquiry_date} onChange={e => setFormData(prev => ({ ...prev, enquiry_date: e.target.value }))} className="pl-10 h-10" /><Calendar className="absolute left-3 top-3 h-4 w-4 text-blue-400 pointer-events-none" /></div></div>
                                             </CardContent>
                                         </Card>
@@ -564,7 +711,7 @@ const [formData, setFormData] = useState({
                                         </h3>
                                         {loadingQuestions && <Loader2 className="h-3 w-3 animate-spin text-blue-500" />}
                                     </div>
-                                    
+
                                     <Card className={cn("border-blue-100 shadow-sm transition-all bg-white")}>
                                         <CardContent className="p-6">
                                             {jobQuestions.length > 0 ? (
@@ -575,7 +722,7 @@ const [formData, setFormData] = useState({
                                                                 {q.label}
                                                                 {q.required && <span className="text-red-500">*</span>}
                                                             </Label>
-                                                            
+
                                                             {q.type === 'text' && <Input value={jobAnswers[q.id] || ''} onChange={e => setJobAnswers(prev => ({ ...prev, [q.id]: e.target.value }))} className="h-10 bg-slate-50/50 border-blue-50" />}
                                                             {q.type === 'number' && <Input type="number" value={jobAnswers[q.id] || ''} onChange={e => setJobAnswers(prev => ({ ...prev, [q.id]: e.target.value }))} className="h-10 bg-slate-50/50 border-blue-50" />}
                                                             {q.type === 'date' && <Input type="date" value={jobAnswers[q.id] || ''} onChange={e => setJobAnswers(prev => ({ ...prev, [q.id]: e.target.value }))} className="h-10 bg-slate-50/50 border-blue-50" />}

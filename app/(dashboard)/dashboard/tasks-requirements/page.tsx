@@ -99,12 +99,34 @@ const [internalStaff, setInternalStaff] = useState({ users: [], officers: [] });
 
   useEffect(() => {
     const fetchStaff = async () => {
-        const { data: staff } = await supabase.from('registry_users').select('id, full_name').order('full_name');
-        // If your schema differentiates officers, filter here or fetch separately
-        setInternalStaff({
-            users: staff || [],
-            officers: staff || [] // Assuming same table for this example
-        });
+        console.group('🔹 [Parent Component] Fetching Staff Data');
+        try {
+            console.log('🔹 [Parent] Attempting to fetch from registry_users table...');
+            const { data: staff, error } = await supabase.from('registry_users').select('id, full_name').order('full_name');
+            
+            console.log('🔹 [Parent] Staff fetch result:', {
+                data: staff,
+                error,
+                dataLength: staff?.length || 0
+            });
+            
+            if (error) {
+                console.error('🔹 [Parent] Error fetching staff:', error);
+            }
+            
+            // If your schema differentiates officers, filter here or fetch separately
+            const staffData = {
+                users: staff || [],
+                officers: staff || [] // Assuming same table for this example
+            };
+            
+            console.log('🔹 [Parent] Setting internal staff state:', staffData);
+            setInternalStaff(staffData);
+        } catch (err) {
+            console.error('🔹 [Parent] Unexpected error fetching staff:', err);
+            setInternalStaff({ users: [], officers: [] });
+        }
+        console.groupEnd();
     };
     fetchStaff();
 }, []);
@@ -477,7 +499,20 @@ const [internalStaff, setInternalStaff] = useState({ users: [], officers: [] });
     selectedSubdepartment={selectedSubdepartment}
     selectedClass={selectedClass}
     selectedSubclass={selectedSubclass}
+    key={`enquiry-dialog-${selectedDepartment}-${selectedSubdepartment}-${selectedClass}`}
 />
+      
+      {/* Debug logging for props being passed */}
+      {(() => {
+          console.log('🔹 [Parent Component] EnquiryDialog Props:', {
+              open: enquiryDialogOpen,
+              departmentsLength: departments?.length,
+              usersLength: internalStaff.users?.length,
+              officersLength: internalStaff.officers?.length,
+              internalStaffState: internalStaff
+          });
+          return null;
+      })()}
         </div>
       </main>
     </div>
