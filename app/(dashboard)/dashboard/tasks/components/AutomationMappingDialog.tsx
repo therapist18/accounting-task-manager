@@ -2,7 +2,7 @@
 "use client"
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -11,7 +11,7 @@ import {
   CheckCircle2, Edit3, X, Save, Calculator,
   FunctionSquare, ExternalLink, Paperclip, AlertTriangle,
   ArrowUpDown, Filter, Check, List, ChevronDown,
-  HelpCircle
+  HelpCircle, Eye, Download
 } from 'lucide-react';
 import {
   Table,
@@ -31,7 +31,9 @@ import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { processComputedFields, executeComputedField } from '../utils/automationComputedFunctions';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ExtractionPreview } from "@/components/ExtractionPreview";
 
+// ... (Interfaces remain unchanged)
 interface AutomationMappingDialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -59,7 +61,7 @@ interface EntityAutomationMapping {
   automation?: any;
 }
 
-// --- UTILS ---
+// ... (Utils remain unchanged)
 const parseJsonValue = (data: any, path: string, extractionMode?: 'latest' | 'all'): any => {
   if (!data || !path) return undefined;
   if (path.includes('->>') || path.includes('->')) {
@@ -105,36 +107,24 @@ const parseJsonValue = (data: any, path: string, extractionMode?: 'latest' | 'al
   return path.split('.').reduce((acc, key) => (acc && typeof acc === 'object') ? acc[key] : undefined, data);
 };
 
-// Helper function to sort array items by date fields
 const sortArrayItemsByDate = <T extends { value: any; item: any; index: number }>(items: T, fieldPath?: string): T => {
-  // Try to find date fields in the items for sorting
   const dateFields = ['end_date', 'start_date', 'date', 'created_at', 'updated_at'];
-
   return items.sort((a, b) => {
     const itemA = a.item;
     const itemB = b.item;
-
-    // Look for date fields in priority order
     for (const dateField of dateFields) {
       const dateA = itemA[dateField];
       const dateB = itemB[dateField];
-
       if (dateA && dateB) {
         try {
           const parsedDateA = new Date(dateA);
           const parsedDateB = new Date(dateB);
-
           if (!isNaN(parsedDateA.getTime()) && !isNaN(parsedDateB.getTime())) {
-            // Sort by date descending (latest first)
             return parsedDateB.getTime() - parsedDateA.getTime();
           }
-        } catch (e) {
-          // Continue to next date field if parsing fails
-        }
+        } catch (e) { }
       }
     }
-
-    // If no valid dates found, maintain original order
     return a.index - b.index;
   });
 };
@@ -144,7 +134,7 @@ const updateJsonValue = (existingData: any, path: string, newValue: any): any =>
   if (path.includes('->>') || path.includes('->')) {
     const parts = path.split(/(->>|->)/);
     const column = parts[0].trim().replace(/['"]/g, '');
-    const jsonPath = parts[2].trim().replace(/['']/g, '');
+    const jsonPath = parts[2].trim().replace(/['"]/g, '');
     const currentJsonData = existingData?.[column] || {};
     const pathParts = jsonPath.split('.');
     const updatedJsonData = { ...currentJsonData };
@@ -200,6 +190,56 @@ const mapEntityTypeToRegistry = (type?: string): string => {
   return map[type?.toLowerCase()] || 'Principal';
 };
 
+// Helper function to clean object strings and prevent "[object Object]" issues
+const cleanFieldValue = (value: any): string => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') {
+    // Check for object string representation
+    if (value === '[object Object]' || value.startsWith('[object ')) {
+      return '';
+    }
+    // Return empty string for actual empty values, but "Missing" for invalid object strings
+    if (value === '') return '';
+    return value;
+  }
+  if (typeof value === 'object') {
+    // Convert object to string representation, but avoid "[object Object]"
+    try {
+      const str = JSON.stringify(value);
+      return str === '{}' ? '' : str;
+    } catch {
+      return '';
+    }
+  }
+  return String(value);
+};
+
+// Helper function for display purposes (shows "Missing" in UI)
+const cleanFieldValueForDisplay = (value: any): string => {
+  if (value === null || value === undefined) return 'Missing';
+
+  if (typeof value === 'string') {
+    // Check for object string representation
+    if (value === '[object Object]' || value.startsWith('[object ')) {
+      return 'Missing';
+    }
+    // Return empty string for actual empty values, but "Missing" for invalid object strings
+    if (value === '') return 'Missing'; // Changed to return Missing for empty strings too if desired, or keep as ''
+    return value;
+  }
+
+  if (typeof value === 'object') {
+    // Convert object to string representation, but avoid "[object Object]"
+    try {
+      const str = JSON.stringify(value);
+      return str === '{}' ? 'Missing' : str;
+    } catch {
+      return 'Missing';
+    }
+  }
+  return String(value);
+};
+
 export const AutomationMappingDialog = ({
   isOpen,
   onClose,
@@ -232,10 +272,87 @@ export const AutomationMappingDialog = ({
   const [sortMissingFirst, setSortMissingFirst] = useState(false);
   const [expandedArrayFields, setExpandedArrayFields] = useState<Set<string>>(new Set());
   const [expandedSourceFields, setExpandedSourceFields] = useState<Set<string>>(new Set());
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [previewingDocuments, setPreviewingDocuments] = useState<any>(null);
   const lastFetchKey = React.useRef<string>('');
   const isFetchingRef = React.useRef(false);
   const [requirementJobQuestions, setRequirementJobQuestions] = useState<any[]>([]);
   const [individualName, setIndividualName] = useState<string>('');
+
+  // Helper functions for document preview (moved inside component)
+  const getFileUrl = (filePath: string) => {
+    if (!filePath) return '';
+    // If it's already a full URL, return as is
+    if (filePath.startsWith('http')) return filePath;
+    // Otherwise, construct the Supabase storage URL
+    return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${filePath}`;
+  };
+
+  const handlePreviewDocument = async (doc: any) => {
+    if (!doc) return;
+
+    // Set preview data with document and its extracted details
+    setPreviewingDocuments({
+      document_display_name: doc.file_name || 'Document',
+      documents: [doc],
+      person_full_name: relationshipData?.principal?.full_name || 'Unknown',
+      requirementId: doc.requirement_id || 'Unknown'
+    });
+    setShowPreviewModal(true);
+  };
+
+  const handlePreviewDataChange = useCallback((docId: string, fieldName: string, value: any) => {
+    if (!previewingDocuments) return;
+
+    // Update the specific document's extracted details
+    const updatedDocuments = previewingDocuments.documents.map((doc: any) => {
+      if (doc.id === docId || doc.id === `doc-${docId}` || doc.file_path === docId) {
+        return {
+          ...doc,
+          edited_details: {
+            ...doc.edited_details,
+            [fieldName]: value
+          }
+        };
+      }
+      return doc;
+    });
+
+    setPreviewingDocuments({
+      ...previewingDocuments,
+      documents: updatedDocuments
+    });
+  }, [previewingDocuments]);
+
+  const handleSaveEditedDocument = async (doc: any, editedData: Record<string, any>) => {
+    try {
+      // Save the edited details to the database
+      const { error } = await supabase
+        .from('acc_portal_directors_documents')
+        .update({
+          edited_details: editedData,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', doc.id);
+
+      if (error) throw error;
+
+      toast.success('Document details updated successfully');
+
+      // Update local state
+      const updatedDocuments = previewingDocuments.documents.map((d: any) =>
+        d.id === doc.id ? { ...d, edited_details } : d
+      );
+
+      setPreviewingDocuments({
+        ...previewingDocuments,
+        documents: updatedDocuments
+      });
+    } catch (error) {
+      console.error('Error saving document details:', error);
+      toast.error('Failed to save document details');
+    }
+  };
 
   const buildFileUrl = (linkedDoc: any): string | null => {
     if (!linkedDoc?.file_path) return null;
@@ -246,7 +363,6 @@ export const AutomationMappingDialog = ({
 
   const resolveTargetEntityId = useCallback((field: any) => {
     const types = field.entityTypes || [];
-
     if (types.includes('company')) return relationshipData?.company?.id || task?.company_id;
     if (types.includes('dependant')) {
       if (field.dependantRelationships && field.dependantRelationships.length > 0) {
@@ -257,18 +373,15 @@ export const AutomationMappingDialog = ({
     }
     if (types.includes('director')) return relationshipData?.directors?.[0]?.id;
     if (types.includes('understudy')) return relationshipData?.understudy?.id;
-
     return relationshipData?.principal?.id || currentIndividualId;
   }, [relationshipData, currentIndividualId, task]);
 
   const getEntityNameAndId = useCallback((entityType?: string, entityId?: string) => {
-    if (!entityType && !entityId) {
-      // Default to principal
-      return {
-        name: task?.applicant_name || individualName || currentIndividualId || 'Not specified',
-        id: currentIndividualId || 'Not specified'
-      };
-    }
+    // If no specific ID passed, use current context
+    const targetId = entityId || currentIndividualId;
+
+    // Fallback if generic
+    if (!entityType && !targetId) return { name: task?.applicant_name || individualName || 'Not specified', id: 'Not specified' };
 
     const type = entityType?.toLowerCase();
 
@@ -280,56 +393,48 @@ export const AutomationMappingDialog = ({
     }
 
     if (type === 'director') {
-      const director = relationshipData?.directors?.[0];
+      // Look for specific director by ID, otherwise default to first
+      const director = relationshipData?.directors?.find((d: any) => String(d.id) === String(targetId)) || relationshipData?.directors?.[0];
       if (director) {
-        const name = director.full_name ||
-          (director.first_name && director.last_name ? `${director.first_name} ${director.last_name}` :
-            `Director ${director.id}`);
-        return { name, id: String(director.id) };
+        return {
+          name: director.full_name || (director.first_name && director.last_name ? `${director.first_name} ${director.last_name}` : `Director ${director.id}`),
+          id: String(director.id)
+        };
       }
     }
 
     if (type === 'understudy') {
       const understudy = relationshipData?.understudy;
       if (understudy) {
-        const name = understudy.full_name ||
-          (understudy.first_name && understudy.last_name ? `${understudy.first_name} ${understudy.last_name}` :
-            `Understudy ${understudy.id}`);
-        return { name, id: String(understudy.id) };
+        return {
+          name: understudy.full_name || (understudy.first_name && understudy.last_name ? `${understudy.first_name} ${understudy.last_name}` : `Understudy ${understudy.id}`),
+          id: String(understudy.id)
+        };
       }
     }
 
     if (type === 'dependant') {
-      const dependant = relationshipData?.dependants?.[0];
+      // Look for specific dependant by ID, otherwise default to first
+      const dependant = relationshipData?.dependants?.find((d: any) => String(d.id) === String(targetId)) || relationshipData?.dependants?.[0];
       if (dependant) {
-        const name = dependant.full_name ||
-          (dependant.first_name && dependant.last_name ? `${dependant.first_name} ${dependant.last_name}` :
-            `Dependant ${dependant.id}`);
-        return { name, id: String(dependant.id) };
+        return {
+          name: dependant.full_name || (dependant.first_name && dependant.last_name ? `${dependant.first_name} ${dependant.last_name}` : `Dependant ${dependant.id}`),
+          id: String(dependant.id)
+        };
       }
     }
 
-    // Default to principal
+    // Default Fallback
     return {
-      name: task?.applicant_name || individualName || currentIndividualId || 'Not specified',
-      id: currentIndividualId || 'Not specified'
+      name: task?.applicant_name || individualName || targetId || 'Not specified',
+      id: targetId || 'Not specified'
     };
   }, [relationshipData, task, individualName, currentIndividualId]);
-
-  // Get the primary entity type from the active automation
   const getPrimaryEntityType = useCallback(() => {
     const activeAutomation = webData.find(w => w.automationId === selectedAutomationId);
     if (!activeAutomation?.fields) return 'principal';
-
-    // Check entity types in fields to determine primary entity
     const entityTypes = new Set<string>();
-    activeAutomation.fields.forEach((field: any) => {
-      if (field.entityTypes && field.entityTypes.length > 0) {
-        field.entityTypes.forEach((type: string) => entityTypes.add(type));
-      }
-    });
-
-    // Priority order: company > director > understudy > dependant > principal
+    activeAutomation.fields.forEach((field: any) => { if (field.entityTypes && field.entityTypes.length > 0) field.entityTypes.forEach((type: string) => entityTypes.add(type)); });
     if (entityTypes.has('company')) return 'company';
     if (entityTypes.has('director')) return 'director';
     if (entityTypes.has('understudy')) return 'understudy';
@@ -339,516 +444,259 @@ export const AutomationMappingDialog = ({
 
   const resolveEntityIdsForArray = (field: any, relationshipData: any) => {
     const types = field.entityTypes || [];
-    if (types.includes('dependant')) {
-      if (field.dependantRelationships && field.dependantRelationships.length > 0) {
-        return (relationshipData?.dependants || [])
-          .filter((d: any) => field.dependantRelationships.includes(d.relationship?.toLowerCase()))
-          .map((d: any) => d.id);
-      }
-      return (relationshipData?.dependants || []).map((d: any) => d.id);
-    }
-    if (types.includes('director')) {
-      if (field.directorType === 'primary') return (relationshipData?.directors || []).slice(0, 1).map((d: any) => d.id);
-      return (relationshipData?.directors || []).map((d: any) => d.id);
-    }
-    if (types.includes('principal')) {
-      const pid = relationshipData?.principal?.id;
-      return pid ? [pid] : [];
-    }
+    if (types.includes('dependant')) { if (field.dependantRelationships && field.dependantRelationships.length > 0) return (relationshipData?.dependants || []).filter((d: any) => field.dependantRelationships.includes(d.relationship?.toLowerCase())).map((d: any) => d.id); return (relationshipData?.dependants || []).map((d: any) => d.id); }
+    if (types.includes('director')) { if (field.directorType === 'primary') return (relationshipData?.directors || []).slice(0, 1).map((d: any) => d.id); return (relationshipData?.directors || []).map((d: any) => d.id); }
+    if (types.includes('principal')) { const pid = relationshipData?.principal?.id; return pid ? [pid] : []; }
     return [];
   };
 
-  const toggleArrayFieldExpansion = (fieldVariableName: string) => {
-    setExpandedArrayFields(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(fieldVariableName)) {
-        newSet.delete(fieldVariableName);
-      } else {
-        newSet.add(fieldVariableName);
-      }
-      return newSet;
-    });
-  };
-
-  const toggleSourceFieldExpansion = (fieldId: string) => {
-    setExpandedSourceFields(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(fieldId)) {
-        newSet.delete(fieldId);
-      } else {
-        newSet.add(fieldId);
-      }
-      return newSet;
-    });
-  };
+  const toggleArrayFieldExpansion = (fieldVariableName: string) => setExpandedArrayFields(prev => { const newSet = new Set(prev); if (newSet.has(fieldVariableName)) newSet.delete(fieldVariableName); else newSet.add(fieldVariableName); return newSet; });
+  const toggleSourceFieldExpansion = (fieldId: string) => setExpandedSourceFields(prev => { const newSet = new Set(prev); if (newSet.has(fieldId)) newSet.delete(fieldId); else newSet.add(fieldId); return newSet; });
 
   const getArrayFieldData = (field: any) => {
     const entityIds = resolveEntityIdsForArray(field, relationshipData);
     const arrayData = [];
-
     entityIds.forEach((entityId, index) => {
-      // Get values for each array item column
       const columnValues: any = {};
       field.arrayItems?.forEach((item: any) => {
-        // Handle both linkedMasterFields (array) and linkedMasterFieldId (single value)
         const fieldIds = item.linkedMasterFields || (item.linkedMasterFieldId ? [item.linkedMasterFieldId] : []);
         const fieldId = String(fieldIds[0] || '');
-
         if (fieldId) {
           const itemExtractionMode = item.extractionMode || 'latest';
           const value = getFieldValue(fieldId, String(entityId), 0, itemExtractionMode, true);
-          // Use item.variableName as the key for storage
           const columnKey = item.variableName || fieldId;
           columnValues[columnKey] = value;
         }
       });
-
-      // Calculate max rows - if any column has array values, we need multiple rows
       const maxRows = Math.max(1, ...Object.values(columnValues).map((v: any) => Array.isArray(v) ? v.length : 1));
-
-      // Create a row for each array element
       for (let i = 0; i < maxRows; i++) {
-        const rowData: any = {
-          index: arrayData.length + 1,
-          entityId: String(entityId)
-        };
-
+        const rowData: any = { index: arrayData.length + 1, entityId: String(entityId) };
         field.arrayItems?.forEach((item: any) => {
           const columnKey = item.variableName || String((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId || '');
           let value = columnValues[columnKey];
-
-          // If value is an array (from extractionMode: 'all'), get the i-th element
-          if (Array.isArray(value)) {
-            rowData[columnKey] = value[i] !== undefined && value[i] !== '' ? value[i] : "";
-          } else {
-            // Single value - repeat for all rows or only show on first row
-            rowData[columnKey] = (i === 0 && value !== undefined && value !== 'Computing...') ? value : "";
-          }
+          if (Array.isArray(value)) { rowData[columnKey] = value[i] !== undefined && value[i] !== '' ? value[i] : ""; }
+          else { rowData[columnKey] = (i === 0 && value !== undefined && value !== 'Computing...') ? value : ""; }
         });
-
         arrayData.push(rowData);
       }
     });
-
     return arrayData;
   };
 
   const getMasterFieldDisplayName = (masterFieldId: string | number, itemName?: string) => {
-    // If itemName is provided (from array item), use that first
-    if (itemName) {
-      return itemName;
-    }
-
-    // Convert to string for consistent comparison
+    if (itemName) return itemName;
     const fieldIdStr = String(masterFieldId);
-
-    // Look up the master field in jobFields to get its display name
     const masterField = jobFields[fieldIdStr];
-    if (masterField) {
-      const displayName = masterField.label || masterField.field_key || masterField.table_header || fieldIdStr;
-      return displayName;
-    }
-
-    // If not found in jobFields, try to find it in the active web entry fields
+    if (masterField) return masterField.label || masterField.field_key || masterField.table_header || fieldIdStr;
     const activeWebEntry = webData.find(w => w.automationId === selectedAutomationId);
-    if (activeWebEntry?.fields) {
-      const field = activeWebEntry.fields.find((f: any) => {
-        const linkedFields = f.linkedMasterFields || f.masterFieldIds || [];
-        return linkedFields.some((id: any) => String(id) === fieldIdStr) ||
-          f.variableName === fieldIdStr;
-      });
-      if (field) {
-        const displayName = field.efnsDisplayName || field.variableName || fieldIdStr;
-        return displayName;
-      }
-    }
-
-    // Try to find by searching through all jobFields for matching linkedMasterFields
-    for (const [key, field] of Object.entries(jobFields)) {
-      const linkedFields = field.linkedMasterFields || field.masterFieldIds || [];
-      if (linkedFields.some((id: any) => String(id) === fieldIdStr)) {
-        const displayName = field.label || field.field_key || field.table_header || key;
-        return displayName;
-      }
-    }
-
-    // Fallback to the ID if no display name found
+    if (activeWebEntry?.fields) { const field = activeWebEntry.fields.find((f: any) => { const linkedFields = f.linkedMasterFields || f.masterFieldIds || []; return linkedFields.some((id: any) => String(id) === fieldIdStr) || f.variableName === fieldIdStr; }); if (field) return field.efnsDisplayName || field.variableName || fieldIdStr; }
+    for (const [key, field] of Object.entries(jobFields)) { const linkedFields = field.linkedMasterFields || field.masterFieldIds || []; if (linkedFields.some((id: any) => String(id) === fieldIdStr)) return field.label || field.field_key || field.table_header || key; }
     return fieldIdStr;
   };
 
+  // ... (fetchSourceData, getSourceValue, etc. remain unchanged)
   const fetchSourceData = useCallback(async () => {
-    if (!isOpen || !selectedAutomationId || Object.keys(jobFields).length === 0 || !webData.length) {
-      return;
-    }
-
+    if (!isOpen || !selectedAutomationId || Object.keys(jobFields).length === 0 || !webData.length) return;
     const fetchKey = `${selectedAutomationId}-${Object.keys(jobFields).length}-${webData.length}-${Date.now()}`;
     if (isFetchingRef.current) return;
-
     lastFetchKey.current = fetchKey;
     isFetchingRef.current = true;
     setIsLoadingData(true);
-
     try {
       const standardFetchQueue = new Map<string, { table: string, ids: Set<string>, linkingVariable: string }>();
-
-      const addToQueue = (table: string, linkingVar: string, id: string) => {
-        const queueKey = `${table}:${linkingVar}`;
-        if (!standardFetchQueue.has(queueKey)) {
-          standardFetchQueue.set(queueKey, { table, ids: new Set(), linkingVariable: linkingVar });
-        }
-        standardFetchQueue.get(queueKey)!.ids.add(id);
-      };
-
-      const computedRequirements = {
-        individualIds: new Set<string>(),
-        documentIds: new Set<string>()
-      };
-
+      const addToQueue = (table: string, linkingVar: string, id: string) => { const queueKey = `${table}:${linkingVar}`; if (!standardFetchQueue.has(queueKey)) { standardFetchQueue.set(queueKey, { table, ids: new Set(), linkingVariable: linkingVar }); } standardFetchQueue.get(queueKey)!.ids.add(id); };
+      const computedRequirements = { individualIds: new Set<string>(), documentIds: new Set<string>() };
       const activeAutomation = webData.find(w => w.automationId === selectedAutomationId);
       const fieldsToProcess = activeAutomation?.fields || [];
       const computedMasterFields: any[] = [];
-
       fieldsToProcess.forEach((field: any) => {
-        if (field.linkedJobQuestionId) {
-          if (taskId) addToQueue('tm_tasks', 'id', String(taskId));
-          return;
-        }
-
+        if (field.linkedJobQuestionId) { if (taskId) addToQueue('tm_tasks', 'id', String(taskId)); return; }
         const isArray = field.fieldType === 'array';
-        const cols = isArray
-          ? (field.arrayItems || [])
-          : [{ linkedMasterFieldId: field.linkedMasterFields?.[0] || field.masterFieldIds?.[0] }];
-
+        const cols = isArray ? (field.arrayItems || []) : [{ linkedMasterFieldId: field.linkedMasterFields?.[0] || field.masterFieldIds?.[0] }];
         let entityIds: string[] = [];
-        if (isArray) {
-          entityIds = resolveEntityIdsForArray(field, relationshipData);
-        } else {
-          const targetId = resolveTargetEntityId(field);
-          if (targetId) entityIds = [String(targetId)];
-        }
-
+        if (isArray) { entityIds = resolveEntityIdsForArray(field, relationshipData); } else { const targetId = resolveTargetEntityId(field); if (targetId) entityIds = [String(targetId)]; }
         cols.forEach((col: any) => {
           const fieldIds = col.linkedMasterFields || (col.linkedMasterFieldId ? [col.linkedMasterFieldId] : []);
           const mid = fieldIds[0] || field.linkedMasterFields?.[0] || field.masterFieldIds?.[0];
           if (!mid) return;
-
           const jobField = jobFields[mid];
           if (!jobField) return;
-
           const computedSource = jobField.sources?.find((s: any) => s.is_computed === true);
           if (computedSource) {
             const extractionMode = col.extractionMode || field.extractionMode || 'latest';
             (computedSource.document_id || []).forEach((did: string) => computedRequirements.documentIds.add(did));
-            entityIds.forEach(id => {
-              computedRequirements.individualIds.add(String(id));
-              computedMasterFields.push({
-                field: jobField,
-                entityId: String(id),
-                extractionMode,
-                computedSource // Pass the source config
-              });
-            });
+            entityIds.forEach(id => { computedRequirements.individualIds.add(String(id)); computedMasterFields.push({ field: jobField, entityId: String(id), extractionMode, computedSource }); });
           }
-
-          // FIXED: Queue standard sources for fetching
           jobField.sources?.forEach((source: any) => {
             if (source.is_computed) return;
             if (!source.table) return;
             const linkingVar = source.linking_variable || 'id';
-            if (source.table === 'tm_tasks' && (!source.linking_variable || source.linking_variable === 'id')) {
-              if (taskId) {
-                addToQueue(source.table, linkingVar, String(taskId));
-              }
-            } else {
-              entityIds.forEach(id => {
-                addToQueue(source.table, linkingVar, String(id));
-              });
-            }
+            if (source.table === 'tm_tasks' && (!source.linking_variable || source.linking_variable === 'id')) { if (taskId) addToQueue(source.table, linkingVar, String(taskId)); }
+            else { entityIds.forEach(id => { addToQueue(source.table, linkingVar, String(id)); }); }
           });
         });
       });
-
       const newSourceData: Record<string, Record<string, any>> = {};
       const documentCache = { documents: [], docTypes: [] };
       const fetchPromises = [];
-
       for (const [queueKey, { table, ids, linkingVariable }] of standardFetchQueue.entries()) {
         const idArray = Array.from(ids);
         if (idArray.length === 0) continue;
-
-
-        fetchPromises.push(
-          supabase.from(table)
-            .select('*')
-            .in(linkingVariable, idArray)
-            .then(({ data, error }) => {
-              if (!error && data) {
-                if (!newSourceData[table]) newSourceData[table] = {};
-                data.forEach(record => {
-                  const recordKey = String(record[linkingVariable]);
-                  newSourceData[table][recordKey] = record;
-                  if (table === 'tm_tasks' && record.id) {
-                    newSourceData[table][String(record.id)] = record;
-                  }
-                });
-                if (table === 'acc_portal_directors_documents') {
-                  documentCache.documents.push(...data);
-                }
-              }
-            })
-        );
+        fetchPromises.push(supabase.from(table).select('*').in(linkingVariable, idArray).then(({ data, error }) => { if (!error && data) { if (!newSourceData[table]) newSourceData[table] = {}; data.forEach(record => { const recordKey = String(record[linkingVariable]); newSourceData[table][recordKey] = record; if (table === 'tm_tasks' && record.id) { newSourceData[table][String(record.id)] = record; } }); if (table === 'acc_portal_directors_documents') { documentCache.documents.push(...data); } } }));
       }
       await Promise.all(fetchPromises);
       const neededDocTypes = Array.from(computedRequirements.documentIds);
       if (neededDocTypes.length > 0) {
         const remainingPeople = Array.from(computedRequirements.individualIds);
         await Promise.all([
-          supabase.from('acc_portal_kyc').select('*').in('id', neededDocTypes)
-            .then(({ data }) => { if (data) documentCache.docTypes = data; }),
-          supabase.from('acc_portal_directors_documents')
-            .select('*')
-            .in('director_id', remainingPeople)
-            .in('document_id', neededDocTypes)
-            .neq('status', 'deleted')
-            .then(({ data }) => { if (data) documentCache.documents.push(...data); })
+          supabase.from('acc_portal_kyc').select('*').in('id', neededDocTypes).then(({ data }) => { if (data) documentCache.docTypes = data; }),
+          supabase.from('acc_portal_directors_documents').select('*').in('director_id', remainingPeople).in('document_id', neededDocTypes).neq('status', 'deleted').then(({ data }) => { if (data) documentCache.documents.push(...data); })
         ]);
       }
-
       if (computedMasterFields.length > 0) {
         const newComputedValues: Record<string, any> = {};
         for (const item of computedMasterFields) {
           const { field, entityId, extractionMode, computedSource } = item;
           let functionToCall = computedSource.computed_function || 'extractFieldFromLatestDocument';
-          if (functionToCall === 'getLatestDocument' && computedSource.path) {
-            functionToCall = 'extractFieldFromLatestDocument';
-          }
-          const val = await executeComputedField(
-            functionToCall,
-            entityId,
-            computedSource.document_id || [],
-            computedSource.path,
-            extractionMode,
-            documentCache,
-            computedSource.computed_config
-          );
-
+          if (functionToCall === 'getLatestDocument' && computedSource.path) { functionToCall = 'extractFieldFromLatestDocument'; }
+          const val = await executeComputedField(functionToCall, entityId, computedSource.document_id || [], computedSource.path, extractionMode, documentCache, computedSource.computed_config);
           newComputedValues[`${field.id}_${entityId}_${extractionMode}`] = val;
         }
         setMasterFieldComputedValues(newComputedValues);
       }
-
       setSourceData(newSourceData);
-
-    } catch (error) {
-      console.error("Fetch Error:", error);
-    } finally {
-      isFetchingRef.current = false;
-      setIsLoadingData(false);
-    }
+    } catch (error) { console.error("Fetch Error:", error); } finally { isFetchingRef.current = false; setIsLoadingData(false); }
   }, [jobFields, selectedAutomationId, webData, resolveTargetEntityId, relationshipData, isOpen, taskId]);
 
   const getSourceValue = (table: string, path: string, entityId: string, extractionMode?: 'latest' | 'all') => {
     const tableData = sourceData[table];
-    if (!tableData) {
-      return "Missing";
-    }
+    if (!tableData) return "Missing";
     const record = tableData[entityId];
-    if (!record) {
-      return "Missing";
-    }
+    if (!record) return "Missing";
     const val = parseJsonValue(record, path, extractionMode);
     return val !== undefined && val !== null ? String(val) : "Missing";
   };
 
   const getFieldValue = (fieldIdOrVariable: string, entityId: string, sourceIdx: number = 0, extractionMode: string = 'latest', preserveArray: boolean = false) => {
     const activeAuto = webData.find(w => w.automationId === selectedAutomationId);
-    const fieldDef = activeAuto?.fields?.find(f =>
-      f.variableName === fieldIdOrVariable ||
-      String(f.id) === String(fieldIdOrVariable)
-    );
-    
-    // Log field information
-    console.log(`[Field Debug] ===== Processing Field: ${fieldIdOrVariable} =====`);
-    console.log(`[Field Debug] Entity ID: ${entityId}`);
-    console.log(`[Field Debug] Extraction Mode: ${extractionMode}`);
-    console.log(`[Field Debug] Field Definition:`, fieldDef);
-    
+    const fieldDef = activeAuto?.fields?.find(f => f.variableName === fieldIdOrVariable || String(f.id) === String(fieldIdOrVariable));
+
     if (fieldDef?.linkedJobQuestionId) {
       const taskRecord = sourceData['tm_tasks']?.[String(taskId)];
-      if (!taskRecord) {
-        if (isLoadingData) return "Loading Task Data...";
-        console.warn(`[getFieldValue] NO Task Record found in sourceData for Task ID: ${taskId}. Available Task records:`, Object.keys(sourceData['tm_tasks'] || {}));
-        return "Missing Task Data";
-      }
+      if (!taskRecord) return isLoadingData ? "Loading Task Data..." : "Missing Task Data";
       const answers = taskRecord.job_specific_answers || {};
       const questionId = String(fieldDef.linkedJobQuestionId);
       let answer = answers[questionId];
-      if (answer === undefined || answer === null) {
-        answer = answers[Number(questionId)];
-      }
-      console.log(`[Field Debug] Linked Job Question ID: ${questionId}, Answer: ${answer}`);
+      if (answer === undefined || answer === null) answer = answers[Number(questionId)];
       return (answer !== undefined && answer !== null) ? String(answer) : "Missing";
     }
-    
+
     const field = jobFields[fieldIdOrVariable];
-    if (!field) {
-      console.log(`[Field Debug] Field not found in jobFields. Available fields:`, Object.keys(jobFields));
-      return isLoading ? "Loading Config..." : "Missing Config";
-    }
-    
-    console.log(`[Field Debug] Field Config:`, {
-      id: field.id,
-      variableName: field.variableName,
-      fieldLabel: field.fieldLabel,
-      fieldType: field.fieldType,
-      sourcesCount: field.sources?.length || 0
-    });
-    
+    if (!field) return isLoading ? "Loading Config..." : "Missing Config";
+
     const sortedSources = field.sources?.sort((a: any, b: any) => (a.priority || 999) - (b.priority || 999)) || [];
-    console.log(`[Field Debug] Processing ${sortedSources.length} sources in priority order:`);
-    
+
     for (let i = 0; i < sortedSources.length; i++) {
       const source = sortedSources[i];
       if (!source) continue;
-      
-      console.log(`[Field Debug] --- Source ${i + 1} ---`);
-      console.log(`[Field Debug] Source:`, {
-        table: source.table,
-        path: source.path,
-        entityType: source.entity_type,
-        linkingVariable: source.linking_variable,
-        isComputed: source.is_computed,
-        priority: source.priority,
-        computationConfig: source.computation_config
-      });
-      
+
       if (source.is_computed) {
         const key = `${field.id}_${entityId}_${extractionMode}`;
         const val = masterFieldComputedValues[key];
-        console.log(`[Field Debug] Computed field key: ${key}, Value:`, val);
-        
-        if (val === undefined) {
-          console.log(`[Field Debug] Computed value still loading...`);
-          return isLoadingData ? "Computing..." : "Computing...";
-        }
-        
-        // For simple strings like "2 years", return as-is without JSON parsing
+
+        if (val === undefined) return isLoadingData ? "Computing..." : "Computing...";
         if (typeof val === 'string' && !val.startsWith('{')) {
-          console.log(`[Field Debug] Returning simple string value: ${val}`);
-          return val;
-        }
-        
-        let parsedVal = val;
-        if (typeof val === 'string' && val.startsWith('{')) {
-          try {
-            parsedVal = JSON.parse(val);
-            console.log(`[Field Debug] Parsed JSON value:`, parsedVal);
-          } catch (e) {
-            console.log(`[Field Debug] Failed to parse JSON:`, e);
-          }
-        }
-        if (typeof parsedVal === 'object' && parsedVal !== null && source.path) {
-          const pathMatch = source.path.match(/['"]([\w_]+)['"]$/);
-          const fieldName = pathMatch ? pathMatch[1] : null;
-          if (fieldName && parsedVal[fieldName]) {
-            const extractedValue = String(parsedVal[fieldName]);
-            console.log(`[Field Debug] Extracted field value from object: ${fieldName} = ${extractedValue}`);
-            return extractedValue;
-          }
-        }
-
-        // Check if computed value is valid (including proper handling of empty arrays)
-        const isValidValue = val !== null && val !== undefined &&
-          val !== 'Number Not Found' && val !== 'Missing' && val !== 'No Source' &&
-          val !== 'Document Not Found' && val !== 'Field Not Found' &&
-          !((Array.isArray(val) && val.length === 0) || val === '');
-
-        console.log(`[Field Debug] Computed value validation:`, {
-          value: val,
-          isValid: isValidValue,
-          type: typeof val,
-          isArray: Array.isArray(val),
-          isEmpty: val === ''
-        });
-
-        if (isValidValue) {
-          if (typeof parsedVal === 'object' && parsedVal !== null) {
-            const finalValue = parsedVal.en || parsedVal.name || parsedVal.title || String(Object.values(parsedVal)[0]);
-            console.log(`[Field Debug] Returning object value: ${finalValue}`);
-            return finalValue;
-          }
-          console.log(`[Field Debug] Returning valid computed value: ${val}`);
-          return String(val);
+          // CRITICAL: Strict validation of error strings to ensure fallback
+          const isErrorString = val === 'Document Not Found' || val === 'Missing Document' ||
+            val === 'No Document Specified' || val === 'Field Not Found' ||
+            val === 'Number Not Found' || val === 'Missing' || val === 'No Source';
+          if (!isErrorString) return val;
+          // If it is an error string, fall through to continue loop
         } else {
-          console.log(`[Field Debug] Computed value invalid, trying next source...`);
-          continue; // Try next source
+          // Valid object or array
+          let parsedVal = val;
+          if (typeof val === 'string' && val.startsWith('{')) { try { parsedVal = JSON.parse(val); } catch (e) { } }
+          if (typeof parsedVal === 'object' && parsedVal !== null && source.path) {
+            const pathMatch = source.path.match(/['"]([\w_]+)['"]$/);
+            const fieldName = pathMatch ? pathMatch[1] : null;
+            if (fieldName && parsedVal[fieldName]) return String(parsedVal[fieldName]);
+          }
+          const isValidValue = val !== null && val !== undefined && !((Array.isArray(val) && val.length === 0) || val === '');
+          if (isValidValue) {
+            if (typeof parsedVal === 'object' && parsedVal !== null) { return parsedVal.en || parsedVal.name || parsedVal.title || String(Object.values(parsedVal)[0]); }
+            return String(val);
+          }
         }
+        // Computed failed or returned error string, proceed to next source
+        console.log(`[Field Debug] Computed value invalid/missing (${val}), trying next source...`);
+        continue;
       }
-      
+
       let lookupId = String(entityId);
-      if (source.table === 'tm_tasks' && (!source.linking_variable || source.linking_variable === 'id')) {
-        lookupId = String(taskId);
-      }
-      
-      console.log(`[Field Debug] Looking up value from table: ${source.table}, path: ${source.path}, lookupId: ${lookupId}`);
+      if (source.table === 'tm_tasks' && (!source.linking_variable || source.linking_variable === 'id')) lookupId = String(taskId);
       const value = getSourceValue(source.table, source.path, lookupId, extractionMode as 'latest' | 'all');
-      console.log(`[Field Debug] Retrieved value:`, value);
-      
-      if (value !== null && value !== undefined && value !== '' && value !== 'No Source' && value !== 'Missing') {
-        console.log(`[Field Debug] ✓ Found valid value: ${value}`);
-        return value;
-      } else {
-        console.log(`[Field Debug] ✗ Invalid/missing value, trying next source...`);
-      }
+      if (value !== null && value !== undefined && value !== '' && value !== 'Missing') return value;
     }
-    
-    console.log(`[Field Debug] No valid sources found for field: ${fieldIdOrVariable}`);
-    if (isLoadingData) return "Loading Data...";
-    return "No Source";
+    return "Missing";
   };
 
+  // ... (fetchDocumentFiles, useEffects remain unchanged)
+  // ... (fetchDocumentFiles, useEffect initial data, useEffect fetchSourceData, useEffect fetchIndividualName, useEffect runComputation)
   const fetchDocumentFiles = useCallback(async () => {
-    if (!isOpen || !selectedAutomationId || !webData.length) return;
-    if (isLoadingDocuments) return;
-
+    if (!isOpen || !selectedAutomationId || !webData.length || isLoadingDocuments) return;
     setIsLoadingDocuments(true);
     const activeAutomation = webData.find(w => w.automationId === selectedAutomationId);
     if (!activeAutomation) { setIsLoadingDocuments(false); return; }
 
-    const docFields = activeAutomation.fields?.filter((f: any) => f.fieldType === 'document') || [];
+    // Collect all document fields: normal fields + array item fields
+    const normalDocFields = activeAutomation.fields?.filter((f: any) => f.fieldType === 'document') || [];
+    const arrayDocFields = activeAutomation.fields?.filter((f: any) => f.fieldType === 'array')
+      ?.flatMap((field: any) => {
+        return (field.arrayItems || [])
+          .filter((colItem: any) => colItem.type === 'document')
+          .map((colItem: any) => ({
+            ...colItem,
+            entityTypes: colItem.entityTypes || field.entityTypes,
+            linkedKycDocuments: colItem.linkedKycDocuments || []
+          }));
+      }) || [];
+
+    const allDocFields = [...normalDocFields, ...arrayDocFields];
+
     const personIds = new Set<string>();
     const companyIds = new Set<string>();
     const requiredKycIds = new Set<string>();
 
-    docFields.forEach((field: any) => {
+    allDocFields.forEach((field: any) => {
       const entityId = resolveTargetEntityId(field);
       if (entityId) {
         if (field.entityTypes?.includes('company')) companyIds.add(String(entityId));
         else personIds.add(String(entityId));
-        if (field.kycDocumentId) requiredKycIds.add(field.kycDocumentId);
+        // Handle linkedKycDocuments array
+        if (field.linkedKycDocuments && Array.isArray(field.linkedKycDocuments)) {
+          field.linkedKycDocuments.forEach((docId: string) => requiredKycIds.add(docId));
+        }
       }
     });
 
     try {
       const results = [];
       if (personIds.size > 0 && requiredKycIds.size > 0) {
-        const { data: personDocs } = await supabase.from('acc_portal_directors_documents')
-          .select('*, kyc_document:acc_portal_kyc!document_id(*)')
-          .in('director_id', Array.from(personIds)).in('document_id', Array.from(requiredKycIds)).neq('status', 'deleted');
+        const { data: personDocs } = await supabase.from('acc_portal_directors_documents').select('*, kyc_document:acc_portal_kyc!document_id(*)').in('director_id', Array.from(personIds)).in('document_id', Array.from(requiredKycIds)).neq('status', 'deleted');
         if (personDocs) results.push(...personDocs.map(d => ({ ...d, owner_type: 'person', owner_id: String(d.director_id) })));
       }
-
       if (companyIds.size > 0 && requiredKycIds.size > 0) {
-        const { data: companyDocs } = await supabase.from('acc_portal_company_documents')
-          .select('*, kyc_document:acc_portal_kyc!document_id(*)')
-          .in('company_id', Array.from(companyIds)).in('document_id', Array.from(requiredKycIds)).neq('status', 'deleted');
+        const { data: companyDocs } = await supabase.from('acc_portal_company_documents').select('*, kyc_document:acc_portal_kyc!document_id(*)').in('company_id', Array.from(companyIds)).in('document_id', Array.from(requiredKycIds)).neq('status', 'deleted');
         if (companyDocs) results.push(...companyDocs.map(d => ({ ...d, owner_type: 'company', owner_id: String(d.company_id) })));
       }
       setDocumentFiles(results);
-    } catch (err) { console.error("Error fetching documents:", err); } finally { setIsLoadingDocuments(false); }
+    } catch (err) {
+      console.error("Error fetching documents:", err);
+    } finally {
+      setIsLoadingDocuments(false);
+    }
   }, [selectedAutomationId, webData, resolveTargetEntityId, isOpen]);
 
-  // --- INITIAL DATA FETCH ---
   useEffect(() => {
     if (!isOpen) return;
     const fetchData = async () => {
@@ -856,125 +704,47 @@ export const AutomationMappingDialog = ({
       try {
         const jl = task?.job_level;
         if (!jl) return;
-        let query = supabase.from('tm_class_requirements').select('*')
-          .eq('job_level->>department_id', String(jl.department_id))
-          .eq('job_level->>subdepartment_id', String(jl.subdepartment_id));
-
-        if (jl.class_id) query = query.eq('job_level->>class_id', String(jl.class_id));
-        else query = query.is('job_level->>class_id', null);
-
-        if (jl.subclass_id) query = query.eq('job_level->>subclass_id', String(jl.subclass_id));
-        else query = query.is('job_level->>subclass_id', null);
-
+        let query = supabase.from('tm_class_requirements').select('*').eq('job_level->>department_id', String(jl.department_id)).eq('job_level->>subdepartment_id', String(jl.subdepartment_id));
+        if (jl.class_id) query = query.eq('job_level->>class_id', String(jl.class_id)); else query = query.is('job_level->>class_id', null);
+        if (jl.subclass_id) query = query.eq('job_level->>subclass_id', String(jl.subclass_id)); else query = query.is('job_level->>subclass_id', null);
         const { data: requirement } = await query.maybeSingle();
         if (!requirement) return;
         setRequirementJobQuestions(requirement.job_specific_questions || []);
-        const individualRequirements = requirement.requirements?.filter((req: any) =>
-          req.automationId || req.automation_id || req.web_automation?.automationId
-        ) || [];
-
+        const individualRequirements = requirement.requirements?.filter((req: any) => req.automationId || req.automation_id || req.web_automation?.automationId) || [];
         const globalAutoIds = requirement.web_automation?.map((auto: any) => auto.automationId).filter(Boolean) || [];
         const indivAutoIds = individualRequirements.map((req: any) => req.automationId || req.automation_id || req.web_automation?.automationId).filter(Boolean);
         const allAutomationIds = [...new Set([...globalAutoIds, ...indivAutoIds])];
-
         let finalWebDataItems: any[] = [];
         let fetchedAutos: any[] = [];
-
         if (allAutomationIds.length > 0) {
           const { data: autos } = await supabase.from('tm_automations').select('*').in('id', allAutomationIds);
           fetchedAutos = autos || [];
           const globalRefs = requirement.web_automation || [];
-          const indivRefs = individualRequirements.map((req: any) => ({
-            automationId: req.automationId || req.automation_id || req.web_automation?.automationId,
-            documentName: req.name,
-            documentId: req.id,
-            ...(req.web_automation || {})
-          }));
-
+          const indivRefs = individualRequirements.map((req: any) => ({ automationId: req.automationId || req.automation_id || req.web_automation?.automationId, documentName: req.name, documentId: req.id, ...(req.web_automation || {}) }));
           const allRefs = [...globalRefs, ...indivRefs];
-          finalWebDataItems = allRefs.map((ref: any) => {
-            const autoDef = fetchedAutos.find(a => a.id === ref.automationId);
-            return { ...ref, fields: autoDef?.webdata || [], automationName: autoDef?.name, automation: autoDef };
-          }).filter(item => item.automationId);
+          finalWebDataItems = allRefs.map((ref: any) => { const autoDef = fetchedAutos.find(a => a.id === ref.automationId); return { ...ref, fields: autoDef?.webdata || [], automationName: autoDef?.name, automation: autoDef }; }).filter(item => item.automationId);
           setWebData(finalWebDataItems);
         } else { setWebData([]); }
-
-        const mappings = finalWebDataItems.map((item, idx) => ({
-          entityKey: `wd-${idx}`, entityName: item.documentName || item.automationName || `Flow ${idx + 1}`,
-          entityType: 'webdata', automationId: item.automationId, documentId: item.documentId, automation: item.automation
-        }));
+        const mappings = finalWebDataItems.map((item, idx) => ({ entityKey: `wd-${idx}`, entityName: item.documentName || item.automationName || `Flow ${idx + 1}`, entityType: 'webdata', automationId: item.automationId, documentId: item.documentId, automation: item.automation }));
         setEntityAutomationMappings(mappings);
-        if (mappings.length > 0) {
-          if (!selectedAutomationId || !mappings.some(m => m.automationId === selectedAutomationId)) setSelectedAutomationId(mappings[0].automationId);
-        } else { setSelectedAutomationId(''); }
-
-        const fieldIds = finalWebDataItems.flatMap(i => {
-          const fields = i.fields || [];
-          const directIds = fields.flatMap((f: any) =>
-            f.linkedMasterFields || f.masterFieldIds || []
-          );
-          const arrayIds = fields.flatMap((f: any) =>
-            (f.arrayItems || []).flatMap((item: any) =>
-              item.linkedMasterFields || (item.linkedMasterFieldId ? [item.linkedMasterFieldId] : [])
-            )
-          );
-          return [...directIds, ...arrayIds];
-        }).filter(Boolean);
-
+        if (mappings.length > 0) { if (!selectedAutomationId || !mappings.some(m => m.automationId === selectedAutomationId)) setSelectedAutomationId(mappings[0].automationId); } else { setSelectedAutomationId(''); }
+        const fieldIds = finalWebDataItems.flatMap(i => { const fields = i.fields || []; const directIds = fields.flatMap((f: any) => f.linkedMasterFields || f.masterFieldIds || []); const arrayIds = fields.flatMap((f: any) => (f.arrayItems || []).flatMap((item: any) => item.linkedMasterFields || (item.linkedMasterFieldId ? [item.linkedMasterFieldId] : []))); return [...directIds, ...arrayIds]; }).filter(Boolean);
         const uniqueFieldIds = [...new Set(fieldIds)];
-
-        if (uniqueFieldIds.length > 0) {
-          const { data: fields } = await supabase.from('tm_job_fields').select('*').in('id', uniqueFieldIds);
-          setJobFields(fields?.reduce((acc, f) => ({ ...acc, [f.id.toString()]: f }), {}) || {});
-        }
+        if (uniqueFieldIds.length > 0) { const { data: fields } = await supabase.from('tm_job_fields').select('*').in('id', uniqueFieldIds); setJobFields(fields?.reduce((acc, f) => ({ ...acc, [f.id.toString()]: f }), {}) || {}); }
       } catch (error) { console.error('Error in fetchData:', error); } finally { setIsLoading(false); }
     };
     fetchData();
   }, [isOpen, task?.job_level]);
 
-  useEffect(() => {
-    if (isOpen && selectedAutomationId && Object.keys(jobFields).length > 0) {
-      fetchSourceData();
-      fetchDocumentFiles();
-    }
-  }, [selectedAutomationId, isOpen, fetchSourceData, fetchDocumentFiles]);
+  useEffect(() => { if (isOpen && selectedAutomationId && Object.keys(jobFields).length > 0) { fetchSourceData(); fetchDocumentFiles(); } }, [selectedAutomationId, isOpen, fetchSourceData, fetchDocumentFiles]);
 
   useEffect(() => {
     const fetchIndividualName = async () => {
       if (!currentIndividualId) return;
-
-      // If we already have name from relationship data, use it
-      if (relationshipData?.principal?.full_name) {
-        setIndividualName(relationshipData.principal.full_name);
-        return;
-      }
-
-      if (relationshipData?.principal?.first_name && relationshipData?.principal?.last_name) {
-        setIndividualName(`${relationshipData.principal.first_name} ${relationshipData.principal.last_name}`);
-        return;
-      }
-
-      // Otherwise, fetch from database
-      try {
-        const { data: individual } = await supabase
-          .from('registry_individuals')
-          .select('first_name, last_name, full_name')
-          .eq('id', currentIndividualId)
-          .single();
-
-        if (individual) {
-          const name = individual.full_name ||
-            (individual.first_name && individual.last_name ?
-              `${individual.first_name} ${individual.last_name}` :
-              currentIndividualId);
-          setIndividualName(name);
-        }
-      } catch (error) {
-        console.error('Error fetching individual name:', error);
-        setIndividualName(currentIndividualId);
-      }
+      if (relationshipData?.principal?.full_name) { setIndividualName(relationshipData.principal.full_name); return; }
+      if (relationshipData?.principal?.first_name && relationshipData?.principal?.last_name) { setIndividualName(`${relationshipData.principal.first_name} ${relationshipData.principal.last_name}`); return; }
+      try { const { data: individual } = await supabase.from('registry_individuals').select('first_name, last_name, full_name').eq('id', currentIndividualId).single(); if (individual) { const name = individual.full_name || (individual.first_name && individual.last_name ? `${individual.first_name} ${individual.last_name}` : currentIndividualId); setIndividualName(name); } } catch (error) { console.error('Error fetching individual name:', error); setIndividualName(currentIndividualId); }
     };
-
     fetchIndividualName();
   }, [currentIndividualId, relationshipData]);
 
@@ -983,110 +753,56 @@ export const AutomationMappingDialog = ({
       if (!currentIndividualId || !selectedAutomationId) return;
       const cid = relationshipData?.company?.id || task?.company_id;
       const activeWeb = webData.find(w => w.automationId === selectedAutomationId);
-
-      // Map fields and include the entityType context
-      const computedFields = activeWeb?.fields?.filter((f: any) => f.fieldType === 'computed')
-        ?.map((f: any) => ({
-          variableName: f.variableName,
-          computedFunction: f.computedFunction,
-          computedDocuments: f.computedDocuments || [],
-          // This pulls "principal" or "employee" from the automation config
-          entityContext: f.entityTypes?.[0]
-        })) || [];
-
+      const computedFields = activeWeb?.fields?.filter((f: any) => f.fieldType === 'computed')?.map((f: any) => ({ variableName: f.variableName, computedFunction: f.computedFunction, computedDocuments: f.computedDocuments || [], entityContext: f.entityTypes?.[0] })) || [];
       if (computedFields.length === 0) { setComputedFieldsPreview({}); return; }
-
       const computedConfigs = activeWeb?.fields?.filter((f: any) => f.fieldType === 'computed') || [];
-      for (const f of computedConfigs) {
-        const val = await executeComputedField(
-          f.computedFunction,
-          currentIndividualId,
-          f.computedDocuments || [],
-          null, // fieldPath
-          'latest',
-          null, // cache
-          f.computed_config, // PASS THE ACTUAL CONFIG
-          cid,  // PASS TARGET COMPANY
-          f.entityTypes?.[0] // PASS ENTITY TYPE (e.g. 'employee')
-        );
-        formData[f.variableName] = val;
-      }
-
       setIsComputing(true);
       try {
         const results = {};
         for (const config of computedFields) {
-          // Find the original field config that has computed_config
           const originalField = computedConfigs.find(f => f.variableName === config.variableName);
-          const val = await executeComputedField(
-            config.computedFunction,
-            currentIndividualId,
-            config.computedDocuments,
-            null, // fieldPath
-            'latest',
-            null, // cache
-            originalField?.computed_config, // PASS THE ACTUAL CONFIG FROM ORIGINAL FIELD
-            cid,
-            config.entityContext // PASSING THE CONTEXT HERE
-          );
+          const val = await executeComputedField(config.computedFunction, currentIndividualId, config.computedDocuments, null, 'latest', null, originalField?.computed_config, cid, config.entityContext);
           results[config.variableName] = val;
         }
         setComputedFieldsPreview(results);
-      } catch (error) {
-        console.error('Error auto-computing fields:', error);
-      } finally {
-        setIsComputing(false);
-      }
+      } catch (error) { console.error('Error auto-computing fields:', error); } finally { setIsComputing(false); }
     };
     const timer = setTimeout(runComputation, 500);
     return () => clearTimeout(timer);
   }, [currentIndividualId, selectedAutomationId, webData, relationshipData, task]);
 
   const handleRunAutomation = async () => {
-    if (!selectedAutomationId) {
-      toast({ title: "Validation Error", description: "Missing automation selection", variant: "destructive" });
-      // ...
-      return;
-    }
-
+    if (!selectedAutomationId) { toast({ title: "Validation Error", description: "Missing automation selection", variant: "destructive" }); return; }
     setIsAutomationRunning(true);
     try {
       const mapping = entityAutomationMappings.find(m => m.automationId === selectedAutomationId);
       if (!mapping?.automation) throw new Error("Automation configuration not found");
-
       const automation = mapping.automation;
       const automationLogin = automation.login || {};
       const formData: Record<string, any> = {};
       const activeWeb = webData.find(w => w.automationId === selectedAutomationId);
-
       activeWeb?.fields?.forEach((f: any) => {
-
-        if (f.linkedJobQuestionId) {
-          const val = getFieldValue(f.variableName, ""); // entityId not needed for job questions
-          formData[f.variableName] = (val === 'Missing' || val === 'Missing Task Data') ? null : val;
-          return;
-        }
-
-        if (f.fieldType === 'document') {
-          const targetId = resolveTargetEntityId(f);
-          const doc = documentFiles.find(d => d.document_id === f.kycDocumentId && String(d.owner_id) === String(targetId));
-          if (doc) formData[f.variableName] = buildFileUrl(doc);
-          return;
-        }
-
+        if (f.linkedJobQuestionId) { const val = getFieldValue(f.variableName, ""); formData[f.variableName] = (val === 'Missing' || val === 'Missing Task Data') ? null : cleanFieldValue(val); return; }
+        if (f.fieldType === 'document') { const targetId = resolveTargetEntityId(f); const doc = documentFiles.find(d => f.linkedKycDocuments?.includes(d.document_id) && String(d.owner_id) === String(targetId)); if (doc) formData[f.variableName] = buildFileUrl(doc); return; }
         if (f.fieldType === 'computed') return;
-
         if (f.fieldType === 'array') {
           const entityIds = resolveEntityIdsForArray(f, relationshipData);
           const finalArrayData: any[] = [];
-
           entityIds.forEach((id: string) => {
             const columnsData = (f.arrayItems || []).map((col: any) => {
               let val: any = '';
-              // Handle both linkedMasterFields (array) and linkedMasterFieldId (single value)
+              // --- Special handling for document fields in arrays ---
+              if (col.type === 'document') {
+                const targetId = resolveTargetEntityId({ ...col, entityTypes: col.entityTypes || f.entityTypes });
+                const doc = documentFiles.find(d =>
+                  col.linkedKycDocuments?.includes(d.document_id) &&
+                  String(d.owner_id) === String(targetId)
+                );
+                val = doc ? buildFileUrl(doc) : '';
+                return { ...col, value: val, fieldId: 'document' };
+              }
               const fieldIds = col.linkedMasterFields || (col.linkedMasterFieldId ? [col.linkedMasterFieldId] : []);
               const fieldId = String(fieldIds[0] || '');
-
               if (fieldId) {
                 const field = jobFields[fieldId];
                 if (field?.is_computed || field?.computed_config?.is_computed) {
@@ -1094,206 +810,92 @@ export const AutomationMappingDialog = ({
                   const key = `${field.id}_${id}_${itemExtractionMode}`;
                   val = masterFieldComputedValues[key];
                 } else if (field?.sources?.[0]) {
-                  // Use getFieldValue to properly match entity type with source
                   val = getFieldValue(fieldId, String(id), 0, col.extractionMode || 'latest');
                   if (val === 'Missing' || val === 'Missing Config' || val === 'No Source') val = '';
                 }
               }
-              return { ...col, value: val, fieldId };
+              return { ...col, value: cleanFieldValue(val), fieldId };
             });
-
-            const maxRows = Math.max(
-              1,
-              ...columnsData.map((c: any) => Array.isArray(c.value) ? c.value.length : 1)
-            );
-
+            const maxRows = Math.max(1, ...columnsData.map((c: any) => Array.isArray(c.value) ? c.value.length : 1));
             for (let i = 0; i < maxRows; i++) {
               const rowObj: Record<string, any> = {};
               columnsData.forEach((col: any) => {
                 let v = col.value;
-                if (Array.isArray(v)) {
-                  v = v[i] !== undefined ? v[i] : "";
-                } else {
-                  v = v !== undefined && v !== 'Computing...' ? v : "";
-                }
-                if (col.type === 'date' && v) {
-                  v = formatDateValue(v, col.dateFormat);
-                }
-                rowObj[col.variableName] = v;
+                if (Array.isArray(v)) { v = v[i] !== undefined ? v[i] : ""; }
+                else { v = v !== undefined && v !== 'Computing...' ? v : ""; }
+                if (col.type === 'date' && v) { v = formatDateValue(v, col.dateFormat); }
+                rowObj[col.variableName] = cleanFieldValue(v);
               });
               finalArrayData.push(rowObj);
             }
           });
-
           formData[f.variableName] = finalArrayData;
           return;
         }
-
         const targetId = resolveTargetEntityId(f);
         const masterIds = f.linkedMasterFields || f.masterFieldIds || [];
-
-        // ============================================================
-        // KEY FIX: Use getFieldValue which now properly matches entity types
-        // ============================================================
         const values = masterIds.map((mid: string | number) => {
           let val = getFieldValue(String(mid), String(targetId), 0, f.extractionMode || 'latest');
-
-          // Handle Object values preventing [object Object]
-          if (typeof val === 'object' && val !== null) {
-            // If it's a date object, leave it for formatting
-            if (val.day && val.month && val.year) return val;
-
-            // If it's a generic object, try to find a 'name', 'label', or 'value' key
-            // Or simply JSON.stringify it so the backend can at least read it
-            return val.name || val.label || val.value || JSON.stringify(val);
-          }
-          if (Array.isArray(val)) {
-            val = val.join(', ');
-          }
-          if (f.fieldType === 'date' && val && val !== 'Missing' && val !== 'Computing...') {
-            return formatDateValue(val, f.dateFormat);
-          }
-          return (val === 'Missing' || val === 'Computing...' || val === 'Missing Config' || val === 'No Source') ? null : val;
+          if (typeof val === 'object' && val !== null) { if (val.day && val.month && val.year) return val; return val.name || val.label || val.value || JSON.stringify(val); }
+          if (Array.isArray(val)) { val = val.join(', '); }
+          if (f.fieldType === 'date' && val && val !== 'Missing' && val !== 'Computing...') { return formatDateValue(val, f.dateFormat); }
+          return (val === 'Missing' || val === 'Computing...' || val === 'Missing Config' || val === 'No Source') ? null : cleanFieldValue(val);
         }).filter(Boolean);
-
-        if (values.length > 0) {
-          formData[f.variableName] = values.length === 1 ? values[0] : values.join(' ');
-        }
+        if (values.length > 0) { formData[f.variableName] = values.length === 1 ? cleanFieldValue(values[0]) : values.join(' '); }
       });
-
-      const computedFields = activeWeb?.fields?.filter((f: any) => f.fieldType === 'computed')
-        ?.map((f: any) => ({
-          variableName: f.variableName,
-          computedFunction: f.computedFunction,
-          computedDocuments: f.computedDocuments || [],
-          entityContext: f.entityTypes?.[0], // Pass entity type
-          computed_config: f.computed_config // Include the computed configuration
-        })) || [];
+      const computedFields = activeWeb?.fields?.filter((f: any) => f.fieldType === 'computed')?.map((f: any) => ({ variableName: f.variableName, computedFunction: f.computedFunction, computedDocuments: f.computedDocuments || [], entityContext: f.entityTypes?.[0], computed_config: f.computed_config })) || [];
       if (computedFields.length > 0) {
         const cid = relationshipData?.company?.id || task?.company_id;
-        console.log(`[Dialog] Processing ${computedFields.length} computed fields`);
         for (const config of computedFields) {
-          console.log(`[Dialog] Processing computed field:`, {
-            variableName: config.variableName,
-            computedFunction: config.computedFunction,
-            computedDocuments: config.computedDocuments,
-            entityContext: config.entityContext,
-            computed_config: config.computed_config
-          });
-          const val = await executeComputedField(
-            config.computedFunction,
-            currentIndividualId,
-            config.computedDocuments,
-            null,
-            'latest',
-            null,
-            config.computed_config,
-            cid,
-            config.entityContext // Ensure this matches your computed Function's new signature
-          );
+          const val = await executeComputedField(config.computedFunction, currentIndividualId, config.computedDocuments, null, 'latest', null, config.computed_config, cid, config.entityContext);
           formData[config.variableName] = val;
         }
       }
       const payload = {
         url: automationLogin.url || "https://fns.immigration.go.ke/account/login.html",
         photoPath: "",
-        login: { email: automationLogin.email || "", idNumber: automationLogin.idNumber || "", password: automationLogin.password || "" },
-        formData: formData, step2Data: {}, step3Data: {}
+        login: {
+          email: automationLogin.email || "",
+          idNumber: (typeof automationLogin.idNumber === 'string' && automationLogin.idNumber !== '[object Object]') ? automationLogin.idNumber : "",
+          password: automationLogin.password || ""
+        },
+        formData: formData,
+        step2Data: {},
+        step3Data: {}
       };
-
-
       const res = await fetch(automation.webhook_url, { method: automation.webhook_method || 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (!res.ok) throw new Error("Trigger failed: " + res.status);
       toast({ title: 'Success', description: 'Automation process initiated successfully' });
-    } catch (e) {
-      console.error("Automation Error:", e);
-      toast({ title: 'Automation Error', description: e.message, variant: 'destructive' });
-    } finally { setIsAutomationRunning(false); }
+    } catch (e) { console.error("Automation Error:", e); toast({ title: 'Automation Error', description: e.message, variant: 'destructive' }); } finally { setIsAutomationRunning(false); }
   };
 
-  const cancelEditing = () => {
-    setEditingCell(null);
-    setEditValue('');
-  };
-
+  const cancelEditing = () => { setEditingCell(null); setEditValue(''); };
   const startEditing = async (fieldId: string, sourceIdx: number, table: string, path: string, val: string, entityId: string, linkingVariable: string, fieldType?: string, computedFunction?: string, masterFieldId?: string | number) => {
     try {
-      // For computed fields, we don't need to fetch anything
-      if (fieldType === 'computed' || computedFunction) {
-        setEditingCell({ fieldId, sourceIdx, table, path, entityId, linkingVariable, fieldType, computedFunction });
-        setEditValue(val || '');
-        return;
-      }
-
-      // For non-computed fields, ensure we have the record in cache
+      if (fieldType === 'computed' || computedFunction) { setEditingCell({ fieldId, sourceIdx, table, path, entityId, linkingVariable, fieldType, computedFunction }); setEditValue(val || ''); return; }
       if (table && entityId) {
         let record = sourceData[table]?.[entityId];
-
-        // If record not in cache, fetch it using the correct linking variables from master field sources
         if (!record) {
-          let query = supabase
-            .from(table)
-            .select('*');
-
-          // If we have a master field ID, use its sources to determine the correct linking
-          if (masterFieldId) {
-            const masterField = jobFields[masterFieldId.toString()];
-            if (masterField?.sources?.length) {
-              // Find the source that matches our current table
-              const source = masterField.sources.find(s => s.table === table);
-              if (source?.linking_variable) {
-                // Use the linking variable from the master field source
-                query = query.eq(source.linking_variable, entityId);
-              } else {
-                // Fallback to trying common ID fields
-                query = query.or(`id.eq.${entityId},director_id.eq.${entityId},company_id.eq.${entityId}`);
-              }
-            } else {
-              // No sources defined, try common ID fields
-              query = query.or(`id.eq.${entityId},director_id.eq.${entityId},company_id.eq.${entityId}`);
-            }
-          } else {
-            // No master field ID, try common ID fields
-            query = query.or(`id.eq.${entityId},director_id.eq.${entityId},company_id.eq.${entityId}`);
-          }
-
+          let query = supabase.from(table).select('*');
+          if (masterFieldId) { const masterField = jobFields[masterFieldId.toString()]; if (masterField?.sources?.length) { const source = masterField.sources.find(s => s.table === table); if (source?.linking_variable) { query = query.eq(source.linking_variable, entityId); } else { query = query.or(`id.eq.${entityId},director_id.eq.${entityId},company_id.eq.${entityId}`); } } else { query = query.or(`id.eq.${entityId},director_id.eq.${entityId},company_id.eq.${entityId}`); } } else { query = query.or(`id.eq.${entityId},director_id.eq.${entityId},company_id.eq.${entityId}`); }
           const { data, error } = await query.maybeSingle();
           if (error) throw error;
           record = data;
-
-          if (record) {
-            // Update the cache with the fetched record
-            setSourceData(prev => ({
-              ...prev,
-              [table]: {
-                ...(prev[table] || {}),
-                [entityId]: record
-              }
-            }));
-          } else {
-            throw new Error('Record not found');
-          }
+          if (record) { setSourceData(prev => ({ ...prev, [table]: { ...(prev[table] || {}), [entityId]: record } })); } else { throw new Error('Record not found'); }
         }
       }
-
       setEditingCell({ fieldId, sourceIdx, table, path, entityId, linkingVariable, fieldType, computedFunction });
       setEditValue(val || '');
-    } catch (error) {
-      console.error('Error starting edit:', error);
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to start editing. The record could not be loaded.',
-        variant: 'destructive'
-      });
-    }
+    } catch (error) { console.error('Error starting edit:', error); toast({ title: 'Error', description: error.message || 'Failed to start editing. The record could not be loaded.', variant: 'destructive' }); }
   };
 
   const saveEdit = async (isDropdown?: boolean, dropdownOptions?: { label: string, value: string }[]) => {
     if (!editingCell) return;
-    const { table, path, entityId, fieldType, computedFunction } = editingCell;
-    let valueToSave = editValue;
 
-    // Handle dropdown value mapping if needed
+    const { table, path, entityId, fieldType, computedFunction, fieldId, sourceIdx } = editingCell;
+
+    // --- 1. RESOLVE VALUE ---
+    let valueToSave = editValue;
     if (isDropdown && dropdownOptions && dropdownOptions.length > 0) {
       const selectedOption = dropdownOptions.find(opt => opt.value === editValue);
       if (selectedOption) {
@@ -1301,96 +903,79 @@ export const AutomationMappingDialog = ({
       }
     }
 
-    // Special handling for computed fields
+    // --- 2. REQUESTED LOGGING ---
+    console.group("💾 Saving Edit Operation");
+    console.log("Field Variable/ID:", fieldId);
+    console.log("New Value:", valueToSave);
+    console.log("Target Table:", table);
+    console.log("Entity ID (PK):", entityId);
+    console.log("Path/Column:", path);
+    console.groupEnd();
+
+    // --- 3. HANDLE COMPUTED FIELDS (Local State Only) ---
     if (fieldType === 'computed' || computedFunction) {
-      // For computed fields, just update the preview and local state
-      setComputedFieldsPreview(prev => ({
-        ...prev,
-        [editingCell.fieldId]: valueToSave
-      }));
-
-      // Also update the form data if needed
-      if (formData) {
-        setFormData((prev: any) => ({
-          ...prev,
-          [editingCell.fieldId]: valueToSave
-        }));
-      }
-
+      setComputedFieldsPreview(prev => ({ ...prev, [editingCell.fieldId]: valueToSave }));
+      // If you maintain a global formData state, update it here too
+      // if (formData) { setFormData((prev: any) => ({ ...prev, [editingCell.fieldId]: valueToSave })); } 
       setEditingCell(null);
       setEditValue('');
       return;
     }
 
-    // For non-computed fields, proceed with database update
     if (!table || !path) {
       console.error('Missing table or path for non-computed field');
-      toast({
-        title: 'Error',
-        description: 'Missing required field information',
-        variant: 'destructive'
-      });
+      toast({ title: 'Error', description: 'Missing required field information', variant: 'destructive' });
       return;
     }
 
     setIsLoadingData(true);
+
     try {
-      // Try to get the record from cache first
+      // --- 4. FETCH CURRENT RECORD ---
+      // We need the current record to merge JSON data correctly
       let record = sourceData[table]?.[entityId];
-      let recordPK = entityId;
-      let queryField = 'id';
 
-      // If not in cache, try to fetch it
       if (!record) {
-        // First try with the entityId as the primary key
-        const { data: fetchedRecord, error: fetchError } = await supabase
-          .from(table)
-          .select('*')
-          .eq('id', entityId)
-          .maybeSingle();
+        // Fallback fetch if not in local cache
+        // FIX: Prioritize 'id' for tm_tasks to avoid PGRST116
+        let query = supabase.from(table).select('*');
 
-        if (fetchError) throw fetchError;
-
-        // If not found, try with other possible ID fields
-        if (!fetchedRecord) {
-          const { data: altRecord, error: altError } = await supabase
-            .from(table)
-            .select('*')
-            .or(`director_id.eq.${entityId},company_id.eq.${entityId}`)
-            .maybeSingle();
-
-          if (altError) throw altError;
-          if (!altRecord) {
-            throw new Error(`Record not found in table ${table} with ID ${entityId}`);
-          }
-          record = altRecord;
+        if (table === 'tm_tasks') {
+          query = query.eq('id', entityId);
         } else {
-          record = fetchedRecord;
+          // Generic fallback for other tables
+          query = query.or(`id.eq.${entityId},director_id.eq.${entityId},company_id.eq.${entityId}`);
         }
 
-        // Update the cache
+        const { data: fetchedData, error: fetchError } = await query.maybeSingle();
+
+        if (fetchError) throw fetchError;
+        if (!fetchedData) throw new Error(`Record not found in table ${table} with identifier ${entityId}`);
+
+        record = fetchedData;
+
+        // Update local cache
         setSourceData(prev => ({
           ...prev,
-          [table]: {
-            ...(prev[table] || {}),
-            [entityId]: record
-          }
+          [table]: { ...(prev[table] || {}), [entityId]: record }
         }));
       }
 
-      // Determine the primary key field
-      if (record.director_id) {
-        queryField = 'director_id';
-        recordPK = record.director_id;
-      } else if (record.company_id) {
-        queryField = 'company_id';
-        recordPK = record.company_id;
-      } else if (record.id) {
-        queryField = 'id';
-        recordPK = record.id;
-      }
+      // --- 5. DETERMINE QUERY KEYS ---
+      // FIX: Explicitly handle tm_tasks to prevent accidental update by company_id
+      let queryField = 'id';
+      let recordPK = entityId;
 
-      // Get the latest record to avoid conflicts
+      if (table === 'tm_tasks') {
+        queryField = 'id';
+        recordPK = record.id; // Ensure we use the record's actual ID
+      }
+      else if (record.director_id) { queryField = 'director_id'; recordPK = record.director_id; }
+      else if (record.company_id) { queryField = 'company_id'; recordPK = record.company_id; }
+      else { queryField = 'id'; recordPK = record.id; }
+
+      // --- 6. PREPARE UPDATE ---
+      // Fetch latest version from DB to ensure atomic-like JSON update
       const { data: existing, error: fetchError } = await supabase
         .from(table)
         .select('*')
@@ -1398,39 +983,35 @@ export const AutomationMappingDialog = ({
         .single();
 
       if (fetchError) throw fetchError;
-      if (!existing) {
-        throw new Error(`Record not found in database: ${recordPK}`);
-      }
+      if (!existing) throw new Error(`Record not found in database: ${recordPK}`);
 
-      // Update the record with the new value
+      // Use utility to merge JSON paths (handles ->> syntax)
       const updated = updateJsonValue(existing, path, valueToSave);
 
-      // Save the changes
+      // --- 7. EXECUTE UPDATE ---
       const { data: updatedRecord, error: updateError } = await supabase
         .from(table)
-        .update({ ...updated, updated_at: new Date().toISOString() })
+        .update({
+          ...updated,
+          updated_at: new Date().toISOString()
+        })
         .eq(queryField, recordPK)
         .select()
         .single();
 
       if (updateError) throw updateError;
 
-      // Update the cache
       if (updatedRecord) {
+        // Update local state
         setSourceData(prev => ({
           ...prev,
-          [table]: {
-            ...(prev[table] || {}),
-            [entityId]: updatedRecord
-          }
+          [table]: { ...(prev[table] || {}), [entityId]: updatedRecord }
         }));
 
-        toast({
-          title: 'Success',
-          description: 'Field updated successfully',
-          variant: 'default'
-        });
+        // If it was a job question, we might want to refresh the UI immediately
+        toast({ title: 'Success', description: 'Field updated successfully', variant: 'default' });
       }
+
     } catch (error) {
       console.error('Error saving field:', error);
       toast({
@@ -1448,63 +1029,27 @@ export const AutomationMappingDialog = ({
   const selectedMapping = useMemo(() => entityAutomationMappings.find(m => m.automationId === selectedAutomationId), [selectedAutomationId, entityAutomationMappings]);
   const activeWebEntry = useMemo(() => webData.find(e => e.automationId === selectedAutomationId), [selectedAutomationId, webData]);
 
-  // --- FIXED: Helper to get dependent dropdown options using VALUE not LABEL ---
   const getDependentDropdownOptions = useCallback((field: any, linkedJobField: any, targetId: string) => {
     const opts = linkedJobField?.options;
-
-    if (!opts?.isDependencyConfig) {
-      if (Array.isArray(opts)) {
-        return opts.map((o: any) => typeof o === 'string' ? { label: o, value: o } : o);
-      }
-      return [];
-    }
-
+    if (!opts?.isDependencyConfig) { if (Array.isArray(opts)) { return opts.map((o: any) => typeof o === 'string' ? { label: o, value: o } : o); } return []; }
     const parentFieldId = opts.dependencyConfig?.dependentFieldId;
-
-    if (!parentFieldId) {
-      return [];
-    }
-
+    if (!parentFieldId) return [];
     const parentField = jobFields[parentFieldId];
-    if (!parentField) {
-      return [];
-    }
-
+    if (!parentField) return [];
     let entityCategory = 'individual';
-    if (field.entityTypes?.includes('company')) {
-      entityCategory = 'company';
-    }
-
+    if (field.entityTypes?.includes('company')) entityCategory = 'company';
     let sourceIdx = parentField.sources?.findIndex((s: any) => s.source_type === entityCategory);
     if (sourceIdx === -1 || sourceIdx === undefined) sourceIdx = 0;
-
     const parentLabelValue = getFieldValue(String(parentFieldId), String(targetId), sourceIdx);
     let parentValueForMapping = parentLabelValue;
-
     const parentFieldOptions = parentField.options;
-    if (Array.isArray(parentFieldOptions) && parentLabelValue && parentLabelValue !== 'Missing' && parentLabelValue !== 'Computing...') {
-      const matchingParentOption = parentFieldOptions.find((opt: any) => {
-        const optLabel = typeof opt === 'string' ? opt : opt.label;
-        return optLabel === parentLabelValue;
-      });
-
-      if (matchingParentOption) {
-        parentValueForMapping = typeof matchingParentOption === 'string'
-          ? matchingParentOption
-          : matchingParentOption.value;
-      }
-    }
-
-    if (!parentValueForMapping || parentValueForMapping === 'Missing' || parentValueForMapping === 'Computing...') {
-      return [];
-    }
-
+    if (Array.isArray(parentFieldOptions) && parentLabelValue && parentLabelValue !== 'Missing' && parentLabelValue !== 'Computing...') { const matchingParentOption = parentFieldOptions.find((opt: any) => { const optLabel = typeof opt === 'string' ? opt : opt.label; return optLabel === parentLabelValue; }); if (matchingParentOption) { parentValueForMapping = typeof matchingParentOption === 'string' ? matchingParentOption : matchingParentOption.value; } }
+    if (!parentValueForMapping || parentValueForMapping === 'Missing' || parentValueForMapping === 'Computing...') return [];
     const availableOptions = opts.manualMapping?.[parentValueForMapping] || [];
-
     return availableOptions;
   }, [jobFields, getFieldValue]);
 
- const renderFieldsTable = () => {
+  const renderFieldsTable = () => {
     if (!activeWebEntry?.fields || activeWebEntry.fields.length === 0) {
       return <div className="p-12 text-center text-slate-400 text-sm">No fields configured for this automation.</div>;
     }
@@ -1517,7 +1062,7 @@ export const AutomationMappingDialog = ({
         const entityIds = resolveEntityIdsForArray(field, relationshipData);
         if (entityIds.length === 0) isMissing = true;
       } else if (field.fieldType === 'document') {
-        const foundDoc = documentFiles.find(d => d.document_id === field.kycDocumentId && String(d.owner_id) === String(targetId));
+        const foundDoc = documentFiles.find(d => field.linkedKycDocuments?.includes(d.document_id) && String(d.owner_id) === String(targetId));
         if (!foundDoc) isMissing = true;
       } else if (field.fieldType === 'computed') {
         const val = computedFieldsPreview[field.variableName];
@@ -1531,7 +1076,7 @@ export const AutomationMappingDialog = ({
           const v = getFieldValue(String(mid), String(targetId), 0, field.extractionMode || 'latest');
           return Array.isArray(v) ? v.join(', ') : v;
         }).join(' ').trim();
-        if (!mergedValue || mergedValue === 'Missing' || mergedValue === 'Missing Config' || mergedValue === 'No Source') isMissing = true;
+        if (!mergedValue || mergedValue === 'Missing' || mergedValue === 'Missing Config' || mergedValue === 'Missing') isMissing = true;
       }
       return { ...field, isMissing };
     });
@@ -1584,11 +1129,11 @@ export const AutomationMappingDialog = ({
                     const entityIds = resolveEntityIdsForArray(field, relationshipData);
                     const arrayData = getArrayFieldData(field);
                     const isExpanded = expandedArrayFields.has(field.variableName);
-                    
+
                     return (
                       <React.Fragment key={fIdx}>
                         {/* 1. SECTION HEADER ROW */}
-                        <TableRow 
+                        <TableRow
                           className="bg-blue-50/80 border-b border-blue-200 hover:bg-blue-100 cursor-pointer transition-colors"
                           onClick={() => toggleArrayFieldExpansion(field.variableName)}
                         >
@@ -1601,7 +1146,7 @@ export const AutomationMappingDialog = ({
                                 <List className="h-4 w-4" />
                               </div>
                               <span className="text-sm font-bold text-slate-800">
-                                {field.efnsDisplayName || field.variableName}
+                                {field.displayName || field.efnsDisplayName || field.variableName}
                               </span>
                               <Badge className="bg-blue-600 hover:bg-blue-700 text-white h-5 text-[10px] px-2 ml-auto">
                                 {arrayData.length} Items found
@@ -1617,31 +1162,52 @@ export const AutomationMappingDialog = ({
                             const fieldIds = colItem.linkedMasterFields || (colItem.linkedMasterFieldId ? [colItem.linkedMasterFieldId] : []);
                             const fieldId = String(fieldIds[0] || '');
                             const masterFieldDef = jobFields[fieldId];
-                            
+
                             // --- Resolve Value ---
                             const columnKey = colItem.variableName || fieldId;
                             const rawValue = row[columnKey];
-                            const displayValue = (!rawValue && rawValue !== 0) ? "Missing" : rawValue;
-                            const isRowValueMissing = (!rawValue && rawValue !== 0);
+
+                            // NEW: Unified Missing Logic for Array Items
+                            const isItemValueMissing = !rawValue ||
+                              rawValue === 'Missing' ||
+                              rawValue === 'Pending...' ||
+                              rawValue === 'Document Not Found' ||
+                              rawValue === 'Missing Config' ||
+                              rawValue === 'No Source' ||
+                              rawValue === 'Missing Task Data' ||
+                              rawValue === 'Computing...' ||
+                              rawValue === '[object Object]';
+
+                            let displayValue = isItemValueMissing ? "Missing" : rawValue;
+
+                            // --- Special handling for document fields ---
+                            if (colItem.type === 'document') {
+                              const targetId = resolveTargetEntityId(colItem);
+                              const foundDoc = documentFiles.find(d =>
+                                colItem.linkedKycDocuments?.includes(d.document_id) &&
+                                String(d.owner_id) === String(targetId)
+                              );
+                              displayValue = foundDoc ? "Available" : "Missing";
+                            }
 
                             // --- Resolve Persistence/Source for Editing ---
                             let arrayPersistenceSource = null;
                             let specificPath = '';
-                            
+
                             if (masterFieldDef) {
-                               const baseSource = masterFieldDef.sources?.find((s: any) => s.source_type === entityCategory) || masterFieldDef.sources?.[0];
-                               if (baseSource) {
-                                  if (baseSource.path && baseSource.path.includes('[]')) {
-                                    specificPath = baseSource.path.replace('[]', `.${rowIndex}`);
-                                  } else {
-                                    specificPath = baseSource.path;
-                                  }
-                                  arrayPersistenceSource = {
-                                    ...baseSource,
-                                    path: specificPath,
-                                    entityIdOverride: row.entityId 
-                                  };
-                               }
+                              const baseSource = masterFieldDef.sources?.find((s: any) => s.source_type === entityCategory) || masterFieldDef.sources?.[0];
+                              if (baseSource) {
+                                if (baseSource.path && baseSource.path.includes('[]')) {
+                                  specificPath = baseSource.path.replace('[]', `.${rowIndex}`);
+                                } else {
+                                  specificPath = baseSource.path;
+                                }
+                                arrayPersistenceSource = {
+                                  ...baseSource,
+                                  path: specificPath,
+                                  entityIdOverride: row.entityId
+                                };
+                              }
                             }
 
                             const isItemEditable = !!arrayPersistenceSource;
@@ -1659,42 +1225,39 @@ export const AutomationMappingDialog = ({
                               if (opts?.isDependencyConfig) {
                                 // 1. Identify Parent Field
                                 const parentId = opts.dependencyConfig?.dependentFieldId;
-                                
+
                                 // 2. Find Parent Value (Look in current ROW first, then Global)
                                 let parentValue = null;
                                 if (parentId) {
-                                   parentValue = row[parentId] || 
-                                                 Object.entries(row).find(([k]) => k === String(parentId))?.[1];
+                                  parentValue = row[parentId] ||
+                                    Object.entries(row).find(([k]) => k === String(parentId))?.[1];
 
-                                   if (!parentValue) {
-                                      // Fallback to global
-                                      const globalVal = getFieldValue(String(parentId), String(targetId));
-                                      if (globalVal && globalVal !== 'Missing' && globalVal !== 'Computing...') {
-                                        parentValue = globalVal;
-                                      }
-                                   }
-                                   
-                                   // 3. *** REVERSE LOOKUP FIX ***
-                                   // The database might contain the LABEL (e.g. "Nairobi"), but the mapping needs the VALUE (e.g. "30")
-                                   const parentFieldDef = jobFields[parentId];
-                                   if (parentFieldDef && Array.isArray(parentFieldDef.options) && parentValue) {
-                                       const matchingOption = parentFieldDef.options.find((opt: any) => {
-                                           const optLabel = typeof opt === 'string' ? opt : opt.label;
-                                           return String(optLabel) === String(parentValue);
-                                       });
-                                       
-                                       // If we found a matching option by label, swap parentValue to the option's value
-                                       if (matchingOption && typeof matchingOption !== 'string') {
-                                           parentValue = matchingOption.value;
-                                       }
-                                   }
+                                  if (!parentValue) {
+                                    // Fallback to global
+                                    const globalVal = getFieldValue(String(parentId), String(targetId));
+                                    if (globalVal && globalVal !== 'Missing' && globalVal !== 'Computing...') {
+                                      parentValue = globalVal;
+                                    }
+                                  }
+
+                                  // 3. *** REVERSE LOOKUP FIX ***
+                                  const parentFieldDef = jobFields[parentId];
+                                  if (parentFieldDef && Array.isArray(parentFieldDef.options) && parentValue) {
+                                    const matchingParentOption = parentFieldDef.options.find((opt: any) => {
+                                      const optLabel = typeof opt === 'string' ? opt : opt.label;
+                                      return String(optLabel) === String(parentValue);
+                                    });
+                                    if (matchingParentOption && typeof matchingParentOption !== 'string') {
+                                      parentValue = matchingParentOption.value;
+                                    }
+                                  }
                                 }
 
                                 // 4. Get Options based on Resolved Parent Value
                                 if (parentValue && parentValue !== 'Missing') {
-                                   itemDropdownOptions = opts.manualMapping?.[parentValue] || [];
+                                  itemDropdownOptions = opts.manualMapping?.[parentValue] || [];
                                 } else {
-                                   itemDropdownOptions = [];
+                                  itemDropdownOptions = [];
                                 }
 
                               } else if (Array.isArray(opts)) {
@@ -1705,9 +1268,9 @@ export const AutomationMappingDialog = ({
 
                             // --- Helper for Display ---
                             const getArrayItemDisplayValue = (val: string) => {
-                              if (!isItemDropdown) return val;
+                              if (!isItemDropdown) return cleanFieldValueForDisplay(val);
                               const option = itemDropdownOptions.find(o => String(o.value) === String(val) || o.label === val);
-                              return option ? option.label : val;
+                              return option ? option.label : cleanFieldValueForDisplay(val);
                             };
 
                             return (
@@ -1725,87 +1288,112 @@ export const AutomationMappingDialog = ({
                                   <div className="flex items-center gap-2 pl-6 relative">
                                     <div className="absolute left-3 top-0 bottom-0 w-px bg-blue-100"></div>
                                     <div className="absolute left-3 top-1/2 w-3 h-px bg-blue-200"></div>
-                                    
+
                                     <span className="text-sm text-slate-700 font-medium">
-                                      {colItem.name || colItem.header || masterFieldDef?.label || "Unknown Column"}
+                                      {colItem.displayName || colItem.name || colItem.header || masterFieldDef?.label || "Unknown Column"}
                                     </span>
-                                    
-                                    {isItemEditable && <Badge variant="outline" className="text-[9px] border-slate-200 text-slate-400 h-4 px-1 ml-2 font-normal">Editable</Badge>}
+                                    {colItem.type === 'document' && <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700 bg-amber-50">Document</Badge>}
                                   </div>
                                 </TableCell>
 
                                 {/* Source Info */}
                                 <TableCell className="px-4 py-2 text-xs text-slate-600">
-                                   {arrayPersistenceSource ? (
-                                      <TooltipProvider delayDuration={300}>
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <div className="font-mono text-[10px] bg-slate-50 text-slate-500 p-1 rounded inline-flex items-center truncate max-w-[200px] cursor-help">
-                                              <Database className="h-3 w-3 mr-1 text-slate-400" />
-                                              {arrayPersistenceSource.table?.replace('acc_portal_', '').substring(0, 10)}... 
-                                            </div>
-                                          </TooltipTrigger>
-                                          <TooltipContent className="text-xs">
-                                            <p>Table: {arrayPersistenceSource.table}</p>
-                                            <p>Path: {arrayPersistenceSource.path}</p>
-                                            <p>ID: {arrayPersistenceSource.entityIdOverride}</p>
-                                          </TooltipContent>
-                                        </Tooltip>
-                                      </TooltipProvider>
-                                   ) : (
-                                      <span className="text-slate-300 italic text-[10px]">Computed / No Map</span>
-                                   )}
+                                  {arrayPersistenceSource ? (
+                                    <TooltipProvider delayDuration={300}>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <div className="font-mono text-[10px] bg-slate-50 text-slate-500 p-1 rounded inline-flex items-center truncate max-w-[200px] cursor-help">
+                                            <Database className="h-3 w-3 mr-1 text-slate-400" />
+                                            {arrayPersistenceSource.table?.replace('acc_portal_', '').substring(0, 10)}...
+                                          </div>
+                                        </TooltipTrigger>
+                                        <TooltipContent className="text-xs">
+                                          <p>Table: {arrayPersistenceSource.table}</p>
+                                          <p>Path: {arrayPersistenceSource.path}</p>
+                                          <p>ID: {arrayPersistenceSource.entityIdOverride}</p>
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                  ) : (
+                                    <span className="text-slate-300 italic text-[10px]">Computed / No Map</span>
+                                  )}
                                 </TableCell>
 
                                 {/* Value / Edit Input */}
                                 <TableCell className="px-4 py-1 border-r border-slate-100 h-full">
-                                  {isItemEditing ? (
+                                  {colItem.type === 'document' ? (
                                     <div className="flex items-center gap-2">
-                                       {isItemDropdown ? (
-                                          <Select value={editValue} onValueChange={setEditValue}>
-                                            <SelectTrigger className="h-8 text-sm border-blue-400 w-full min-w-[150px]"><SelectValue /></SelectTrigger>
-                                            <SelectContent>
-                                              {itemDropdownOptions.length > 0 ? (
-                                                itemDropdownOptions.map((opt, i) => (
-                                                  <SelectItem key={`${opt.value}-${i}`} value={String(opt.value)}>{opt.label}</SelectItem>
-                                                ))
-                                              ) : (
-                                                <div className="p-2 text-xs text-slate-400">No options (Check parent field)</div>
-                                              )}
-                                            </SelectContent>
-                                          </Select>
-                                        ) : (
-                                          <Input 
-                                            autoFocus 
-                                            value={editValue} 
-                                            onChange={e => setEditValue(e.target.value)} 
-                                            onKeyDown={e => { if (e.key === 'Enter') saveEdit(isItemDropdown, itemDropdownOptions); if (e.key === 'Escape') cancelEditing(); }} 
-                                            className="h-8 text-sm border-blue-400" 
-                                          />
-                                        )}
-                                        <Button size="icon" onClick={() => saveEdit(isItemDropdown, itemDropdownOptions)} className="h-8 w-8 bg-green-600 hover:bg-green-700 shrink-0"><Check className="h-4 w-4" /></Button>
-                                        <Button size="icon" variant="ghost" onClick={cancelEditing} className="h-8 w-8 text-red-500 shrink-0"><X className="h-4 w-4" /></Button>
+                                      {displayValue === "Available" ? (
+                                        <>
+                                          <Badge className="bg-green-600 text-white h-6">Available</Badge>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={() => {
+                                              const targetId = resolveTargetEntityId(colItem);
+                                              const doc = documentFiles.find(d =>
+                                                colItem.linkedKycDocuments?.includes(d.document_id) &&
+                                                String(d.owner_id) === String(targetId)
+                                              );
+                                              if (doc) handlePreviewDocument(doc);
+                                            }}
+                                            className="h-6 px-2 text-xs"
+                                          >
+                                            <Eye className="h-3 w-3 mr-1" />
+                                            Preview
+                                          </Button>
+                                        </>
+                                      ) : (
+                                        <Badge variant="destructive" className="h-6">Missing</Badge>
+                                      )}
+                                    </div>
+                                  ) : isItemEditing ? (
+                                    <div className="flex items-center gap-2">
+                                      {isItemDropdown ? (
+                                        <Select value={editValue} onValueChange={setEditValue}>
+                                          <SelectTrigger className="h-8 text-sm border-blue-400 w-full min-w-[150px]"><SelectValue /></SelectTrigger>
+                                          <SelectContent>
+                                            {itemDropdownOptions.length > 0 ? (
+                                              itemDropdownOptions.map((opt, i) => (
+                                                <SelectItem key={`${opt.value}-${i}`} value={String(opt.value)}>{opt.label}</SelectItem>
+                                              ))
+                                            ) : (
+                                              <div className="p-2 text-xs text-slate-400">No options (Check parent field)</div>
+                                            )}
+                                          </SelectContent>
+                                        </Select>
+                                      ) : (
+                                        <Input
+                                          autoFocus
+                                          value={editValue}
+                                          onChange={e => setEditValue(e.target.value)}
+                                          onKeyDown={e => { if (e.key === 'Enter') saveEdit(isItemDropdown, itemDropdownOptions); if (e.key === 'Escape') cancelEditing(); }}
+                                          className="h-8 text-sm border-blue-400"
+                                        />
+                                      )}
+                                      <Button size="icon" onClick={() => saveEdit(isItemDropdown, itemDropdownOptions)} className="h-8 w-8 bg-green-600 hover:bg-green-700 shrink-0"><Check className="h-4 w-4" /></Button>
+                                      <Button size="icon" variant="ghost" onClick={cancelEditing} className="h-8 w-8 text-red-500 shrink-0"><X className="h-4 w-4" /></Button>
                                     </div>
                                   ) : (
                                     <div
                                       className={cn(
                                         "text-sm h-7 flex items-center px-2 rounded -my-1 transition-colors relative",
                                         isItemEditable ? "cursor-pointer border border-transparent hover:border-blue-400 hover:bg-blue-50" : "cursor-default",
-                                        isRowValueMissing ? "text-red-600 font-medium italic" : "text-slate-900"
+                                        isItemValueMissing ? "text-red-600 font-medium italic" : "text-slate-900" // UPDATED: Styles now match main table
                                       )}
                                       onClick={() => {
                                         if (!isItemEditable || !arrayPersistenceSource) return;
                                         startEditing(
-                                          uniqueKey, 
+                                          uniqueKey,
                                           0,
                                           arrayPersistenceSource.table,
                                           arrayPersistenceSource.path,
                                           String(displayValue === 'Missing' ? '' : displayValue),
-                                          String(arrayPersistenceSource.entityIdOverride), 
+                                          String(arrayPersistenceSource.entityIdOverride),
                                           arrayPersistenceSource.linking_variable || 'id',
-                                          undefined, 
                                           undefined,
-                                          fieldId 
+                                          undefined,
+                                          fieldId
                                         );
                                       }}
                                     >
@@ -1821,20 +1409,21 @@ export const AutomationMappingDialog = ({
 
                         {isExpanded && (
                           <TableRow className="bg-slate-50 border-b-2 border-slate-200">
-                             <TableCell colSpan={4} className="py-1">
-                                <div className="h-1 w-full bg-gradient-to-r from-blue-100 to-transparent"></div>
-                             </TableCell>
+                            <TableCell colSpan={4} className="py-1">
+                              <div className="h-1 w-full bg-gradient-to-r from-blue-100 to-transparent"></div>
+                            </TableCell>
                           </TableRow>
                         )}
                       </React.Fragment>
                     );
                   }
 
-                  // ... (Existing Document and Normal Fields Logic remains unchanged)
+                  // =========================================================
+                  // CASE: DOCUMENT FIELDS
+                  // =========================================================
                   if (field.fieldType === 'document') {
-                    // ... (existing code)
                     const targetId = resolveTargetEntityId(field);
-                    const foundDoc = documentFiles.find(d => d.document_id === field.kycDocumentId && String(d.owner_id) === String(targetId));
+                    const foundDoc = documentFiles.find(d => field.linkedKycDocuments?.includes(d.document_id) && String(d.owner_id) === String(targetId));
 
                     return (
                       <TableRow key={fIdx} className="group border-b border-slate-200">
@@ -1846,11 +1435,26 @@ export const AutomationMappingDialog = ({
                             <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700 bg-amber-50">Document</Badge>
                           </div>
                         </TableCell>
-                        <TableCell className="px-4 py-2 border-r border-slate-100">
-                          {foundDoc ? <Badge className="bg-green-600 text-white h-6">Available</Badge> : <Badge variant="destructive" className="h-6">Missing</Badge>}
-                        </TableCell>
                         <TableCell className="px-4 py-2">
                           <span className="text-xs text-slate-500">KYC: {field.kycDocumentId?.substring(0, 12)}...</span>
+                        </TableCell>
+                        <TableCell className="px-4 py-2 border-r border-slate-100">
+                          {foundDoc ? (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handlePreviewDocument(foundDoc)}
+                                className="h-6 px-2 text-xs mr-2"
+                              >
+                                <Eye className="h-3 w-3 mr-1" />
+                                Preview
+                              </Button>
+                              <Badge className="bg-green-600 text-white h-6">Available</Badge>
+                            </>
+                          ) : (
+                            <Badge variant="destructive" className="h-6">Missing</Badge>
+                          )}
                         </TableCell>
                       </TableRow>
                     );
@@ -1865,12 +1469,35 @@ export const AutomationMappingDialog = ({
                   if (field.fieldType === 'computed') {
                     mergedValue = computedFieldsPreview[field.variableName] || "";
                     isDropdown = false;
-                    const mappingKey = field.computedFunction === 'extractCurrentJobTitle' ? 'job_title' :
-                      field.computedFunction === 'extractCurrentJobDescription' ? 'job_description' : null;
-                    if (mappingKey) {
-                      masterFieldDef = Object.values(jobFields).find(jf => jf.field_key === mappingKey);
-                      persistenceSource = masterFieldDef?.sources?.find(s => s.source_type === entityCategory) || masterFieldDef?.sources?.[0];
+
+                    // --- FALLBACK LOGIC START ---
+                    // Resolve Master Field to check for Fallback
+                    let mappingKey = null;
+                    if (field.computedFunction === 'extractCurrentJobTitle') mappingKey = 'job_title';
+                    else if (field.computedFunction === 'extractCurrentJobDescription') mappingKey = 'job_description';
+                    else mappingKey = field.variableName; // Try matching variable name to field_key
+
+                    // Look up master field definition
+                    masterFieldDef = Object.values(jobFields).find(jf => jf.field_key === mappingKey);
+
+                    // If computed value is missing/error, try fallback to Master Field sources
+                    const isComputedError = !mergedValue || mergedValue === 'Document Not Found' || mergedValue === 'Field Not Found' || mergedValue === 'Missing Document' || mergedValue === 'No Document Specified';
+
+                    if (isComputedError && masterFieldDef) {
+                      // This uses getFieldValue which iterates through ALL sources of the master field
+                      const fallbackVal = getFieldValue(String(masterFieldDef.id), String(targetId));
+                      // If fallback is valid (and not just the same error), use it
+                      if (fallbackVal && fallbackVal !== 'Missing' && fallbackVal !== 'No Source' && fallbackVal !== 'Computing...' && fallbackVal !== 'Document Not Found') {
+                        mergedValue = fallbackVal;
+                      }
                     }
+
+                    // Set persistence source for editing if available
+                    if (masterFieldDef) {
+                      persistenceSource = masterFieldDef.sources?.find(s => s.source_type === entityCategory) || masterFieldDef.sources?.[0];
+                    }
+                    // --- FALLBACK LOGIC END ---
+
                   } else if (isJobQuestion) {
                     mergedValue = getFieldValue(field.variableName, String(targetId));
                     persistenceSource = { table: 'tm_tasks', path: `job_specific_answers->>'${field.linkedJobQuestionId}'`, linking_variable: 'id' };
@@ -1897,20 +1524,33 @@ export const AutomationMappingDialog = ({
                   }
 
                   const getDisplayValue = (val: string) => {
-                    if (!isDropdown) return val;
+                    if (!isDropdown) return cleanFieldValueForDisplay(val);
                     const option = dropdownOptions.find(o => String(o.value) === String(val) || o.label === val);
-                    return option ? option.label : val;
+                    return option ? option.label : cleanFieldValueForDisplay(val);
                   };
 
                   const isEditable = !!persistenceSource;
-                  const isValueMissing = !mergedValue || mergedValue === 'Missing' || mergedValue === 'Pending...';
+                  const isValueMissing = !mergedValue ||
+                    mergedValue === 'Missing' ||
+                    mergedValue === 'Pending...' ||
+                    mergedValue === 'Document Not Found' ||
+                    mergedValue === 'Missing Config' ||
+                    mergedValue === 'No Source' || // Added No Source
+                    mergedValue === 'Missing Task Data' ||
+                    mergedValue === 'Computing...' ||
+                    mergedValue === '[object Object]'; // Added object check
+
+                  const getFinalDisplayValue = (val: string) => {
+                    if (isValueMissing && val !== 'Computing...') return 'Missing';
+                    return getDisplayValue(val);
+                  };
 
                   return (
                     <TableRow key={fIdx} className={cn("group border-b border-slate-200 transition-colors", isEditing ? "bg-blue-50/50" : (field.fieldType === 'computed' ? "bg-purple-50/10" : "hover:bg-blue-50"))}>
                       <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">{fIdx + 1}</TableCell>
                       <TableCell className="px-4 py-2 border-r border-slate-100">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-slate-900">{field.efnsDisplayName || field.variableName}</span>
+                          <span className="text-sm font-semibold text-slate-900">{field.displayName || field.efnsDisplayName || field.variableName}</span>
                           {field.fieldType === 'computed' && <Badge variant="outline" className="text-[10px] border-purple-300 text-purple-700 bg-purple-50">Computed</Badge>}
                           {isEditable && <Badge variant="outline" className="text-[10px] border-blue-300 text-blue-700 bg-blue-50">Editable</Badge>}
                           {isValueMissing && <AlertCircle className="h-3.5 w-3.5 text-red-500" />}
@@ -1968,6 +1608,7 @@ export const AutomationMappingDialog = ({
                               if (!isEditable) return;
                               let finalPath = persistenceSource.path || '';
                               let idToUse = (persistenceSource.table === 'tm_tasks') ? taskId : targetId;
+                              // (Dynamic array logic removed here as handled in array section)
                               startEditing(
                                 field.variableName,
                                 0,
@@ -1981,7 +1622,7 @@ export const AutomationMappingDialog = ({
                               );
                             }}
                           >
-                            {isComputing ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : getDisplayValue(mergedValue)}
+                            {isComputing ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : getFinalDisplayValue(mergedValue)}
                             {isEditable && !isEditing && <Edit3 className="h-3 w-3 ml-auto text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2" />}
                           </div>
                         )}
@@ -1998,161 +1639,300 @@ export const AutomationMappingDialog = ({
   };
 
   const renderDocumentsSection = () => {
-    const docFields = activeWebEntry?.fields?.filter((f: any) => f.fieldType === 'document') || [];
-    if (docFields.length === 0) return <div className="p-12 text-center text-slate-400">No document assets configured.</div>;
+    // Collect all document fields: normal fields + array item fields
+    const normalDocFields = activeWebEntry?.fields?.filter((f: any) => f.fieldType === 'document') || [];
+
+    // Collect document fields from array items
+    const arrayDocFields = activeWebEntry?.fields?.filter((f: any) => f.fieldType === 'array')
+      ?.flatMap((field: any) => {
+        return (field.arrayItems || [])
+          .filter((colItem: any) => colItem.type === 'document')
+          .map((colItem: any) => ({
+            ...colItem,
+            // Add array context for display
+            arrayFieldName: field.displayName || field.efnsDisplayName || field.variableName,
+            arrayVariableName: field.variableName,
+            isFromArray: true
+          }));
+      }) || [];
+
+    // Combine all document fields
+    const allDocFields = [...normalDocFields, ...arrayDocFields];
+
+    if (allDocFields.length === 0) return <div className="p-12 text-center text-slate-400">No document assets configured.</div>;
+
     return (
       <div className="grid grid-cols-2 gap-4">
-        {docFields.map((req, idx) => {
+        {allDocFields.map((req, idx) => {
           const targetId = resolveTargetEntityId(req);
-          const foundDoc = documentFiles.find(d => d.document_id === req.kycDocumentId && String(d.owner_id) === String(targetId));
+          const foundDoc = documentFiles.find(d => req.linkedKycDocuments?.includes(d.document_id) && String(d.owner_id) === String(targetId));
+
+          // --- LOGGING REQUESTED ---
+          console.groupCollapsed(`📄 Document Field: ${req.variableName}`);
+          console.log("Field Name:", req.variableName);
+          console.log("Entity Type:", req.entityTypes);
+          console.log("Target Entity ID:", targetId);
+          console.log("Linked KYC Documents:", req.linkedKycDocuments);
+          console.log("Fetched Value (foundDoc):", foundDoc);
+          console.groupEnd();
+          // -------------------------
+
+          // Display name logic: for array items, show "Array Field - Item Name"
+          const displayName = req.isFromArray
+            ? `${req.arrayFieldName} - ${req.displayName || req.name || req.variableName}`
+            : req.displayName || req.efnsDisplayName || req.variableName;
+
           return (
             <Card key={idx} className={cn("overflow-hidden border transition-all", foundDoc ? "border-green-200 shadow-sm" : "border-red-200 bg-red-50/10")}>
               <CardContent className="p-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className={cn("p-2 rounded-lg", foundDoc ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600")}><Paperclip className="h-4 w-4" /></div>
-                  <div>
-                    <h4 className="font-bold text-sm text-slate-900">{req.efnsDisplayName || req.variableName}</h4>
-                    <p className="text-[10px] text-slate-500">Target: {req.variableName}</p>
+                  <div className="flex-1">
+                    <h4 className="font-bold text-sm text-slate-900">{displayName}</h4>
+                    <p className="text-[10px] text-slate-500">
+                      Target: {req.isFromArray ? `${req.arrayVariableName}.${req.variableName}` : req.variableName}
+                    </p>
+                    {req.isFromArray && (
+                      <p className="text-[9px] text-blue-600 font-medium">Array Item</p>
+                    )}
                   </div>
                 </div>
-                {foundDoc ? <Badge className="bg-green-600">Ready</Badge> : <Badge variant="destructive">Missing</Badge>}
+                <div className="flex items-center gap-2">
+                  {foundDoc && (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handlePreviewDocument(foundDoc)}
+                        className="h-8 px-2 text-xs"
+                      >
+                        <Eye className="h-3 w-3 mr-1" />
+                        Preview
+                      </Button>
+                      <Badge className="bg-green-600">Available</Badge>
+                    </>
+                  )}
+                  {!foundDoc && <Badge variant="destructive">Missing</Badge>}
+                </div>
               </CardContent>
             </Card>
-          )
+          );
         })}
       </div>
-    )
+    );
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-[95vw] w-[1400px] h-[90vh] flex flex-col p-0 overflow-hidden border-none shadow-2xl bg-white">
-        <div className="p-5 border-b bg-gradient-to-r from-blue-600 to-blue-500 flex items-center justify-between shadow-lg">
-          <div className="flex items-center gap-4">
-            <div className="h-12 w-12 bg-white/20 rounded-xl flex items-center justify-center text-white backdrop-blur">
-              <Zap className="h-6 w-6 fill-white" />
+    <>
+      <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+        <DialogContent className="max-w-[95vw] w-[1400px] h-[90vh] flex flex-col p-0 overflow-hidden border-none shadow-2xl bg-white">
+          <div className="p-5 border-b bg-gradient-to-r from-blue-600 to-blue-500 flex items-center justify-between shadow-lg">
+            <div className="flex items-center gap-4">
+              <div className="h-12 w-12 bg-white/20 rounded-xl flex items-center justify-center text-white backdrop-blur">
+                <Zap className="h-6 w-6 fill-white" />
+              </div>
+              <div>
+                <DialogTitle className="text-2xl font-black text-white tracking-tight">
+                  Data Mapping: {(() => {
+                    const primaryEntityType = getPrimaryEntityType();
+                    const entityInfo = getEntityNameAndId(primaryEntityType);
+                    return entityInfo.name; // UPDATED: Displays "John Doe" instead of "Dependant 1326"
+                  })()}
+                </DialogTitle>
+                <div className="flex items-center gap-2 text-white/80 text-sm mt-0.5">
+                  <span className="bg-white/10 px-1.5 py-0.5 rounded font-mono">Task #{task?.id}</span>
+                  <span>•</span>
+                  <span>ID: {(() => {
+                    const primaryEntityType = getPrimaryEntityType();
+                    const entityInfo = getEntityNameAndId(primaryEntityType);
+                    return entityInfo.id;
+                  })()}</span>
+                </div>
+              </div>
             </div>
-            <div>
-              <DialogTitle className="text-2xl font-black text-white tracking-tight">Data Mapping</DialogTitle>
-              <div className="flex items-center gap-2 text-white/80 text-sm mt-0.5">
-                <span>Task #{task?.id}</span>
-                <span>•</span>
-                <span>Full name: {(() => {
-                  const primaryEntityType = getPrimaryEntityType();
-                  const entityInfo = getEntityNameAndId(primaryEntityType);
-                  return entityInfo.name;
-                })()}</span>
+
+            <div className="flex items-center gap-3">
+              <Select value={selectedAutomationId} onValueChange={setSelectedAutomationId}>
+                <SelectTrigger className="w-[250px] bg-white/10 border-white/20 text-white h-10">
+                  <SelectValue placeholder="Select Workflow" />
+                </SelectTrigger>
+                <SelectContent>
+                  {entityAutomationMappings.length > 0 ? (
+                    entityAutomationMappings.map(m => (
+                      <SelectItem key={m.automationId} value={m.automationId}>
+                        {m.automation?.name || "Unnamed Flow"}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <div className="p-2 text-xs text-slate-400 italic text-center">No workflows found</div>
+                  )}
+                </SelectContent>
+              </Select>
+
+              <div className="h-10 w-px bg-white/20" />
+
+              <div className="flex items-center gap-2 bg-white/10 backdrop-blur px-3 py-2 rounded-lg border border-white/20">
+                <User className="h-4 w-4 text-white" />
+                <input
+                  value={(() => {
+                    const primaryEntityType = getPrimaryEntityType();
+                    const entityInfo = getEntityNameAndId(primaryEntityType);
+                    return entityInfo.id;
+                  })()}
+                  onChange={(e) => {
+                    const primaryEntityType = getPrimaryEntityType();
+                    const entityInfo = getEntityNameAndId(primaryEntityType);
+                    if (primaryEntityType === 'principal') {
+                      setCurrentIndividualId(e.target.value);
+                    }
+                  }}
+                  placeholder="ID Number..."
+                  className="w-28 outline-none text-sm font-semibold text-white bg-transparent placeholder:text-white/50"
+                  disabled={(() => {
+                    const primaryEntityType = getPrimaryEntityType();
+                    return primaryEntityType !== 'principal';
+                  })()}
+                />
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <Select value={selectedAutomationId} onValueChange={setSelectedAutomationId}>
-              <SelectTrigger className="w-[250px] bg-white/10 border-white/20 text-white h-10">
-                <SelectValue placeholder="Select Workflow" />
-              </SelectTrigger>
-              <SelectContent>
-                {entityAutomationMappings.length > 0 ? (
-                  entityAutomationMappings.map(m => (
-                    <SelectItem key={m.automationId} value={m.automationId}>
-                      {m.automation?.name || "Unnamed Flow"}
-                    </SelectItem>
-                  ))
-                ) : (
-                  <div className="p-2 text-xs text-slate-400 italic text-center">No workflows found</div>
-                )}
-              </SelectContent>
-            </Select>
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {!selectedAutomationId ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
+                <Webhook className="h-16 w-16 mb-4 opacity-20" />
+                <p className="text-lg font-medium">Select a workflow to begin</p>
+              </div>
+            ) : (
+              <>
+                <div className="px-6 py-3 bg-slate-50 border-b flex items-center justify-between">
+                  <Tabs value={activeTab} onValueChange={setActiveTab}>
+                    <TabsList className="bg-white border border-slate-200 h-9">
+                      <TabsTrigger value="fields" className="text-xs"><Database className="h-3 w-3 mr-2" />Fields</TabsTrigger>
+                      <TabsTrigger value="documents" className="text-xs"><FileText className="h-3 w-3 mr-2" />Documents</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                  {isLoadingData && (
+                    <div className="flex items-center gap-2 text-sm text-slate-500">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading data...
+                    </div>
+                  )}
+                </div>
 
-            <div className="h-10 w-px bg-white/20" />
-
-            <div className="flex items-center gap-2 bg-white/10 backdrop-blur px-3 py-2 rounded-lg border border-white/20">
-              <User className="h-4 w-4 text-white" />
-              <input
-                value={(() => {
-                  const primaryEntityType = getPrimaryEntityType();
-                  const entityInfo = getEntityNameAndId(primaryEntityType);
-                  return entityInfo.id;
-                })()}
-                onChange={(e) => {
-                  const primaryEntityType = getPrimaryEntityType();
-                  const entityInfo = getEntityNameAndId(primaryEntityType);
-                  // Only allow editing if it's the principal individual
-                  if (primaryEntityType === 'principal') {
-                    setCurrentIndividualId(e.target.value);
-                  }
-                }}
-                placeholder="ID Number..."
-                className="w-28 outline-none text-sm font-semibold text-white bg-transparent placeholder:text-white/50"
-                disabled={(() => {
-                  const primaryEntityType = getPrimaryEntityType();
-                  return primaryEntityType !== 'principal';
-                })()}
-              />
-            </div>
+                <div className="flex-1 overflow-hidden">
+                  <Tabs value={activeTab} className="h-full">
+                    <TabsContent value="fields" className="h-full m-0">
+                      {isLoading ? (
+                        <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                          <Loader2 className="h-8 w-8 animate-spin mb-2" />
+                          <p>Loading configuration...</p>
+                        </div>
+                      ) : renderFieldsTable()}
+                    </TabsContent>
+                    <TabsContent value="documents" className="h-full p-6 overflow-auto">
+                      {renderDocumentsSection()}
+                    </TabsContent>
+                  </Tabs>
+                </div>
+              </>
+            )}
           </div>
-        </div>
 
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {!selectedAutomationId ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
-              <Webhook className="h-16 w-16 mb-4 opacity-20" />
-              <p className="text-lg font-medium">Select a workflow to begin</p>
-            </div>
-          ) : (
+          <div className="p-4 border-t bg-slate-50 flex justify-between items-center">
+            <Button variant="outline" onClick={onClose} className="h-10">
+              Close
+            </Button>
+            <Button
+              onClick={handleRunAutomation}
+              disabled={isAutomationRunning}
+              className="bg-blue-600 hover:bg-blue-700 h-10 px-6 gap-2"
+            >
+              {isAutomationRunning ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Zap className="h-4 w-4 fill-white" />
+              )}
+              Execute Workflow
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Document Preview Modal */}
+      <Dialog open={showPreviewModal} onOpenChange={setShowPreviewModal}>
+        <DialogContent className="max-w-[95vw] w-full max-h-[95vh] flex flex-col p-0 overflow-hidden bg-slate-50">
+          {showPreviewModal && previewingDocuments && (
             <>
-              <div className="px-6 py-3 bg-slate-50 border-b flex items-center justify-between">
-                <Tabs value={activeTab} onValueChange={setActiveTab}>
-                  <TabsList className="bg-white border border-slate-200 h-9">
-                    <TabsTrigger value="fields" className="text-xs"><Database className="h-3 w-3 mr-2" />Fields</TabsTrigger>
-                    <TabsTrigger value="documents" className="text-xs"><FileText className="h-3 w-3 mr-2" />Documents</TabsTrigger>
-                  </TabsList>
-                </Tabs>
-                {isLoadingData && (
-                  <div className="flex items-center gap-2 text-sm text-slate-500">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Loading data...
+              <DialogHeader className="p-4 border-b bg-white shrink-0">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <DialogTitle className="text-xl">
+                      <div className="flex items-center p-2">
+                        <div className="bg-white p-2 rounded-lg border shadow-sm">
+                          <FileText className="h-5 w-5 text-blue-600" />
+                        </div>
+                        <div className="flex flex-col">
+                          <p className="text-xl font-bold text-slate-800 line-clamp-1">{previewingDocuments?.document_display_name || 'Document'}</p>
+                        </div>
+                      </div>
+                    </DialogTitle>
+                    <p className="text-sm text-muted-foreground">
+                      Target: {previewingDocuments?.person_full_name || 'Unknown'}
+                    </p>
                   </div>
-                )}
+
+                  <div className="text-sm font-medium bg-blue-50 text-blue-700 px-3 py-1 rounded-full border border-blue-100">
+                    {previewingDocuments?.documents?.length || 0} File(s)
+                  </div>
+                </div>
+                <DialogDescription className="sr-only">
+                  Document extraction and verification interface.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="flex-1 overflow-auto p-4">
+                {previewingDocuments?.documents?.map((doc, index) => {
+                  const docId = doc.id || `doc-${index}`;
+
+                  return (
+                    <div key={docId} className="p-0 lg:p-4">
+                      <ExtractionPreview
+                        key={docId}
+                        documentName={previewingDocuments?.document_display_name || 'Document'}
+                        extractedData={doc.edited_details || doc.extracted_details || {}}
+                        fields={doc.document_fields || []}
+                        fileUrl={getFileUrl(doc.file_path)}
+                        fileName={doc.file_name || 'document.pdf'}
+                        expanded={true}
+                        showSaveButton={true}
+                        onSave={(data) => handleSaveEditedDocument(doc, data)}
+                        onDataChange={(fieldName, value) => {
+                          handlePreviewDataChange(docId, fieldName, value);
+                        }}
+                        documentTypes={[]}
+                        type={doc.director_id ? 'individual' : 'company'}
+                        file={doc}
+                        extractionStatus={doc.extraction_status || 'success'}
+                        supabase={supabase}
+                        onDialogClose={() => {
+                          setShowPreviewModal(false);
+                        }}
+                      />
+                    </div>
+                  );
+                })}
               </div>
 
-              <div className="flex-1 overflow-hidden">
-                <Tabs value={activeTab} className="h-full">
-                  <TabsContent value="fields" className="h-full m-0">
-                    {isLoading ? (
-                      <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                        <Loader2 className="h-8 w-8 animate-spin mb-2" />
-                        <p>Loading configuration...</p>
-                      </div>
-                    ) : renderFieldsTable()}
-                  </TabsContent>
-                  <TabsContent value="documents" className="h-full p-6 overflow-auto">
-                    {renderDocumentsSection()}
-                  </TabsContent>
-                </Tabs>
+              <div className="p-4 border-t bg-white flex justify-end shrink-0">
+                <Button variant="outline" onClick={() => setShowPreviewModal(false)} className="w-24">
+                  Close
+                </Button>
               </div>
             </>
           )}
-        </div>
-
-        <div className="p-4 border-t bg-slate-50 flex justify-between items-center">
-          <Button variant="outline" onClick={onClose} className="h-10">
-            Close
-          </Button>
-          <Button
-            onClick={handleRunAutomation}
-            disabled={isAutomationRunning}
-            className="bg-blue-600 hover:bg-blue-700 h-10 px-6 gap-2"
-          >
-            {isAutomationRunning ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Zap className="h-4 w-4 fill-white" />
-            )}
-            Execute Workflow
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };

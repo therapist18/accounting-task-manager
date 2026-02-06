@@ -108,6 +108,7 @@ interface WebDataGroup {
   extractionMode?: 'latest' | 'all';
   arrayItems?: Array<{
     name: string;
+    displayName: string;
     variableName: string;
     type: 'text' | 'number' | 'boolean' | 'date' | 'select' | 'document';
     linkedMasterFieldId?: number;
@@ -125,6 +126,7 @@ interface WebDataGroup {
   kycDocumentId?: string; // Legacy support
   linkedKycDocuments?: string[]; // Array of IDs
   documentLogic?: 'merge' | 'fallback';
+  documentCount?: number; // Number of documents required
   computedFunction?: string;
   computedDocuments?: string[];
   customFieldSource?: string;
@@ -349,6 +351,7 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
   const addItem = () => {
     const newItem = { 
       name: '', 
+      displayName: '',
       variableName: '', 
       type: 'text',
       entityTypes: group.entityTypes || ['principal'],
@@ -458,18 +461,19 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
             <Table>
               <TableHeader className="bg-slate-100/50 border-b border-slate-200 sticky top-0 z-10">
                 <TableRow>
-                  <TableHead className="w-[18%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Web Key (JSON Property)</TableHead>
-                  <TableHead className="w-[18%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Data Type & Format</TableHead>
-                  <TableHead className="w-[18%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Entity Scope</TableHead>
-                  <TableHead className="w-[24%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Source Mapping</TableHead>
-                  <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Extraction Mode</TableHead>
+                  <TableHead className="w-[15%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Display Name</TableHead>
+                  <TableHead className="w-[15%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Web Key (JSON Property)</TableHead>
+                  <TableHead className="w-[15%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Data Type & Format</TableHead>
+                  <TableHead className="w-[15%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Entity Scope</TableHead>
+                  <TableHead className="w-[20%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Source Mapping</TableHead>
+                  <TableHead className="w-[10%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Extraction Mode</TableHead>
                   <TableHead className="w-[10%] text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {items.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="py-12">
+                    <TableCell colSpan={7} className="py-12">
                       <div className="flex flex-col items-center justify-center text-slate-300">
                         <TableIcon className="h-10 w-10 mb-2 opacity-20" />
                         <p className="text-sm">No columns defined yet.</p>
@@ -484,7 +488,17 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
                     return (
                       <TableRow key={i} className="hover:bg-slate-50 transition-colors group">
 
-                        {/* 1. Web Key */}
+                        {/* 1. Display Name */}
+                        <TableCell className="p-3">
+                          <Input
+                            value={item.displayName || ''}
+                            onChange={e => handleItemChange(i, 'displayName', e.target.value)}
+                            placeholder="e.g. First Name"
+                            className="h-8 text-sm border-slate-200 focus:border-blue-400"
+                          />
+                        </TableCell>
+
+                        {/* 2. Web Key */}
                         <TableCell className="p-3">
                           <Input
                             value={item.variableName}
@@ -494,7 +508,7 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
                           />
                         </TableCell>
 
-                        {/* 2. Type & Format */}
+                        {/* 3. Type & Format */}
                         <TableCell className="p-3">
                           <div className="flex flex-col gap-2">
                             <Select value={item.type} onValueChange={(val) => handleItemChange(i, 'type', val)}>
@@ -523,7 +537,7 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
                           </div>
                         </TableCell>
 
-                        {/* 3. Entity Scope */}
+                        {/* 4. Entity Scope */}
                         <TableCell className="p-3">
                           <EntityConfigurator
                             group={{
@@ -550,7 +564,7 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
                           />
                         </TableCell>
 
-                        {/* 4. Source Mapping */}
+                        {/* 5. Source Mapping */}
                         <TableCell className="p-3">
                           {item.type === 'document' ? (
                             // Document Selection UI
@@ -662,7 +676,7 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
                           )}
                         </TableCell>
 
-                        {/* 5. Extraction Mode */}
+                        {/* 6. Extraction Mode */}
                         <TableCell className="p-3">
                           {(item.linkedKycDocuments && item.linkedKycDocuments.length > 0) ||
                             (item.linkedMasterFields && item.linkedMasterFields.length > 0) ? (
@@ -701,7 +715,7 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
                           )}
                         </TableCell>
 
-                        {/* 6. Action */}
+                        {/* 7. Action */}
                         <TableCell className="p-3 text-center">
                           <AlertDialog open={deleteItemDialogOpen && itemToDelete === i} onOpenChange={(open) => !open && setDeleteItemDialogOpen(false)}>
                             <AlertDialogTrigger asChild>
@@ -991,6 +1005,19 @@ function WebDataGroupEditDialog({
                         <SelectItem value="fallback">Fallback (Use First Found)</SelectItem>
                       </SelectContent>
                     </Select>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <Label className="text-xs text-slate-600">Number of Documents Required:</Label>
+                    <Input
+                      type="number"
+                      min="1"
+                      max="99"
+                      placeholder="Optional"
+                      value={editingGroup.documentCount || ''}
+                      onChange={(e) => updateField('documentCount', e.target.value ? parseInt(e.target.value) : undefined)}
+                      className="w-[100px] h-8 text-xs bg-white"
+                    />
                   </div>
 
                   <div className="border rounded-md bg-white p-2 space-y-2 overflow-auto max-h-[300px]">
@@ -2164,6 +2191,7 @@ export function AutomationDialog({
           // Migrate array items to include entity scope fields
           arrayItems: g.arrayItems ? g.arrayItems.map((item: any) => ({
             ...item,
+            displayName: item.displayName || item.name || formatDisplayName(item.variableName) || '',
             entityTypes: item.entityTypes || g.entityTypes || ['principal'],
             dependantRelationships: item.dependantRelationships || [],
             directorType: item.directorType || undefined
@@ -2863,7 +2891,22 @@ export function AutomationDialog({
                                     </TableCell>
 
                                     <TableCell className="p-3 border-r border-slate-100 align-middle">
-                                      {isDocument ? (
+                                      {group.linkedJobQuestionId ? (
+                                        <div className="flex items-center gap-2">
+                                          <HelpCircle className="h-3.5 w-3.5 text-purple-600" />
+                                          <span className="text-sm font-medium text-purple-700 truncate max-w-[200px]">
+                                            {group.linkedJobQuestionId}
+                                          </span>
+                                          <Badge variant="outline" className={cn(
+                                            "text-[9px] ml-auto",
+                                            group.fieldType === 'document' && group.linkedKycDocuments?.length > 0
+                                              ? "bg-green-50 text-green-600 border-green-200"
+                                              : "bg-purple-50 text-purple-600 border-purple-200"
+                                          )}>
+                                            {group.fieldType === 'document' && group.linkedKycDocuments?.length > 0 ? 'Requirement' : 'Job Question'}
+                                          </Badge>
+                                        </div>
+                                      ) : isDocument ? (
                                         <div className="flex flex-col justify-center gap-1">
                                           <div className="flex items-center gap-2 text-amber-700">
                                             <Paperclip className="h-3.5 w-3.5" />
@@ -2878,6 +2921,11 @@ export function AutomationDialog({
                                               <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200">
                                                 {group.documentLogic === 'merge' ? 'Merge All' : 'Fallback (First Found)'}
                                               </Badge>
+                                              {group.documentCount && (
+                                                <Badge variant="outline" className="text-[9px] bg-blue-50 text-blue-700 border-blue-200">
+                                                  {group.documentCount} Required
+                                                </Badge>
+                                              )}
                                             </div>
                                           )}
                                         </div>

@@ -64,6 +64,7 @@ export function EnquiryDialog({
     const [searchLoading, setSearchLoading] = useState(false)
     const [loadingRelations, setLoadingRelations] = useState(false)
     const [loadingQuestions, setLoadingQuestions] = useState(false)
+    const [loadingStaff, setLoadingStaff] = useState(false)
 
     // Data lists
     const [individuals, setIndividuals] = useState<Individual[]>([])
@@ -223,52 +224,46 @@ export function EnquiryDialog({
         fetchJobQuestions(levelObj)
     }, [formData.department_id, formData.subdepartment_id, formData.class_id, fetchJobQuestions])
 
+    // --- Staff Data Loading Logic ---
+    const loadStaffData = useCallback(async () => {
+        setLoadingStaff(true);
+        try {
+            const [usersResult, officersResult] = await Promise.all([
+                supabase.from('tm_users').select('*').order('name'),
+                supabase.from('tm_users').select('*').eq('role', 'officer').order('name')
+            ]);
+            
+            if (usersResult.data) {
+                setAvailableManagers(usersResult.data);
+                setAvailableAssistants(usersResult.data);
+            }
+            if (officersResult.data) {
+                setAvailableOfficers(officersResult.data);
+            }
+        } catch (err) {
+            console.error("Error loading staff:", err);
+            toast({ title: "Error", description: "Failed to load staff data", variant: "destructive" });
+        } finally {
+            setLoadingStaff(false);
+        }
+    }, []);
+
     useEffect(() => {
-        console.group('🔹 Staff Data Initialization');
-        console.log('🔹 Officers prop received:', officers);
-        console.log('🔹 Users prop received:', users);
-        
-        // Log component props for debugging
-        console.log('🔹 Component props:', {
-            open,
-            onOpenChange: typeof onOpenChange,
-            onEnquiryCreated: typeof onEnquiryCreated,
-            departmentsLength: departments?.length,
-            usersLength: users?.length,
-            officersLength: officers?.length
-        });
-
-        // Set available officers from props
-        console.log(`✅ [Officers] Loading ${officers?.length || 0} officers from props`);
-        if (officers?.length) {
-            console.log('📋 First 3 officers:', officers.slice(0, 3).map((o: any) => ({
-                id: o.id,
-                name: o.name,
-                full_name: o.full_name,
-                email: o.email
-            })));
-            setAvailableOfficers(officers);
-        } else {
-            console.warn('⚠️ No officers data received from props');
+        // If props are explicitly provided and not empty, use them
+        if (users.length > 0 || officers.length > 0) {
+            if (officers.length > 0) setAvailableOfficers(officers);
+            if (users.length > 0) {
+                setAvailableManagers(users);
+                setAvailableAssistants(users);
+            }
+        } 
+        // Otherwise, if dialog is open and we haven't loaded data yet, fetch internally
+        else if (open) {
+            if (availableManagers.length === 0 && availableOfficers.length === 0) {
+                loadStaffData();
+            }
         }
-        
-        // Set available managers and assistants from users prop
-        console.log(`✅ [Users] Loading ${users?.length || 0} users from props`);
-        if (users?.length) {
-            console.log('📋 First 3 users:', users.slice(0, 3).map((u: any) => ({
-                id: u.id,
-                name: u.name,
-                full_name: u.full_name,
-                email: u.email
-            })));
-            setAvailableManagers(users);
-            setAvailableAssistants(users);
-        } else {
-            console.warn('⚠️ No users data received from props');
-        }
-
-        console.groupEnd();
-    }, [officers, users, open, onOpenChange, onEnquiryCreated, departments]);
+    }, [open, users, officers, loadStaffData, availableManagers.length, availableOfficers.length]);
 
     useEffect(() => {
         if (open) {
@@ -407,12 +402,49 @@ export function EnquiryDialog({
                 const u = understudies.find(x => x.id.toString() === selectedUnderstudy)
                 if (u) participants.push({ id: u.id, name: u.full_name, role: ['understudy'], type: "individual" })
             }
+            
+            // Add assigned staff
+            if (formData.officer_id) {
+                const officer = availableOfficers.find(o => o.id.toString() === formData.officer_id);
+                if (officer) {
+                    participants.push({
+                        id: officer.id,
+                        name: officer.full_name || officer.name,
+                        role: ['officer'],
+                        type: "individual"
+                    });
+                }
+            }
+            
+            if (formData.task_manager_id) {
+                const manager = availableManagers.find(m => m.id.toString() === formData.task_manager_id);
+                if (manager) {
+                    participants.push({
+                        id: manager.id,
+                        name: manager.full_name || manager.name,
+                        role: ['task_manager'],
+                        type: "individual"
+                    });
+                }
+            }
+
+            if (formData.task_assistant_id) {
+                const assistant = availableAssistants.find(a => a.id.toString() === formData.task_assistant_id);
+                if (assistant) {
+                    participants.push({
+                        id: assistant.id,
+                        name: assistant.full_name || assistant.name,
+                        role: ['task_assistant'],
+                        type: "individual"
+                    });
+                }
+            }
 
             const payload = {
                 status: 'enquiry',
                 date_initiated: new Date(formData.enquiry_date).toISOString(),
                 job_description: formData.job_description,
-                // --- ADDED: Root level IDs ---
+                // --- Root level IDs ---
                 individual_id: selectedIndividual.id,
                 company_id: selectedCompany ? Number(selectedCompany) : null,
                 officer_id: formData.officer_id ? Number(formData.officer_id) : null,
@@ -425,7 +457,7 @@ export function EnquiryDialog({
                     subdepartment_id: Number(formData.subdepartment_id),
                     class_id: formData.class_id ? Number(formData.class_id) : null
                 },
-                // --- UPDATED: Include role in applicant_details ---
+                // --- Applicant details ---
                 applicant_details: {
                     id: selectedIndividual.id,
                     name: selectedIndividual.full_name,
@@ -620,45 +652,17 @@ export function EnquiryDialog({
                                                     <Select 
                                                         value={formData.officer_id} 
                                                         onValueChange={id => setFormData(prev => ({ ...prev, officer_id: id }))}
+                                                        disabled={loadingStaff}
                                                     >
                                                         <SelectTrigger className="h-10 border-blue-50 bg-blue-50/10">
-                                                            <SelectValue placeholder="Select Officer" />
+                                                            <SelectValue placeholder={loadingStaff ? "Loading..." : "Select Officer"} />
                                                         </SelectTrigger>
                                                         <SelectContent>
-                                                            {(() => {
-                                                                console.log('🔹 Rendering officers dropdown with:', {
-                                                                    availableOfficersCount: availableOfficers.length,
-                                                                    hasOfficers: availableOfficers.length > 0,
-                                                                    firstOfficer: availableOfficers[0]
-                                                                });
-                                                                
-                                                                if (availableOfficers.length === 0) {
-                                                                    console.warn('⚠️ No officers available to render in dropdown');
-                                                                    return (
-                                                                        <div className="p-2 text-xs text-slate-500">
-                                                                            No officers available
-                                                                        </div>
-                                                                    );
-                                                                }
-
-                                                                return availableOfficers.map((officer) => {
-                                                                    const displayName = officer.full_name || officer.name || `Officer ${officer.id}`;
-                                                                    console.log(`👤 Rendering officer option:`, {
-                                                                        id: officer.id,
-                                                                        displayName,
-                                                                        rawData: officer
-                                                                    });
-                                                                    
-                                                                    return (
-                                                                        <SelectItem 
-                                                                            key={officer.id} 
-                                                                            value={officer.id.toString()}
-                                                                        >
-                                                                            {displayName}
-                                                                        </SelectItem>
-                                                                    );
-                                                                });
-                                                            })()}
+                                                            {availableOfficers.map((officer) => (
+                                                                <SelectItem key={officer.id} value={officer.id.toString()}>
+                                                                    {officer.full_name || officer.name || `Officer ${officer.id}`}
+                                                                </SelectItem>
+                                                            ))}
                                                         </SelectContent>
                                                     </Select>
                                                 </div>
@@ -667,9 +671,10 @@ export function EnquiryDialog({
                                                     <Select 
                                                         value={formData.task_manager_id} 
                                                         onValueChange={id => setFormData(prev => ({ ...prev, task_manager_id: id }))}
+                                                        disabled={loadingStaff}
                                                     >
                                                         <SelectTrigger className="h-10 border-blue-50 bg-blue-50/10">
-                                                            <SelectValue placeholder="Select Manager" />
+                                                            <SelectValue placeholder={loadingStaff ? "Loading..." : "Select Manager"} />
                                                         </SelectTrigger>
                                                         <SelectContent>
                                                             {availableManagers.map(manager => (
@@ -685,9 +690,10 @@ export function EnquiryDialog({
                                                     <Select 
                                                         value={formData.task_assistant_id} 
                                                         onValueChange={id => setFormData(prev => ({ ...prev, task_assistant_id: id }))}
+                                                        disabled={loadingStaff}
                                                     >
                                                         <SelectTrigger className="h-10 border-blue-50 bg-blue-50/10">
-                                                            <SelectValue placeholder="Select Assistant" />
+                                                            <SelectValue placeholder={loadingStaff ? "Loading..." : "Select Assistant"} />
                                                         </SelectTrigger>
                                                         <SelectContent>
                                                             {availableAssistants.map(assistant => (
