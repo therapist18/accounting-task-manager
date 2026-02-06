@@ -611,10 +611,12 @@ export default function Departments() {
     }
   };
 
-  const filteredDepartments = departments.filter(dept =>
-    dept.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (dept.tm_subdepartments || []).some(subdept => subdept.name.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const filteredDepartments = departments
+    .filter(dept =>
+      dept.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (dept.tm_subdepartments || []).some(subdept => subdept.name.toLowerCase().includes(searchTerm.toLowerCase()))
+    )
+    .sort((a, b) => (a.order || 0) - (b.order || 0));
 
   const areAllExpanded = filteredDepartments.length > 0 &&
     filteredDepartments.every(dept => expanded[dept.id]) &&
@@ -1186,7 +1188,9 @@ export default function Departments() {
                       </TableCell>
                     </TableRow>
 
-                    {expanded[dept.id] && (dept.tm_subdepartments || []).map((subdept, subdeptIndex) => {
+                    {expanded[dept.id] && (dept.tm_subdepartments || [])
+                      .sort((a, b) => (a.order || 0) - (b.order || 0))
+                      .map((subdept, subdeptIndex) => {
                       const hasClasses = subdept.classes && subdept.classes.length > 0;
                       const subdeptKey = `subdept-${subdept.id}`;
                       const isExpanded = expanded[subdeptKey];
@@ -1252,7 +1256,9 @@ export default function Departments() {
                             </TableCell>
                           </TableRow>
 
-                          {isExpanded && hasClasses && subdept.classes.map((cls, clsIndex) => {
+                          {isExpanded && hasClasses && (subdept.classes || [])
+                            .sort((a, b) => (a.order || 0) - (b.order || 0))
+                            .map((cls, clsIndex) => {
                             const classId = `class-${subdept.id}-${cls.id || clsIndex}`;
                             const hasSubClasses = cls.subClasses && cls.subClasses.length > 0;
                             const isClassExpanded = expandedClasses[classId];
@@ -1281,7 +1287,9 @@ export default function Departments() {
                                   <TableCell className="border-r"></TableCell>
                                 </TableRow>
 
-                                {isClassExpanded && hasSubClasses && cls.subClasses.map((subClass, subClassIndex) => (
+                                {isClassExpanded && hasSubClasses && (cls.subClasses || [])
+                                  .sort((a, b) => (a.order || 0) - (b.order || 0))
+                                  .map((subClass, subClassIndex) => (
                                   <TableRow key={`${cls.id}-${subClass.id || subClassIndex}`} className="hover:bg-gray-100/70">
                                     <TableCell className="text-center border-r text-gray-500 text-xs">{deptIndex + 1}.{subdeptIndex + 1}.{clsIndex + 1}.{subClassIndex + 1}</TableCell>
                                     <TableCell className="pl-32 border-r">

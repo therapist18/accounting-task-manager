@@ -116,6 +116,9 @@ interface WebDataGroup {
     documentLogic?: 'merge' | 'fallback';
     dateFormat?: 'iso' | 'object_split' | 'dd_mm_yyyy';
     extractionMode?: 'latest' | 'all';
+    entityTypes?: string[];
+    dependantRelationships?: string[];
+    directorType?: 'all' | 'primary';
   }>;
   linkedMasterFields: number[];
   linkedJobQuestionId?: string;
@@ -344,7 +347,15 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
   };
 
   const addItem = () => {
-    onUpdate([...items, { name: '', variableName: '', type: 'text' }]);
+    const newItem = { 
+      name: '', 
+      variableName: '', 
+      type: 'text',
+      entityTypes: group.entityTypes || ['principal'],
+      dependantRelationships: [],
+      directorType: undefined
+    };
+    onUpdate([...items, newItem]);
   };
 
   const [itemToDelete, setItemToDelete] = useState<number | null>(null);
@@ -447,17 +458,18 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
             <Table>
               <TableHeader className="bg-slate-100/50 border-b border-slate-200 sticky top-0 z-10">
                 <TableRow>
-                  <TableHead className="w-[20%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Web Key (JSON Property)</TableHead>
-                  <TableHead className="w-[20%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Data Type & Format</TableHead>
-                  <TableHead className="w-[30%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Source Mapping</TableHead>
-                  <TableHead className="w-[15%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Extraction Mode</TableHead>
-                  <TableHead className="w-[15%] text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">Action</TableHead>
+                  <TableHead className="w-[18%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Web Key (JSON Property)</TableHead>
+                  <TableHead className="w-[18%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Data Type & Format</TableHead>
+                  <TableHead className="w-[18%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Entity Scope</TableHead>
+                  <TableHead className="w-[24%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Source Mapping</TableHead>
+                  <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Extraction Mode</TableHead>
+                  <TableHead className="w-[10%] text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {items.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="py-12">
+                    <TableCell colSpan={6} className="py-12">
                       <div className="flex flex-col items-center justify-center text-slate-300">
                         <TableIcon className="h-10 w-10 mb-2 opacity-20" />
                         <p className="text-sm">No columns defined yet.</p>
@@ -511,7 +523,34 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
                           </div>
                         </TableCell>
 
-                        {/* 3. Source Mapping */}
+                        {/* 3. Entity Scope */}
+                        <TableCell className="p-3">
+                          <EntityConfigurator
+                            group={{
+                              id: `array-item-${i}`,
+                              efnsDisplayName: item.variableName || 'Array Item',
+                              variableName: item.variableName || `item_${i}`,
+                              fieldType: 'text',
+                              entityTypes: item.entityTypes || group.entityTypes || ['principal'],
+                              dependantRelationships: item.dependantRelationships || [],
+                              directorType: item.directorType,
+                              linkedMasterFields: [],
+                              arrayItems: []
+                            }}
+                            onUpdate={(updates) => {
+                              const newItems = [...items];
+                              newItems[i] = {
+                                ...newItems[i],
+                                entityTypes: updates.entityTypes,
+                                dependantRelationships: updates.dependantRelationships,
+                                directorType: updates.directorType
+                              };
+                              onUpdate(newItems);
+                            }}
+                          />
+                        </TableCell>
+
+                        {/* 4. Source Mapping */}
                         <TableCell className="p-3">
                           {item.type === 'document' ? (
                             // Document Selection UI
@@ -623,7 +662,7 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
                           )}
                         </TableCell>
 
-                        {/* 4. Extraction Mode */}
+                        {/* 5. Extraction Mode */}
                         <TableCell className="p-3">
                           {(item.linkedKycDocuments && item.linkedKycDocuments.length > 0) ||
                             (item.linkedMasterFields && item.linkedMasterFields.length > 0) ? (
@@ -662,7 +701,7 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
                           )}
                         </TableCell>
 
-                        {/* 5. Action */}
+                        {/* 6. Action */}
                         <TableCell className="p-3 text-center">
                           <AlertDialog open={deleteItemDialogOpen && itemToDelete === i} onOpenChange={(open) => !open && setDeleteItemDialogOpen(false)}>
                             <AlertDialogTrigger asChild>
@@ -2121,7 +2160,14 @@ export function AutomationDialog({
           extractionMode: g.extractionMode || 'latest',
           entityTypes: Array.isArray(g.entityTypes)
             ? g.entityTypes
-            : (g.entityType ? [g.entityType] : [])
+            : (g.entityType ? [g.entityType] : []),
+          // Migrate array items to include entity scope fields
+          arrayItems: g.arrayItems ? g.arrayItems.map((item: any) => ({
+            ...item,
+            entityTypes: item.entityTypes || g.entityTypes || ['principal'],
+            dependantRelationships: item.dependantRelationships || [],
+            directorType: item.directorType || undefined
+          })) : []
         })));
       } else {
         setWebDataGroups([]);

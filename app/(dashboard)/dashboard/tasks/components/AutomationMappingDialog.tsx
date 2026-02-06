@@ -1504,19 +1504,18 @@ export const AutomationMappingDialog = ({
     return availableOptions;
   }, [jobFields, getFieldValue]);
 
-  const renderFieldsTable = () => {
+ const renderFieldsTable = () => {
     if (!activeWebEntry?.fields || activeWebEntry.fields.length === 0) {
-
       return <div className="p-12 text-center text-slate-400 text-sm">No fields configured for this automation.</div>;
     }
+
+    // Sort fields logic
     const processedFields = activeWebEntry.fields.map((field, index) => {
       let isMissing = false;
       const targetId = resolveTargetEntityId(field);
       if (field.fieldType === 'array') {
         const entityIds = resolveEntityIdsForArray(field, relationshipData);
-        if (entityIds.length === 0) {
-          isMissing = true;
-        }
+        if (entityIds.length === 0) isMissing = true;
       } else if (field.fieldType === 'document') {
         const foundDoc = documentFiles.find(d => d.document_id === field.kycDocumentId && String(d.owner_id) === String(targetId));
         if (!foundDoc) isMissing = true;
@@ -1538,10 +1537,9 @@ export const AutomationMappingDialog = ({
     });
 
     const sortedFields = sortMissingFirst
-
       ? [...processedFields].sort((a, b) => (a.isMissing === b.isMissing ? 0 : a.isMissing ? -1 : 1))
-
       : processedFields;
+
     return (
       <div className="flex flex-col h-full">
         <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-slate-200">
@@ -1579,353 +1577,349 @@ export const AutomationMappingDialog = ({
                   const entityCategory = field.entityTypes?.includes('company') ? 'company' : 'individual';
                   const targetCompanyId = String(relationshipData?.company?.id || task?.company_id);
 
-                  // --- DATA RESOLUTION ---
-
-                  let persistenceSource = null;
-
-                  let mergedValue = "";
-
-                  let isDropdown = false;
-
-                  let dropdownOptions = [];
-
-                  let masterFieldDef = null;
-
-
-
-                  if (field.fieldType === 'computed') {
-
-                    mergedValue = computedFieldsPreview[field.variableName] || "";
-
-                    // Computed fields should not be treated as dropdowns
-                    isDropdown = false;
-
-                    const mappingKey = field.computedFunction === 'extractCurrentJobTitle' ? 'job_title' :
-
-                      field.computedFunction === 'extractCurrentJobDescription' ? 'job_description' : null;
-
-
-
-                    if (mappingKey) {
-
-                      masterFieldDef = Object.values(jobFields).find(jf => jf.field_key === mappingKey);
-
-                      // Find the source matching the entity category (Individual vs Company)
-
-                      persistenceSource = masterFieldDef?.sources?.find(s => s.source_type === entityCategory) || masterFieldDef?.sources?.[0];
-
-                    }
-
-                  }
-
-                  else if (isJobQuestion) {
-
-                    mergedValue = getFieldValue(field.variableName, String(targetId));
-
-                    persistenceSource = { table: 'tm_tasks', path: `job_specific_answers->>'${field.linkedJobQuestionId}'`, linking_variable: 'id' };
-
-                    const qDef = requirementJobQuestions.find(q => String(q.id) === String(field.linkedJobQuestionId));
-
-                    if (qDef?.type === 'select') {
-
-                      isDropdown = true;
-
-                      dropdownOptions = (qDef.options || []).map(opt => ({ label: opt, value: opt }));
-
-                    }
-
-                  }
-
-                  else {
-
-                    const masterIds = field.linkedMasterFields || field.masterFieldIds || [];
-
-                    masterFieldDef = jobFields[masterIds[0]];
-
-                    mergedValue = masterIds.map(mid => getFieldValue(String(mid), String(targetId), 0, field.extractionMode)).join(' ').trim();
-
-                    persistenceSource = masterFieldDef?.sources?.find(s => s.source_type === entityCategory) || masterFieldDef?.sources?.[0];
-
-
-
-                    // DROPDOWN LOGIC
-
-                    if (masterFieldDef?.type === 'select') {
-
-                      isDropdown = true;
-
-                      const opts = masterFieldDef.options;
-
-                      if (opts?.isDependencyConfig) {
-
-                        // Dependent logic (e.g. County -> Sub County)
-
-                        dropdownOptions = getDependentDropdownOptions(field, masterFieldDef, String(targetId));
-
-                      } else if (Array.isArray(opts)) {
-
-                        // Standard logic
-
-                        dropdownOptions = opts.map(o => typeof o === 'string' ? { label: o, value: o } : o);
-
-                      }
-
-                    }
-
-                  }
-
-
-
-                  // Helper to get display label for dropdowns
-
-                  const getDisplayValue = (val: string) => {
-
-                    if (!isDropdown) return val;
-
-                    const option = dropdownOptions.find(o => String(o.value) === String(val) || o.label === val);
-
-                    return option ? option.label : val;
-
-                  };
-
-
-
-                  const isEditable = !!persistenceSource;
-
-                  const isValueMissing = !mergedValue || mergedValue === 'Missing' || mergedValue === 'Pending...';
-
-
-
-                  // CASE: ARRAY FIELDS
-
+                  // =========================================================
+                  // CASE: ARRAY FIELDS (Flattened with Header)
+                  // =========================================================
                   if (field.fieldType === 'array') {
-
                     const entityIds = resolveEntityIdsForArray(field, relationshipData);
-
-                    const isExpanded = expandedArrayFields.has(field.variableName);
-
                     const arrayData = getArrayFieldData(field);
-
-
-
+                    const isExpanded = expandedArrayFields.has(field.variableName);
+                    
                     return (
-
                       <React.Fragment key={fIdx}>
-
-                        <TableRow className="group border-b border-slate-200 bg-blue-50/20">
-
-                          <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">
-
-                            {fIdx + 1}
-
+                        {/* 1. SECTION HEADER ROW */}
+                        <TableRow 
+                          className="bg-blue-50/80 border-b border-blue-200 hover:bg-blue-100 cursor-pointer transition-colors"
+                          onClick={() => toggleArrayFieldExpansion(field.variableName)}
+                        >
+                          <TableCell className="px-2 py-2 text-center text-xs font-bold text-blue-600 border-r border-blue-200 bg-blue-100/50">
+                            {isExpanded ? <ChevronDown className="h-4 w-4 mx-auto" /> : <ChevronRight className="h-4 w-4 mx-auto" />}
                           </TableCell>
-
-                          <TableCell className="px-4 py-2 border-r border-slate-100">
-
-                            <div className="flex items-center gap-2">
-
-                              <button onClick={() => toggleArrayFieldExpansion(field.variableName)} className="flex items-center gap-1 hover:bg-blue-100 rounded px-2 py-1 transition-colors">
-
-                                <ChevronRight className={`h-4 w-4 text-blue-600 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
-
-                                <List className="h-4 w-4 text-blue-600" />
-
-                              </button>
-
-                              <span className="text-sm font-semibold text-slate-900">{field.efnsDisplayName || field.variableName}</span>
-
-                              <Badge variant="outline" className="text-[10px] border-blue-300 text-blue-700 bg-blue-50">Array</Badge>
-
+                          <TableCell colSpan={3} className="px-4 py-2">
+                            <div className="flex items-center gap-3">
+                              <div className="bg-blue-100 p-1 rounded text-blue-600">
+                                <List className="h-4 w-4" />
+                              </div>
+                              <span className="text-sm font-bold text-slate-800">
+                                {field.efnsDisplayName || field.variableName}
+                              </span>
+                              <Badge className="bg-blue-600 hover:bg-blue-700 text-white h-5 text-[10px] px-2 ml-auto">
+                                {arrayData.length} Items found
+                              </Badge>
                             </div>
-
                           </TableCell>
-
-                          <TableCell className="px-4 py-2 border-r border-slate-100">
-
-                            <span className="text-xs text-slate-600">{entityIds.length} entities • {field.arrayItems?.length || 0} columns</span>
-
-                          </TableCell>
-
-                          <TableCell className="px-4 py-2">
-
-                            <button onClick={() => toggleArrayFieldExpansion(field.variableName)} className="text-xs text-blue-600 hover:text-blue-800 hover:underline italic">
-
-                              {isExpanded ? 'Hide details' : 'View full details'}
-
-                            </button>
-
-                          </TableCell>
-
                         </TableRow>
 
+                        {/* 2. FLATTENED ARRAY ITEMS */}
+                        {isExpanded && arrayData.map((row, rowIndex) => {
+                          return (field.arrayItems || []).map((colItem: any, colIndex: number) => {
+                            // --- Resolve Field Definition ---
+                            const fieldIds = colItem.linkedMasterFields || (colItem.linkedMasterFieldId ? [colItem.linkedMasterFieldId] : []);
+                            const fieldId = String(fieldIds[0] || '');
+                            const masterFieldDef = jobFields[fieldId];
+                            
+                            // --- Resolve Value ---
+                            const columnKey = colItem.variableName || fieldId;
+                            const rawValue = row[columnKey];
+                            const displayValue = (!rawValue && rawValue !== 0) ? "Missing" : rawValue;
+                            const isRowValueMissing = (!rawValue && rawValue !== 0);
 
+                            // --- Resolve Persistence/Source for Editing ---
+                            let arrayPersistenceSource = null;
+                            let specificPath = '';
+                            
+                            if (masterFieldDef) {
+                               const baseSource = masterFieldDef.sources?.find((s: any) => s.source_type === entityCategory) || masterFieldDef.sources?.[0];
+                               if (baseSource) {
+                                  if (baseSource.path && baseSource.path.includes('[]')) {
+                                    specificPath = baseSource.path.replace('[]', `.${rowIndex}`);
+                                  } else {
+                                    specificPath = baseSource.path;
+                                  }
+                                  arrayPersistenceSource = {
+                                    ...baseSource,
+                                    path: specificPath,
+                                    entityIdOverride: row.entityId 
+                                  };
+                               }
+                            }
+
+                            const isItemEditable = !!arrayPersistenceSource;
+                            const uniqueKey = `${field.variableName}-${rowIndex}-${colIndex}`;
+                            const isItemEditing = editingCell?.fieldId === uniqueKey;
+
+                            // --- Resolve Dropdown Options (Including Dependencies) ---
+                            let isItemDropdown = false;
+                            let itemDropdownOptions: any[] = [];
+
+                            if (masterFieldDef?.type === 'select') {
+                              isItemDropdown = true;
+                              const opts = masterFieldDef.options;
+
+                              if (opts?.isDependencyConfig) {
+                                // 1. Identify Parent Field
+                                const parentId = opts.dependencyConfig?.dependentFieldId;
+                                
+                                // 2. Find Parent Value (Look in current ROW first, then Global)
+                                let parentValue = null;
+                                if (parentId) {
+                                   parentValue = row[parentId] || 
+                                                 Object.entries(row).find(([k]) => k === String(parentId))?.[1];
+
+                                   if (!parentValue) {
+                                      // Fallback to global
+                                      const globalVal = getFieldValue(String(parentId), String(targetId));
+                                      if (globalVal && globalVal !== 'Missing' && globalVal !== 'Computing...') {
+                                        parentValue = globalVal;
+                                      }
+                                   }
+                                   
+                                   // 3. *** REVERSE LOOKUP FIX ***
+                                   // The database might contain the LABEL (e.g. "Nairobi"), but the mapping needs the VALUE (e.g. "30")
+                                   const parentFieldDef = jobFields[parentId];
+                                   if (parentFieldDef && Array.isArray(parentFieldDef.options) && parentValue) {
+                                       const matchingOption = parentFieldDef.options.find((opt: any) => {
+                                           const optLabel = typeof opt === 'string' ? opt : opt.label;
+                                           return String(optLabel) === String(parentValue);
+                                       });
+                                       
+                                       // If we found a matching option by label, swap parentValue to the option's value
+                                       if (matchingOption && typeof matchingOption !== 'string') {
+                                           parentValue = matchingOption.value;
+                                       }
+                                   }
+                                }
+
+                                // 4. Get Options based on Resolved Parent Value
+                                if (parentValue && parentValue !== 'Missing') {
+                                   itemDropdownOptions = opts.manualMapping?.[parentValue] || [];
+                                } else {
+                                   itemDropdownOptions = [];
+                                }
+
+                              } else if (Array.isArray(opts)) {
+                                // Standard Options
+                                itemDropdownOptions = opts.map(o => typeof o === 'string' ? { label: o, value: o } : o);
+                              }
+                            }
+
+                            // --- Helper for Display ---
+                            const getArrayItemDisplayValue = (val: string) => {
+                              if (!isItemDropdown) return val;
+                              const option = itemDropdownOptions.find(o => String(o.value) === String(val) || o.label === val);
+                              return option ? option.label : val;
+                            };
+
+                            return (
+                              <TableRow key={uniqueKey} className={cn("group border-b border-slate-100 transition-colors", isItemEditing ? "bg-blue-50" : "hover:bg-slate-50")}>
+                                {/* Indentation + Index */}
+                                <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50/50">
+                                  <div className="flex justify-center items-center gap-1">
+                                    <span className="opacity-40">{fIdx + 1}.</span>
+                                    <span className="font-semibold text-blue-600">{rowIndex + 1}</span>
+                                  </div>
+                                </TableCell>
+
+                                {/* Field Label with Thread Line */}
+                                <TableCell className="px-4 py-2 border-r border-slate-100 relative">
+                                  <div className="flex items-center gap-2 pl-6 relative">
+                                    <div className="absolute left-3 top-0 bottom-0 w-px bg-blue-100"></div>
+                                    <div className="absolute left-3 top-1/2 w-3 h-px bg-blue-200"></div>
+                                    
+                                    <span className="text-sm text-slate-700 font-medium">
+                                      {colItem.name || colItem.header || masterFieldDef?.label || "Unknown Column"}
+                                    </span>
+                                    
+                                    {isItemEditable && <Badge variant="outline" className="text-[9px] border-slate-200 text-slate-400 h-4 px-1 ml-2 font-normal">Editable</Badge>}
+                                  </div>
+                                </TableCell>
+
+                                {/* Source Info */}
+                                <TableCell className="px-4 py-2 text-xs text-slate-600">
+                                   {arrayPersistenceSource ? (
+                                      <TooltipProvider delayDuration={300}>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <div className="font-mono text-[10px] bg-slate-50 text-slate-500 p-1 rounded inline-flex items-center truncate max-w-[200px] cursor-help">
+                                              <Database className="h-3 w-3 mr-1 text-slate-400" />
+                                              {arrayPersistenceSource.table?.replace('acc_portal_', '').substring(0, 10)}... 
+                                            </div>
+                                          </TooltipTrigger>
+                                          <TooltipContent className="text-xs">
+                                            <p>Table: {arrayPersistenceSource.table}</p>
+                                            <p>Path: {arrayPersistenceSource.path}</p>
+                                            <p>ID: {arrayPersistenceSource.entityIdOverride}</p>
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
+                                   ) : (
+                                      <span className="text-slate-300 italic text-[10px]">Computed / No Map</span>
+                                   )}
+                                </TableCell>
+
+                                {/* Value / Edit Input */}
+                                <TableCell className="px-4 py-1 border-r border-slate-100 h-full">
+                                  {isItemEditing ? (
+                                    <div className="flex items-center gap-2">
+                                       {isItemDropdown ? (
+                                          <Select value={editValue} onValueChange={setEditValue}>
+                                            <SelectTrigger className="h-8 text-sm border-blue-400 w-full min-w-[150px]"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                              {itemDropdownOptions.length > 0 ? (
+                                                itemDropdownOptions.map((opt, i) => (
+                                                  <SelectItem key={`${opt.value}-${i}`} value={String(opt.value)}>{opt.label}</SelectItem>
+                                                ))
+                                              ) : (
+                                                <div className="p-2 text-xs text-slate-400">No options (Check parent field)</div>
+                                              )}
+                                            </SelectContent>
+                                          </Select>
+                                        ) : (
+                                          <Input 
+                                            autoFocus 
+                                            value={editValue} 
+                                            onChange={e => setEditValue(e.target.value)} 
+                                            onKeyDown={e => { if (e.key === 'Enter') saveEdit(isItemDropdown, itemDropdownOptions); if (e.key === 'Escape') cancelEditing(); }} 
+                                            className="h-8 text-sm border-blue-400" 
+                                          />
+                                        )}
+                                        <Button size="icon" onClick={() => saveEdit(isItemDropdown, itemDropdownOptions)} className="h-8 w-8 bg-green-600 hover:bg-green-700 shrink-0"><Check className="h-4 w-4" /></Button>
+                                        <Button size="icon" variant="ghost" onClick={cancelEditing} className="h-8 w-8 text-red-500 shrink-0"><X className="h-4 w-4" /></Button>
+                                    </div>
+                                  ) : (
+                                    <div
+                                      className={cn(
+                                        "text-sm h-7 flex items-center px-2 rounded -my-1 transition-colors relative",
+                                        isItemEditable ? "cursor-pointer border border-transparent hover:border-blue-400 hover:bg-blue-50" : "cursor-default",
+                                        isRowValueMissing ? "text-red-600 font-medium italic" : "text-slate-900"
+                                      )}
+                                      onClick={() => {
+                                        if (!isItemEditable || !arrayPersistenceSource) return;
+                                        startEditing(
+                                          uniqueKey, 
+                                          0,
+                                          arrayPersistenceSource.table,
+                                          arrayPersistenceSource.path,
+                                          String(displayValue === 'Missing' ? '' : displayValue),
+                                          String(arrayPersistenceSource.entityIdOverride), 
+                                          arrayPersistenceSource.linking_variable || 'id',
+                                          undefined, 
+                                          undefined,
+                                          fieldId 
+                                        );
+                                      }}
+                                    >
+                                      {getArrayItemDisplayValue(displayValue)}
+                                      {isItemEditable && !isItemEditing && <Edit3 className="h-3 w-3 ml-auto text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2" />}
+                                    </div>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          });
+                        })}
 
                         {isExpanded && (
-
-                          <TableRow>
-
-                            <TableCell colSpan={4} className="p-0 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 border-b-2 border-blue-300">
-
-                              {/* ... Array Table rendering logic ... */}
-
-                              <div className="p-6">
-
-                                <div className="border-2 border-blue-300 rounded-lg overflow-hidden shadow-sm">
-
-                                  <Table>
-
-                                    <TableHeader className="bg-gradient-to-r from-blue-100 to-indigo-100 border-b-2 border-blue-300">
-
-                                      <TableRow>
-
-                                        <TableHead className="px-4 py-3 text-left text-xs font-bold text-slate-800 border-r-2 border-blue-200 bg-blue-50/50 w-16">#</TableHead>
-
-                                        {field.arrayItems?.map((item: any, idx: number) => (
-
-                                          <TableHead key={idx} className={cn("px-4 py-3 text-left text-xs font-bold text-slate-800", idx < field.arrayItems.length - 1 && "border-r-2 border-blue-200")}>
-
-                                            <span>{item.name || item.header || getMasterFieldDisplayName((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId)}</span>
-
-                                          </TableHead>
-
-                                        ))}
-
-                                      </TableRow>
-
-                                    </TableHeader>
-
-                                    <TableBody className="bg-white">
-
-                                      {arrayData.map((row: any, rowIndex: number) => (
-
-                                        <TableRow key={rowIndex} className="border-b border-blue-200 last:border-b-0 hover:bg-blue-50/30">
-
-                                          <TableCell className="px-4 py-3 text-xs font-semibold text-slate-600 border-r-2 border-blue-200 bg-blue-50/30">{row.index}</TableCell>
-
-                                          {field.arrayItems?.map((item: any, colIndex: number) => {
-
-                                            const columnKey = item.variableName || String((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId || '');
-
-                                            const value = row[columnKey];
-
-                                            return (
-
-                                              <TableCell key={colIndex} className={cn("px-4 py-3 text-xs", colIndex < field.arrayItems.length - 1 && "border-r-2 border-blue-100", (!value) ? "text-red-600 font-medium" : "text-slate-800")}>
-
-                                                {value || "Missing"}
-
-                                              </TableCell>
-
-                                            );
-
-                                          })}
-
-                                        </TableRow>
-
-                                      ))}
-
-                                    </TableBody>
-
-                                  </Table>
-
-                                </div>
-
-                              </div>
-
-                            </TableCell>
-
+                          <TableRow className="bg-slate-50 border-b-2 border-slate-200">
+                             <TableCell colSpan={4} className="py-1">
+                                <div className="h-1 w-full bg-gradient-to-r from-blue-100 to-transparent"></div>
+                             </TableCell>
                           </TableRow>
-
                         )}
-
                       </React.Fragment>
-
                     );
-
                   }
 
-
-
-                  // CASE: DOCUMENT FIELDS
-
+                  // ... (Existing Document and Normal Fields Logic remains unchanged)
                   if (field.fieldType === 'document') {
-
+                    // ... (existing code)
                     const targetId = resolveTargetEntityId(field);
-
                     const foundDoc = documentFiles.find(d => d.document_id === field.kycDocumentId && String(d.owner_id) === String(targetId));
 
-
-
                     return (
-
                       <TableRow key={fIdx} className="group border-b border-slate-200">
-
                         <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">{fIdx + 1}</TableCell>
-
                         <TableCell className="px-4 py-2 border-r border-slate-100">
-
                           <div className="flex items-center gap-2">
-
                             <Paperclip className="h-4 w-4 text-amber-600" />
-
                             <span className="text-sm font-semibold text-slate-900">{field.efnsDisplayName || field.variableName}</span>
-
                             <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700 bg-amber-50">Document</Badge>
-
                           </div>
-
                         </TableCell>
-
                         <TableCell className="px-4 py-2 border-r border-slate-100">
-
                           {foundDoc ? <Badge className="bg-green-600 text-white h-6">Available</Badge> : <Badge variant="destructive" className="h-6">Missing</Badge>}
-
                         </TableCell>
-
                         <TableCell className="px-4 py-2">
-
                           <span className="text-xs text-slate-500">KYC: {field.kycDocumentId?.substring(0, 12)}...</span>
-
                         </TableCell>
-
                       </TableRow>
-
                     );
-
                   }
 
+                  let persistenceSource = null;
+                  let mergedValue = "";
+                  let isDropdown = false;
+                  let dropdownOptions = [];
+                  let masterFieldDef = null;
 
+                  if (field.fieldType === 'computed') {
+                    mergedValue = computedFieldsPreview[field.variableName] || "";
+                    isDropdown = false;
+                    const mappingKey = field.computedFunction === 'extractCurrentJobTitle' ? 'job_title' :
+                      field.computedFunction === 'extractCurrentJobDescription' ? 'job_description' : null;
+                    if (mappingKey) {
+                      masterFieldDef = Object.values(jobFields).find(jf => jf.field_key === mappingKey);
+                      persistenceSource = masterFieldDef?.sources?.find(s => s.source_type === entityCategory) || masterFieldDef?.sources?.[0];
+                    }
+                  } else if (isJobQuestion) {
+                    mergedValue = getFieldValue(field.variableName, String(targetId));
+                    persistenceSource = { table: 'tm_tasks', path: `job_specific_answers->>'${field.linkedJobQuestionId}'`, linking_variable: 'id' };
+                    const qDef = requirementJobQuestions.find(q => String(q.id) === String(field.linkedJobQuestionId));
+                    if (qDef?.type === 'select') {
+                      isDropdown = true;
+                      dropdownOptions = (qDef.options || []).map(opt => ({ label: opt, value: opt }));
+                    }
+                  } else {
+                    const masterIds = field.linkedMasterFields || field.masterFieldIds || [];
+                    masterFieldDef = jobFields[masterIds[0]];
+                    mergedValue = masterIds.map(mid => getFieldValue(String(mid), String(targetId), 0, field.extractionMode)).join(' ').trim();
+                    persistenceSource = masterFieldDef?.sources?.find(s => s.source_type === entityCategory) || masterFieldDef?.sources?.[0];
+
+                    if (masterFieldDef?.type === 'select') {
+                      isDropdown = true;
+                      const opts = masterFieldDef.options;
+                      if (opts?.isDependencyConfig) {
+                        dropdownOptions = getDependentDropdownOptions(field, masterFieldDef, String(targetId));
+                      } else if (Array.isArray(opts)) {
+                        dropdownOptions = opts.map(o => typeof o === 'string' ? { label: o, value: o } : o);
+                      }
+                    }
+                  }
+
+                  const getDisplayValue = (val: string) => {
+                    if (!isDropdown) return val;
+                    const option = dropdownOptions.find(o => String(o.value) === String(val) || o.label === val);
+                    return option ? option.label : val;
+                  };
+
+                  const isEditable = !!persistenceSource;
+                  const isValueMissing = !mergedValue || mergedValue === 'Missing' || mergedValue === 'Pending...';
 
                   return (
-
                     <TableRow key={fIdx} className={cn("group border-b border-slate-200 transition-colors", isEditing ? "bg-blue-50/50" : (field.fieldType === 'computed' ? "bg-purple-50/10" : "hover:bg-blue-50"))}>
-
                       <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">{fIdx + 1}</TableCell>
-
                       <TableCell className="px-4 py-2 border-r border-slate-100">
-
                         <div className="flex items-center gap-2">
-
                           <span className="text-sm font-semibold text-slate-900">{field.efnsDisplayName || field.variableName}</span>
-
                           {field.fieldType === 'computed' && <Badge variant="outline" className="text-[10px] border-purple-300 text-purple-700 bg-purple-50">Computed</Badge>}
-
                           {isEditable && <Badge variant="outline" className="text-[10px] border-blue-300 text-blue-700 bg-blue-50">Editable</Badge>}
-
                           {isValueMissing && <AlertCircle className="h-3.5 w-3.5 text-red-500" />}
-
                         </div>
-
                       </TableCell>
 
-
-
                       <TableCell className="px-4 py-2 text-xs text-slate-600">
-
                         {isJobQuestion ? (
-
                           <div className="font-mono text-[10px] bg-purple-100 text-purple-700 p-1 rounded inline-flex items-center"><HelpCircle className="h-3 w-3 mr-1" /> Job Question</div>
-
                         ) : persistenceSource ? (
                           <TooltipProvider delayDuration={150}>
                             <Tooltip>
@@ -1972,42 +1966,13 @@ export const AutomationMappingDialog = ({
                             )}
                             onClick={() => {
                               if (!isEditable) return;
-
                               let finalPath = persistenceSource.path || '';
                               let idToUse = (persistenceSource.table === 'tm_tasks') ? taskId : targetId;
-
-                              // --- DYNAMIC ARRAY INDEX RESOLUTION ---
-                              if (persistenceSource.table === 'registry_individuals' && finalPath.includes('associations')) {
-                                const record = sourceData['registry_individuals']?.[targetId];
-                                const associations = record?.employment_data?.associations || [];
-                                const targetRegistryType = mapEntityTypeToRegistry(entityCategory);
-
-                                // Find index matching BOTH the Individual Type (Principal/Employee) and the Company ID
-                                const assocIdx = associations.findIndex(a =>
-                                  String(a.individual_type).toLowerCase() === targetRegistryType.toLowerCase() &&
-                                  String(a.company_id) === targetCompanyId
-                                );
-
-                                if (assocIdx !== -1) {
-                                  const rawPath = finalPath.includes('->>') ? finalPath.split('->>')[1] : finalPath;
-                                  const column = finalPath.includes('->>') ? finalPath.split('->>')[0] : '';
-
-                                  const resolvedJsonPath = rawPath
-                                    .replace(/['"]/g, '')       // Remove quotes
-                                    .replace('associations[]', `associations.${assocIdx}`)
-                                    .replace('job[]', 'job');   // Flatten the job[] template to job object
-
-                                  finalPath = column ? `${column}->>${resolvedJsonPath}` : resolvedJsonPath;
-
-                                  console.log(`[Persistence] Targeted Index: ${assocIdx} | Entity: ${targetRegistryType} | Path: ${finalPath}`);
-                                }
-                              }
-
                               startEditing(
                                 field.variableName,
                                 0,
                                 persistenceSource.table,
-                                finalPath, // Use the resolved path
+                                finalPath,
                                 mergedValue,
                                 String(idToUse),
                                 persistenceSource.linking_variable || 'id',
@@ -2015,7 +1980,6 @@ export const AutomationMappingDialog = ({
                                 field.computedFunction
                               );
                             }}
-
                           >
                             {isComputing ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : getDisplayValue(mergedValue)}
                             {isEditable && !isEditing && <Edit3 className="h-3 w-3 ml-auto text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2" />}

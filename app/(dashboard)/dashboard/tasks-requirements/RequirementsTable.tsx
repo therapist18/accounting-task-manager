@@ -173,9 +173,11 @@ export function RequirementsTable({
     const individualTypeMap = new Map<number, string>();
 
     tasksToFetch.forEach(task => {
-      if (task.applicant_details?.id) {
-        uniqueIds.add(task.applicant_details.id);
-        individualTypeMap.set(task.applicant_details.id, 'principal');
+      // Use individual_id for Principal/Applicant to match director_id in DB
+      const pId = task.individual_id || task.applicant_details?.id;
+      if (pId) {
+        uniqueIds.add(pId);
+        individualTypeMap.set(pId, 'principal');
       }
 
       if (Array.isArray(task.participants_details)) {
@@ -211,17 +213,7 @@ export function RequirementsTable({
 
       const endTime = performance.now();
 
-      // Filter documents based on applicability
-      const filteredDocuments = documentsRes?.filter(doc => {
-        const individualType = individualTypeMap.get(doc.director_id);
-        const docApplicantTypes = doc.acc_portal_kyc?.applicant_types;
-
-        if (!docApplicantTypes || !Array.isArray(docApplicantTypes) || docApplicantTypes.length === 0) return true;
-
-        return docApplicantTypes.includes(individualType);
-      });
-
-      const documentsByDirector = filteredDocuments?.reduce((acc, doc) => {
+      const documentsByDirector = documentsRes?.reduce((acc, doc) => {
         if (!acc[doc.director_id]) acc[doc.director_id] = [];
         acc[doc.director_id].push(doc);
         return acc;
@@ -412,7 +404,10 @@ export function RequirementsTable({
         });
 
         filteredTasks.forEach(task => {
-          if (task.applicant_details?.type === 'individual' && task.applicant_details?.id) allIndividualIds.add(task.applicant_details.id);
+          // Use individual_id for Principal/Applicant to match director_id in DB
+          const pId = task.individual_id || task.applicant_details?.id;
+          if (pId) allIndividualIds.add(pId);
+
           task.participants_details?.forEach(p => {
             if (p.type === 'individual' && p.id) allIndividualIds.add(p.id);
             if (p.type === 'company' && p.id) allCompanyIds.add(p.id);

@@ -13,7 +13,7 @@ export interface DocumentCache {
 const parseDateString = (dateInput: string | Date | number | null | undefined): Date | null => {
     if (!dateInput) return null;
     if (dateInput instanceof Date && !isNaN(dateInput.getTime())) return dateInput;
-    
+
     // Handle numeric values (could be timestamps or arithmetic results)
     if (typeof dateInput === 'number') {
         // Check if it's a reasonable timestamp (milliseconds since epoch)
@@ -32,7 +32,7 @@ const parseDateString = (dateInput: string | Date | number | null | undefined): 
         }
         return null;
     }
-    
+
     if (typeof dateInput !== 'string') return null;
 
     let date = new Date(dateInput);
@@ -115,7 +115,7 @@ async function fetchDocsAndTypes(
  * Sorts documents by 'Effective Date' (Newest First).
  */
 function sortDocsByRecency(docs: any[], docTypes: any[]) {
-       const sorted = docs.map(doc => {
+    const sorted = docs.map(doc => {
         const type = docTypes.find((t: any) => t.id === doc.document_id);
         const details = doc.extracted_details || {};
 
@@ -170,12 +170,12 @@ function parseJsonPath(doc: any, fieldPath: string | number): any {
     // Helper function for case-insensitive key lookup
     const findKeyCaseInsensitive = (obj: any, targetKey: string): any => {
         if (!obj || typeof obj !== 'object') return undefined;
-        
+
         // First try exact match
         if (targetKey in obj) {
             return obj[targetKey];
         }
-        
+
         // Try case-insensitive match
         const lowerTargetKey = targetKey.toLowerCase();
         for (const key in obj) {
@@ -183,7 +183,7 @@ function parseJsonPath(doc: any, fieldPath: string | number): any {
                 return obj[key];
             }
         }
-        
+
         return undefined;
     };
 
@@ -229,7 +229,7 @@ export async function extractFieldFromAllDocuments(
 ): Promise<string[]> {
     try {
         console.log(`[Array-Extract] Starting extraction - Individual: ${individualId}, Docs: ${documentIds?.join(', ')}, Path: ${fieldPath}`);
-        
+
         const { docs, types } = await fetchDocsAndTypes(individualId, documentIds, cache);
         if (docs.length === 0) {
             console.log(`[Array-Extract] No documents found`);
@@ -243,13 +243,13 @@ export async function extractFieldFromAllDocuments(
 
         for (const item of sorted) {
             console.log(`[Array-Extract] Processing document - ID: ${item.doc.id}, extracted_details keys:`, Object.keys(item.doc.extracted_details || {}));
-            
+
             const value = parseJsonPath(item.doc, fieldPath);
             console.log(`[Array-Extract] Document ${item.doc.id} - Path: ${fieldPath}, Value:`, value);
-            
+
             results.push(value !== null && value !== undefined ? String(value) : "");
         }
-        
+
         console.log(`[Array-Extract] Final results:`, results);
         return results;
     } catch (error) {
@@ -271,7 +271,7 @@ export async function getLatestDocument(
 
         const sorted = sortDocsByRecency(docs, types);
         const latest = sorted[0];
-        
+
         return {
             document: latest.doc,
             documentType: latest.type,
@@ -294,7 +294,7 @@ export async function getAllDocuments(
         if (docs.length === 0) return [];
 
         const sorted = sortDocsByRecency(docs, types);
-        
+
         return sorted.map(item => ({
             document: item.doc,
             documentType: item.type,
@@ -315,12 +315,12 @@ export async function extractFieldFromLatestDocument(
 ): Promise<string> {
     try {
         console.log(`[Extract Debug] Individual: ${individualId}, Docs: ${documentIds?.join(', ') || 'none'}, Path: ${fieldPath}`);
-        
+
         if (!documentIds || documentIds.length === 0) {
             console.log(`[Extract Debug] No document IDs provided`);
             return "No Document Specified";
         }
-        
+
         // --- START MODIFICATION 2: Handle Master Field Key/ID resolution ---
         if (!fieldPath.includes('->>') && !fieldPath.includes('->') && fieldPath !== '') {
             let fieldKeyToExtract = fieldPath;
@@ -332,7 +332,7 @@ export async function extractFieldFromLatestDocument(
                     .select('field_key')
                     .eq('id', fieldPath)
                     .maybeSingle();
-                
+
                 if (masterField?.field_key) {
                     fieldKeyToExtract = masterField.field_key;
                 }
@@ -341,18 +341,18 @@ export async function extractFieldFromLatestDocument(
             // If we have a key, extract the value from that master field's sources recursively
             if (fieldKeyToExtract) {
                 console.log(`[Extract Debug] Field Path identified as Master Field Key/ID (${fieldKeyToExtract}), delegating to extractFromMasterField.`);
-                
+
                 const result = await extractFromMasterField(
-                    fieldKeyToExtract, 
-                    individualId, 
+                    fieldKeyToExtract,
+                    individualId,
                     null // Company ID null
                 );
-                
+
                 if (result !== '' && result !== 'No Computation Config') {
                     // Return the value found by the master field extraction chain
                     return String(result);
                 }
-                
+
                 console.log(`[Extract Debug] Master Field extraction failed for ${fieldKeyToExtract}. Continuing with document path logic.`);
             }
         }
@@ -360,7 +360,7 @@ export async function extractFieldFromLatestDocument(
 
 
         const { docs, types } = await fetchDocsAndTypes(individualId, documentIds, cache);
-     
+
         if (!docs || docs.length === 0) {
             console.log(`[Extract Debug] No documents found for the specified IDs`);
             return "Document Not Found";
@@ -369,7 +369,7 @@ export async function extractFieldFromLatestDocument(
         console.log(`[Extract Debug] Found ${docs.length} documents`);
         const sorted = sortDocsByRecency(docs, types);
         const latestDoc = sorted[0]?.doc;
-        
+
         if (!latestDoc) {
             console.log(`[Extract Debug] No valid document data found`);
             return "Invalid Document Data";
@@ -377,29 +377,29 @@ export async function extractFieldFromLatestDocument(
 
         console.log(`[Extract Debug] Latest doc ID: ${latestDoc.id}`);
         console.log(`[Extract Debug] Extracting from path: ${fieldPath}`);
-        
+
         // First try to get the value using the full path
         let value = parseJsonPath(latestDoc, fieldPath);
-        
+
         // If not found and path contains 'extracted_details', try to get it directly from the nested object
         if ((value === null || value === undefined) && fieldPath.includes('extracted_details')) {
             const pathParts = fieldPath.split('->>')
                 .join('.')  // Convert ->> to .
                 .replace(/['"]/g, '')  // Remove quotes
                 .split('.');  // Split by dot notation
-            
+
             // Remove empty strings from the path parts
             const cleanPathParts = pathParts.filter(part => part.trim() !== '');
-            
+
             // Helper function for case-insensitive key lookup
             const findKeyCaseInsensitive = (obj: any, targetKey: string): any => {
                 if (!obj || typeof obj !== 'object') return undefined;
-                
+
                 // First try exact match
                 if (targetKey in obj) {
                     return obj[targetKey];
                 }
-                
+
                 // Try case-insensitive match
                 const lowerTargetKey = targetKey.toLowerCase();
                 for (const key in obj) {
@@ -407,10 +407,10 @@ export async function extractFieldFromLatestDocument(
                         return obj[key];
                     }
                 }
-                
+
                 return undefined;
             };
-            
+
             // Traverse the object using the path parts with case-insensitive matching
             value = cleanPathParts.reduce((obj, key) => {
                 return findKeyCaseInsensitive(obj, key);
@@ -418,7 +418,7 @@ export async function extractFieldFromLatestDocument(
         }
 
         console.log(`[Extract Debug] Extracted value:`, value, `Type: ${typeof value}`);
-        
+
         if (value === null || value === undefined || value === '') {
             console.log(`[Extract Debug] Field not found at path: ${fieldPath}`);
             return ""; // Return empty string instead of "Field Not Found" to allow for fallback
@@ -517,21 +517,30 @@ export async function getLatestDocumentNumber(individualId: string | number, com
 }
 
 export async function getLatestDocumentExpiryDate(
-    individualId: string | number, 
-    computedDocuments: string[], 
-    cache?: DocumentCache
+    individualId: string | number,
+    computedDocuments: string[],
+    cache?: DocumentCache,
+    providedLatest?: { doc: any, type: any }
 ): Promise<string> {
-    if (!individualId) return "Expiry Not Found";
-    
-    // 1. Fetch doc and its metadata (using batch cache if provided)
-    const { docs, types } = await fetchDocsAndTypes(individualId, computedDocuments, cache);
-    if (docs.length === 0) return "Missing Document";
+    if (!individualId && !providedLatest) return "Expiry Not Found";
 
-    // 2. Sort by recency to get the latest one
-    const sorted = sortDocsByRecency(docs, types);
-    const latest = sorted[0];
-    const details = latest.doc.extracted_details || {};
-    const docType = latest.type;
+    let latest, details, docType;
+
+    if (providedLatest) {
+        latest = providedLatest;
+        details = latest.doc.extracted_details || {};
+        docType = latest.type;
+    } else {
+        // 1. Fetch doc and its metadata (using batch cache if provided)
+        const { docs, types } = await fetchDocsAndTypes(individualId, computedDocuments, cache);
+        if (docs.length === 0) return "Missing Document";
+
+        // 2. Sort by recency to get the latest one
+        const sorted = sortDocsByRecency(docs, types);
+        latest = sorted[0];
+        details = latest.doc.extracted_details || {};
+        docType = latest.type;
+    }
 
     // 3. DYNAMIC SEARCH: Find the field marked 'isEffectiveTo' in the KYC metadata
     if (docType?.fields && Array.isArray(docType.fields)) {
@@ -585,16 +594,16 @@ export async function determineImmigrationStatus(individualId: string | number, 
     console.log(`[Immigration Status] === START determineImmigrationStatus ===`);
     console.log(`[Immigration Status] Individual: ${individualId}`);
     console.log(`[Immigration Status] Documents: ${computedDocuments?.join(', ')}`);
-    
+
     try {
         const { docs, types } = await fetchDocsAndTypes(individualId, computedDocuments, cache);
         console.log(`[Immigration Status] Found ${docs.length} documents and ${types.length} types`);
-        
+
         if (docs.length === 0) {
             console.log(`[Immigration Status] No documents found, returning "No Status Doc"`);
             return "No Status Doc";
         }
-        
+
         const sorted = docs.map(doc => {
             const type = types.find((t: any) => t.id === doc.document_id);
             const details = doc.extracted_details || {};
@@ -630,17 +639,17 @@ export async function determineImmigrationStatus(individualId: string | number, 
         const current = sorted[0];
         const now = new Date();
         const details = current.details;
-        
+
         console.log(`[Immigration Status] Latest document ID: ${current.doc.id}`);
         console.log(`[Immigration Status] Document document_id: ${current.doc.document_id}`);
         console.log(`[Immigration Status] Document type:`, current.type);
-        
+
         // PRIORITY 1: Use immigration_status from document type definition (from acc_portal_kyc)
         let typeBasedStatus = null;
         const immigrationStatus = current.type?.immigration_status;
-        
+
         console.log(`[Immigration Status] Raw immigration_status from KYC:`, immigrationStatus);
-        
+
         if (typeof immigrationStatus === 'string') {
             typeBasedStatus = immigrationStatus;
             console.log(`[Immigration Status] Using string immigration_status: ${typeBasedStatus}`);
@@ -653,7 +662,7 @@ export async function determineImmigrationStatus(individualId: string | number, 
                 console.log(`[Immigration Status] Using immigration_status.name: ${typeBasedStatus}`);
             }
         }
-        
+
         // PRIORITY 2: Extract permit/pass type from extracted_details (fallback)
         const permitTypeFieldNames = [
             'Permit_Type', 'permit_type', 'PermitType',
@@ -661,7 +670,7 @@ export async function determineImmigrationStatus(individualId: string | number, 
             'Pass_type', 'Permit_type',
             'Immigration_Status', 'immigration_status', 'Status', 'status'
         ];
-        
+
         let extractedPermitType = null;
         for (const fieldName of permitTypeFieldNames) {
             if (details[fieldName]) {
@@ -670,14 +679,14 @@ export async function determineImmigrationStatus(individualId: string | number, 
                 break;
             }
         }
-        
+
         // PRIORITY 3: Use document type name as fallback
         const fallbackStatus = current.type?.name || current.type?.id || "Unknown Status";
-        
+
         // Determine final status (prefer KYC immigration_status first, then extracted permit type)
         const finalStatus = typeBasedStatus || extractedPermitType || fallbackStatus;
         console.log(`[Immigration Status] Final status: ${finalStatus}`);
-        
+
         // Check if expired
         if (current.expiryDate.getTime() > 0 && current.expiryDate < now) {
             return `${finalStatus}`;
@@ -797,16 +806,16 @@ export async function calculateDateDifference(
         console.log(`[Date Debug] === START calculateDateDifference ===`);
         console.log(`[Date Debug] Individual: ${individualId}`);
         console.log(`[Date Debug] StartPath: ${startDatePath}, EndPath: ${endDatePath}, Unit: ${unit}`);
-        
+
         // Helper function to resolve master field ID to actual field path
         const resolveFieldPath = async (pathOrId: string | number): Promise<string> => {
             const pathOrIdStr = String(pathOrId);
-            
+
             // If it's already a path (contains -> or .), return as-is
             if (pathOrIdStr.includes('->') || pathOrIdStr.includes('.')) {
                 return pathOrIdStr;
             }
-            
+
             // Otherwise, treat as master field ID and resolve to field path
             try {
                 const fieldConfig = await getJobFieldDefinition(pathOrIdStr);
@@ -814,14 +823,14 @@ export async function calculateDateDifference(
                     console.log(`[Date Debug] No sources found for master field: ${pathOrIdStr}`);
                     return '';
                 }
-                
+
                 // Find the first source with a path (computed or non-computed)
                 const source = fieldConfig.sources.find(s => s.path);
                 if (source && source.path) {
                     console.log(`[Date Debug] Resolved master field ${pathOrIdStr} to path: ${source.path}`);
                     return source.path;
                 }
-                
+
                 console.log(`[Date Debug] No valid path found for master field: ${pathOrIdStr}`);
                 return '';
             } catch (error) {
@@ -829,17 +838,17 @@ export async function calculateDateDifference(
                 return '';
             }
         };
-        
+
         // Resolve the paths
         const resolvedStartPath = await resolveFieldPath(startDatePath);
         const resolvedEndPath = await resolveFieldPath(endDatePath);
-        
+
         console.log(`[Date Debug] Resolved paths - Start: ${resolvedStartPath}, End: ${resolvedEndPath}`);
-        
+
         if (!resolvedStartPath || !resolvedEndPath) {
             return "Invalid Field Paths";
         }
-        
+
         // 1. Extract Start Date
         const startDateValue = await extractFieldFromLatestDocument(individualId, computedDocuments, resolvedStartPath, cache);
         console.log(`[Date Debug] Extracted Start Date Value: "${startDateValue}"`);
@@ -849,8 +858,8 @@ export async function calculateDateDifference(
             return "Start Date Not Found";
         }
         if (typeof startDateValue === 'string' && (startDateValue.trim().startsWith('{') || startDateValue.trim().startsWith('['))) {
-             console.log(`[Date Debug] Start date is complex object:`, startDateValue);
-             return "Invalid Start Date Format";
+            console.log(`[Date Debug] Start date is complex object:`, startDateValue);
+            return "Invalid Start Date Format";
         }
 
         // 2. Extract End Date
@@ -861,8 +870,8 @@ export async function calculateDateDifference(
             return "End Date Not Found";
         }
         if (typeof endDateValue === 'string' && (endDateValue.trim().startsWith('{') || endDateValue.trim().startsWith('['))) {
-             console.log(`[Date Debug] End date is complex object:`, endDateValue);
-             return "Invalid End Date Format";
+            console.log(`[Date Debug] End date is complex object:`, endDateValue);
+            return "Invalid End Date Format";
         }
 
         // 3. Parse Dates
@@ -926,18 +935,18 @@ async function bulkFetchJobFields(): Promise<Record<string, any>> {
     if (bulkFetchPromise) {
         return bulkFetchPromise;
     }
-    
+
     bulkFetchPromise = (async () => {
         try {
             const { data, error } = await supabase
                 .from('tm_job_fields')
                 .select('*');
-            
+
             if (error) {
                 console.error('Bulk fetch job fields error:', error);
                 return {};
             }
-            
+
             const fieldsMap: Record<string, any> = {};
             if (data) {
                 data.forEach(field => {
@@ -948,7 +957,7 @@ async function bulkFetchJobFields(): Promise<Record<string, any>> {
                     }
                 });
             }
-            
+
             console.log(`[Bulk Fetch] Loaded ${data?.length || 0} job fields into cache`);
             return fieldsMap;
         } catch (error) {
@@ -956,14 +965,14 @@ async function bulkFetchJobFields(): Promise<Record<string, any>> {
             return {};
         }
     })();
-    
+
     return bulkFetchPromise;
 }
 
 async function getJobFieldDefinition(fieldKey: string) {
     // Ensure bulk data is loaded
     const fieldsMap = await bulkFetchJobFields();
-    
+
     // Return from cache
     return fieldsMap[fieldKey] || null;
 }
@@ -974,7 +983,7 @@ async function getJobFieldDefinition(fieldKey: string) {
  * ENHANCED: Now supports fallback to lower priority sources if higher priority returns empty
  */
 async function extractFromMasterField(
-    fieldKey: string, 
+    fieldKey: string,
     individualId: string | number,
     companyId: string | number,
     extractionMode: 'latest' | 'all' = 'latest'
@@ -988,16 +997,16 @@ async function extractFromMasterField(
 
         // Sort sources by priority (lower number = higher priority)
         const sortedSources = [...fieldConfig.sources].sort((a, b) => (a.priority || 99) - (b.priority || 99));
-        
+
         console.log(`[Extract Master Field] Field: ${fieldKey}, Total sources: ${sortedSources.length}`);
 
         // Try each source in priority order
         for (let i = 0; i < sortedSources.length; i++) {
             const source = sortedSources[i];
             const { table, path, linking_variable = 'id', source_type, is_computed, document_id } = source;
-            
+
             console.log(`[Extract Master Field] Trying source ${i + 1} (Priority: ${source.priority || 99}): table=${table}, path=${path}, source_type=${source_type}, is_computed=${is_computed}`);
-            
+
             // Determine which ID to use based on source type
             const targetId = source_type === 'company' ? companyId : individualId;
             if (!targetId) {
@@ -1008,26 +1017,26 @@ async function extractFromMasterField(
             // Handle computed sources (document extraction)
             if (is_computed && document_id && document_id.length > 0) {
                 console.log(`[Extract Master Field] Source ${i + 1} is computed, extracting from documents: ${document_id.join(', ')}, mode: ${extractionMode}`);
-                
+
                 let value: any;
                 if (extractionMode === 'all') {
                     value = await extractFieldFromAllDocuments(targetId, document_id, path || '');
                 } else {
                     value = await extractFieldFromLatestDocument(targetId, document_id, path || '');
                 }
-                
+
                 // Check if the result is valid (not empty array for array fields, not empty string for single fields)
                 const isValidResult = (extractionMode === 'all' && Array.isArray(value) && value.length > 0) ||
-                                   (extractionMode === 'latest' && value && value !== '' && value !== 'Document Not Found' && value !== 'Field Not Found' && value !== 'No Document Specified');
-                
+                    (extractionMode === 'latest' && value && value !== '' && value !== 'Document Not Found' && value !== 'Field Not Found' && value !== 'No Document Specified');
+
                 if (isValidResult) {
                     console.log(`[Extract Master Field] Source ${i + 1} SUCCESS - Got value:`, value);
-                    
+
                     // Handle arrays (return as-is for array fields)
                     if (Array.isArray(value)) {
                         return value;
                     }
-                    
+
                     // Handle objects (like translations {en: "..."})
                     if (typeof value === 'object' && value !== null) {
                         try {
@@ -1046,7 +1055,7 @@ async function extractFromMasterField(
 
             // Handle standard sources (direct table lookups)
             console.log(`[Extract Master Field] Source ${i + 1} is standard, querying table: ${table} with ${linking_variable}=${targetId}`);
-            
+
             const { data: record, error } = await supabase
                 .from(table)
                 .select('*')
@@ -1057,7 +1066,7 @@ async function extractFromMasterField(
                 console.log(`[Extract Master Field] Source ${i + 1} query error:`, error);
                 continue;
             }
-            
+
             if (!record) {
                 console.log(`[Extract Master Field] Source ${i + 1} - no record found, trying next source...`);
                 continue;
@@ -1069,7 +1078,7 @@ async function extractFromMasterField(
 
             if (value !== null && value !== undefined && value !== '') {
                 console.log(`[Extract Master Field] Source ${i + 1} SUCCESS - Got value: ${value}`);
-                
+
                 // Handle objects (like translations {en: "..."})
                 if (typeof value === 'object') {
                     return value.en || value.name || value.title || String(Object.values(value)[0]);
@@ -1090,14 +1099,14 @@ async function extractFromMasterField(
 
 const mapEntityTypeToRegistry = (type?: string): string => {
     const map: Record<string, string> = {
-      'principal': 'Principal',
-      'director': 'Director',
-      'understudy': 'Understudy',
-      'employee': 'Employee',
-      'dependant': 'Dependant'
+        'principal': 'Principal',
+        'director': 'Director',
+        'understudy': 'Understudy',
+        'employee': 'Employee',
+        'dependant': 'Dependant'
     };
     return map[type?.toLowerCase()] || 'Principal';
-  };
+};
 
 /**
  * Extracts job title matching the specific entity type from registry associations
@@ -1118,17 +1127,17 @@ export async function extractCurrentJobTitle(
 
         if (Array.isArray(associations)) {
             const targetRegistryType = mapEntityTypeToRegistry(entityContext);
-            
+
             // Filter by current status and individual type
-            const match = associations.find(a => 
-                a.is_current === true && 
+            const match = associations.find(a =>
+                a.is_current === true &&
                 String(a.individual_type).toLowerCase() === targetRegistryType.toLowerCase()
             );
 
             // Path mapping based on your JSON: associations -> job -> title
             if (match?.job?.title) return String(match.job.title);
             if (match?.role) return String(match.role);
-            
+
             // Context-less fallback: pick first current job
             const fallback = associations.find(a => a.is_current === true && a.job?.title);
             if (fallback?.job?.title) return String(fallback.job.title);
@@ -1161,8 +1170,8 @@ export async function extractCurrentJobDescription(
 
         if (Array.isArray(associations)) {
             const targetRegistryType = mapEntityTypeToRegistry(entityContext);
-            const match = associations.find(a => 
-                a.is_current === true && 
+            const match = associations.find(a =>
+                a.is_current === true &&
                 String(a.individual_type).toLowerCase() === targetRegistryType.toLowerCase()
             );
 
@@ -1282,32 +1291,32 @@ export async function executeComputedField(
             return await getEducationalDetails(individualId, computedDocuments, cache);
         case 'calculateArithmetic':
             return await calculateArithmetic(
-                individualId, 
-                computedDocuments, 
+                individualId,
+                computedDocuments,
                 arithmeticConfig?.operation || 'add',
                 arithmeticConfig?.field1Path || fieldPath || '',
                 arithmeticConfig?.field2Path,
                 arithmeticConfig?.operand,
                 cache
             );
-       case 'calculateDateDifference':
+        case 'calculateDateDifference':
             console.log(`[ExecuteComputedField] calculateDateDifference case - arithmeticConfig:`, arithmeticConfig);
             // FIX: The arithmeticConfig might be nested (dateDiffConfig) or flat.
             // We check both. We also remove the fallback to 'fieldPath' because
             // fieldPath is often the root path (extracted_details) which isn't a valid date source.
             const diffConfig = arithmeticConfig?.dateDiffConfig || arithmeticConfig || {};
             console.log(`[ExecuteComputedField] diffConfig extracted:`, diffConfig);
-            
+
             // IMPORTANT: Removed fallback to fieldPath. 
             // fieldPath usually points to the parent container (extracted_details) which is NOT a valid date path.
             // If the specific start/end paths are missing in the config, we should fail gracefully (Start Date Not Found)
             // rather than trying to parse the entire JSON object as a date.
             return await calculateDateDifference(
-                individualId, 
-                computedDocuments, 
-                diffConfig.startDatePath || '', 
-                diffConfig.endDatePath || '', 
-                diffConfig.unit || 'days', 
+                individualId,
+                computedDocuments,
+                diffConfig.startDatePath || '',
+                diffConfig.endDatePath || '',
+                diffConfig.unit || 'days',
                 cache
             );
         default:
@@ -1327,12 +1336,12 @@ export async function processComputedFieldsFromSources(
     entityContext?: string
 ): Promise<Record<string, string | string[]>> {
     const results: Record<string, string | string[]> = {};
-    
+
     for (const fieldKey of fieldKeys) {
         try {
             // Get computation config from sources
             const config = await getComputationConfigFromSources(fieldKey);
-            
+
             if (!config) {
                 results[fieldKey] = "No Computation Config";
                 continue;
@@ -1350,14 +1359,14 @@ export async function processComputedFieldsFromSources(
                 companyId,
                 entityContext
             );
-            
+
             results[fieldKey] = value;
         } catch (error) {
             console.error(`[Process Computed Field Error - ${fieldKey}]:`, error);
             results[fieldKey] = "Error";
         }
     }
-    
+
     return results;
 }
 

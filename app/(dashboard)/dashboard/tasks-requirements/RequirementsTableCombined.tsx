@@ -212,46 +212,26 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       if (!success) {
         throw new Error("Extraction service returned failure status");
       }
-      let updateQuery;
-      if (doc.director_id) {
-        updateQuery = supabase
-          .from('acc_portal_directors_documents')
-          .update({
-            extracted_details: extractedData,
-            extraction_date: new Date().toISOString(),
-            extraction_status: 'success',
-            fields_extracted: true
-          })
-          .eq('id', doc.id);
-      } else if (doc.company_id) {
-        updateQuery = supabase
-          .from('acc_portal_kyc_uploads')
-          .update({
-            extracted_details: extractedData,
-            extraction_date: new Date().toISOString(),
-            extraction_status: 'success',
-            fields_extracted: true
-          })
-          .eq('id', doc.id);
-      } else {
-        throw new Error("Cannot determine document type (missing director_id or company_id)");
+      if (onSaveDocument) {
+        await onSaveDocument(doc, extractedData);
+      } else if (onSave) {
+        await onSave(doc, extractedData);
       }
-      const { error: updateError } = await updateQuery;
-      if (updateError) {
-        throw updateError;
+
+      // Update the local Preview Modal state so the UI reflects changes immediately
+      if (previewingDocuments) {
+        setPreviewingDocuments(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            documents: prev.documents.map(d =>
+              d.id === doc.id
+                ? { ...d, edited_details: extractedData, extracted_details: extractedData }
+                : d
+            )
+          };
+        });
       }
-      const previousState = previewingDocuments?.documents || [];
-      setPreviewingDocuments(prev => {
-        const newState = {
-          ...prev,
-          documents: prev.documents.map(d =>
-            d.id === doc.id
-              ? { ...d, edited_details: extractedData, extracted_details: extractedData }
-              : d
-          )
-        };
-        return newState;
-      });
 
       toast.success("Re-extraction completed successfully", { id: toastId });
       if (handleRetryExtraction) {
@@ -290,7 +270,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   }, [onSaveDocument, onSave, previewingDocuments]);
 
   // Function to get document status with caching - now inside component
-  const getDocumentStatus = async (task: any, docId: string, personType: string, personId: string) => {
+  const getDocumentStatus = async (task: any, docId: string, personType: string, personId: string, docObj?: any) => {
     const cacheKey = `${task.id}-${docId}-${personType}-${personId}`;
 
     // Check cache first
@@ -316,8 +296,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         return result;
       }
 
-      // Get expiry date using computed function
-      const expiryDate = await getLatestDocumentExpiryDate(personId, [docId]);
+      // Get expiry date using computed function - pass the document if we already have it
+      const expiryDate = await getLatestDocumentExpiryDate(personId, [docId], undefined, docObj ? { doc: docObj, type: docMetadata } : undefined);
 
       if (expiryDate.includes('Not Found')) {
         const result = { status: 'unknown', label: 'No Expiry', color: 'text-gray-400', bgColor: 'bg-gray-50' };
@@ -336,6 +316,10 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
           personType,
           taskName: task.title || task.id
         });
+
+        const result = { status: 'unknown', label: 'No Expiry', color: 'text-gray-400', bgColor: 'bg-gray-50' };
+        setDocumentStatusCache(prev => new Map(prev.set(cacheKey, result)));
+        return result;
       }
 
       const now = new Date();
@@ -642,8 +626,10 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       let changed = false;
 
       for (const col of columnDefinitions) {
-        // Logic for Company vs Individual IDs
-        const personId = col.type === 'company' ? col.id : (col.id || col.task.individual_id);
+        // Logic for Company vs Individual IDs - MUST MATCH renderRequirementRows logic
+        const personId = col.type === 'company' ? col.task.company_id :
+          (col.type === 'principal' || col.type === 'director' || col.type === 'understudy') ? col.task.individual_id :
+            col.id;
 
         const docsToCheck = col.type === 'company'
           ? (allCompanyDocuments[personId] || [])
@@ -655,7 +641,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
           // Only fetch if not already in cache and we have the metadata definition
           if (!newStatuses.has(cacheKey) && documentMetadataCache.has(docId)) {
-            const status = await getDocumentStatus(col.task, docId, col.type, personId);
+            const status = await getDocumentStatus(col.task, docId, col.type, personId, doc);
             newStatuses.set(cacheKey, status);
             changed = true;
           }
@@ -1031,16 +1017,58 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
       const companyParticipant = participants.find(p => p.type === 'company');
 
+      // Determine principal: should be the applicant UNLESS they have a dependant role
+      let principal = null;
+      let dependants = [];
+
+      // Check if applicant is a dependant
+      const isApplicantDependant = applicant.role === 'dependant' ||
+        (Array.isArray(applicant.role) && applicant.role.includes('dependant'));
+
+      if (isApplicantDependant) {
+        // Applicant is a dependant, add to dependants array
+        dependants = [{
+          id: applicant.id || task?.individual_id,
+          name: applicant.name || individualNames[applicant.id],
+          relationship: applicant.relationship || 'dependant'
+        }];
+
+        // Find principal from other participants (non-dependant individual)
+        principal = participants.find(p =>
+          p.type === 'individual' &&
+          p.role !== 'dependant' &&
+          !(Array.isArray(p.role) && p.role.includes('dependant'))
+        );
+      } else {
+        // Applicant is the principal
+        principal = {
+          id: applicant.id || task?.individual_id,
+          name: applicant.name || individualNames[applicant.id],
+          role: applicant.role
+        };
+
+        // Find dependants from other participants
+        dependants = participants
+          .filter(p => p.type === 'individual' && (
+            Array.isArray(p.role) ? p.role.includes('dependant') : p.role === 'dependant'
+          ))
+          .map(dep => ({
+            id: dep.id,
+            name: dep.name,
+            relationship: dep.relationship || 'dependant'
+          }));
+      }
+
       return {
         company: {
           id: companyParticipant?.id || task?.company_id,
           name: companyParticipant?.name || task?.company_name || 'Company',
           type: 'company'
         },
-        principal: {
+        principal: principal || {
           id: applicant.id || task?.individual_id,
-          name: applicant.name || individualNames[applicant.id],
-          role: applicant.role
+          name: applicant.name || individualNames[applicant.id] || 'Unknown',
+          role: applicant.role || 'principal'
         },
         directors: participants
           .filter(p => p.type === 'individual' && (
@@ -1051,15 +1079,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             name: d.name,
             role: d.role
           })),
-        dependants: participants
-          .filter(p => p.type === 'individual' && (
-            Array.isArray(p.role) ? p.role.includes('dependant') : p.role === 'dependant'
-          ))
-          .map(dep => ({
-            id: dep.id,
-            name: dep.name,
-            relationship: dep.relationship || 'dependant'
-          })),
+        dependants: dependants,
         understudy: (() => {
           const understudyParticipant = participants.find(p =>
             p.type === 'individual' &&
@@ -1995,11 +2015,13 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                             </div>
                             {(() => {
                               const personId = col.type === 'company' ? col.task.company_id :
-                                (col.type === 'principal' || col.type === 'director') ? col.task.individual_id :
+                                (col.type === 'principal' || col.type === 'director' || col.type === 'understudy') ? col.task.individual_id :
                                   col.id;
                               const statusKey = `${col.task.id}-${docId}-${col.type}-${personId}`;
                               if (!documentStatusCache.has(statusKey)) {
-                                getDocumentStatus(col.task, docId, col.type, personId);
+                                // Find the latest document of this type to pass to getDocumentStatus
+                                const latestDoc = docs.reduce((prev, curr) => (new Date(curr.created_at) > new Date(prev.created_at)) ? curr : prev);
+                                getDocumentStatus(col.task, docId, col.type, personId, latestDoc);
                                 return (
                                   <div className="w-2 h-2 bg-gray-300 rounded-full animate-pulse" title="Checking status..." />
                                 );
