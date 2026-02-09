@@ -33,7 +33,6 @@ import { processComputedFields, executeComputedField } from '../utils/automation
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ExtractionPreview } from "@/components/ExtractionPreview";
 
-// ... (Interfaces remain unchanged)
 interface AutomationMappingDialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -282,10 +281,31 @@ export const AutomationMappingDialog = ({
   // Helper functions for document preview (moved inside component)
   const getFileUrl = (filePath: string) => {
     if (!filePath) return '';
+    
     // If it's already a full URL, return as is
     if (filePath.startsWith('http')) return filePath;
-    // Otherwise, construct the Supabase storage URL
-    return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${filePath}`;
+    
+    const bucketName = 'kyc-documents';
+    let cleanPath = filePath;
+    
+    // Ensure file path doesn't start with bucket name (avoid double prefix)
+    if (cleanPath.startsWith(bucketName + '/')) {
+      cleanPath = cleanPath.substring(bucketName.length + 1);
+    }
+    
+    // Construct full path
+    const fullPath = `${bucketName}/${cleanPath}`;
+    
+    // Build complete URL
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl) {
+      console.error('NEXT_PUBLIC_SUPABASE_URL environment variable is not set');
+      return '';
+    }
+    
+    // Use encodeURI for the entire path to handle spaces properly
+    const encodedPath = encodeURI(fullPath);
+    return `${supabaseUrl}/storage/v1/object/public/${encodedPath}`;
   };
 
   const handlePreviewDocument = async (doc: any) => {
@@ -356,9 +376,32 @@ export const AutomationMappingDialog = ({
 
   const buildFileUrl = (linkedDoc: any): string | null => {
     if (!linkedDoc?.file_path) return null;
+    
+    // If it's already a full URL, return as is
+    if (linkedDoc.file_path.startsWith('http')) return linkedDoc.file_path;
+    
     const bucketName = 'kyc-documents';
-    const filePath = linkedDoc.file_path?.startsWith(bucketName) ? linkedDoc.file_path : `${bucketName}/${linkedDoc.file_path}`;
-    return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
+    let filePath = linkedDoc.file_path;
+    
+    // Ensure the file path doesn't start with the bucket name (avoid double prefix)
+    if (filePath.startsWith(bucketName + '/')) {
+      filePath = filePath.substring(bucketName.length + 1);
+    }
+    
+    // Construct the full path
+    const fullPath = `${bucketName}/${filePath}`;
+    
+    // Build the complete URL
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl) {
+      console.error('NEXT_PUBLIC_SUPABASE_URL environment variable is not set');
+      return null;
+    }
+    
+    // Use encodeURI for the entire path to handle spaces properly
+    // This will encode spaces as %20 which is correct for URLs
+    const encodedPath = encodeURI(fullPath);
+    return `${supabaseUrl}/storage/v1/object/public/${encodedPath}`;
   };
 
   const resolveTargetEntityId = useCallback((field: any) => {
