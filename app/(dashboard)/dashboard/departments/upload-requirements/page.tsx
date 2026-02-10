@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import React, { useEffect, useState, useMemo } from "react"
 import { cn } from "@/lib/utils"
-import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff, Zap, FileType, Database, Code, HelpCircle } from "lucide-react"
+import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff, Zap, FileType, Database, Code, HelpCircle, Folder, Split } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -131,20 +131,12 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const [activeClass, setActiveClass] = useState<Record<string, string>>({})
   const [activeSubclass, setActiveSubclass] = useState<Record<string, string>>({})
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({})
-  
-  // State for expanding webdata rows
   const [expandedWebDataRows, setExpandedWebDataRows] = useState<Set<string>>(new Set())
-
   const [isSubmitting, setIsSubmitting] = useState(false)
-  
-  // Requirement Editing
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editingRequirement, setEditingRequirement] = useState<ApiRequirement | null>(null)
-  
-  // Question Editing
   const [isEditQuestionDialogOpen, setIsEditQuestionDialogOpen] = useState(false)
   const [editingQuestion, setEditingQuestion] = useState<JobQuestion | null>(null)
-
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [addContext, setAddContext] = useState<EditingContext | null>(null)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
@@ -153,7 +145,33 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
   const [masterFields, setMasterFields] = useState<any[]>([])
 
-  // Fetch KYC documents and Master Fields for display
+  const activeSelection = useMemo(() => {
+    const currentDept = departments.find(d => String(d.id) === String(activeDept))
+    if (!currentDept) return { reqs: [], questions: [] }
+
+    const currentSubdeptId = activeSubdept[String(currentDept.id)]
+    const currentSubdept = currentDept.subdepartments?.find(s => String(s.id) === String(currentSubdeptId)) ||
+      currentDept.tm_subdepartments?.find(s => String(s.id) === String(currentSubdeptId))
+
+    if (!currentSubdept) return { currentDept, reqs: [], questions: [] }
+
+    const activeClassKey = `${String(currentDept.id)}-${String(currentSubdept.id)}`
+    const currentClassId = activeClass[activeClassKey]
+    const currentClass = currentSubdept.classes?.find(c => String(c.id) === String(currentClassId))
+
+    const activeSubclassKey = `${activeClassKey}-${String(currentClassId)}`
+    const currentSubclassId = activeSubclass[activeSubclassKey]
+    const currentSubclass = currentClass?.subClasses?.find(sc => String(sc.id) === String(currentSubclassId))
+
+    const reqs = (currentSubclass ? currentSubclass.requirements : currentClass ? currentClass.requirements : currentSubdept.upload_requirements) || []
+    const questions = (currentSubclass ? currentSubclass.job_specific_questions : currentClass ? currentClass.job_specific_questions : currentSubdept.job_specific_questions) || []
+
+    return { currentDept, currentSubdept, currentClass, currentSubclass, reqs, questions }
+  }, [departments, activeDept, activeSubdept, activeClass, activeSubclass])
+
+  // --- 2. DESTUCTURE FOR DIALOGS (Solves 'is not defined' error) ---
+  const { currentDept, currentSubdept, currentClass, currentSubclass, reqs, questions } = activeSelection
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -163,12 +181,19 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         ])
         setKycDocuments(kycRes.data || [])
         setMasterFields(mfRes.data || [])
-      } catch (error) {
-        console.error('Error fetching initial data:', error)
-      }
+      } catch (error) { console.error(error) }
     }
     fetchData()
   }, [])
+
+  const mapRequirementsData = async (record: any) => {
+    if (!record || !record.requirements) return []
+    return record.requirements.map((r: any) => ({
+      ...r,
+      applicantTypes: r.applicantTypes || (r.applicantType ? [r.applicantType] : []),
+      kyc_document_ids: r.kyc_document_ids || (r.kycDocumentId ? [r.kycDocumentId] : []),
+    }))
+  }
 
   const toggleWebDataRow = (reqId: string) => {
     setExpandedWebDataRows(prev => {
@@ -195,7 +220,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     if (departments.length > 0 && !activeDept) {
       const firstDept = departments[0]
       setActiveDept(String(firstDept.id))
-      
+
       if (firstDept.tm_subdepartments && firstDept.tm_subdepartments.length > 0) {
         const firstSub = firstDept.tm_subdepartments[0]
         setActiveSubdept({ [String(firstDept.id)]: String(firstSub.id) })
@@ -203,131 +228,67 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     }
   }, [departments, activeDept])
 
-  const mapRequirementsData = async (record: any) => {
-    if (!record) return []
-    if (!record.requirements) return []
-    
-    // Get all automation IDs from requirements
-    const automationIds = record.requirements
-      .filter((r: any) => {
-        const automationId = r.automationId || r.automation_id || r.web_automation?.automationId;
-        return !!automationId;
-      })
-      .map((r: any) => r.automationId || r.automation_id || r.web_automation.automationId)
-    
-    // Fetch automation data with webdata
-    let automationWebData: any[] = []
-    if (automationIds.length > 0) {
-      const { data: automations, error } = await supabase
-        .from('tm_automations')
-        .select('id, webdata')
-        .in('id', automationIds)
-      if (error) {
-        console.error('Error fetching automations:', error)
-      } else {
-        automationWebData = automations || []
-      }
-    }
-
-    return record.requirements.map((r: any) => {
-      const contextItem = record.requirement_context?.find((ctx: any) => String(ctx.requirementId) === String(r.id))
-      const automationId = r.automationId || r.automation_id || r.web_automation?.automationId;
-      const ctx = contextItem?.context || {}
-      
-      const docIds = r.kyc_document_ids || (r.kycDocumentId ? [r.kycDocumentId] : []);
-
-      // Find webdata from linked automation
-      const automation = automationWebData.find(a => a.id === automationId)
-      const webdata = automation?.webdata || []
-      
-      return {
-        ...r,
-        applicantTypes: r.applicantTypes || ctx.applicantTypes || (r.applicantType ? [r.applicantType] : []),
-        kyc_document_ids: docIds,
-        requiredDocumentCount: ctx.requiredDocumentCount || r.requiredDocumentCount || 1,
-        billingEntity: ctx.billingEntity || r.billingEntity || 'applicant',
-        instructions: ctx.instructions || r.instructions || '',
-        requirement_context: ctx,
-        web_automation: r.web_automation || { automationId: automationId },
-        webdata: webdata
-      }
-    })
-  }
-
   const refreshDepartments = async () => {
     try {
-      const { data: departmentsData, error: deptError } = await supabase
+      const { data: departmentsData } = await supabase
         .from('tm_departments')
         .select('*, tm_subdepartments(*)')
         .order('order', { ascending: true })
 
-      if (deptError) throw deptError
-      const { data: allReqRecords, error: reqError } = await supabase
-        .from('tm_class_requirements')
-        .select('*')
-
-      if (reqError) throw reqError
+      const { data: allReqRecords } = await supabase.from('tm_class_requirements').select('*')
 
       const processedDepartments = await Promise.all((departmentsData || []).map(async (dept) => {
         const resolvedSubdepartments = await Promise.all((dept.tm_subdepartments || []).map(async (subdept) => {
-          
+
           const findRecord = (cId: string | null, scId: string | null) => {
             return allReqRecords?.find(r => {
               const job = r.job_level || {}
               return String(job.department_id) === String(dept.id) &&
-                     String(job.subdepartment_id) === String(subdept.id) &&
-                     String(job.class_id || 'null') === String(cId || 'null') &&
-                     String(job.subclass_id || 'null') === String(scId || 'null')
+                String(job.subdepartment_id) === String(subdept.id) &&
+                String(job.class_id || 'null') === String(cId || 'null') &&
+                String(job.subclass_id || 'null') === String(scId || 'null')
             })
           }
 
-          const classes = (subdept.classes || []).map(async (cls) => {
+          const resolvedClasses = await Promise.all((subdept.classes || []).map(async (cls) => {
             const classRec = findRecord(String(cls.id), null)
-            const subClasses = (cls.subClasses || []).map(async (subCls) => {
+            const resolvedSubClasses = await Promise.all((cls.subClasses || []).map(async (subCls) => {
               const subClsRec = findRecord(String(cls.id), String(subCls.id))
-              return { 
-                ...subCls, 
-                requirements: await mapRequirementsData(subClsRec || {}),
-                job_specific_questions: subClsRec?.job_specific_questions || [] 
+              return {
+                ...subCls,
+                requirements: await mapRequirementsData(subClsRec),
+                job_specific_questions: subClsRec?.job_specific_questions || []
               }
-            })
-            const resolvedSubClasses = await Promise.all(subClasses)
-            return { 
-              ...cls, 
-              requirements: await mapRequirementsData(classRec || {}), 
+            }))
+            return {
+              ...cls,
+              requirements: await mapRequirementsData(classRec),
               job_specific_questions: classRec?.job_specific_questions || [],
               subClasses: resolvedSubClasses
             }
-          })
-
-          const resolvedClasses = await Promise.all(classes)
+          }))
 
           const subDeptRec = findRecord(null, null)
-
           return {
             ...subdept,
             classes: resolvedClasses,
-            upload_requirements: await mapRequirementsData(subDeptRec || {}),
+            upload_requirements: await mapRequirementsData(subDeptRec),
             job_specific_questions: subDeptRec?.job_specific_questions || []
           }
         }))
-        
-        return { 
-          ...dept, 
-          subdepartments: resolvedSubdepartments, 
-          tm_subdepartments: resolvedSubdepartments 
+        // IMPORTANT: Populate both tm_subdepartments AND subdepartments for sidebar compatibility
+        return {
+          ...dept,
+          tm_subdepartments: resolvedSubdepartments,
+          subdepartments: resolvedSubdepartments
         }
       }))
-
       setDepartments(processedDepartments)
-    } catch (error) {
-      setDepartments([])
-    }
+    } catch (error) { setDepartments([]) }
   }
 
-  useEffect(() => {
-    refreshDepartments()
-  }, [])
+
+  useEffect(() => { refreshDepartments() }, [])
 
   const handleDeptClick = (deptId: string) => setActiveDept(String(deptId))
   const handleSubdeptClick = (deptId: string, subdeptId: string) => {
@@ -350,133 +311,65 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   }
 
   const renderMainContent = () => {
-    const currentDept = departments.find(d => String(d.id) === String(activeDept))
+    const { currentDept, currentSubdept, currentClass, currentSubclass, reqs, questions } = activeSelection
     if (!currentDept) return <div className="p-10 text-center text-gray-400">Select a department from the sidebar to begin.</div>
+    if (!currentSubdept) return <div className="p-8 font-bold text-slate-400">Please select a sub-department.</div>
 
-    const currentSubdeptId = activeSubdept[String(currentDept.id)]
-    const currentSubdept = currentDept.tm_subdepartments?.find(s => String(s.id) === String(currentSubdeptId))
-
-    if (!currentSubdept) {
-      return (
-        <div className="p-8">
-          <h2 className="text-2xl font-bold mb-2">{currentDept.name}</h2>
-          <p className="text-muted-foreground italic">Select a subdepartment from the sidebar to view requirements.</p>
-        </div>
-      )
-    }
-
-    const activeClassKey = `${String(currentDept.id)}-${String(currentSubdept.id)}`
-    const currentClassId = activeClass[activeClassKey]
-    const currentClass = currentSubdept.classes?.find(c => String(c.id) === String(currentClassId))
-
-    const activeSubclassKey = `${activeClassKey}-${String(currentClassId)}`
-    const currentSubclassId = activeSubclass[activeSubclassKey]
-    const currentSubclass = currentClass?.subClasses?.find(sc => String(sc.id) === String(currentSubclassId))
-
-    const targetContext: EditingContext = currentSubclass 
-      ? { 
-          type: 'subclass', 
-          departmentId: currentDept.id, 
-          subdepartmentId: currentSubdept.id, 
-          classId: currentClass.id, 
-          subclassId: currentSubclass.id, 
-          subdepartmentName: currentSubdept.name, 
-          className: currentClass.name, 
-          subclassName: currentSubclass.name,
-          jobLevel: {
-            department_id: currentDept.id,
-            subdepartment_id: currentSubdept.id,
-            class_id: currentClass.id,
-            subclass_id: currentSubclass.id
-          }
-        }
+    const targetContext: EditingContext = currentSubclass
+      ? { type: 'subclass', departmentId: currentDept.id, subdepartmentId: currentSubdept.id, classId: currentClass.id, subclassId: currentSubclass.id, subdepartmentName: currentSubdept.name, className: currentClass.name, subclassName: currentSubclass.name, jobLevel: { department_id: currentDept.id, subdepartment_id: currentSubdept.id, class_id: currentClass.id, subclass_id: currentSubclass.id } }
       : currentClass
-      ? { 
-          type: 'class', 
-          departmentId: currentDept.id, 
-          subdepartmentId: currentSubdept.id, 
-          classId: currentClass.id, 
-          subdepartmentName: currentSubdept.name, 
-          className: currentClass.name,
-          jobLevel: {
-            department_id: currentDept.id,
-            subdepartment_id: currentSubdept.id,
-            class_id: currentClass.id,
-            subclass_id: null
-          }
-        }
-      : { 
-          type: 'subdepartment', 
-          departmentId: currentDept.id, 
-          subdepartmentId: currentSubdept.id, 
-          subdepartmentName: currentSubdept.name,
-          jobLevel: {
-            department_id: currentDept.id,
-            subdepartment_id: currentSubdept.id,
-            class_id: null,
-            subclass_id: null
-          }
-        }
-    
-    const reqsToDisplay = (currentSubclass ? currentSubclass.requirements : currentClass ? currentClass.requirements : currentSubdept.upload_requirements) || []
-    const questionsToDisplay = (currentSubclass ? currentSubclass.job_specific_questions : currentClass ? currentClass.job_specific_questions : currentSubdept.job_specific_questions) || []
-
-    const isDept1 = String(activeDept) === "1"
+        ? { type: 'class', departmentId: currentDept.id, subdepartmentId: currentSubdept.id, classId: currentClass.id, subdepartmentName: currentSubdept.name, className: currentClass.name, jobLevel: { department_id: currentDept.id, subdepartment_id: currentSubdept.id, class_id: currentClass.id, subclass_id: null } }
+        : { type: 'subdepartment', departmentId: currentDept.id, subdepartmentId: currentSubdept.id, subdepartmentName: currentSubdept.name, jobLevel: { department_id: currentDept.id, subdepartment_id: currentSubdept.id, class_id: null, subclass_id: null } }
 
     return (
       <div className="space-y-8">
         <div className="flex items-center justify-between border-b pb-4">
           <div>
             <h2 className="text-xl font-bold flex items-center gap-2">
-               {currentSubclass ? <Layers className="h-5 w-5 text-orange-500" /> : currentClass ? <Layers className="h-5 w-5 text-purple-500" /> : <FileText className="h-5 w-5 text-green-500" />}
-               {currentSubclass ? currentSubclass.name : currentClass ? currentClass.name : currentSubdept.name}
+              {currentSubclass ? <Layers className="h-5 w-5 text-orange-500" /> : currentClass ? <Layers className="h-5 w-5 text-purple-500" /> : <FileText className="h-5 w-5 text-green-500" />}
+              {currentSubclass ? currentSubclass.name : currentClass ? currentClass.name : currentSubdept.name}
             </h2>
             <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
-               <Badge variant="outline" className="bg-slate-100">{currentDept.name}</Badge>
-               <span>&rsaquo;</span>
-               <span>{currentSubdept.name}</span>
-               {currentClass && <><span className="text-slate-300">&rsaquo;</span><span>{currentClass.name}</span></>}
-               {currentSubclass && <><span className="text-slate-300">&rsaquo;</span><span>{currentSubclass.name}</span></>}
+              <Badge variant="outline" className="bg-slate-100">{currentDept.name}</Badge>
+              <span>&rsaquo;</span><span>{currentSubdept.name}</span>
+              {currentClass && <><span className="text-slate-300">&rsaquo;</span><span>{currentClass.name}</span></>}
+              {currentSubclass && <><span className="text-slate-300">&rsaquo;</span><span>{currentSubclass.name}</span></>}
             </div>
           </div>
           <Button onClick={() => { setAddContext(targetContext); setIsAddDialogOpen(true); }}>
-            <Plus className="h-4 w-4 mr-2" /> Add Requirements
+            <Plus className="h-4 w-4 mr-2" /> Add Items
           </Button>
         </div>
 
-        {isDept1 ? (
+        {String(activeDept) === "1" ? (
           <div className="space-y-12">
-            <section>
-              <div className="flex items-center gap-2 mb-4"><div className="h-8 w-1 bg-blue-600 rounded-full" /><h3 className="text-lg font-semibold">General Requirements</h3></div>
-              {renderRequirements(reqsToDisplay.filter(r => r.category === 'general'), targetContext)}
-            </section>
-            <section>
-              <div className="flex items-center gap-2 mb-4"><div className="h-8 w-1 bg-amber-500 rounded-full" /><h3 className="text-lg font-semibold">Upload Processing Requirements</h3></div>
-              {renderRequirements(reqsToDisplay.filter(r => r.category === 'processing' || !r.category), targetContext)}
-            </section>
-            <section>
-              <div className="flex items-center gap-2 mb-4"><div className="h-8 w-1 bg-emerald-500 rounded-full" /><h3 className="text-lg font-semibold">Upload Issuance Requirements</h3></div>
-              {renderRequirements(reqsToDisplay.filter(r => r.category === 'issuance'), targetContext)}
-            </section>
+            <section><div className="flex items-center gap-2 mb-4 font-semibold">General Requirements</div>{renderRequirements(reqs.filter(r => r.category === 'general'), targetContext)}</section>
+            <section><div className="flex items-center gap-2 mb-4 font-semibold">Processing Requirements</div>{renderRequirements(reqs.filter(r => r.category === 'processing' || !r.category), targetContext)}</section>
+            <section><div className="flex items-center gap-2 mb-4 font-semibold">Issuance Requirements</div>{renderRequirements(reqs.filter(r => r.category === 'issuance'), targetContext)}</section>
           </div>
-        ) : (
-          renderRequirements(reqsToDisplay, targetContext)
-        )}
-        
-        {/* Job Specific Questions Section */}
+        ) : renderRequirements(reqs, targetContext)}
+
         <section className="pt-8 border-t">
-           <div className="flex items-center gap-2 mb-4"><div className="h-8 w-1 bg-indigo-600 rounded-full" /><h3 className="text-lg font-semibold">Job Specific Questions</h3></div>
-           {renderQuestions(questionsToDisplay, targetContext)}
+          <div className="flex items-center gap-2 mb-4 font-semibold">Job Specific Questions</div>
+          {renderQuestions(questions, targetContext)}
         </section>
       </div>
     )
   }
 
- const renderQuestions = (questions: JobQuestion[], context: EditingContext) => {
+  // --- RENDER QUESTIONS HELPER ---
+  const renderQuestions = (questions: JobQuestion[], context: EditingContext) => {
+    const grouped = (questions || []).reduce((acc, q) => {
+      const cat = q.category || "General / Uncategorized";
+      if (!acc[cat]) acc[cat] = [];
+      acc[cat].push(q);
+      return acc;
+    }, {} as Record<string, JobQuestion[]>);
+
     return (
       <div className="border rounded-lg overflow-hidden bg-white shadow-sm">
         <div className="overflow-auto max-h-[600px]">
-           <Table>
+          <Table>
             <TableHeader className="bg-slate-50 sticky top-0 z-10">
               <TableRow>
                 <TableHead className="w-12 text-center border-r">#</TableHead>
@@ -490,81 +383,77 @@ export default function UploadRequirements({ departments: initialDepartments }: 
               </TableRow>
             </TableHeader>
             <TableBody>
-              {questions.length > 0 ? (
-                questions.map((q, idx) => {
-                    const linkedMasterField = q.linked_field_id 
-                        ? masterFields.find(mf => String(mf.id) === String(q.linked_field_id)) 
-                        : null;
-
+              {Object.entries(grouped).map(([category, items]) => (
+                <React.Fragment key={category}>
+                  <TableRow className="bg-slate-50 border-y"><TableCell colSpan={4} className="py-2 px-4 font-bold text-xs uppercase text-slate-500">{category}</TableCell></TableRow>
+                  {items.map((q, idx) => {
+                    const linkedMasterField = q.linked_field_id
+                      ? masterFields.find(mf => String(mf.id) === String(q.linked_field_id))
+                      : null;
                     return (
-                        <TableRow key={q.id || idx} className="hover:bg-slate-50/50">
-                            <TableCell className="text-center font-mono text-xs text-muted-foreground border-r">{idx + 1}</TableCell>
-                            <TableCell className="border-r font-medium">{q.label}</TableCell>
-                            <TableCell className="border-r"><Badge variant="outline" className="capitalize bg-slate-100">{q.type}</Badge></TableCell>
-                            
-                            {/* New Default Value Cell */}
-                            <TableCell className="border-r">
-                                {q.default_value ? (
-                                    <span className="text-xs font-mono bg-slate-50 px-1.5 py-0.5 rounded border text-slate-600">
-                                        {q.default_value}
-                                    </span>
-                                ) : (
-                                    <span className="text-[10px] text-slate-400 italic">None</span>
-                                )}
-                            </TableCell>
+                      <TableRow key={q.id} className="hover:bg-blue-50/30">
+                        <TableCell className="text-center font-mono text-xs text-muted-foreground border-r">{idx + 1}</TableCell>
+                        <TableCell className="border-r font-medium">{q.label}</TableCell>
+                        <TableCell className="border-r"><Badge variant="outline" className="capitalize bg-slate-100">{q.type}</Badge></TableCell>
 
-                            <TableCell className="border-r">
-                                {q.required ? <Badge className="bg-red-50 text-red-600 hover:bg-red-100">Required</Badge> : <span className="text-xs text-slate-400">Optional</span>}
-                            </TableCell>
-                            <TableCell className="border-r">
-                                <div className="flex flex-wrap gap-1">
-                                    {(q.applicant_types || []).length > 0 ? q.applicant_types?.map(t => (
-                                        <Badge key={t} variant="secondary" className="text-[10px] h-4 px-1 capitalize">{t}</Badge>
-                                    )) : <span className="text-xs text-slate-400">All</span>}
-                                </div>
-                            </TableCell>
-                            <TableCell className="border-r text-xs">
-                                {linkedMasterField ? (
-                                    <div className="flex items-center gap-1 text-blue-600">
-                                        <Database className="h-3 w-3" />
-                                        <span>Linked: {linkedMasterField.label}</span>
-                                    </div>
-                                ) : (q.options && q.options.length > 0) ? (
-                                    <span className="text-slate-600" title={q.options.join(', ')}>
-                                        {q.options.length} Manual Options
-                                    </span>
-                                ) : <span className="text-slate-400">-</span>}
-                            </TableCell>
-                            <TableCell className="text-right">
-                                <div className="flex justify-end gap-1">
-                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600" onClick={() => { 
-                                        setEditingQuestion(q); 
-                                        setEditingContext(context); 
-                                        setIsEditQuestionDialogOpen(true); 
-                                    }}>
-                                        <Pencil className="h-3.5 w-3.5" />
-                                    </Button>
-                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => { 
-                                        setEditingContext(context); 
-                                        setDeleteContext({ type: context.type, index: idx, requirementId: q.id, isQuestion: true }); 
-                                        setIsDeleteDialogOpen(true); 
-                                    }}>
-                                        <Trash2 className="h-3.5 w-3.5" />
-                                    </Button>
-                                </div>
-                            </TableCell>
-                        </TableRow>
+                        {/* New Default Value Cell */}
+                        <TableCell className="border-r">
+                          {q.default_value ? (
+                            <span className="text-xs font-mono bg-slate-50 px-1.5 py-0.5 rounded border text-slate-600">
+                              {q.default_value}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-400 italic">None</span>
+                          )}
+                        </TableCell>
+
+                        <TableCell className="border-r">
+                          {q.required ? <Badge className="bg-red-50 text-red-600 hover:bg-red-100">Required</Badge> : <span className="text-xs text-slate-400">Optional</span>}
+                        </TableCell>
+                        <TableCell className="border-r">
+                          <div className="flex flex-wrap gap-1">
+                            {(q.applicant_types || []).length > 0 ? q.applicant_types?.map(t => (
+                              <Badge key={t} variant="secondary" className="text-[10px] h-4 px-1 capitalize">{t}</Badge>
+                            )) : <span className="text-xs text-slate-400">All</span>}
+                          </div>
+                        </TableCell>
+                        <TableCell className="border-r text-xs">
+                          {linkedMasterField ? (
+                            <div className="flex items-center gap-1 text-blue-600">
+                              <Database className="h-3 w-3" />
+                              <span>Linked: {linkedMasterField.label}</span>
+                            </div>
+                          ) : (q.options && q.options.length > 0) ? (
+                            <span className="text-slate-600" title={q.options.join(', ')}>
+                              {q.options.length} Manual Options
+                            </span>
+                          ) : <span className="text-slate-400">-</span>}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600" onClick={() => {
+                              setEditingQuestion(q);
+                              setEditingContext(context);
+                              setIsEditQuestionDialogOpen(true);
+                            }}>
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => {
+                              setEditingContext(context);
+                              setDeleteContext({ type: context.type, index: idx, requirementId: q.id, isQuestion: true });
+                              setIsDeleteDialogOpen(true);
+                            }}>
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
                     )
-                })
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground italic bg-slate-50/30">
-                     No job specific questions configured.
-                  </TableCell>
-                </TableRow>
-              )}
+                  })}
+                </React.Fragment>
+              ))}
             </TableBody>
-           </Table>
+          </Table>
         </div>
       </div>
     )
@@ -610,12 +499,12 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                           {(() => {
                             const hasWebData = req.webdata && req.webdata.length > 0;
                             return hasWebData ? (
-                              <Badge 
+                              <Badge
                                 variant={isExpanded ? "default" : "outline"}
                                 className={cn("cursor-pointer hover:bg-blue-100 hover:text-blue-700 transition-colors", isExpanded && "bg-blue-600 hover:bg-blue-700")}
                                 onClick={() => toggleWebDataRow(req.id || `temp-${idx}`)}
                               >
-                                {isExpanded ? <ChevronDown className="h-3 w-3 mr-1"/> : <Code className="h-3 w-3 mr-1"/>}
+                                {isExpanded ? <ChevronDown className="h-3 w-3 mr-1" /> : <Code className="h-3 w-3 mr-1" />}
                                 {req.webdata.length} Fields
                               </Badge>
                             ) : (
@@ -626,8 +515,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                         <TableCell className="border-r">{getAutomationDisplay(req)}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600" onClick={() => { 
-                              setEditingRequirement(req); 
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600" onClick={() => {
+                              setEditingRequirement(req);
                               setEditingContext({
                                 ...context,
                                 jobLevel: context.jobLevel || {
@@ -636,22 +525,22 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                                   class_id: context.classId || null,
                                   subclass_id: context.subclassId || null
                                 }
-                              }); 
-                              setIsEditDialogOpen(true); 
+                              });
+                              setIsEditDialogOpen(true);
                             }}>
                               <Pencil className="h-3.5 w-3.5" />
                             </Button>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => { 
-                              setEditingContext(context); 
-                              setDeleteContext({ type: context.type, index: idx, requirementId: req.id, isQuestion: false }); 
-                              setIsDeleteDialogOpen(true); 
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => {
+                              setEditingContext(context);
+                              setDeleteContext({ type: context.type, index: idx, requirementId: req.id, isQuestion: false });
+                              setIsDeleteDialogOpen(true);
                             }}>
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
                           </div>
                         </TableCell>
                       </TableRow>
-                      
+
                       {/* EXPANDED WEB DATA ROW */}
                       {isExpanded && hasWebData && (
                         <TableRow className="bg-slate-50 hover:bg-slate-50">
@@ -680,10 +569,10 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                                         <TableCell className="py-2 text-xs"><Badge variant="secondary" className="text-[10px] h-5">{field.fieldType}</Badge></TableCell>
                                         <TableCell className="py-2 text-xs capitalize text-slate-500">{field.entityType}</TableCell>
                                         <TableCell className="py-2 text-xs text-slate-400">
-                                          {field.fieldType === 'document' 
+                                          {field.fieldType === 'document'
                                             ? `Document: ${kycDocuments.find(d => d.id === field.kycDocumentId)?.display_name || 'Unknown'}`
-                                            : field.linkedMasterFields?.length 
-                                              ? field.linkedMasterFields.map(m => m.label).join(", ") 
+                                            : field.linkedMasterFields?.length
+                                              ? field.linkedMasterFields.map(m => m.label).join(", ")
                                               : "Manual / None"}
                                         </TableCell>
                                       </TableRow>
@@ -701,7 +590,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
               ) : (
                 <TableRow>
                   <TableCell colSpan={8} className="text-center py-8 text-muted-foreground italic bg-slate-50/30">
-                     No requirements found in this section.
+                    No requirements found in this section.
                   </TableCell>
                 </TableRow>
               )}
@@ -754,11 +643,11 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const getFunctionDisplay = (req: RequirementTableEntry) => {
     const computedFunction = req.computed_function || req.computedFunction || 'none'
     const functionItem = COMPUTED_FUNCTIONS.find(fn => fn.value === computedFunction)
-    
+
     if (!functionItem || computedFunction === 'none') {
       return <span className="text-gray-400 text-[11px]">None</span>
     }
-    
+
     return (
       <div className="flex items-center gap-1">
         <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">
@@ -814,7 +703,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         .eq('job_level', JSON.stringify(payload.job_level))
         .maybeSingle();
       if (fetchError) throw fetchError;
-      
+
       if (existing) {
         const updateData: any = { updated_at: payload.updated_at };
         if (payload.requirements) updateData.requirements = payload.requirements;
@@ -858,7 +747,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         .maybeSingle();
       if (fetchError) throw fetchError;
       if (!existing) throw new Error('No existing record found');
-      const updatedRequirements = existing.requirements.map((req: any) => 
+      const updatedRequirements = existing.requirements.map((req: any) =>
         req.id === updatedRequirement.id ? updatedRequirement : req
       );
       const { error: updateError } = await supabase
@@ -880,52 +769,52 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const handleSaveQuestion = async (updatedQuestion: JobQuestion) => {
     if (!editingContext) return;
     try {
-        setIsSubmitting(true);
-        // Construct Job Level
-        const jobLevel = {
-            department_id: Number(editingContext.departmentId),
-            subdepartment_id: Number(editingContext.subdepartmentId),
-            class_id: editingContext.classId ? Number(editingContext.classId) : null,
-            subclass_id: editingContext.subclassId ? Number(editingContext.subclassId) : null,
-            level: editingContext.type === 'subdepartment' ? 2 : editingContext.type === 'class' ? 3 : 4
-        }
-        
-        // Fetch Existing
-        const { data: existing, error: fetchError } = await supabase
-            .from('tm_class_requirements')
-            .select('*')
-            .eq('job_level', JSON.stringify(jobLevel))
-            .maybeSingle();
+      setIsSubmitting(true);
+      // Construct Job Level
+      const jobLevel = {
+        department_id: Number(editingContext.departmentId),
+        subdepartment_id: Number(editingContext.subdepartmentId),
+        class_id: editingContext.classId ? Number(editingContext.classId) : null,
+        subclass_id: editingContext.subclassId ? Number(editingContext.subclassId) : null,
+        level: editingContext.type === 'subdepartment' ? 2 : editingContext.type === 'class' ? 3 : 4
+      }
 
-        if (fetchError) throw fetchError;
-        if (!existing) throw new Error('No existing record found');
+      // Fetch Existing
+      const { data: existing, error: fetchError } = await supabase
+        .from('tm_class_requirements')
+        .select('*')
+        .eq('job_level', JSON.stringify(jobLevel))
+        .maybeSingle();
 
-        // Update Question in Array
-        const existingQuestions = existing.job_specific_questions || [];
-        const updatedQuestions = existingQuestions.map((q: any) => 
-            q.id === updatedQuestion.id ? updatedQuestion : q
-        );
+      if (fetchError) throw fetchError;
+      if (!existing) throw new Error('No existing record found');
 
-        // Save
-        const { error: updateError } = await supabase
-            .from('tm_class_requirements')
-            .update({ 
-                job_specific_questions: updatedQuestions, 
-                updated_at: new Date().toISOString() 
-            })
-            .eq('id', existing.id);
+      // Update Question in Array
+      const existingQuestions = existing.job_specific_questions || [];
+      const updatedQuestions = existingQuestions.map((q: any) =>
+        q.id === updatedQuestion.id ? updatedQuestion : q
+      );
 
-        if (updateError) throw updateError;
+      // Save
+      const { error: updateError } = await supabase
+        .from('tm_class_requirements')
+        .update({
+          job_specific_questions: updatedQuestions,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existing.id);
 
-        await refreshDepartments();
-        setIsEditQuestionDialogOpen(false);
-        toast({ title: "Success", description: "Question updated successfully" });
+      if (updateError) throw updateError;
+
+      await refreshDepartments();
+      setIsEditQuestionDialogOpen(false);
+      toast({ title: "Success", description: "Question updated successfully" });
 
     } catch (error) {
-        console.error(error);
-        toast({ title: "Error", description: "Failed to update question", variant: "destructive" });
+      console.error(error);
+      toast({ title: "Error", description: "Failed to update question", variant: "destructive" });
     } finally {
-        setIsSubmitting(false);
+      setIsSubmitting(false);
     }
   }
 
@@ -950,13 +839,13 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       let updatePayload: any = { updated_at: new Date().toISOString() };
 
       if (deleteContext?.isQuestion) {
-          const updatedQuestions = (existing.job_specific_questions || []).filter((q: any) => q.id !== requirementId);
-          const reorderedQuestions = updatedQuestions.map((q: any, index: number) => ({ ...q, order: index }));
-          updatePayload.job_specific_questions = reorderedQuestions;
+        const updatedQuestions = (existing.job_specific_questions || []).filter((q: any) => q.id !== requirementId);
+        const reorderedQuestions = updatedQuestions.map((q: any, index: number) => ({ ...q, order: index }));
+        updatePayload.job_specific_questions = reorderedQuestions;
       } else {
-          const updatedRequirements = (existing.requirements || []).filter((req: any) => req.id !== requirementId);
-          const reorderedRequirements = updatedRequirements.map((req: any, index: number) => ({ ...req, order: index }));
-          updatePayload.requirements = reorderedRequirements;
+        const updatedRequirements = (existing.requirements || []).filter((req: any) => req.id !== requirementId);
+        const reorderedRequirements = updatedRequirements.map((req: any, index: number) => ({ ...req, order: index }));
+        updatePayload.requirements = reorderedRequirements;
       }
 
       const { error: updateError } = await supabase
@@ -994,42 +883,25 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       />
       <main className="flex-1 overflow-hidden">
         <div className="h-full overflow-auto p-4 space-y-4">
-          <header className="flex items-center justify-between">
-            <div>
-              <h2 className="text-3xl font-bold tracking-tight">Upload Processing Requirements</h2>
-              <p className="text-muted-foreground">
-                {departments.find(d => String(d.id) === activeDept)?.name} 
-                {activeSubdept[activeDept] && ` > ${departments.find(d => String(d.id) === activeDept)?.tm_subdepartments?.find(s => String(s.id) === activeSubdept[activeDept])?.name}`}
-              </p>
-            </div>
-          </header>
-          {!activeDept ? (
-            <Card>
-              <CardHeader><CardTitle>Upload Processing Requirements</CardTitle><CardDescription>Select a department</CardDescription></CardHeader>
-              <CardContent className="p-4 text-center py-8"><FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" /><p className="text-muted-foreground">Choose a department to manage upload requirements.</p></CardContent>
-            </Card>
-          ) : renderMainContent()}
+          <header className="flex items-center justify-between"><div><h2 className="text-3xl font-bold tracking-tight">Requirement Logic Manager</h2></div></header>
+          {!activeDept ? <Card className="p-20 text-center"><FileText className="mx-auto h-12 w-12 text-slate-300 mb-4" /><p>Select a department to manage logic.</p></Card> : renderMainContent()}
+
           <AddRequirementsDialog isOpen={isAddDialogOpen} onOpenChange={setIsAddDialogOpen} onSubmit={handleAddRequirements} isSubmitting={isSubmitting} context={addContext} />
-          
           <EditRequirementDialog isOpen={isEditDialogOpen} onOpenChange={setIsEditDialogOpen} requirement={editingRequirement} onSave={handleSaveRequirement} isSubmitting={isSubmitting} context={editingContext} />
-          
-          <EditJobQuestionDialog 
-             isOpen={isEditQuestionDialogOpen} 
-             onOpenChange={setIsEditQuestionDialogOpen} 
-             question={editingQuestion} 
-             onSave={handleSaveQuestion} 
-             isSubmitting={isSubmitting} 
-             masterFields={masterFields}
+
+          <EditJobQuestionDialog
+            isOpen={isEditQuestionDialogOpen}
+            onOpenChange={setIsEditQuestionDialogOpen}
+            question={editingQuestion}
+            /* Correctly pass only questions from the currently active selection */
+            allQuestions={activeSelection.questions || []}
+            onSave={handleSaveQuestion}
+            isSubmitting={isSubmitting}
+            masterFields={masterFields}
           />
 
           <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-            <DialogContent>
-              <DialogHeader><DialogTitle>Delete {deleteContext?.isQuestion ? 'Question' : 'Requirement'}</DialogTitle><DialogDescription>Are you sure?</DialogDescription></DialogHeader>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>Cancel</Button>
-                <Button variant="destructive" onClick={() => deleteContext?.requirementId && handleDeleteRequirement(deleteContext.requirementId)} disabled={isSubmitting}>{isSubmitting ? 'Deleting...' : 'Delete'}</Button>
-              </DialogFooter>
-            </DialogContent>
+            <DialogContent><DialogHeader><DialogTitle>Confirm Delete</DialogTitle></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>Cancel</Button><Button variant="destructive" onClick={() => deleteContext?.requirementId && handleDeleteRequirement(deleteContext.requirementId)} disabled={isSubmitting}>Delete</Button></DialogFooter></DialogContent>
           </Dialog>
         </div>
       </main>

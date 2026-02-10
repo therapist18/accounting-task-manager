@@ -114,6 +114,7 @@ interface WebDataGroup {
     linkedMasterFieldId?: number;
     linkedMasterFields?: number[];
     linkedKycDocuments?: string[];
+    linkedJobQuestionId?: string;
     documentLogic?: 'merge' | 'fallback';
     dateFormat?: 'iso' | 'object_split' | 'dd_mm_yyyy';
     extractionMode?: 'latest' | 'all';
@@ -333,11 +334,11 @@ function EntityConfigurator({
   );
 }
 
-// --- Updated Array Configurator ---
-function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
+function ArrayConfigurator({ group, masterFields, kycDocuments, jobQuestions, onUpdate }: {
   group: WebDataGroup;
   masterFields: JobField[];
   kycDocuments: KYCDocument[];
+  jobQuestions: any[];
   onUpdate: (items: any[]) => void;
 }) {
   const items = group.arrayItems || [];
@@ -356,7 +357,9 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
       type: 'text',
       entityTypes: group.entityTypes || ['principal'],
       dependantRelationships: [],
-      directorType: undefined
+      directorType: undefined,
+      linkedMasterFields: [],
+      linkedKycDocuments: []
     };
     onUpdate([...items, newItem]);
   };
@@ -380,12 +383,8 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
   const linkMasterField = (idx: number, field: JobField) => {
     const newItems = [...items];
     const currentLinkedFields = newItems[idx].linkedMasterFields || [];
-
     if (!currentLinkedFields.includes(field.id)) {
-      newItems[idx] = {
-        ...newItems[idx],
-        linkedMasterFields: [...currentLinkedFields, field.id]
-      };
+      newItems[idx] = { ...newItems[idx], linkedMasterFields: [...currentLinkedFields, field.id] };
       onUpdate(newItems);
     }
   };
@@ -393,23 +392,15 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
   const unlinkMasterField = (idx: number, fieldId: number) => {
     const newItems = [...items];
     const currentLinkedFields = newItems[idx].linkedMasterFields || [];
-
-    newItems[idx] = {
-      ...newItems[idx],
-      linkedMasterFields: currentLinkedFields.filter(id => id !== fieldId)
-    };
+    newItems[idx] = { ...newItems[idx], linkedMasterFields: currentLinkedFields.filter(id => id !== fieldId) };
     onUpdate(newItems);
   };
 
   const linkDocument = (idx: number, docId: string) => {
     const newItems = [...items];
     const currentLinkedDocs = newItems[idx].linkedKycDocuments || [];
-
     if (!currentLinkedDocs.includes(docId)) {
-      newItems[idx] = {
-        ...newItems[idx],
-        linkedKycDocuments: [...currentLinkedDocs, docId]
-      };
+      newItems[idx] = { ...newItems[idx], linkedKycDocuments: [...currentLinkedDocs, docId] };
       onUpdate(newItems);
     }
   };
@@ -417,11 +408,19 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
   const unlinkDocument = (idx: number, docId: string) => {
     const newItems = [...items];
     const currentLinkedDocs = newItems[idx].linkedKycDocuments || [];
+    newItems[idx] = { ...newItems[idx], linkedKycDocuments: currentLinkedDocs.filter(id => id !== docId) };
+    onUpdate(newItems);
+  };
 
-    newItems[idx] = {
-      ...newItems[idx],
-      linkedKycDocuments: currentLinkedDocs.filter(id => id !== docId)
-    };
+  const linkJobQuestion = (idx: number, questionId: string) => {
+    const newItems = [...items];
+    newItems[idx] = { ...newItems[idx], linkedJobQuestionId: questionId };
+    onUpdate(newItems);
+  };
+
+  const unlinkJobQuestion = (idx: number) => {
+    const newItems = [...items];
+    newItems[idx] = { ...newItems[idx], linkedJobQuestionId: undefined };
     onUpdate(newItems);
   };
 
@@ -441,7 +440,7 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
           <ChevronRight className="h-3 w-3 opacity-50" />
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-6xl max-h-[85vh] p-0">
+      <DialogContent className="max-w-7xl max-h-[85vh] p-0">
         <DialogHeader className="px-6 py-4 border-b bg-slate-50">
           <DialogTitle className="flex items-center gap-2 text-slate-800">
             <TableIcon className="h-4 w-4 text-blue-600" />
@@ -455,298 +454,133 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
           </Button>
         </DialogHeader>
 
-        {/* Table */}
-        <ScrollArea className="max-h-[400px]">
+        <ScrollArea className="max-h-[600px]">
           <div className="w-full">
             <Table>
               <TableHeader className="bg-slate-100/50 border-b border-slate-200 sticky top-0 z-10">
                 <TableRow>
-                  <TableHead className="w-[15%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Display Name</TableHead>
-                  <TableHead className="w-[15%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Web Key (JSON Property)</TableHead>
-                  <TableHead className="w-[15%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Data Type & Format</TableHead>
-                  <TableHead className="w-[15%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Entity Scope</TableHead>
-                  <TableHead className="w-[20%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Source Mapping</TableHead>
-                  <TableHead className="w-[10%] text-[10px] font-bold text-slate-500 uppercase tracking-wider">Extraction Mode</TableHead>
-                  <TableHead className="w-[10%] text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">Action</TableHead>
+                  <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase">Display Name</TableHead>
+                  <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase">Web Key</TableHead>
+                  <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase">Type</TableHead>
+                  <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase">Scope</TableHead>
+                  <TableHead className="w-[30%] text-[10px] font-bold text-slate-500 uppercase">Source Mapping</TableHead>
+                  <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase">Mode</TableHead>
+                  <TableHead className="w-[10%] text-center text-[10px] font-bold text-slate-500 uppercase">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {items.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="py-12">
-                      <div className="flex flex-col items-center justify-center text-slate-300">
-                        <TableIcon className="h-10 w-10 mb-2 opacity-20" />
-                        <p className="text-sm">No columns defined yet.</p>
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                  <TableRow><TableCell colSpan={7} className="py-12 text-center text-slate-400">No columns defined.</TableCell></TableRow>
                 ) : (
-                  items.map((item, i) => {
-                    const linkedField = masterFields.find(f => f.id === item.linkedMasterFieldId);
-                    const isComputed = linkedField?.is_computed || linkedField?.computed_config?.is_computed;
-
-                    return (
-                      <TableRow key={i} className="hover:bg-slate-50 transition-colors group">
-
-                        {/* 1. Display Name */}
-                        <TableCell className="p-3">
-                          <Input
-                            value={item.displayName || ''}
-                            onChange={e => handleItemChange(i, 'displayName', e.target.value)}
-                            placeholder="e.g. First Name"
-                            className="h-8 text-sm border-slate-200 focus:border-blue-400"
-                          />
-                        </TableCell>
-
-                        {/* 2. Web Key */}
-                        <TableCell className="p-3">
-                          <Input
-                            value={item.variableName}
-                            onChange={e => handleItemChange(i, 'variableName', e.target.value)}
-                            placeholder="e.g. first_name"
-                            className="h-8 text-sm border-slate-200 focus:border-blue-400"
-                          />
-                        </TableCell>
-
-                        {/* 3. Type & Format */}
-                        <TableCell className="p-3">
-                          <div className="flex flex-col gap-2">
-                            <Select value={item.type} onValueChange={(val) => handleItemChange(i, 'type', val)}>
-                              <SelectTrigger className="h-8 text-sm border-slate-200"><SelectValue /></SelectTrigger>
+                  items.map((item, i) => (
+                    <TableRow key={i} className="hover:bg-slate-50 transition-colors">
+                      <TableCell className="p-2">
+                        <Input value={item.displayName || ''} onChange={e => handleItemChange(i, 'displayName', e.target.value)} className="h-8 text-sm" />
+                      </TableCell>
+                      <TableCell className="p-2">
+                        <Input value={item.variableName} onChange={e => handleItemChange(i, 'variableName', e.target.value)} className="h-8 text-sm" />
+                      </TableCell>
+                      <TableCell className="p-2">
+                        <div className="flex flex-col gap-1">
+                          <Select value={item.type} onValueChange={(val) => handleItemChange(i, 'type', val)}>
+                            <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="text">Text</SelectItem>
+                              <SelectItem value="number">Number</SelectItem>
+                              <SelectItem value="date">Date</SelectItem>
+                              <SelectItem value="boolean">Boolean</SelectItem>
+                              <SelectItem value="document">Document</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {item.type === 'date' && (
+                            <Select value={item.dateFormat || 'iso'} onValueChange={(val) => handleItemChange(i, 'dateFormat', val)}>
+                              <SelectTrigger className="h-7 text-[10px] bg-blue-50"><SelectValue /></SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="text">Text</SelectItem>
-                                <SelectItem value="number">Number</SelectItem>
-                                <SelectItem value="date">Date</SelectItem>
-                                <SelectItem value="boolean">Boolean</SelectItem>
-                                <SelectItem value="document">Document</SelectItem>
+                                <SelectItem value="iso">YYYY-MM-DD</SelectItem>
+                                <SelectItem value="object_split">Object</SelectItem>
+                                <SelectItem value="dd_mm_yyyy">DD/MM/YYYY</SelectItem>
                               </SelectContent>
                             </Select>
-
-                            {item.type === 'date' && (
-                              <Select value={item.dateFormat || 'iso'} onValueChange={(val) => handleItemChange(i, 'dateFormat', val)}>
-                                <SelectTrigger className="h-7 text-[10px] bg-blue-50 text-blue-700 border-blue-100">
-                                  <span className="truncate">Fmt: <SelectValue /></span>
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="iso">YYYY-MM-DD</SelectItem>
-                                  <SelectItem value="object_split">Object &#123;d, m, y&#125;</SelectItem>
-                                  <SelectItem value="dd_mm_yyyy">DD/MM/YYYY</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            )}
-                          </div>
-                        </TableCell>
-
-                        {/* 4. Entity Scope */}
-                        <TableCell className="p-3">
-                          <EntityConfigurator
-                            group={{
-                              id: `array-item-${i}`,
-                              efnsDisplayName: item.variableName || 'Array Item',
-                              variableName: item.variableName || `item_${i}`,
-                              fieldType: 'text',
-                              entityTypes: item.entityTypes || group.entityTypes || ['principal'],
-                              dependantRelationships: item.dependantRelationships || [],
-                              directorType: item.directorType,
-                              linkedMasterFields: [],
-                              arrayItems: []
-                            }}
-                            onUpdate={(updates) => {
-                              const newItems = [...items];
-                              newItems[i] = {
-                                ...newItems[i],
-                                entityTypes: updates.entityTypes,
-                                dependantRelationships: updates.dependantRelationships,
-                                directorType: updates.directorType
-                              };
-                              onUpdate(newItems);
-                            }}
-                          />
-                        </TableCell>
-
-                        {/* 5. Source Mapping */}
-                        <TableCell className="p-3">
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="p-2">
+                        <EntityConfigurator
+                          group={{ ...item, id: `item-${i}`, fieldType: item.type } as any}
+                          onUpdate={(updates) => handleItemChange(i, 'entityTypes', updates.entityTypes)}
+                        />
+                      </TableCell>
+                      <TableCell className="p-2">
+                        <div className="space-y-3">
                           {item.type === 'document' ? (
-                            // Document Selection UI
-                            <div className="space-y-2">
-                              <div className="flex items-center gap-2 text-xs font-semibold text-amber-600 uppercase">
-                                <FileText className="h-3 w-3" />
-                                Document Selection
-                              </div>
-
-                              {/* Display linked documents */}
-                              <div className="space-y-1">
-                                {item.linkedKycDocuments && item.linkedKycDocuments.length > 0 ? (
-                                  item.linkedKycDocuments.map((docId) => {
-                                    const doc = kycDocuments.find(d => d.id === docId);
-                                    if (!doc) return null;
-                                    return (
-                                      <div key={doc.id} className="flex items-center gap-2 p-2 bg-amber-50 border border-amber-200 rounded-md">
-                                        <FileText className="h-3.5 w-3.5 text-amber-600" />
-                                        <span className="text-sm text-amber-700 font-medium truncate flex-1">
-                                          {doc.display_name || doc.name}
-                                        </span>
-                                        <Button
-                                          size="icon"
-                                          variant="ghost"
-                                          className="h-5 w-5 text-red-500 hover:bg-red-50"
-                                          onClick={() => unlinkDocument(i, doc.id)}
-                                        >
-                                          <X className="h-3 w-3" />
-                                        </Button>
-                                      </div>
-                                    );
-                                  })
-                                ) : (
-                                  <div className="flex items-center px-3 h-8 rounded-md border bg-slate-50 border-slate-200 text-slate-400 italic text-sm">
-                                    <FileText className="h-3.5 w-3.5 mr-2 opacity-70" />
-                                    <span className="truncate font-medium">
-                                      No documents selected
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Multi-select document picker */}
-                              <div className="flex gap-1">
-                                <MultiDocumentPicker
-                                  availableDocuments={kycDocuments}
-                                  linkedDocumentIds={item.linkedKycDocuments || []}
-                                  onSelect={(doc) => linkDocument(i, doc.id)}
-                                />
-                              </div>
-                            </div>
-                          ) : (
-                            // Standard Field Selection UI
-                            <div className="space-y-2">
-                              <div className="flex items-center gap-2 text-xs font-semibold text-slate-600 uppercase">
-                                <Database className="h-3 w-3" />
-                                Database Fields
-                              </div>
-
-                              {/* Display linked fields */}
-                              <div className="space-y-1">
-                                {item.linkedMasterFields && item.linkedMasterFields.length > 0 ? (
-                                  item.linkedMasterFields.map((fieldId) => {
-                                    const field = masterFields.find(f => f.id === fieldId);
-                                    if (!field) return null;
-
-                                    const isComputed = field?.is_computed || field?.computed_config?.is_computed;
-                                    return (
-                                      <div key={field.id} className="flex items-center gap-2 p-2 bg-blue-50 border border-blue-200 rounded-md">
-                                        <Database className="h-3.5 w-3.5 text-blue-600" />
-                                        <span className="text-sm text-blue-700 font-medium truncate flex-1">
-                                          {field.label}
-                                        </span>
-                                        {isComputed && (
-                                          <Badge className="text-[9px] bg-purple-100 text-purple-700 border-purple-200">
-                                            Computed
-                                          </Badge>
-                                        )}
-                                        <Button
-                                          size="icon"
-                                          variant="ghost"
-                                          className="h-5 w-5 text-red-500 hover:bg-red-50"
-                                          onClick={() => unlinkMasterField(i, field.id)}
-                                        >
-                                          <X className="h-3 w-3" />
-                                        </Button>
-                                      </div>
-                                    );
-                                  })
-                                ) : (
-                                  <div className="flex items-center px-3 h-8 rounded-md border bg-slate-50 border-slate-200 text-slate-400 italic text-sm">
-                                    <Database className="h-3.5 w-3.5 mr-2 opacity-70" />
-                                    <span className="truncate font-medium">
-                                      No fields linked
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Multi-select field picker */}
-                              <div className="flex gap-1">
-                                <MultiMasterFieldPicker
-                                  availableFields={masterFields}
-                                  linkedFieldIds={item.linkedMasterFields || []}
-                                  onSelect={(field) => linkMasterField(i, field)}
-                                />
-                              </div>
-                            </div>
-                          )}
-                        </TableCell>
-
-                        {/* 6. Extraction Mode */}
-                        <TableCell className="p-3">
-                          {(item.linkedKycDocuments && item.linkedKycDocuments.length > 0) ||
-                            (item.linkedMasterFields && item.linkedMasterFields.length > 0) ? (
                             <div className="space-y-1">
-                              <Select
-                                value={item.extractionMode || 'latest'}
-                                onValueChange={(val) => handleItemChange(i, 'extractionMode', val)}
-                              >
-                                <SelectTrigger className={cn(
-                                  "h-7 text-[10px]",
-                                  item.type === 'document'
-                                    ? "bg-amber-50 text-amber-700 border-amber-100"
-                                    : "bg-blue-50 text-blue-700 border-blue-100"
-                                )}>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {item.type === 'document' ? (
-                                    <>
-                                      <SelectItem value="latest">Latest Document</SelectItem>
-                                      <SelectItem value="all">All Documents</SelectItem>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <SelectItem value="latest">Latest Value</SelectItem>
-                                      <SelectItem value="all">All Values</SelectItem>
-                                    </>
-                                  )}
-                                </SelectContent>
-                              </Select>
+                              <div className="text-[9px] font-bold text-amber-600 uppercase">KYC Documents</div>
+                              <div className="flex flex-wrap gap-1 mb-1">
+                                {item.linkedKycDocuments?.map(docId => (
+                                  <Badge key={docId} variant="secondary" className="bg-amber-50 text-amber-700 h-6">
+                                    {kycDocuments.find(d => d.id === docId)?.display_name || docId}
+                                    <X className="h-3 w-3 ml-1 cursor-pointer" onClick={() => unlinkDocument(i, docId)} />
+                                  </Badge>
+                                ))}
+                              </div>
+                              <MultiDocumentPicker 
+                                availableDocuments={kycDocuments} 
+                                linkedDocumentIds={item.linkedKycDocuments || []} 
+                                onSelect={(doc) => linkDocument(i, doc.id)} 
+                              />
                             </div>
                           ) : (
-                            <div className="text-center text-slate-400 italic text-xs">
-                              No sources linked
+                            <div className="grid grid-cols-2 gap-4">
+                              <div className="space-y-1">
+                                <div className="text-[9px] font-bold text-blue-600 uppercase">DB Fields</div>
+                                <div className="flex flex-wrap gap-1 mb-1">
+                                  {item.linkedMasterFields?.map(fieldId => (
+                                    <Badge key={fieldId} variant="secondary" className="bg-blue-50 text-blue-700 h-6">
+                                      {masterFields.find(f => f.id === fieldId)?.label || fieldId}
+                                      <X className="h-3 w-3 ml-1 cursor-pointer" onClick={() => unlinkMasterField(i, fieldId)} />
+                                    </Badge>
+                                  ))}
+                                </div>
+                                <MultiMasterFieldPicker 
+                                  availableFields={masterFields} 
+                                  linkedFieldIds={item.linkedMasterFields || []} 
+                                  onSelect={(f) => linkMasterField(i, f)} 
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <div className="text-[9px] font-bold text-purple-600 uppercase">Job Question</div>
+                                {item.linkedJobQuestionId ? (
+                                  <Badge variant="outline" className="bg-purple-50 text-purple-700 h-8 w-full justify-between">
+                                    <span className="truncate">{item.linkedJobQuestionId}</span>
+                                    <X className="h-3 w-3 ml-1 cursor-pointer" onClick={() => unlinkJobQuestion(i)} />
+                                  </Badge>
+                                ) : (
+                                  <JobQuestionPicker 
+                                    availableQuestions={jobQuestions} 
+                                    onSelect={(q) => linkJobQuestion(i, q.id)} 
+                                  />
+                                )}
+                              </div>
                             </div>
                           )}
-                        </TableCell>
-
-                        {/* 7. Action */}
-                        <TableCell className="p-3 text-center">
-                          <AlertDialog open={deleteItemDialogOpen && itemToDelete === i} onOpenChange={(open) => !open && setDeleteItemDialogOpen(false)}>
-                            <AlertDialogTrigger asChild>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-7 w-7 text-slate-300 hover:text-red-500 hover:bg-red-50"
-                                onClick={() => removeItem(i)}
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Delete Column</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  Are you sure you want to delete this column from the array? This action cannot be undone.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={confirmRemoveItem} className="bg-red-600 hover:bg-red-700">
-                                  Delete
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })
+                        </div>
+                      </TableCell>
+                      <TableCell className="p-2">
+                        <Select value={item.extractionMode || 'latest'} onValueChange={(val) => handleItemChange(i, 'extractionMode', val)}>
+                          <SelectTrigger className="h-7 text-[10px]"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="latest">Latest</SelectItem>
+                            <SelectItem value="all">All</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell className="p-2 text-center">
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400" onClick={() => removeItem(i)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
                 )}
               </TableBody>
             </Table>
@@ -757,7 +591,6 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, onUpdate }: {
   );
 }
 
-// --- Supporting Component: Job Question Picker ---
 function JobQuestionPicker({ 
   availableQuestions, 
   onSelect 
@@ -1083,6 +916,7 @@ function WebDataGroupEditDialog({
                   group={editingGroup}
                   masterFields={masterFields}
                   kycDocuments={kycDocuments}
+                   jobQuestions={jobQuestions}
                   onUpdate={(items) => updateField('arrayItems', items)}
                 />
               ) : (
@@ -2109,12 +1943,18 @@ export function AutomationDialog({
     }
   }, [isOpen]);
 
+// ... existing code around line 1056 ...
+
   useEffect(() => {
     const fetchQuestions = async () => {
       const { data } = await supabase.from('tm_class_requirements').select('job_specific_questions');
       // Flatten and get unique labels
       const allQuestions = data?.flatMap(r => r.job_specific_questions || []) || [];
       const unique = Array.from(new Map(allQuestions.map(q => [q.label, q])).values());
+      
+      // LOG: Fallback/General Questions
+      console.log('🔍 [Automation Dialog] Loaded Global Fallback Job Questions:', unique);
+      
       setJobQuestions(unique);
     };
     fetchQuestions();
@@ -2134,20 +1974,29 @@ export function AutomationDialog({
 
     // 2. Fetch Job Questions matching the automation's job_level
     if (initialData?.job_level) {
+      const jobLevelString = typeof initialData.job_level === 'string' 
+        ? initialData.job_level 
+        : JSON.stringify(initialData.job_level);
+
       const { data, error } = await supabase
         .from('tm_class_requirements')
         .select('*')
-        // Match the JSON object exactly
-        .eq('job_level', JSON.stringify(initialData.job_level))
+        .eq('job_level', jobLevelString)
         .maybeSingle();
 
       if (error) {
-        console.error("Error fetching contextual requirements:", error);
+        console.error(`❌ [Automation Dialog] Error fetching requirements for "${initialData.name}":`, error);
       } else {
+        // LOG: Contextual Questions for this specific automation
+        console.log(`🎯 [Automation Dialog] Contextual Load for "${initialData.name}"`);
+        console.log(`   - Job Level:`, initialData.job_level);
+        console.log(`   - Questions Found:`, data?.job_specific_questions || []);
+        
         setJobQuestions(data?.job_specific_questions || []);
         setClassRequirements(data || null);
       }
     } else {
+      console.log(`ℹ️ [Automation Dialog] No Job Level defined for "${initialData?.name || 'New Automation'}". Using global question list.`);
       setJobQuestions([]);
       setClassRequirements(null);
     }
@@ -2156,6 +2005,7 @@ export function AutomationDialog({
   fetchContextualData();
 }, [isOpen, initialData]);
 
+// ... existing code ...
   useEffect(() => {
     if (initialData) {
       form.reset({

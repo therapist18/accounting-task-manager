@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Check, ChevronsUpDown, Loader2, User, Users, Building2, FileText, UserPlus, UserCheck, Shield, HelpCircle, Calendar, MessageSquare, ListTodo, Phone, Database } from "lucide-react"
+import { Check, ChevronsUpDown, Loader2, User, Users, Building2, FileText, UserPlus, UserCheck, Shield, HelpCircle, Calendar, MessageSquare, ListTodo, Phone, Database, Folder, Search, HeartHandshake, Split, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Textarea } from "@/components/ui/textarea"
@@ -22,16 +22,23 @@ import { format } from "date-fns"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
 const CLASS_D_ID = '1750687058159';
+const SPONSOR_SUBDEPT_ID = '26';
 
 interface JobQuestion {
     id: string
     label: string
+    category?: string
     type: 'text' | 'number' | 'date' | 'select' | 'multiselect' | 'boolean'
     required: boolean
     options?: string[]
     linked_field_id?: string
     applicant_types?: string[]
     default_value?: string
+    depends_on?: {
+        id: string
+        operator: 'equals' | 'not_equals' | 'is_not_empty' | 'is_empty'
+        value: any
+    }
 }
 
 interface Individual {
@@ -52,14 +59,7 @@ export function EnquiryDialog({
     departments = [],
     users = [],
     officers = []
-}: {
-    open: boolean
-    onOpenChange: (open: boolean) => void
-    onEnquiryCreated: (enquiry: any) => void
-    departments: any[]
-    users: any[]
-    officers: any[]
-}) {
+}: any) {
     const [loading, setLoading] = useState(false)
     const [searchLoading, setSearchLoading] = useState(false)
     const [loadingRelations, setLoadingRelations] = useState(false)
@@ -68,6 +68,7 @@ export function EnquiryDialog({
 
     // Data lists
     const [individuals, setIndividuals] = useState<Individual[]>([])
+    const [sponsors, setSponsors] = useState<any[]>([]) // List for sponsors
     const [jobQuestions, setJobQuestions] = useState<JobQuestion[]>([])
     const [jobAnswers, setJobAnswers] = useState<Record<string, any>>({})
     const [masterFieldsData, setMasterFieldsData] = useState<Record<string, any[]>>({})
@@ -75,6 +76,7 @@ export function EnquiryDialog({
     // Selection State
     const [applicantType, setApplicantType] = useState<'principal' | 'dependant'>('principal')
     const [selectedIndividual, setSelectedIndividual] = useState<Individual | null>(null)
+    const [selectedSponsor, setSelectedSponsor] = useState<any | null>(null) // State for Sponsor
     const [principalForDependant, setPrincipalForDependant] = useState<Individual | null>(null)
     const [companies, setCompanies] = useState<any[]>([])
     const [selectedCompany, setSelectedCompany] = useState<string>('')
@@ -105,13 +107,13 @@ export function EnquiryDialog({
             subclass_id: null
         }
     });
-    
+
     // State for available staff
     const [availableOfficers, setAvailableOfficers] = useState<any[]>([]);
     const [availableManagers, setAvailableManagers] = useState<any[]>([]);
     const [availableAssistants, setAvailableAssistants] = useState<any[]>([]);
     const [isIndividualPopoverOpen, setIsIndividualPopoverOpen] = useState(false);
-
+ const [isSponsorPopoverOpen, setIsSponsorPopoverOpen] = useState(false);
     // --- Form Reset Logic ---
     const resetForm = useCallback(() => {
         setFormData({
@@ -172,6 +174,38 @@ export function EnquiryDialog({
         }
     }, [open])
 
+  const checkVisibility = useCallback((q: JobQuestion) => {
+        if (!q.depends_on || !q.depends_on.id) return true;
+
+        const parentVal = jobAnswers[q.depends_on.id];
+        const targetVal = q.depends_on.value;
+
+        switch (q.depends_on.operator) {
+            case 'equals': 
+                return String(parentVal) === String(targetVal);
+            case 'not_equals': 
+                return String(parentVal) !== String(targetVal);
+            case 'is_not_empty': 
+                if (Array.isArray(parentVal)) return parentVal.length > 0;
+                return parentVal !== undefined && parentVal !== null && parentVal !== '';
+            case 'is_empty': 
+                if (Array.isArray(parentVal)) return parentVal.length === 0;
+                return parentVal === undefined || parentVal === null || parentVal === '';
+            default: 
+                return true;
+        }
+    }, [jobAnswers]);
+
+    const groupedQuestions = useMemo(() => {
+        const visible = jobQuestions.filter(q => checkVisibility(q));
+        return visible.reduce((acc, q) => {
+            const cat = q.category || "General Requirements";
+            if (!acc[cat]) acc[cat] = [];
+            acc[cat].push(q);
+            return acc;
+        }, {} as Record<string, JobQuestion[]>);
+    }, [jobQuestions, checkVisibility]);
+
     const availableSubdepartments = useMemo(() => {
         const dept = departments.find(d => d.id.toString() === formData.department_id)
         return dept?.tm_subdepartments || []
@@ -185,26 +219,20 @@ export function EnquiryDialog({
     const fetchJobQuestions = useCallback(async (levelObj: any) => {
         setLoadingQuestions(true)
         try {
-            const { data, error } = await supabase
+            const { data } = await supabase
                 .from('tm_class_requirements')
                 .select('job_specific_questions')
                 .contains('job_level', levelObj)
                 .maybeSingle()
 
             if (data?.job_specific_questions) {
-                const questions = data.job_specific_questions as JobQuestion[]
-                setJobQuestions(questions)
+                setJobQuestions(data.job_specific_questions as JobQuestion[])
+                // Set defaults
                 const initial: any = {}
-                questions.forEach(q => { if (q.default_value) initial[q.id] = q.default_value })
+                data.job_specific_questions.forEach((q: any) => {
+                    if (q.default_value) initial[q.id] = q.default_value
+                })
                 setJobAnswers(initial)
-
-                const linkedIds = questions.filter(q => q.linked_field_id).map(q => q.linked_field_id)
-                if (linkedIds.length) {
-                    const { data: mFields } = await supabase.from('tm_job_fields').select('id, options').in('id', linkedIds)
-                    const mData: any = {}
-                    mFields?.forEach(f => mData[f.id] = f.options || [])
-                    setMasterFieldsData(mData)
-                }
             } else {
                 setJobQuestions([])
             }
@@ -224,6 +252,16 @@ export function EnquiryDialog({
         fetchJobQuestions(levelObj)
     }, [formData.department_id, formData.subdepartment_id, formData.class_id, fetchJobQuestions])
 
+    // Load Sponsors if Subdepartment is 26
+    useEffect(() => {
+        if (formData.subdepartment_id === SPONSOR_SUBDEPT_ID) {
+            supabase.from('registry_individuals')
+                .select('id, full_name')
+                .order('full_name')
+                .then(({ data }) => setSponsors(data || []))
+        }
+    }, [formData.subdepartment_id])
+
     // --- Staff Data Loading Logic ---
     const loadStaffData = useCallback(async () => {
         setLoadingStaff(true);
@@ -232,7 +270,7 @@ export function EnquiryDialog({
                 supabase.from('tm_users').select('*').order('name'),
                 supabase.from('tm_users').select('*').eq('role', 'officer').order('name')
             ]);
-            
+
             if (usersResult.data) {
                 setAvailableManagers(usersResult.data);
                 setAvailableAssistants(usersResult.data);
@@ -256,7 +294,7 @@ export function EnquiryDialog({
                 setAvailableManagers(users);
                 setAvailableAssistants(users);
             }
-        } 
+        }
         // Otherwise, if dialog is open and we haven't loaded data yet, fetch internally
         else if (open) {
             if (availableManagers.length === 0 && availableOfficers.length === 0) {
@@ -402,7 +440,7 @@ export function EnquiryDialog({
                 const u = understudies.find(x => x.id.toString() === selectedUnderstudy)
                 if (u) participants.push({ id: u.id, name: u.full_name, role: ['understudy'], type: "individual" })
             }
-            
+
             // Add assigned staff
             if (formData.officer_id) {
                 const officer = availableOfficers.find(o => o.id.toString() === formData.officer_id);
@@ -415,7 +453,7 @@ export function EnquiryDialog({
                     });
                 }
             }
-            
+
             if (formData.task_manager_id) {
                 const manager = availableManagers.find(m => m.id.toString() === formData.task_manager_id);
                 if (manager) {
@@ -440,33 +478,31 @@ export function EnquiryDialog({
                 }
             }
 
+            if (formData.subdepartment_id === SPONSOR_SUBDEPT_ID && selectedSponsor) {
+                participants.push({
+                    id: selectedSponsor.id,
+                    name: selectedSponsor.full_name,
+                    role: ['sponsor'],
+                    type: "individual"
+                })
+            }
+
             const payload = {
                 status: 'enquiry',
                 date_initiated: new Date(formData.enquiry_date).toISOString(),
                 job_description: formData.job_description,
-                // --- Root level IDs ---
                 individual_id: selectedIndividual.id,
                 company_id: selectedCompany ? Number(selectedCompany) : null,
-                officer_id: formData.officer_id ? Number(formData.officer_id) : null,
-                task_manager_id: formData.task_manager_id ? Number(formData.task_manager_id) : null,
-                task_assistant_id: formData.task_assistant_id ? Number(formData.task_assistant_id) : null,
-
+                sponsor_id: selectedSponsor ? selectedSponsor.id : null, // Add to DB column if exists
                 job_level: {
                     level: formData.class_id ? 3 : formData.subdepartment_id ? 2 : 1,
                     department_id: Number(formData.department_id),
                     subdepartment_id: Number(formData.subdepartment_id),
                     class_id: formData.class_id ? Number(formData.class_id) : null
                 },
-                // --- Applicant details ---
-                applicant_details: {
-                    id: selectedIndividual.id,
-                    name: selectedIndividual.full_name,
-                    type: "individual",
-                    role: applicantType
-                },
-                participants_details: participants,
                 job_specific_answers: jobAnswers,
-                applied_by: "11",
+                participants_details: participants,
+                applied_by: "11", // User ID
                 stages: { '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa': { status: "completed", date: format(new Date(), 'dd/MM/yyyy') } }
             }
 
@@ -483,61 +519,63 @@ export function EnquiryDialog({
         }
     }
 
-    return (
+   return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-[1200px] max-h-[95vh] p-0 flex flex-col border-none shadow-2xl overflow-hidden">
-                <DialogHeader className="p-6 bg-blue-600 text-white shrink-0">
-                    <div className="flex items-center gap-4">
-                        <div className="bg-white/20 p-2.5 rounded-xl"><ListTodo className="h-6 w-6" /></div>
-                        <div>
-                            <DialogTitle className="text-2xl font-bold tracking-tight">New Client Enquiry</DialogTitle>
-                            <DialogDescription className="text-blue-100">Initialize a task with smart data linking and job questions</DialogDescription>
+            <DialogContent className="max-w-[1250px] max-h-[95vh] p-0 flex flex-col border-none shadow-2xl overflow-hidden bg-white">
+                {/* STATIC HEADER */}
+                <DialogHeader className="p-6 bg-blue-600 text-white shrink-0 z-10 shadow-md">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                            <div className="bg-white/20 p-2.5 rounded-xl"><ListTodo className="h-6 w-6" /></div>
+                            <div>
+                                <DialogTitle className="text-2xl font-bold tracking-tight">New Client Enquiry</DialogTitle>
+                                <DialogDescription className="text-blue-100 font-medium">Logical requirement engine active</DialogDescription>
+                            </div>
                         </div>
                     </div>
                 </DialogHeader>
 
-                <ScrollArea className="flex-1 bg-slate-50/50">
+                {/* SCROLLABLE CONTENT AREA */}
+                <ScrollArea className="flex-1 w-full overflow-y-auto bg-slate-50/50">
                     <form id="enquiry-form" onSubmit={handleSubmit} className="p-8 space-y-8">
                         <div className="grid grid-cols-12 gap-8">
 
+                            {/* LEFT COLUMN: IDENTIFICATION */}
                             <div className="col-span-12 lg:col-span-4 space-y-6">
-                                <h3 className="text-xs font-bold uppercase tracking-wider text-blue-600 flex items-center gap-2">
+                                <h3 className="text-[10px] font-black uppercase tracking-widest text-blue-600 flex items-center gap-2">
                                     <User className="h-4 w-4" /> Client Identification
                                 </h3>
 
-                                <Card className="border-blue-100 shadow-sm overflow-hidden">
-                                    <CardHeader className="bg-blue-50/50 py-3 border-b border-blue-100">
-                                        <CardTitle className="text-xs font-bold text-blue-800">Primary Applicant</CardTitle>
-                                    </CardHeader>
+                                <Card className="border-blue-100 shadow-sm overflow-hidden bg-white">
                                     <CardContent className="p-5 space-y-5">
                                         <RadioGroup value={applicantType} onValueChange={(v: any) => setApplicantType(v)} className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-lg">
                                             {['principal', 'dependant'].map(t => (
                                                 <div key={t} className="relative">
                                                     <RadioGroupItem value={t} id={t} className="sr-only" />
-                                                    <Label htmlFor={t} className={cn("flex items-center justify-center py-2 rounded-md cursor-pointer text-[10px] font-black transition-all", applicantType === t ? "bg-white text-blue-600 shadow-sm" : "text-slate-500")}>
-                                                        {t.toUpperCase()}
+                                                    <Label htmlFor={t} className={cn("flex items-center justify-center py-2 rounded-md cursor-pointer text-[10px] font-black transition-all", applicantType === t ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 uppercase")}>
+                                                        {t}
                                                     </Label>
                                                 </div>
                                             ))}
                                         </RadioGroup>
 
                                         <div className="space-y-2">
-                                            <Label className="text-[11px] font-bold text-slate-500">Registry Search</Label>
+                                            <Label className="text-[11px] font-bold text-slate-500 uppercase">Primary Applicant</Label>
                                             <Popover open={isIndividualPopoverOpen} onOpenChange={setIsIndividualPopoverOpen}>
                                                 <PopoverTrigger asChild>
-                                                    <Button variant="outline" className="w-full justify-between h-11 border-slate-200 bg-white hover:border-blue-300">
-                                                        {selectedIndividual ? <span className="font-bold">{selectedIndividual.full_name}</span> : "Select from database..."}
-                                                        {searchLoading ? <Loader2 className="h-4 w-4 animate-spin text-blue-500" /> : <ChevronsUpDown className="h-4 w-4 opacity-30" />}
+                                                    <Button variant="outline" className="w-full justify-between h-12 border-slate-200 bg-white">
+                                                        {selectedIndividual ? <span className="font-bold text-slate-800">{selectedIndividual.full_name}</span> : <span className="text-slate-400">Search database...</span>}
+                                                        <Search className="h-4 w-4 opacity-30" />
                                                     </Button>
                                                 </PopoverTrigger>
-                                                <PopoverContent className="w-[350px] p-0" align="start">
+                                                <PopoverContent className="w-[380px] p-0" align="start">
                                                     <Command>
                                                         <CommandInput placeholder="Search name..." />
-                                                        <CommandList>
-                                                            <CommandEmpty>No records.</CommandEmpty>
+                                                        <CommandList className="max-h-[300px] overflow-y-auto">
+                                                            <CommandEmpty>No individuals found.</CommandEmpty>
                                                             <CommandGroup>
                                                                 {individuals.map(ind => (
-                                                                    <CommandItem key={ind.id} value={ind.full_name} onSelect={() => handleIndividualSelect(ind)}>
+                                                                    <CommandItem key={ind.id} onSelect={() => handleIndividualSelect(ind)}>
                                                                         <Check className={cn("mr-2 h-4 w-4 text-blue-600", selectedIndividual?.id === ind.id ? "opacity-100" : "opacity-0")} />
                                                                         {ind.full_name}
                                                                     </CommandItem>
@@ -547,243 +585,224 @@ export function EnquiryDialog({
                                                     </Command>
                                                 </PopoverContent>
                                             </Popover>
-                                            {loadingRelations && <p className="text-[10px] text-blue-500 animate-pulse flex items-center gap-1"><Database className="h-3 w-3" /> Fetching linked associations...</p>}
                                         </div>
 
-                                        <div className="space-y-3 pt-2">
-                                            <Label className="text-[11px] font-bold text-slate-500 uppercase">Employment Entity</Label>
-                                            <Select value={selectedCompany} onValueChange={handleCompanyChange}>
-                                                <SelectTrigger className="h-11 border-blue-100 bg-blue-50/20"><SelectValue placeholder="Linked Company..." /></SelectTrigger>
-                                                <SelectContent>
-                                                    {companies.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.company_name}</SelectItem>)}
-                                                </SelectContent>
-                                            </Select>
+                                        <div className="space-y-4 pt-2 border-t">
+                                            <div className="space-y-2">
+                                                <Label className="text-[11px] font-bold text-slate-500 uppercase">Employment Entity</Label>
+                                                <Select value={selectedCompany} onValueChange={handleCompanyChange}>
+                                                    <SelectTrigger className="h-11 border-blue-100 bg-blue-50/20"><SelectValue placeholder="Select Company..." /></SelectTrigger>
+                                                    <SelectContent className="max-h-[300px]">
+                                                        {companies.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.company_name}</SelectItem>)}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
 
-                                            {/* Logic Update: Only show if class matches Class D ID */}
                                             {formData.class_id === CLASS_D_ID && understudies.length > 0 && (
-                                                <div className="space-y-2 mt-4 animate-in fade-in slide-in-from-top-1">
-                                                    <Label className="text-[11px] font-bold text-slate-500 uppercase">Related Understudy</Label>
+                                                <div className="space-y-2 animate-in fade-in slide-in-from-top-1">
+                                                    <Label className="text-[11px] font-bold text-amber-600 uppercase flex items-center gap-1">
+                                                        <Users className="h-3 w-3" /> Related Understudy
+                                                    </Label>
                                                     <Select value={selectedUnderstudy} onValueChange={setSelectedUnderstudy}>
-                                                        <SelectTrigger className="h-11 border-amber-200 bg-amber-50/20">
-                                                            <SelectValue placeholder="Select understudy..." />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
+                                                        <SelectTrigger className="h-11 border-amber-200 bg-amber-50/20"><SelectValue placeholder="Select understudy..." /></SelectTrigger>
+                                                        <SelectContent className="max-h-[200px]">
                                                             {understudies.map(u => <SelectItem key={u.id} value={u.id.toString()}>{u.full_name}</SelectItem>)}
                                                         </SelectContent>
                                                     </Select>
                                                 </div>
                                             )}
                                         </div>
+
+                                        {formData.subdepartment_id === SPONSOR_SUBDEPT_ID && (
+                                            <div className="space-y-2 pt-4 border-t border-dashed border-emerald-200 animate-in fade-in slide-in-from-top-2">
+                                                <Label className="text-[11px] font-bold text-emerald-600 uppercase flex items-center gap-1">
+                                                    <HeartHandshake className="h-3 w-3" /> Designated Sponsor
+                                                </Label>
+                                                <Popover open={isSponsorPopoverOpen} onOpenChange={setIsSponsorPopoverOpen}>
+                                                    <PopoverTrigger asChild>
+                                                        <Button variant="outline" className="w-full justify-between h-12 border-emerald-100 bg-emerald-50/30 hover:bg-emerald-50">
+                                                            {selectedSponsor ? <span className="font-bold text-emerald-700">{selectedSponsor.full_name}</span> : <span className="text-emerald-400">Search for sponsor...</span>}
+                                                            <Users className="h-4 w-4 text-emerald-400" />
+                                                        </Button>
+                                                    </PopoverTrigger>
+                                                    <PopoverContent className="w-[350px] p-0" align="start">
+                                                        <Command>
+                                                            <CommandInput placeholder="Search sponsors..." />
+                                                            <CommandList className="max-h-[300px] overflow-y-auto">
+                                                                <CommandEmpty>No sponsors found.</CommandEmpty>
+                                                                <CommandGroup>
+                                                                    {sponsors.map(s => (
+                                                                        <CommandItem key={s.id} onSelect={() => { setSelectedSponsor(s); setIsSponsorPopoverOpen(false); }}>
+                                                                            <Check className={cn("mr-2 h-4 w-4 text-emerald-600", selectedSponsor?.id === s.id ? "opacity-100" : "opacity-0")} />
+                                                                            {s.full_name}
+                                                                        </CommandItem>
+                                                                    ))}
+                                                                </CommandGroup>
+                                                            </CommandList>
+                                                        </Command>
+                                                    </PopoverContent>
+                                                </Popover>
+                                            </div>
+                                        )}
                                     </CardContent>
                                 </Card>
-
-                                {(availableDependants.length > 0 || availableReferences.length > 0) && (
-                                    <div className="space-y-4">
-                                        <h3 className="text-xs font-bold uppercase tracking-wider text-blue-600 flex items-center gap-2">
-                                            <UserPlus className="h-4 w-4" /> Family & References
-                                        </h3>
-                                        <Card className="border-blue-100 shadow-sm bg-white">
-                                            <CardContent className="p-5 space-y-4">
-                                                {availableDependants.length > 0 && (
-                                                    <div className="space-y-3">
-                                                        <div className="flex items-center space-x-2">
-                                                            <Checkbox id="inc-dep" checked={includeDependants} onCheckedChange={(v) => setIncludeDependants(!!v)} />
-                                                            <Label htmlFor="inc-dep" className="text-xs font-bold text-blue-800">Include Dependants/Family</Label>
-                                                        </div>
-                                                        {includeDependants && (
-                                                            <div className="pl-6 space-y-2 border-l-2 border-blue-100">
-                                                                {availableDependants.map(d => (
-                                                                    <div key={d.id} className="flex items-center space-x-2">
-                                                                        <Checkbox id={`d-${d.id}`} checked={selectedDependants.includes(d.id.toString())} onCheckedChange={(v) => setSelectedDependants(prev => v ? [...prev, d.id.toString()] : prev.filter(x => x !== d.id.toString()))} />
-                                                                        <label htmlFor={`d-${d.id}`} className="text-[11px] font-medium cursor-pointer">{d.full_name} <span className="text-slate-400">({d.relationship_type})</span></label>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                )}
-                                                {availableReferences.length > 0 && (
-                                                    <div className="space-y-3">
-                                                        <div className="flex items-center space-x-2">
-                                                            <Checkbox id="inc-ref" checked={includeReferences} onCheckedChange={(v) => setIncludeReferences(!!v)} />
-                                                            <Label htmlFor="inc-ref" className="text-xs font-bold text-blue-800">Include References</Label>
-                                                        </div>
-                                                        {includeReferences && (
-                                                            <div className="pl-6 space-y-2 border-l-2 border-blue-100">
-                                                                {availableReferences.map(r => (
-                                                                    <div key={r.id} className="flex items-center space-x-2">
-                                                                        <Checkbox id={`r-${r.id}`} checked={selectedReferences.includes(r.id.toString())} onCheckedChange={(v) => setSelectedReferences(prev => v ? [...prev, r.id.toString()] : prev.filter(x => x !== r.id.toString()))} />
-                                                                        <label htmlFor={`r-${r.id}`} className="text-[11px] font-medium cursor-pointer">{r.full_name}</label>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                )}
-                                            </CardContent>
-                                        </Card>
-                                    </div>
-                                )}
                             </div>
 
+                            {/* RIGHT COLUMN: CLASSIFICATION & GROUPED QUESTIONS */}
                             <div className="col-span-12 lg:col-span-8 space-y-8">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="space-y-4">
-                                        <h3 className="text-xs font-bold uppercase tracking-wider text-blue-600 flex items-center gap-2">
+                                        <h3 className="text-[10px] font-black uppercase tracking-widest text-blue-600 flex items-center gap-2">
                                             <Shield className="h-4 w-4" /> Process Classification
                                         </h3>
                                         <Card className="border-blue-100 shadow-sm bg-white">
                                             <CardContent className="p-5 space-y-4">
-                                                <div className="space-y-1.5"><Label className="text-[10px] font-bold text-slate-400">DEPARTMENT</Label><Select value={formData.department_id} onValueChange={id => setFormData(prev => ({ ...prev, department_id: id, subdepartment_id: '', class_id: '' }))}><SelectTrigger className="h-10 border-blue-50 bg-blue-50/10"><SelectValue placeholder="Choose Department" /></SelectTrigger><SelectContent>{departments.map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>)}</SelectContent></Select></div>
-                                                <div className="space-y-1.5"><Label className="text-[10px] font-bold text-slate-400">SUB-DEPARTMENT</Label><Select value={formData.subdepartment_id} onValueChange={id => setFormData(prev => ({ ...prev, subdepartment_id: id, class_id: '' }))} disabled={!formData.department_id}><SelectTrigger className="h-10 border-blue-50 bg-blue-50/10"><SelectValue placeholder="Choose Sub-Dept" /></SelectTrigger><SelectContent>{availableSubdepartments.map(s => <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>)}</SelectContent></Select></div>
-                                                <div className="space-y-1.5"><Label className="text-[10px] font-bold text-slate-400">SERVICE CLASS</Label><Select value={formData.class_id} onValueChange={id => setFormData(prev => ({ ...prev, class_id: id }))} disabled={!formData.subdepartment_id}><SelectTrigger className="h-10 border-blue-50 bg-blue-50/10"><SelectValue placeholder="Choose Service Class" /></SelectTrigger><SelectContent>{availableClasses.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>)}</SelectContent></Select></div>
+                                                <div className="space-y-1.5"><Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Department</Label><Select value={formData.department_id} onValueChange={id => setFormData(prev => ({ ...prev, department_id: id, subdepartment_id: '', class_id: '' }))}><SelectTrigger className="h-10 bg-blue-50/10"><SelectValue placeholder="Choose Department" /></SelectTrigger><SelectContent>{departments.map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>)}</SelectContent></Select></div>
+                                                <div className="space-y-1.5"><Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Sub-Department</Label><Select value={formData.subdepartment_id} onValueChange={id => setFormData(prev => ({ ...prev, subdepartment_id: id, class_id: '' }))} disabled={!formData.department_id}><SelectTrigger className="h-10 bg-blue-50/10"><SelectValue placeholder="Choose Sub-Dept" /></SelectTrigger><SelectContent>{availableSubdepartments.map(s => <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>)}</SelectContent></Select></div>
+                                                <div className="space-y-1.5"><Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Service Class</Label><Select value={formData.class_id} onValueChange={id => setFormData(prev => ({ ...prev, class_id: id }))} disabled={!formData.subdepartment_id}><SelectTrigger className="h-10 bg-blue-50/10"><SelectValue placeholder="Choose Service Class" /></SelectTrigger><SelectContent>{availableClasses.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>)}</SelectContent></Select></div>
                                             </CardContent>
                                         </Card>
                                     </div>
 
                                     <div className="space-y-4">
-                                        <h3 className="text-xs font-bold uppercase tracking-wider text-blue-600 flex items-center gap-2">
+                                        <h3 className="text-[10px] font-black uppercase tracking-widest text-blue-600 flex items-center gap-2">
                                             <UserCheck className="h-4 w-4" /> Internal Processing
                                         </h3>
                                         <Card className="border-blue-100 shadow-sm bg-white">
                                             <CardContent className="p-5 space-y-4">
                                                 <div className="space-y-1.5">
-                                                    <Label className="text-[10px] font-bold text-slate-400">CLIENT OFFICER</Label>
-                                                    <Select 
-                                                        value={formData.officer_id} 
-                                                        onValueChange={id => setFormData(prev => ({ ...prev, officer_id: id }))}
-                                                        disabled={loadingStaff}
-                                                    >
-                                                        <SelectTrigger className="h-10 border-blue-50 bg-blue-50/10">
-                                                            <SelectValue placeholder={loadingStaff ? "Loading..." : "Select Officer"} />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            {availableOfficers.map((officer) => (
-                                                                <SelectItem key={officer.id} value={officer.id.toString()}>
-                                                                    {officer.full_name || officer.name || `Officer ${officer.id}`}
-                                                                </SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
+                                                    <Label className="text-[10px] font-bold text-slate-400 uppercase">Assigned Officer</Label>
+                                                    <Select value={formData.officer_id} onValueChange={id => setFormData(prev => ({ ...prev, officer_id: id }))}><SelectTrigger className="h-10 bg-blue-50/10"><SelectValue placeholder="Select Officer" /></SelectTrigger><SelectContent>{availableOfficers.map(o => <SelectItem key={o.id} value={o.id.toString()}>{o.full_name || o.name}</SelectItem>)}</SelectContent></Select>
                                                 </div>
                                                 <div className="space-y-1.5">
-                                                    <Label className="text-[10px] font-bold text-slate-400">ASSIGNED MANAGER</Label>
-                                                    <Select 
-                                                        value={formData.task_manager_id} 
-                                                        onValueChange={id => setFormData(prev => ({ ...prev, task_manager_id: id }))}
-                                                        disabled={loadingStaff}
-                                                    >
-                                                        <SelectTrigger className="h-10 border-blue-50 bg-blue-50/10">
-                                                            <SelectValue placeholder={loadingStaff ? "Loading..." : "Select Manager"} />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            {availableManagers.map(manager => (
-                                                                <SelectItem key={manager.id} value={manager.id.toString()}>
-                                                                    {manager.full_name || manager.name}
-                                                                </SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
+                                                    <Label className="text-[10px] font-bold text-slate-400 uppercase">Task Manager</Label>
+                                                    <Select value={formData.task_manager_id} onValueChange={id => setFormData(prev => ({ ...prev, task_manager_id: id }))}><SelectTrigger className="h-10 bg-blue-50/10"><SelectValue placeholder="Select Manager" /></SelectTrigger><SelectContent>{availableManagers.map(m => <SelectItem key={m.id} value={m.id.toString()}>{m.full_name || m.name}</SelectItem>)}</SelectContent></Select>
                                                 </div>
                                                 <div className="space-y-1.5">
-                                                    <Label className="text-[10px] font-bold text-slate-400">ASSISTANT</Label>
-                                                    <Select 
-                                                        value={formData.task_assistant_id} 
-                                                        onValueChange={id => setFormData(prev => ({ ...prev, task_assistant_id: id }))}
-                                                        disabled={loadingStaff}
-                                                    >
-                                                        <SelectTrigger className="h-10 border-blue-50 bg-blue-50/10">
-                                                            <SelectValue placeholder={loadingStaff ? "Loading..." : "Select Assistant"} />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            {availableAssistants.map(assistant => (
-                                                                <SelectItem key={assistant.id} value={assistant.id.toString()}>
-                                                                    {assistant.full_name || assistant.name}
-                                                                </SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
+                                                    <Label className="text-[10px] font-bold text-slate-400 uppercase">Enquiry Date</Label>
+                                                    <div className="relative"><Input type="date" value={formData.enquiry_date} onChange={e => setFormData(prev => ({ ...prev, enquiry_date: e.target.value }))} className="pl-10 h-10 border-blue-50 bg-blue-50/5 shadow-none" /><Calendar className="absolute left-3 top-3 h-4 w-4 text-blue-400" /></div>
                                                 </div>
-                                                <div className="space-y-1.5"><Label className="text-[10px] font-bold text-slate-400">ENQUIRY DATE</Label><div className="relative"><Input type="date" value={formData.enquiry_date} onChange={e => setFormData(prev => ({ ...prev, enquiry_date: e.target.value }))} className="pl-10 h-10" /><Calendar className="absolute left-3 top-3 h-4 w-4 text-blue-400 pointer-events-none" /></div></div>
                                             </CardContent>
                                         </Card>
                                     </div>
                                 </div>
 
+                                {/* DYNAMIC QUESTIONS AREA */}
                                 <div className="space-y-4">
-                                    <div className="flex items-center justify-between px-1">
-                                        <h3 className="text-xs font-bold uppercase tracking-wider text-blue-600 flex items-center gap-2">
-                                            <HelpCircle className="h-4 w-4" /> Job Requirements
-                                        </h3>
-                                        {loadingQuestions && <Loader2 className="h-3 w-3 animate-spin text-blue-500" />}
-                                    </div>
+                                    <h3 className="text-[10px] font-black uppercase tracking-widest text-blue-600 flex items-center gap-2">
+                                        <HelpCircle className="h-4 w-4" /> Requirement Intelligence
+                                    </h3>
 
-                                    <Card className={cn("border-blue-100 shadow-sm transition-all bg-white")}>
-                                        <CardContent className="p-6">
-                                            {jobQuestions.length > 0 ? (
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-6">
-                                                    {jobQuestions.map((q) => (
-                                                        <div key={q.id} className="space-y-2">
-                                                            <Label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                                                                {q.label}
-                                                                {q.required && <span className="text-red-500">*</span>}
-                                                            </Label>
+                                    {Object.entries(groupedQuestions).length > 0 ? (
+                                        <div className="space-y-6">
+                                            {Object.entries(groupedQuestions).map(([category, questions]) => (
+                                                <Card key={category} className="border-blue-100 shadow-sm overflow-hidden bg-white">
+                                                    <CardHeader className="bg-blue-50/50 py-2.5 px-5 border-b border-blue-100 flex flex-row items-center gap-2 space-y-0">
+                                                        <Folder className="h-3.5 w-3.5 text-blue-600" />
+                                                        <CardTitle className="text-[10px] font-black text-blue-800 uppercase tracking-wider">{category}</CardTitle>
+                                                    </CardHeader>
+                                                    <CardContent className="p-6 grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-6">
+                                                        {questions.map((q) => (
+                                                            <div key={q.id} className="space-y-2 animate-in fade-in zoom-in-95 duration-200">
+                                                                <Label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                                                                    {q.label} {q.required && <span className="text-red-500">*</span>}
+                                                                </Label>
 
-                                                            {q.type === 'text' && <Input value={jobAnswers[q.id] || ''} onChange={e => setJobAnswers(prev => ({ ...prev, [q.id]: e.target.value }))} className="h-10 bg-slate-50/50 border-blue-50" />}
-                                                            {q.type === 'number' && <Input type="number" value={jobAnswers[q.id] || ''} onChange={e => setJobAnswers(prev => ({ ...prev, [q.id]: e.target.value }))} className="h-10 bg-slate-50/50 border-blue-50" />}
-                                                            {q.type === 'date' && <Input type="date" value={jobAnswers[q.id] || ''} onChange={e => setJobAnswers(prev => ({ ...prev, [q.id]: e.target.value }))} className="h-10 bg-slate-50/50 border-blue-50" />}
-                                                            {(q.type === 'select' || q.type === 'multiselect') && (
-                                                                <Select value={jobAnswers[q.id]} onValueChange={v => setJobAnswers(prev => ({ ...prev, [q.id]: v }))}>
-                                                                    <SelectTrigger className="h-10 bg-slate-50/50 border-blue-50"><SelectValue placeholder="Select..." /></SelectTrigger>
-                                                                    <SelectContent>
-                                                                        {(q.linked_field_id ? masterFieldsData[q.linked_field_id] : q.options)?.map((opt: any) => {
-                                                                            const val = typeof opt === 'string' ? opt : opt.value;
-                                                                            return <SelectItem key={val} value={val}>{typeof opt === 'string' ? opt : opt.label}</SelectItem>
-                                                                        })}
-                                                                    </SelectContent>
-                                                                </Select>
-                                                            )}
-                                                            {q.type === 'boolean' && (
-                                                                <div className="flex items-center gap-6 h-10">
-                                                                    <div className="flex items-center gap-2"><Checkbox checked={jobAnswers[q.id] === true} onCheckedChange={() => setJobAnswers(prev => ({ ...prev, [q.id]: true }))} /><span className="text-sm font-medium">Yes</span></div>
-                                                                    <div className="flex items-center gap-2"><Checkbox checked={jobAnswers[q.id] === false} onCheckedChange={() => setJobAnswers(prev => ({ ...prev, [q.id]: false }))} /><span className="text-sm font-medium">No</span></div>
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            ) : (
-                                                <div className="text-center py-6 opacity-30">
-                                                    <MessageSquare className="h-8 w-8 mx-auto mb-2 text-blue-400" />
-                                                    <p className="text-[10px] font-black uppercase tracking-widest text-blue-600">No custom requirements defined</p>
-                                                </div>
-                                            )}
-                                        </CardContent>
-                                    </Card>
+                                                                {q.type === 'text' && <Input value={jobAnswers[q.id] || ''} onChange={e => setJobAnswers(prev => ({ ...prev, [q.id]: e.target.value }))} className="h-10 bg-slate-50/50 border-blue-100" />}
+                                                                
+                                                                {q.type === 'boolean' && (
+                                                                    <RadioGroup value={jobAnswers[q.id] === undefined ? "" : String(jobAnswers[q.id])} onValueChange={v => setJobAnswers(prev => ({ ...prev, [q.id]: v === 'true' }))} className="flex gap-4 h-10 items-center">
+                                                                        <div className="flex items-center space-x-2 bg-slate-50 px-3 py-1.5 rounded-md border border-slate-100">
+                                                                            <RadioGroupItem value="true" id={`q-yes-${q.id}`} />
+                                                                            <Label htmlFor={`q-yes-${q.id}`} className="text-xs cursor-pointer">Yes</Label>
+                                                                        </div>
+                                                                        <div className="flex items-center space-x-2 bg-slate-50 px-3 py-1.5 rounded-md border border-slate-100">
+                                                                            <RadioGroupItem value="false" id={`q-no-${q.id}`} />
+                                                                            <Label htmlFor={`q-no-${q.id}`} className="text-xs cursor-pointer">No</Label>
+                                                                        </div>
+                                                                    </RadioGroup>
+                                                                )}
+
+                                                                {(q.type === 'select' || q.type === 'multiselect') && (
+                                                                    <Popover>
+                                                                        <PopoverTrigger asChild>
+                                                                            <Button variant="outline" className="w-full justify-between h-10 bg-slate-50/50 border-blue-100">
+                                                                                <span className="truncate">{q.type === 'multiselect' ? (jobAnswers[q.id]?.length > 0 ? `${jobAnswers[q.id].length} Selected` : "Choose multiple...") : (jobAnswers[q.id] || "Select option...")}</span>
+                                                                                <ChevronsUpDown className="h-4 w-4 opacity-30" />
+                                                                            </Button>
+                                                                        </PopoverTrigger>
+                                                                        <PopoverContent className="w-[300px] p-0">
+                                                                            <Command>
+                                                                                <CommandInput placeholder="Filter..." />
+                                                                                <CommandList className="max-h-[250px] overflow-y-auto">
+                                                                                    <CommandGroup>
+                                                                                        {q.options?.map(opt => (
+                                                                                            <CommandItem key={opt} onSelect={() => {
+                                                                                                if (q.type === 'multiselect') {
+                                                                                                    const current = jobAnswers[q.id] || [];
+                                                                                                    const next = current.includes(opt) ? current.filter(x => x !== opt) : [...current, opt];
+                                                                                                    setJobAnswers(prev => ({ ...prev, [q.id]: next }));
+                                                                                                } else {
+                                                                                                    setJobAnswers(prev => ({ ...prev, [q.id]: opt }));
+                                                                                                }
+                                                                                            }}>
+                                                                                                <Check className={cn("mr-2 h-4 w-4 text-blue-600", q.type === 'multiselect' ? jobAnswers[q.id]?.includes(opt) ? "opacity-100" : "opacity-0" : jobAnswers[q.id] === opt ? "opacity-100" : "opacity-0")} />
+                                                                                                {opt}
+                                                                                            </CommandItem>
+                                                                                        ))}
+                                                                                    </CommandGroup>
+                                                                                </CommandList>
+                                                                            </Command>
+                                                                        </PopoverContent>
+                                                                    </Popover>
+                                                                )}
+                                                                {/* Multiselect Badges */}
+                                                                {q.type === 'multiselect' && jobAnswers[q.id]?.length > 0 && (
+                                                                    <div className="flex flex-wrap gap-1 mt-1.5">
+                                                                        {jobAnswers[q.id].map(val => (
+                                                                            <Badge key={val} variant="secondary" className="text-[9px] py-0 px-1.5 bg-blue-50 text-blue-600 border-blue-100 flex items-center gap-1">
+                                                                                {val} <X className="h-2.5 w-2.5 cursor-pointer" onClick={() => setJobAnswers(prev => ({ ...prev, [q.id]: prev[q.id].filter(x => x !== val) }))} />
+                                                                            </Badge>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        ))}
+                                                    </CardContent>
+                                                </Card>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="bg-white border-2 border-dashed border-blue-100 rounded-2xl p-10 text-center opacity-40">
+                                            <Database className="h-10 w-10 mx-auto mb-3 text-blue-300" />
+                                            <p className="text-xs font-bold uppercase text-blue-600">No custom requirements for this level</p>
+                                        </div>
+                                    )}
                                 </div>
 
-                                <div className="space-y-4">
-                                    <h3 className="text-xs font-bold uppercase tracking-wider text-blue-600 flex items-center gap-2">
+                                <div className="space-y-4 pb-4">
+                                    <h3 className="text-[10px] font-black uppercase tracking-widest text-blue-600 flex items-center gap-2">
                                         <FileText className="h-4 w-4" /> Additional Remarks
                                     </h3>
-                                    <Textarea value={formData.job_description} onChange={e => setFormData(prev => ({ ...prev, job_description: e.target.value }))} placeholder="Capture additional context here..." className="min-h-[120px] bg-white border-blue-50 p-4" />
+                                    <Textarea value={formData.job_description} onChange={e => setFormData(prev => ({ ...prev, job_description: e.target.value }))} placeholder="Capture additional client context here..." className="min-h-[100px] bg-white border-blue-100 p-4 shadow-sm" />
                                 </div>
                             </div>
                         </div>
                     </form>
                 </ScrollArea>
 
-                <DialogFooter className="p-6 bg-white border-t border-blue-50 shrink-0">
+                {/* STATIC FOOTER */}
+                <DialogFooter className="p-6 bg-white border-t border-blue-100 shrink-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.03)]">
                     <div className="flex items-center justify-between w-full">
                         <div className="flex flex-col">
-                            <span className="text-[10px] text-slate-400 font-bold tracking-widest uppercase">System Integration Active</span>
-                            <span className="text-[11px] text-blue-600 font-black">{selectedIndividual?.full_name || "No Client Selected"}</span>
+                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Enquiry Ready</span>
+                            <span className="text-[11px] text-blue-600 font-black truncate max-w-[400px]">{selectedIndividual?.full_name || "Awaiting Selection"}</span>
                         </div>
                         <div className="flex gap-3">
-                            <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={loading} className="text-slate-500 hover:bg-slate-100 px-6">Cancel</Button>
-                            <Button type="submit" form="enquiry-form" disabled={loading || !selectedIndividual || !formData.department_id} className="px-10 bg-blue-600 hover:bg-blue-700 h-11 text-white font-bold shadow-lg shadow-blue-200">
+                            <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={loading} className="px-6 font-bold uppercase text-[10px] tracking-widest text-slate-500">Cancel</Button>
+                            <Button type="submit" form="enquiry-form" disabled={loading || !selectedIndividual || !formData.department_id} className="px-10 bg-blue-600 hover:bg-blue-700 h-11 text-white font-bold uppercase text-[10px] tracking-widest transition-all">
                                 {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
-                                SAVE ENQUIRY
+                                Finalize Enquiry
                             </Button>
                         </div>
                     </div>
