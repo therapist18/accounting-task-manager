@@ -493,7 +493,6 @@ export function EnquiryDialog({
                 job_description: formData.job_description,
                 individual_id: selectedIndividual.id,
                 company_id: selectedCompany ? Number(selectedCompany) : null,
-                sponsor_id: selectedSponsor ? selectedSponsor.id : null, // Add to DB column if exists
                 job_level: {
                     level: formData.class_id ? 3 : formData.subdepartment_id ? 2 : 1,
                     department_id: Number(formData.department_id),

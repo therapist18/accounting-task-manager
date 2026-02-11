@@ -21,8 +21,12 @@ import { toast } from "@/hooks/use-toast"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Card } from "@/components/ui/card"
 
+import {
+  ENTITY_TYPES,
+  type EntityType
+} from "@/lib/constants/entity-types"
+
 // --- Types ---
-export type ApplicantType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependant' | 'employee' | 'understudy';
 export type RequirementCategory = 'general' | 'processing' | 'issuance' | 'job-specific';
 export type QuestionType = 'text' | 'number' | 'date' | 'select' | 'multiselect' | 'boolean';
 export type LogicOperator = 'equals' | 'not_equals' | 'is_not_empty' | 'is_empty';
@@ -35,7 +39,7 @@ export interface RequirementForm {
   isRequired: boolean
   isVisible: boolean
   kycDocumentIds: string[]
-  applicantTypes: ApplicantType[]
+  entityTypes: EntityType[]
   category: RequirementCategory // The Tab (processing/issuance/etc)
   inputType?: QuestionType
   options?: string[]
@@ -54,7 +58,7 @@ const DEFAULT_REQUIREMENT = (category: RequirementCategory): RequirementForm => 
   isRequired: true,
   isVisible: true,
   kycDocumentIds: [],
-  applicantTypes: ['principal'],
+  entityTypes: ['principal'],
   category: category,
   inputType: 'text',
   defaultValue: '',
@@ -151,7 +155,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
               operator: r.dependsOnOperator,
               value: r.dependsOnValue
             } : null,
-            applicant_types: r.applicantTypes,
+            entity_types: r.entityTypes,
             order: existingQuestions.length + i
           }))
         ];
@@ -166,7 +170,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
             category: activeSection,
             kyc_document_ids: r.kycDocumentIds,
             is_mandatory: r.isRequired,
-            applicantTypes: r.applicantTypes,
+            entityTypes: r.entityTypes,
             order: existingReqs.length + i
           }))
         ];

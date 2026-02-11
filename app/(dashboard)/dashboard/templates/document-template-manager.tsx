@@ -2066,7 +2066,7 @@ export default function DocumentTemplateManager({
                     </div>
                   )}
 
-                  {(newPlaceholder.conditions || []).map((cond) => (
+                  {(newPlaceholder.conditions || []).map((cond, idx) => (
                     <div key={`${cond.tag}-${cond.master_field_id || 'no-master'}`} className="relative p-4 rounded-lg border bg-card shadow-sm space-y-3">
                       <Button
                         variant="ghost"
@@ -2194,7 +2194,7 @@ export default function DocumentTemplateManager({
                 </Button>
 
                 <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
-                  {(newPlaceholder.boolean_conditions || []).map((cond) => (
+                  {(newPlaceholder.boolean_conditions || []).map((cond, idx) => (
                     <div key={`${cond.tag}-${cond.master_field_id || 'no-master'}`} className="relative p-4 rounded-lg border bg-card shadow-sm space-y-3">
                       <Button
                         variant="ghost"

@@ -1,4 +1,4 @@
-export type EntityType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependant' | 'employee' | 'understudy';
+export type EntityType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependant' | 'employee' | 'understudy' | 'sponsor';
 
 export const ENTITY_TYPES: { value: EntityType; label: string }[] = [
   { value: 'company', label: 'Company' }, 
@@ -8,6 +8,7 @@ export const ENTITY_TYPES: { value: EntityType; label: string }[] = [
   { value: 'dependant', label: 'Dependant' }, 
   { value: 'employee', label: 'Employee' },
   { value: 'understudy', label: 'Understudy' },
+  { value: 'sponsor', label: 'Sponsor' }
 ];
 
 export const DEPENDANT_RELATIONSHIPS = [

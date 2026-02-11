@@ -31,7 +31,8 @@ import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { processComputedFields, executeComputedField } from '../utils/automationComputedFunctions';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ExtractionPreview } from "@/components/ExtractionPreview";
+import { ExtractionPreview } from "@/components/ExtractionPreview"
+import { ENTITY_TYPES, type EntityType } from "@/lib/constants/entity-types";
 
 interface AutomationMappingDialogProps {
   isOpen: boolean;
@@ -179,14 +180,8 @@ const formatDateValue = (dateStr: string, format?: string) => {
 };
 
 const mapEntityTypeToRegistry = (type?: string): string => {
-  const map: Record<string, string> = {
-    'principal': 'Principal',
-    'director': 'Director',
-    'understudy': 'Understudy',
-    'employee': 'Employee',
-    'dependant': 'Dependant'
-  };
-  return map[type?.toLowerCase()] || 'Principal';
+  const entityConfig = ENTITY_TYPES.find(et => et.value === type?.toLowerCase());
+  return entityConfig?.label || 'Principal';
 };
 
 // Helper function to clean object strings and prevent "[object Object]" issues
@@ -478,10 +473,13 @@ export const AutomationMappingDialog = ({
     if (!activeAutomation?.fields) return 'principal';
     const entityTypes = new Set<string>();
     activeAutomation.fields.forEach((field: any) => { if (field.entityTypes && field.entityTypes.length > 0) field.entityTypes.forEach((type: string) => entityTypes.add(type)); });
-    if (entityTypes.has('company')) return 'company';
-    if (entityTypes.has('director')) return 'director';
-    if (entityTypes.has('understudy')) return 'understudy';
-    if (entityTypes.has('dependant')) return 'dependant';
+    
+    // Check entity types in priority order using ENTITY_TYPES
+    const priorityOrder = ['company', 'director', 'understudy', 'dependant'];
+    for (const type of priorityOrder) {
+      if (entityTypes.has(type)) return type;
+    }
+    
     return 'principal';
   }, [webData, selectedAutomationId]);
 

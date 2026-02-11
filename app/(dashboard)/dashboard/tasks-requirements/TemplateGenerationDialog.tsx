@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp, Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles, View, MousePointer2, Layout } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp, Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles, View, MousePointer2, Layout, Code } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -891,7 +891,8 @@ const getDisplayLabel = (value, options) => {
 
 const PlaceholderInput = ({
     placeholder, value, originalValue, onChange, onSaveToDb, isSaving, onFileChange, imageStyles, onImageStyleChange,
-    autoPopulated, isArrayItem = false, arrayIndex = null, blockName = null, onAIRefine, isAIRefining, resolvedOptions = []
+    autoPopulated, isArrayItem = false, arrayIndex = null, blockName = null, onAIRefine, isAIRefining, resolvedOptions = [],
+    showLabel = true // Add this prop
 }) => {
     const fieldKey = isArrayItem ? `${blockName}_${arrayIndex}_${placeholder.name}` : placeholder.name;
     const hasChanged = JSON.stringify(value) !== JSON.stringify(originalValue);
@@ -901,32 +902,36 @@ const PlaceholderInput = ({
         ? resolvedOptions
         : (placeholder.options || []).map(o => typeof o === 'string' ? { label: o, value: o } : o);
 
-    const FieldHeader = () => (
-        <div className="flex items-center justify-between mb-1.5">
-            <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">
-                {placeholder.name.replace(/_/g, ' ')}
-            </Label>
-            <div className="flex items-center gap-2">
-                {canSave && hasChanged && (
-                    <Button size="sm" variant="ghost" className="h-6 px-2 text-green-600 hover:bg-green-50 border border-green-200" onClick={() => onSaveToDb(placeholder, value)} disabled={isSaving}>
-                        {isSaving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Save className="h-3 w-3 mr-1" />}
-                        <span className="text-[9px] font-bold">SAVE TO PROFILE</span>
-                    </Button>
+    const FieldHeader = () => {
+        if (!showLabel && !canSave && !placeholder.is_ai_generated) return null;
+        return (
+            <div className="flex items-center justify-between mb-1.5">
+                {showLabel && (
+                    <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">
+                        {placeholder.name.replace(/_/g, ' ')}
+                    </Label>
                 )}
-                {placeholder.is_ai_generated && !isArrayItem && (
-                    <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-purple-600 hover:text-purple-700 hover:bg-purple-50" onClick={(e) => { e.preventDefault(); onAIRefine(placeholder); }} disabled={isAIRefining}>
-                        {isAIRefining ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
-                        <span className="text-[9px]">Refine</span>
-                    </Button>
-                )}
-                {autoPopulated && !hasChanged && <Badge variant="secondary" className="text-[9px] bg-slate-100 text-slate-500">{autoPopulated}</Badge>}
+                <div className="flex items-center gap-2 ml-auto">
+                    {canSave && hasChanged && (
+                        <Button size="sm" variant="ghost" className="h-6 px-2 text-green-600 hover:bg-green-50 border border-green-200" onClick={() => onSaveToDb(placeholder, value)} disabled={isSaving}>
+                            {isSaving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Save className="h-3 w-3 mr-1" />}
+                            <span className="text-[9px] font-bold">SAVE TO PROFILE</span>
+                        </Button>
+                    )}
+                    {placeholder.is_ai_generated && !isArrayItem && (
+                        <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-purple-600 hover:text-purple-700 hover:bg-purple-50" onClick={(e) => { e.preventDefault(); onAIRefine(placeholder); }} disabled={isAIRefining}>
+                            {isAIRefining ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+                            <span className="text-[9px]">Refine</span>
+                        </Button>
+                    )}
+                </div>
             </div>
-        </div>
-    );
+        );
+    };
 
     if (placeholder.type === 'document_checklist') {
         return (
-            <div className="space-y-2">
+            <div className="">
                 <FieldHeader />
                 <div className="p-3 bg-slate-50 rounded border text-xs whitespace-pre-line font-mono">{value || 'No checklist data available'}</div>
             </div>
@@ -936,7 +941,7 @@ const PlaceholderInput = ({
     if (placeholder.is_digit_split) {
         const chars = processDigitSplit(value || '', placeholder.digit_count || 8);
         return (
-            <div className="space-y-2">
+            <div className="">
                 <FieldHeader />
                 <div className={cn("flex flex-wrap gap-1 p-1 rounded", hasChanged && canSave ? "bg-amber-50 border border-amber-200" : "")}>
                     {Array.from({ length: placeholder.digit_count || 8 }).map((_, idx) => (
@@ -955,7 +960,7 @@ const PlaceholderInput = ({
     if (placeholder.type === 'image') {
         const style = imageStyles[fieldKey] || {};
         return (
-            <div className="space-y-2">
+            <div className="">
                 <FieldHeader />
                 {value ? (
                     <div className={cn("relative border rounded overflow-hidden aspect-video flex items-center justify-center bg-white", hasChanged && canSave ? "border-amber-400" : "")}>
@@ -980,7 +985,7 @@ const PlaceholderInput = ({
     if (placeholder.type === 'boolean') {
         const opts = Array.isArray(value) ? value : (placeholder.boolean_conditions || []);
         return (
-            <div className="space-y-2">
+            <div className="">
                 <FieldHeader />
                 <div className={cn("space-y-2 p-2 rounded border", hasChanged && canSave ? "bg-amber-50 border-amber-300" : "bg-slate-50")}>
                     {opts.map((opt, idx) => (
@@ -1002,7 +1007,7 @@ const PlaceholderInput = ({
 
     if (placeholder.type === 'select' || resolvedOptions.length > 0) {
         return (
-            <div className="space-y-2">
+            <div className="">
                 <FieldHeader />
                 <Select value={String(value || '')} onValueChange={(val) => {
                     const selected = options.find(o => String(o.value) === val);
@@ -1020,7 +1025,7 @@ const PlaceholderInput = ({
     }
 
     return (
-        <div className="space-y-2">
+        <div className="">
             <FieldHeader />
             <div className="relative">
                 <Input value={value || ''} onChange={(e) => onChange(e.target.value)} className={cn("bg-white h-8 text-xs transition-all pr-8", hasChanged && canSave ? "border-amber-400 ring-2 ring-amber-50" : "focus:border-blue-400")} />
@@ -1030,7 +1035,7 @@ const PlaceholderInput = ({
     );
 };
 
-export default function TemplateGenerationDialog({ isOpen, onClose, template, availableTemplates = [], documentName, masterFields, entityIdMap, sourceDataCache, extractedData = {}, personData = {}, companyData = {}, relationshipData = { directors: [], dependants: [], company: {}, principal: null, understudy: null }, onDraftDiscarded }) {
+export default function TemplateGenerationDialog({ isOpen, onClose, template, availableTemplates = [], documentName, masterFields, entityIdMap, sourceDataCache, extractedData = {}, personData = {}, companyData = {}, relationshipData = { directors: [], dependants: [], company: {}, principal: null, understudy: null }, onDraftDiscarded, jobLevel }) {
     const [panelsVisible, setPanelsVisible] = useState({ form: true, preview: true, source: true });
     const { toast } = useToast();
     const [formData, setFormData] = useState(() => ({ ...extractedData, ...personData, ...companyData, directors: relationshipData.directors || [], company: relationshipData.company || {} }));
@@ -1219,7 +1224,38 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
         const topLevel = [];
         const blocks = {};
 
+        console.log('=== PLACEHOLDERS DEBUG ===');
+        console.log('🎯 Target Entity IDs:', entityIdMap);
+        console.log('👤 Person Data:', personData);
+        console.log('🏢 Company Data:', companyData);
+        console.log('📊 Extracted Data:', extractedData);
+        console.log('Total placeholders:', selectedTemplate.placeholders.length);
+
         selectedTemplate.placeholders.forEach(p => {
+            console.log(`\n📝 Placeholder: ${p.name}`);
+            console.log(`  Type: ${p.type}`);
+            console.log(`  Master Field IDs:`, p.master_field_ids);
+            console.log(`  Parent Name: ${p.parent_name}`);
+            console.log(`  Is Block Start: ${p.is_block_start}`);
+            
+            // Log master field details if available
+            if (p.master_field_ids && p.master_field_ids.length > 0) {
+                p.master_field_ids.forEach((fieldId, index) => {
+                    const masterField = masterFields.get(parseInt(fieldId));
+                    if (masterField) {
+                        console.log(`  📋 Master Field ${index + 1}:`);
+                        console.log(`    ID: ${fieldId}`);
+                        console.log(`    Field Key: ${masterField.field_key}`);
+                        console.log(`    Label: ${masterField.label}`);
+                        console.log(`    Sources:`, masterField.sources);
+                    } else {
+                        console.log(`  ❌ Master Field ${index + 1}: ID ${fieldId} NOT FOUND`);
+                    }
+                });
+            } else {
+                console.log(`  📋 No Master Field IDs`);
+            }
+
             if (p.is_block_start) {
                 blocks[p.name] = { config: p, children: [] };
             } else if (p.parent_name && blocks[p.parent_name]) {
@@ -1229,9 +1265,11 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
             }
         });
 
+        console.log('\n=== END PLACEHOLDERS DEBUG ===\n');
+
         return { topLevel, blocks };
-    }, [selectedTemplate]);
-    
+    }, [selectedTemplate, masterFields]);
+
     const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) => {
         const conflicts: Array<{
             field: string;
@@ -1339,7 +1377,7 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                             }
                         }
                     });
-                    
+
                     // Generate live data for array items fields
                     Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
                         const blockConfig = groupedPlaceholders.blocks[blockName].config;
@@ -1354,7 +1392,7 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                             extractedData,
                             companyData
                         );
-                        
+
                         if (resolvedArray.length > 0) {
                             liveData[blockName] = resolvedArray;
                         }
@@ -2705,15 +2743,18 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
 
         try {
             const fileName = `${documentName.replace(/[^\w\s-]/g, '_')}_draft_${formatDate(new Date(), 'YYYYMMDD_HHmmss')}`;
-            let applicantType = 'company';
-            if (personData?.applicant_details?.type) {
-                applicantType = personData.applicant_details.type;
-            } else if (companyData?.applicant_details?.type) {
-                applicantType = companyData.applicant_details.type;
-            } else if (extractedData?.type) {
-                applicantType = extractedData.type;
+            
+            // Determine entity type from available data
+            let entityType = 'company';
+            if (personData?.entity_type) {
+                entityType = personData.entity_type;
+            } else if (companyData?.entity_type) {
+                entityType = companyData.entity_type;
+            } else if (extractedData?.entity_type) {
+                entityType = extractedData.entity_type;
             }
-            const isCompany = applicantType.toLowerCase() === 'company';
+            
+            const isCompany = entityType.toLowerCase() === 'company';
             const targetTable = isCompany ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents';
             const kycDocId = template?.document_id;
 
@@ -2724,8 +2765,8 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                 templateId: selectedTemplate?.id,
                 documentName: documentName,
                 version: 1,
-                arrayFields: Object.keys(formData).filter(key => 
-                    Array.isArray(formData[key]) && 
+                arrayFields: Object.keys(formData).filter(key =>
+                    Array.isArray(formData[key]) &&
                     formData[key].some(item => typeof item === 'object' && item !== null)
                 )
             };
@@ -3143,49 +3184,71 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
 
                     <div className="flex-1 overflow-hidden grid grid-cols-12 gap-0">
                         <ScrollArea className={`${panelClasses.form} border-r bg-white`}>
-                            <div className="p-4 space-y-6">
-                                {/* 1. General Fields Section */}
+                            <div className="p-6 space-y-8">
+                                {/* Section Header */}
                                 <div className="space-y-4">
-                                    <Label className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                                        General Fields
-                                    </Label>
-                                    {groupedPlaceholders.topLevel.map(p => {
-                                        let resolvedOptions = [];
-                                        if (p.master_field_ids?.length > 0) {
-                                            const mf = masterFields.get(parseInt(p.master_field_ids[0]));
-                                            if (mf?.type === 'select') {
-                                                resolvedOptions = getDependentDropdownOptions(p, mf);
-                                            }
-                                        }
+                                    <h4 className="flex items-center gap-2 font-black text-blue-600 text-[10px] tracking-widest uppercase border-b pb-2">
+                                        <Layout className="h-3 w-3" /> General Document Fields
+                                    </h4>
 
-                                        return (
-                                            <div key={`${p.id || p.name}-${p.name}`} className="p-3 border rounded-lg bg-slate-50/50">
-                                                <PlaceholderInput
-                                                    placeholder={p}
-                                                    value={formData[p.name]}
-                                                    onChange={(val) => handleInputChange(p.name, val)}
-                                                    onSaveToDb={saveFieldToDatabase}
-                                                    resolvedOptions={resolvedOptions}
-                                                    onFileChange={(e) => handleFileChange(p.name, e)}
-                                                    imageStyles={imageStyles}
-                                                    onImageStyleChange={handleImageStyleChange}
-                                                    autoPopulated={autoPopulatedFields.get(p.name)}
-                                                    originalValue={originalFormData[p.name]}
-                                                    isArrayItem={false}
-                                                    onAIRefine={handleSingleFieldAIRefine}
-                                                    isAIRefining={refiningFields.has(p.name)}
-                                                />
-                                            </div>
-                                        );
-                                    })}
+                                    <div className="grid grid-cols-1 gap-y-1">
+                                        {groupedPlaceholders.topLevel.map((p, idx) => {
+                                            let resolvedOptions = [];
+                                            if (p.master_field_ids?.length > 0) {
+                                                const mf = masterFields.get(parseInt(p.master_field_ids[0]));
+                                                if (mf?.type === 'select') {
+                                                    resolvedOptions = getDependentDropdownOptions(p, mf);
+                                                }
+                                            }
+
+                                            return (
+                                                <div
+                                                    key={`${p.id || p.name}-${p.name}`}
+                                                    className="flex flex-row items-start gap-6 p-2 border-b border-slate-50 last:border-0 hover:bg-slate-50/50 transition-colors"
+                                                >
+                                                    {/* COLUMN 1: ID Badge + Right Aligned Label */}
+                                                    <div className="w-1/3 flex items-start">
+                                                        <Label className="font-bold text-slate-700 text-xs leading-relaxed uppercase tracking-tight">
+                                                            {p.name.replace(/_/g, ' ')}
+                                                        </Label>
+                                                    </div>
+
+                                                    {/* COLUMN 2: Input Control */}
+                                                    <div className="flex-1 min-w-0">
+                                                        <PlaceholderInput
+                                                            placeholder={p}
+                                                            value={formData[p.name]}
+                                                            onChange={(val) => handleInputChange(p.name, val)}
+                                                            onSaveToDb={saveFieldToDatabase}
+                                                            resolvedOptions={resolvedOptions}
+                                                            onFileChange={(e) => handleFileChange(p.name, e)}
+                                                            imageStyles={imageStyles}
+                                                            onImageStyleChange={handleImageStyleChange}
+                                                            autoPopulated={autoPopulatedFields.get(p.name)}
+                                                            originalValue={originalFormData[p.name]}
+                                                            isArrayItem={false}
+                                                            onAIRefine={handleSingleFieldAIRefine}
+                                                            isAIRefining={refiningFields.has(p.name)}
+                                                            showLabel={false} // Hides the internal vertical label
+                                                        />
+                                                        {autoPopulatedFields.get(p.name) && (
+                                                            <p className="text-[9px] text-blue-500 mt-1 font-medium italic">
+                                                                Source: {autoPopulatedFields.get(p.name)}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
                                 </div>
 
-                                {/* 2. RE-ADD THIS SECTION: Repeating Sections */}
+                                {/* Repeating Sections Logic */}
                                 {Object.keys(groupedPlaceholders.blocks).length > 0 && (
                                     <div className="space-y-4 pt-4 border-t">
-                                        <Label className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                                            Repeating Sections
-                                        </Label>
+                                        <h4 className="flex items-center gap-2 font-black text-blue-600 text-[10px] tracking-widest uppercase border-b pb-2">
+                                            <Layers className="h-3 w-3" /> Repeating Tables / Blocks
+                                        </h4>
                                         {Object.keys(groupedPlaceholders.blocks).map(blockName => (
                                             <div key={blockName}>
                                                 {renderArrayInputs(blockName, groupedPlaceholders.blocks[blockName])}

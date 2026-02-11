@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { AlertTriangle, Briefcase, Users, Plus, Minus, UserCheck, Loader2, Download, FileText, FileUp, Trash2, RefreshCw, Wand2, Save, ChevronDown, ChevronRight, Users2, User, Building2, Zap, FileType, UploadCloud, Eye, Calendar, CheckCircle2, XCircle, AlertCircle } from "lucide-react"
+import { AlertTriangle, Briefcase, Users, Plus, Minus, UserCheck, Loader2, Download, FileText, FileUp, Trash2, RefreshCw, Wand2, Save, ChevronDown, ChevronRight, Users2, User, Building2, Zap, FileType, UploadCloud, Eye, Calendar, CheckCircle2, XCircle, AlertCircle, Heart, HeartPulse } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import * as XLSX from 'xlsx'
@@ -28,9 +28,35 @@ import('html-docx-js/dist/html-docx')
   .catch(err => console.error('Failed to load html-docx-js', err));
 
 import TemplateGenerationDialog from "./TemplateGenerationDialog"
+import { ENTITY_TYPES, type EntityType } from "@/lib/constants/entity-types"
 import { UploadModal } from "@/app/generic-components/UploadModal"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
+
+// Helper functions for entity type styling and checking
+const getEntityTypeConfig = (type: string) => {
+  const entityConfig = ENTITY_TYPES.find(et => et.value === type);
+  if (!entityConfig) return { bgColor: 'bg-blue-600', Icon: User };
+  
+  switch (type) {
+    case 'company':
+      return { bgColor: 'bg-slate-700', Icon: Briefcase };
+    case 'director':
+      return { bgColor: 'bg-indigo-600', Icon: UserCheck };
+    case 'dependant':
+      return { bgColor: 'bg-blue-500', Icon: Users2 };
+    case 'principal':
+      return { bgColor: 'bg-blue-700', Icon: UserCheck };
+    case 'sponsor':
+      return { bgColor: 'bg-green-600', Icon: HeartPulse };
+    default:
+      return { bgColor: 'bg-blue-600', Icon: User };
+  }
+};
+
+const isCompanyType = (type: string) => type === 'company';
+const isIndividualType = (type: string) => ['principal', 'director', 'understudy'].includes(type);
+const isPrincipalType = (type: string) => type === 'principal';
 
 const generateDocxBlobFromHtml = async (html: string) => {
   if (!htmlDocx) {
@@ -87,7 +113,7 @@ const getFileUrl = (filePath: string) => {
   return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${filePath}`;
 };
 
-export default function RequirementsTableCombined({ loading, error, filteredGroupedTasks, organizedRequirements, classRequirements, expandedDocuments, onSaveDocument, onSave, toggleDocumentExpansion, renderDocumentStatus, renderClientFieldData, renderReferencesData, hasReferencesColumn, individualNames, companyData, getCurrentRequirements, fuzzyMatch, kycDocuments, documentTypes, mainTab, handleUploadSubmit, handleDeleteDocument, handleRetryExtraction, documentTemplates, allIndividualDocuments, allCompanyDocuments, searchQuery = "", refreshDocuments, }: any) {
+export default function RequirementsTableCombined({ loading, error, filteredGroupedTasks, organizedRequirements, classRequirements, expandedDocuments, onSaveDocument, onSave, toggleDocumentExpansion, renderDocumentStatus, renderClientFieldData, renderReferencesData, hasReferencesColumn, individualNames, companyData, getCurrentRequirements, fuzzyMatch, kycDocuments, documentTypes, mainTab, handleUploadSubmit, handleDeleteDocument, handleRetryExtraction, documentTemplates, allIndividualDocuments, allCompanyDocuments, searchQuery = "", refreshDocuments, jobLevel, }: any) {
   const [expandedSections, setExpandedSections] = useState({
     company: true,
     individual: true,
@@ -415,24 +441,22 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     return filtered;
   }, [organizedRequirements, searchQuery]);
 
-  // RequirementsTableCombined.tsx - Around line 105
   const classDocsAndFields = useMemo(() => { return classRequirements?.[0]?.documents_and_fields || []; }, [classRequirements]);
 
   const checkApplicability = (colType: string, requirement: any) => {
     if (!requirement) return false;
 
-    // Normalizing colType to match your JSON (e.g., 'director' in table vs 'principal' in JSON)
-    const typeMap: Record<string, string> = {
+   const typeMap: Record<string, string> = {
       'principal': 'principal',
       'director': 'director', // Keep as 'director' to match requirements that expect 'director'
       'company': 'company',
       'dependant': 'dependant',
       'understudy': 'understudy',
-      'shareholder': 'shareholder' // Add shareholder mapping
+      'shareholder': 'shareholder',
+      'sponsor': 'sponsor' // Add this line
     };
-
     const targetType = typeMap[colType] || colType;
-    const allowedTypes = requirement.applicantTypes || (requirement.applicantType ? [requirement.applicantType] : []);
+    const allowedTypes = requirement.entityTypes || (requirement.applicantType ? [requirement.applicantType] : []);
 
     return allowedTypes.includes(targetType);
   };
@@ -609,6 +633,24 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         }
       }
 
+ const sponsorParticipant = participants.find(p =>
+        p.type === 'individual' &&
+        (Array.isArray(p.role) ? p.role.includes('sponsor') : p.role === 'sponsor')
+      );
+      if (sponsorParticipant) {
+        // Avoid duplicates
+        if (!groupCols.find(col => col.id === sponsorParticipant.id && col.groupIndex === groupIndex)) {
+          groupCols.push({
+            type: 'sponsor',
+            id: sponsorParticipant.id,
+            label: sponsorParticipant.name,
+            subLabel: 'Sponsor',
+            task,
+            groupIndex,
+            priority: 6 // Sponsor gets sixth priority
+          });
+        }
+      }
       // Sort columns by priority to ensure company always comes first
       groupCols.sort((a, b) => a.priority - b.priority);
       cols.push(...groupCols);
@@ -627,11 +669,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
       for (const col of columnDefinitions) {
         // Logic for Company vs Individual IDs - MUST MATCH renderRequirementRows logic
-        const personId = col.type === 'company' ? col.task.company_id :
-          (col.type === 'principal' || col.type === 'director' || col.type === 'understudy') ? col.task.individual_id :
+        const personId = isCompanyType(col.type) ? col.task.company_id :
+          isIndividualType(col.type) ? col.task.individual_id :
             col.id;
 
-        const docsToCheck = col.type === 'company'
+        const docsToCheck = isCompanyType(col.type)
           ? (allCompanyDocuments[personId] || [])
           : (allIndividualDocuments[personId] || []);
 
@@ -752,8 +794,19 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       let query = supabase
         .from('acc_portal_templates')
         .select('*')
-        .eq('document_id', documentId)
-        .order('file_name', { ascending: true });
+        .eq('document_id', documentId);
+
+      // Filter by job_level if available
+      if (jobLevel) {
+        // Since job_level is stored as an array, we need to check if it contains the matching object
+        // The correct syntax for Supabase is to use the @> operator with the array
+        const jobLevelJson = JSON.stringify([jobLevel]); // Wrap in array for proper matching
+        console.log('Debug - jobLevel:', jobLevel);
+        console.log('Debug - jobLevelJson (wrapped in array):', jobLevelJson);
+        query = query.filter('job_level', 'cs', jobLevelJson);
+      }
+
+      query = query.order('file_name', { ascending: true });
 
       // If bank ID is found, filter templates by bank_id
       if (bankId) {
@@ -1099,6 +1152,19 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             id: uId,
             name: uPart?.name || individualNames[uId] || 'Understudy'
           };
+        })(),
+         sponsor: (() => {
+          const sponsorParticipant = participants.find(p =>
+            p.type === 'individual' &&
+            (Array.isArray(p.role) ? p.role.includes('sponsor') : p.role === 'sponsor')
+          );
+          if (sponsorParticipant) {
+            return {
+              id: sponsorParticipant.id,
+              name: sponsorParticipant.name
+            };
+          }
+          return null;
         })()
       };
     }).filter(Boolean);
@@ -1525,13 +1591,13 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                         className="h-8 w-8 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
                                         onClick={() => {
                                           const latestDocId = reqItem.kyc_document_ids?.find((docId: string) => {
-                                            const docs = col.type === 'company'
+                                            const docs = isCompanyType(col.type)
                                               ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.kyc_document_id === docId)
                                               : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === docId);
                                             return docs && docs.length > 0;
                                           });
                                           if (latestDocId) {
-                                            const docs = col.type === 'company'
+                                            const docs = isCompanyType(col.type)
                                               ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.kyc_document_id === latestDocId)
                                               : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === latestDocId);
                                             if (docs && docs.length > 0) {
@@ -1642,8 +1708,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
                                   {/* Document Status Badge */}
                                   {(() => {
-                                    const personId = col.type === 'company' ? col.task.company_id :
-                                      (col.type === 'principal' || col.type === 'director') ? col.task.individual_id :
+                                    const personId = isCompanyType(col.type) ? col.task.company_id :
+                                      isIndividualType(col.type) ? col.task.individual_id :
                                         col.id;
                                     const statusKey = `${col.task.id}-${docId}-${col.type}-${personId}`;
 
@@ -1764,7 +1830,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       let individualId: number | null = null;
       if (colType === 'principal') individualId = task.principal_member || task.individual_id;
       else if (colType === 'understudy') individualId = task.understudy_member;
-      else if (colType === 'dependant' || colType === 'reference' || colType === 'director') individualId = colId;
+      else if (colType === 'dependant' || colType === 'reference' || colType === 'director' || colType === 'sponsor') individualId = colId;
 
       if (individualId && allIndividualDocuments[individualId]) {
         const draft = allIndividualDocuments[individualId].find(
@@ -1900,13 +1966,13 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                   className="h-8 w-8 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
                                   onClick={() => {
                                     const latestDocId = reqItem.kyc_document_ids?.find((docId: string) => {
-                                      const docs = col.type === 'company'
+                                      const docs = isCompanyType(col.type)
                                         ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.kyc_document_id === docId)
                                         : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === docId);
                                       return docs && docs.length > 0;
                                     });
                                     if (latestDocId) {
-                                      const docs = col.type === 'company'
+                                      const docs = isCompanyType(col.type)
                                         ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.kyc_document_id === latestDocId)
                                         : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === latestDocId);
                                       if (docs && docs.length > 0) {
@@ -2014,8 +2080,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                               )}
                             </div>
                             {(() => {
-                              const personId = col.type === 'company' ? col.task.company_id :
-                                (col.type === 'principal' || col.type === 'director' || col.type === 'understudy') ? col.task.individual_id :
+                              const personId = isCompanyType(col.type) ? col.task.company_id :
+                                isIndividualType(col.type) ? col.task.individual_id :
                                   col.id;
                               const statusKey = `${col.task.id}-${docId}-${col.type}-${personId}`;
                               if (!documentStatusCache.has(statusKey)) {
@@ -2242,22 +2308,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                 <TableHead className="sticky left-0 bg-blue-700 text-white w-16 border-r border-blue-500 text-center z-30 font-bold">#</TableHead>
                 <TableHead className="sticky left-16 bg-blue-700 text-white w-[300px] border-r border-blue-500 z-30 font-bold">Requirement Mapping</TableHead>
                 {columnDefinitions.map((col, idx) => {
-                  let bgColor = 'bg-blue-600';
-                  let Icon = User;
-
-                  if (col.type === 'company') {
-                    bgColor = 'bg-slate-700';
-                    Icon = Briefcase;
-                  } else if (col.type === 'director') {
-                    bgColor = 'bg-indigo-600';
-                    Icon = UserCheck;
-                  } else if (col.type === 'dependant') {
-                    bgColor = 'bg-blue-500';
-                    Icon = Users2;
-                  } else if (col.type === 'principal') {
-                    bgColor = 'bg-blue-700';
-                    Icon = UserCheck;
-                  }
+                  const config = getEntityTypeConfig(col.type);
+                  const { bgColor, Icon } = config;
 
                   return (
                     <TableHead
@@ -2278,7 +2330,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                               {Array.isArray(col.role) ? col.role.join(', ') : col.role}
                             </span>
                           )}
-                          {col.type === 'principal' && (() => {
+                          {isPrincipalType(col.type) && (() => {
                             const dependants = filteredGroupedTasks[col.groupIndex]?.tasks?.[0]?.participants_details?.filter(p =>
                               p.type === 'individual' && (
                                 Array.isArray(p.role) ? p.role.includes('dependant') : p.role === 'dependant'
@@ -2395,7 +2447,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       </div>
 
       {showTemplateGenerator && selectedLetterInfo && (
-        <TemplateGenerationDialog isOpen={showTemplateGenerator} onClose={() => setShowTemplateGenerator(false)} template={selectedLetterInfo.template} availableTemplates={selectedLetterInfo.availableTemplates} documentName={selectedLetterInfo.document.display_name} onSave={handleSaveGeneratedLetter} masterFields={selectedLetterInfo.masterFields} entityIdMap={selectedLetterInfo.entityIdMap} sourceDataCache={selectedLetterInfo.sourceDataCache} extractedData={selectedLetterInfo.extractedData} personData={selectedLetterInfo.personData} companyData={selectedLetterInfo.companyData} relationshipData={selectedLetterInfo.relationshipData} onDraftDiscarded={refreshDocumentData} />
+        <TemplateGenerationDialog isOpen={showTemplateGenerator} onClose={() => setShowTemplateGenerator(false)} template={selectedLetterInfo.template} availableTemplates={selectedLetterInfo.availableTemplates} documentName={selectedLetterInfo.document.display_name} onSave={handleSaveGeneratedLetter} masterFields={selectedLetterInfo.masterFields} entityIdMap={selectedLetterInfo.entityIdMap} sourceDataCache={selectedLetterInfo.sourceDataCache} extractedData={selectedLetterInfo.extractedData} personData={selectedLetterInfo.personData} companyData={selectedLetterInfo.companyData} relationshipData={selectedLetterInfo.relationshipData} onDraftDiscarded={refreshDocumentData} jobLevel={jobLevel} />
       )}
     </div >
   );

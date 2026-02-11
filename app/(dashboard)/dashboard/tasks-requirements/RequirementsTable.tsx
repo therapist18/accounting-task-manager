@@ -16,6 +16,7 @@ import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { AutomationMappingDialog } from "../tasks/components/AutomationMappingDialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import * as XLSX from 'xlsx'
+import { ENTITY_TYPES, type EntityType } from "@/lib/constants/entity-types"
 
 const LetterTemplateDialog = ({ open, onOpenChange, letterData, individualNames }) => {
   if (!letterData) return null;
@@ -64,7 +65,6 @@ interface RequirementsTableProps {
   handleDeleteDocument?: (document: any) => Promise<void>
 }
 
-type ApplicantType = 'principal' | 'dependant' | 'understudy' | 'company' | 'reference';
 
 const REFERENCE_SUBDEPARTMENT_IDS = [10, 5];
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -525,7 +525,7 @@ export function RequirementsTable({
           kyc_document_ids: [doc.id],
           hasTemplate: false,
           web_automation: null,
-          applicantTypes: doc.Principal ? ['principal'] : doc.Company ? ['company'] : doc.Dependent ? ['dependent'] : []
+          entityTypes: doc.Principal ? ['principal'] : doc.Company ? ['company'] : doc.Dependent ? ['dependent'] : []
         }));
       }
 
@@ -578,8 +578,8 @@ export function RequirementsTable({
               return 'template';
             }
 
-            const applicantTypes = req.applicantTypes || (req.applicantType ? [req.applicantType] : []);
-            if (applicantTypes.includes('company')) {
+            const entityTypes = req.entityTypes || (req.applicantType ? [req.applicantType] : []);
+            if (entityTypes.includes('company')) {
               return 'company';
             }
 
@@ -831,7 +831,7 @@ export function RequirementsTable({
 
     if (kycDocIds.length === 0) return baseStatus;
 
-    const allowedTypes = reqItem.applicantTypes || (reqItem.applicantType ? [reqItem.applicantType] : []);
+    const allowedTypes = reqItem.entityTypes || (reqItem.applicantType ? [reqItem.applicantType] : []);
 
     // If no allowed types specified, allow all
     if (!allowedTypes || allowedTypes.length === 0) {
@@ -1250,6 +1250,7 @@ export function RequirementsTable({
               onSaveDocument={handleSaveDocument}
               refreshDocuments={refreshDocuments}
               handleDeleteDocument={handleDeleteDocument}
+              jobLevel={currentClassRequirements[0]?.job_level}
             />
           </div>
         </div>

@@ -26,6 +26,7 @@ import { EditRequirementDialog } from "./components/EditRequirementDialog"
 import { AddRequirementsDialog } from "./components/AddRequirementsDialog"
 import { EditJobQuestionDialog } from "./components/EditJobQuestionDialog"
 import { COMPUTED_FUNCTIONS } from "@/lib/constants/computed-functions"
+import { ENTITY_TYPES, type EntityType } from "@/lib/constants/entity-types"
 
 interface Department {
   id: string | number
@@ -93,7 +94,7 @@ interface JobQuestion {
   required: boolean
   options?: string[]
   linked_field_id?: string
-  applicant_types?: string[]
+  entityTypes?: EntityType[]
   default_value?: string // Matches DB column name
   order: number
 }
@@ -110,7 +111,7 @@ interface ApiRequirement {
   hasWebForm?: boolean
   webFormName?: string
   automationId?: string
-  applicantTypes?: string[]
+  entityTypes?: EntityType[]
   requiredDocumentCount?: number
   billingEntity?: string
   instructions?: string
@@ -190,7 +191,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     if (!record || !record.requirements) return []
     return record.requirements.map((r: any) => ({
       ...r,
-      applicantTypes: r.applicantTypes || (r.applicantType ? [r.applicantType] : []),
+      entityTypes: r.entityTypes || [],
       kyc_document_ids: r.kyc_document_ids || (r.kycDocumentId ? [r.kycDocumentId] : []),
     }))
   }
@@ -412,9 +413,14 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                         </TableCell>
                         <TableCell className="border-r">
                           <div className="flex flex-wrap gap-1">
-                            {(q.applicant_types || []).length > 0 ? q.applicant_types?.map(t => (
-                              <Badge key={t} variant="secondary" className="text-[10px] h-4 px-1 capitalize">{t}</Badge>
-                            )) : <span className="text-xs text-slate-400">All</span>}
+                            {(q.entityTypes || []).length > 0 ? q.entityTypes?.map(t => {
+                              const entityConfig = ENTITY_TYPES.find(et => et.value === t);
+                              return (
+                                <Badge key={t} variant="secondary" className="text-[10px] h-4 px-1">
+                                  {entityConfig?.label || t}
+                                </Badge>
+                              );
+                            }) : <span className="text-xs text-slate-400">All</span>}
                           </div>
                         </TableCell>
                         <TableCell className="border-r text-xs">
@@ -609,11 +615,18 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   }
 
   const getContextDisplay = (req: RequirementTableEntry) => {
-    const types = req.applicantTypes || []
+    const types = req.entityTypes || []
     if (types.length === 0) return <span className="text-xs text-gray-400">-</span>
     return (
       <div className="flex flex-wrap gap-1">
-        {types.map(t => <Badge key={t} variant="secondary" className="text-[10px] h-4 px-1 capitalize">{t}</Badge>)}
+        {types.map(t => {
+          const entityConfig = ENTITY_TYPES.find(et => et.value === t);
+          return (
+            <Badge key={t} variant="secondary" className="text-[10px] h-4 px-1">
+              {entityConfig?.label || t}
+            </Badge>
+          );
+        })}
       </div>
     )
   }

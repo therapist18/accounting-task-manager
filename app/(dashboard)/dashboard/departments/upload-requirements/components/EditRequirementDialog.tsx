@@ -22,24 +22,15 @@ import {
   NATIONALITY_TYPES,
   AGE_RANGE_TYPES,
   DEPENDANT_RELATIONSHIPS,
+  ENTITY_TYPES,
   type NationalityType,
-  type AgeRangeType
+  type AgeRangeType,
+  type EntityType
 } from "@/lib/constants/entity-types"
 import { COMPUTED_FUNCTIONS, EXECUTION_MODES, LINKING_VARIABLES } from "@/lib/constants/computed-functions"
 import { useTableData, type TableOption } from "@/lib/tableUtils"
 import { Card } from '@/components/ui/card'
 
-export type ApplicantType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependant' | 'employee' | 'understudy';
-
-const APPLICANT_OPTIONS = [
-  { label: 'Company', value: 'company' },
-  { label: 'Principal', value: 'principal' },
-  { label: 'Director', value: 'director' },
-  { label: 'Shareholder', value: 'shareholder' },
-  { label: 'Dependant', value: 'dependant' },
-  { label: 'Employee', value: 'employee' },
-  { label: 'Understudy', value: 'understudy' },
-]
 
 interface EditRequirementDialogProps {
   isOpen: boolean
@@ -71,7 +62,7 @@ export function EditRequirementDialog({
     hasWebForm: false,
     webFormName: '',
     automationId: '',
-    applicantTypes: ['principal'],
+    entityTypes: ['principal'],
     requiredDocumentCount: 1,
     instructions: '',
     isStageDocument: false,
@@ -85,7 +76,7 @@ export function EditRequirementDialog({
     selectedTemplateId: undefined,
     selectedTemplate: undefined
   })
-  
+
   const [templates, setTemplates] = useState<any[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
@@ -100,7 +91,7 @@ export function EditRequirementDialog({
       const webAuto = requirement.web_automation || {};
       const automationId = webAuto.automationId || webAuto.automation_id || requirement.automationId || requirement.automation_id || '';
       const webFormName = webAuto.webFormName || webAuto.web_form_name || requirement.webFormName || requirement.web_form_name || '';
-      
+
       setFormData({
         ...requirement,
         name: requirement.name || '',
@@ -112,7 +103,7 @@ export function EditRequirementDialog({
         hasWebForm: !!automationId || requirement.hasWebForm === true,
         webFormName: webFormName,
         automationId: automationId ? String(automationId) : '',
-        applicantTypes: requirement.applicantTypes || (requirement.applicantType ? [requirement.applicantType] : ['principal']),
+        entityTypes: requirement.entityTypes || (requirement.applicantType ? [requirement.applicantType] : ['principal']),
         requiredDocumentCount: requirement.requiredDocumentCount || 1,
         instructions: requirement.instructions || '',
         isStageDocument: requirement.isStageDocument || false,
@@ -132,53 +123,53 @@ export function EditRequirementDialog({
     }
   }, [requirement, isOpen]);
 
-useEffect(() => {
-  const fetchTemplates = async () => {
-    const docIds = formData.kycDocumentIds || [];
-    if (docIds.length === 0 || !formData.hasTemplate) {
-      setTemplates([]);
-      return;
-    }
-    
-    setLoadingTemplates(true);
-    try {
-      const entityTypeMap: Record<string, string> = {
-        'company': 'company',
-        'principal': 'principal',
-        'director': 'director',
-        'shareholder': 'shareholder',
-        'dependant': 'dependant',
-        'employee': 'employee',
-        'understudy': 'understudy'
-      };
-
-      const applicantTypes = formData.applicantTypes || ['principal'];
-      const entityTypes = [...new Set(applicantTypes.map(type => entityTypeMap[type] || 'principal'))];
-      const entityFilters = entityTypes.map(et => `entity_types.cs.["${et}"]`).join(',');
-
-      // BUILD THE QUERY
-      let query = supabase
-        .from('acc_portal_templates')
-        .select('*')
-        .in('document_id', docIds);
-
-      // Logic: Must match the entity type
-      if (entityFilters) {
-        query = query.or(entityFilters);
+  useEffect(() => {
+    const fetchTemplates = async () => {
+      const docIds = formData.kycDocumentIds || [];
+      if (docIds.length === 0 || !formData.hasTemplate) {
+        setTemplates([]);
+        return;
       }
 
-      const { data, error } = await query.order('file_name', { ascending: true });
+      setLoadingTemplates(true);
+      try {
+        const entityTypeMap: Record<string, string> = {
+          'company': 'company',
+          'principal': 'principal',
+          'director': 'director',
+          'shareholder': 'shareholder',
+          'dependant': 'dependant',
+          'employee': 'employee',
+          'understudy': 'understudy'
+        };
 
-      if (error) throw error;
-      setTemplates(data || []);
-    } catch (error) {
-      console.error("Error fetching templates:", error);
-    } finally {
-      setLoadingTemplates(false);
-    }
-  };
-  if (isOpen) fetchTemplates();
-}, [formData.kycDocumentIds, formData.hasTemplate, formData.applicantTypes, isOpen]);
+        const entityTypes = formData.entityTypes || ['principal'];
+        const uniqueEntityTypes = [...new Set(entityTypes.map(type => entityTypeMap[type] || 'principal'))];
+        const entityFilters = uniqueEntityTypes.map(et => `entity_types.cs.["${et}"]`).join(',');
+
+        // BUILD THE QUERY
+        let query = supabase
+          .from('acc_portal_templates')
+          .select('*')
+          .in('document_id', docIds);
+
+        // Logic: Must match the entity type
+        if (entityFilters) {
+          query = query.or(entityFilters);
+        }
+
+        const { data, error } = await query.order('file_name', { ascending: true });
+
+        if (error) throw error;
+        setTemplates(data || []);
+      } catch (error) {
+        console.error("Error fetching templates:", error);
+      } finally {
+        setLoadingTemplates(false);
+      }
+    };
+    if (isOpen) fetchTemplates();
+  }, [formData.kycDocumentIds, formData.hasTemplate, formData.entityTypes, isOpen]);
 
   const fetchKycDocuments = async () => {
     try {
@@ -199,10 +190,10 @@ useEffect(() => {
 
   const updateField = (field: string, value: any) => setFormData(prev => ({ ...prev, [field]: value }))
 
-  const toggleApplicantType = (type: ApplicantType) => {
-    const current = formData.applicantTypes || []
+  const toggleEntityType = (type: EntityType) => {
+    const current = formData.entityTypes || []
     const updated = current.includes(type) ? current.filter(t => t !== type) : [...current, type]
-    updateField('applicantTypes', updated)
+    updateField('entityTypes', updated)
   }
 
   const toggleKycDoc = (docId: string) => {
@@ -230,7 +221,7 @@ useEffect(() => {
       console.log('[handleSubmit] Validation failed: Name is required');
       return;
     }
-    
+
     setIsSubmitting(true);
     try {
       let web_automation = null;
@@ -243,7 +234,7 @@ useEffect(() => {
       if (formData.hasWebForm && formData.automationId) {
         const auto = automationTypes.find(a => String(a.id) === String(formData.automationId));
         console.log('[handleSubmit] Found automation:', auto);
-        
+
         // Update tm_automations table with job level data if it exists in context
         if (context?.jobLevel) {
           // Create job level object with correct structure
@@ -254,16 +245,16 @@ useEffect(() => {
             department_id: Number(context.departmentId),
             subdepartment_id: Number(context.subdepartmentId)
           };
-          
+
           console.log('[handleSubmit] Updating automation with job level:', {
             automationId: formData.automationId,
             jobLevel: jobLevelForAutomation
           });
-          
+
           try {
             const { data, error: updateError } = await supabase
               .from('tm_automations')
-              .update({ 
+              .update({
                 job_level: jobLevelForAutomation,
                 updated_at: new Date().toISOString()
               })
@@ -276,7 +267,7 @@ useEffect(() => {
               console.error('[handleSubmit] Error updating automation job level:', updateError);
               throw updateError;
             }
-            
+
             console.log('[handleSubmit] Successfully updated automation with job level');
           } catch (updateErr) {
             console.error('[handleSubmit] Exception during automation update:', updateErr);
@@ -302,7 +293,7 @@ useEffect(() => {
         isVisible: formData.isVisible,
         isRequired: formData.isRequired,
         is_mandatory: formData.isRequired,
-        applicantTypes: formData.applicantTypes || ['principal'],
+        entityTypes: formData.entityTypes || ['principal'],
         kyc_document_ids: formData.kycDocumentIds || [],
         requiredDocumentCount: formData.requiredDocumentCount || 1,
         instructions: formData.instructions || '',
@@ -310,7 +301,7 @@ useEffect(() => {
         category: formData.category || 'processing',
         hasTemplate: formData.hasTemplate || false,
         web_automation: web_automation,
-        execution_mode: formData.executionMode, 
+        execution_mode: formData.executionMode,
         computed_function: formData.computedFunction,
         nationality: formData.nationality,
         ageRange: formData.ageRange,
@@ -336,10 +327,10 @@ useEffect(() => {
         message: error.message,
         stack: error.stack
       });
-      toast({ 
-        title: 'Error', 
-        description: error.message || 'Failed to save requirement', 
-        variant: 'destructive' 
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to save requirement',
+        variant: 'destructive'
       });
     } finally {
       console.log('[handleSubmit] Form submission complete');
@@ -378,9 +369,9 @@ useEffect(() => {
               <div className="grid grid-cols-3 gap-6">
                 <div className="col-span-2 space-y-2">
                   <Label className="text-xs font-bold uppercase text-slate-500">Requirement Display Name</Label>
-                  <Input 
-                    value={formData.name} 
-                    onChange={e => updateField('name', e.target.value)} 
+                  <Input
+                    value={formData.name}
+                    onChange={e => updateField('name', e.target.value)}
                     placeholder="e.g. Current Valid Passport"
                     className="h-10 text-base font-medium"
                   />
@@ -388,11 +379,11 @@ useEffect(() => {
 
                 <div className="space-y-2">
                   <Label className="text-xs font-bold uppercase text-slate-500">Required Count</Label>
-                  <Input 
-                    type="number" 
-                    min="1" 
-                    value={formData.requiredDocumentCount} 
-                    onChange={e => updateField('requiredDocumentCount', parseInt(e.target.value))} 
+                  <Input
+                    type="number"
+                    min="1"
+                    value={formData.requiredDocumentCount}
+                    onChange={e => updateField('requiredDocumentCount', parseInt(e.target.value))}
                     className="h-10"
                   />
                 </div>
@@ -400,57 +391,57 @@ useEffect(() => {
 
               {/* APPLICANT TYPES POPOVER */}
               <div className="space-y-2">
-                  <Label className="flex justify-between items-center text-xs font-bold uppercase text-slate-500">
-                    Target Applicants
-                    <Button variant="link" size="sm" className="h-auto p-0 text-[10px]" onClick={() => updateField('applicantTypes', [])}>Reset Selection</Button>
-                  </Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full justify-between h-10 bg-white">
-                        <div className="flex gap-1.5 flex-wrap">
-                          {(formData.applicantTypes || []).length > 0 ? formData.applicantTypes.map(t => (
-                            <Badge key={t} variant="secondary" className="capitalize text-[10px] px-2">{t}</Badge>
-                          )) : <span className="text-slate-400 font-normal">Who needs to provide this?</span>}
-                        </div>
-                        <ChevronsUpDown className="h-4 w-4 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[350px] p-0" align="start">
-                      <Command>
-                        <CommandInput placeholder="Search roles..." />
-                        <CommandList>
-                          <CommandGroup>
-                            {APPLICANT_OPTIONS.map(opt => (
-                              <CommandItem key={opt.value} onSelect={() => toggleApplicantType(opt.value as ApplicantType)}>
-                                <Check className={cn("mr-2 h-4 w-4", (formData.applicantTypes || []).includes(opt.value) ? "opacity-100" : "opacity-0")} />
-                                {opt.label}
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
+                <Label className="flex justify-between items-center text-xs font-bold uppercase text-slate-500">
+                  Target Entities
+                  <Button variant="link" size="sm" className="h-auto p-0 text-[10px]" onClick={() => updateField('entityTypes', [])}>Reset Selection</Button>
+                </Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-between h-10 bg-white">
+                      <div className="flex gap-1.5 flex-wrap">
+                        {(formData.entityTypes || []).length > 0 ? formData.entityTypes.map(t => (
+                          <Badge key={t} variant="secondary" className="capitalize text-[10px] px-2">{t}</Badge>
+                        )) : <span className="text-slate-400 font-normal">Who needs to provide this?</span>}
+                      </div>
+                      <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[350px] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Search roles..." />
+                      <CommandList>
+                        <CommandGroup>
+                          {ENTITY_TYPES.map(opt => (
+                            <CommandItem key={opt.value} onSelect={() => toggleEntityType(opt.value as EntityType)}>
+                              <Check className={cn("mr-2 h-4 w-4", (formData.entityTypes || []).includes(opt.value) ? "opacity-100" : "opacity-0")} />
+                              {opt.label}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
 
               {/* EXECUTION & DOCUMENT LOGIC SECTION */}
               <Card className="p-0 overflow-hidden border-slate-200 shadow-sm">
                 <div className="bg-slate-100/80 px-4 py-2 border-b flex items-center gap-2">
-                   <Settings2 className="h-4 w-4 text-slate-600" />
-                   <span className="text-xs font-bold uppercase text-slate-700">Document Logic & Mapping</span>
+                  <Settings2 className="h-4 w-4 text-slate-600" />
+                  <span className="text-xs font-bold uppercase text-slate-700">Document Logic & Mapping</span>
                 </div>
                 <div className="p-6 space-y-6 bg-white">
                   <div className="space-y-3">
                     <Label className="text-xs font-bold text-slate-500">Linked KYC Definitions</Label>
                     <div className="flex flex-wrap gap-2 mb-3">
-                        {getSelectedDocumentNames().map((doc) => (
-                          <Badge key={doc.id} variant="blue" className="pl-3 pr-1 py-1 flex items-center gap-2 text-xs border-blue-200 bg-blue-50 text-blue-700">
-                            {doc.name}
-                            <button onClick={() => removeKycDoc(doc.id)} className="hover:bg-blue-200 rounded-full p-0.5 transition-colors">
-                              <X className="h-3.5 w-3.5" />
-                            </button>
-                          </Badge>
-                        ))}
+                      {getSelectedDocumentNames().map((doc) => (
+                        <Badge key={doc.id} variant="blue" className="pl-3 pr-1 py-1 flex items-center gap-2 text-xs border-blue-200 bg-blue-50 text-blue-700">
+                          {doc.name}
+                          <button onClick={() => removeKycDoc(doc.id)} className="hover:bg-blue-200 rounded-full p-0.5 transition-colors">
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </Badge>
+                      ))}
                     </div>
                     <Popover>
                       <PopoverTrigger asChild>
@@ -537,10 +528,10 @@ useEffect(() => {
                       <Label className="text-xs font-bold text-slate-500">Extraction / Computed Function</Label>
                       <Select value={formData.computedFunction || 'none'} onValueChange={v => {
                         console.log('Computed function changed:', v); // Debug log
-                        
+
                         // Combine all updates into a single call
                         const updates: any = { computedFunction: v };
-                        
+
                         // Auto-derive execution mode from function (only if not None)
                         if (v === 'none') {
                           updates.executionMode = '';
@@ -549,7 +540,7 @@ useEffect(() => {
                         } else {
                           updates.executionMode = 'all';
                         }
-                        
+
                         // Apply all updates at once
                         Object.keys(updates).forEach(key => {
                           updateField(key, updates[key]);
@@ -607,7 +598,7 @@ useEffect(() => {
                 </div>
 
                 <div className="space-y-4">
-                   <Label className="flex items-center gap-2 text-primary font-bold uppercase text-xs tracking-wide">
+                  <Label className="flex items-center gap-2 text-primary font-bold uppercase text-xs tracking-wide">
                     <Settings2 className="h-4 w-4" /> Workflow & Templates
                   </Label>
                   <div className="space-y-4 p-4 bg-white border rounded-xl shadow-sm">
@@ -632,7 +623,7 @@ useEffect(() => {
                           <Label className="text-sm font-medium text-orange-800">Available Templates</Label>
                           {loadingTemplates && <Loader2 className="h-4 w-4 animate-spin text-orange-600" />}
                         </div>
-                        
+
                         {templates.length > 0 ? (
                           <div className="space-y-2">
                             <p className="text-xs text-slate-600">Templates for selected documents:</p>
@@ -680,39 +671,39 @@ useEffect(() => {
 
               {/* AUTOMATION & INSTRUCTIONS */}
               <div className="space-y-4 pt-4 border-t">
-                  <div className="flex items-center justify-between">
-                    <Label className="flex items-center gap-2 text-purple-600 font-bold uppercase text-xs tracking-wide">
-                      <Zap className="h-4 w-4" /> Web Form Automation
-                    </Label>
-                    <Switch checked={formData.hasWebForm} onCheckedChange={v => updateField('hasWebForm', v)} />
-                  </div>
-                  {formData.hasWebForm && (
-                    <div className="grid grid-cols-2 gap-4 p-4 bg-purple-50/50 border border-purple-100 rounded-xl animate-in slide-in-from-top-2">
-                      <div className="space-y-2">
-                        <Label className="text-[10px] uppercase font-bold text-purple-700">Web Form Header</Label>
-                        <Input value={formData.webFormName} onChange={e => updateField('webFormName', e.target.value)} className="bg-white border-purple-200" />
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-[10px] uppercase font-bold text-purple-700">Automation Logic</Label>
-                        <Select value={formData.automationId} onValueChange={v => updateField('automationId', v)}>
-                          <SelectTrigger className="bg-white border-purple-200"><SelectValue placeholder="Select logic..." /></SelectTrigger>
-                          <SelectContent>
-                            {automationTypes.map(a => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                <div className="flex items-center justify-between">
+                  <Label className="flex items-center gap-2 text-purple-600 font-bold uppercase text-xs tracking-wide">
+                    <Zap className="h-4 w-4" /> Web Form Automation
+                  </Label>
+                  <Switch checked={formData.hasWebForm} onCheckedChange={v => updateField('hasWebForm', v)} />
+                </div>
+                {formData.hasWebForm && (
+                  <div className="grid grid-cols-2 gap-4 p-4 bg-purple-50/50 border border-purple-100 rounded-xl animate-in slide-in-from-top-2">
+                    <div className="space-y-2">
+                      <Label className="text-[10px] uppercase font-bold text-purple-700">Web Form Header</Label>
+                      <Input value={formData.webFormName} onChange={e => updateField('webFormName', e.target.value)} className="bg-white border-purple-200" />
                     </div>
-                  )}
-
-                  <div className="space-y-2">
-                    <Label className="text-xs font-bold text-slate-500 uppercase">Submission Instructions</Label>
-                    <Textarea 
-                      value={formData.instructions} 
-                      onChange={e => updateField('instructions', e.target.value)} 
-                      placeholder="Give users specific guidance on how to provide this document..." 
-                      rows={3} 
-                    />
+                    <div className="space-y-2">
+                      <Label className="text-[10px] uppercase font-bold text-purple-700">Automation Logic</Label>
+                      <Select value={formData.automationId} onValueChange={v => updateField('automationId', v)}>
+                        <SelectTrigger className="bg-white border-purple-200"><SelectValue placeholder="Select logic..." /></SelectTrigger>
+                        <SelectContent>
+                          {automationTypes.map(a => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
+                )}
+
+                <div className="space-y-2">
+                  <Label className="text-xs font-bold text-slate-500 uppercase">Submission Instructions</Label>
+                  <Textarea
+                    value={formData.instructions}
+                    onChange={e => updateField('instructions', e.target.value)}
+                    placeholder="Give users specific guidance on how to provide this document..."
+                    rows={3}
+                  />
+                </div>
               </div>
             </TabsContent>
 

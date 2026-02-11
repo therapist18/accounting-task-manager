@@ -18,7 +18,8 @@ import {
   AGE_RANGE_TYPES, 
   type NationalityType,
   type AgeRangeType,
-  ENTITY_TYPES
+  ENTITY_TYPES,
+  type EntityType
 } from "@/lib/constants/entity-types"
 
 export type LogicOperator = 'equals' | 'not_equals' | 'is_not_empty' | 'is_empty';
@@ -31,7 +32,7 @@ interface JobQuestion {
   required: boolean
   options?: string[]
   linked_field_id?: string
-  applicant_types?: string[]
+  entityTypes?: EntityType[]
   default_value?: string
   nationality?: NationalityType
   ageRange?: AgeRangeType
@@ -69,7 +70,6 @@ export function EditJobQuestionDialog({
     if (isOpen && question) {
       setFormData({ 
         ...question,
-        applicant_types: question.applicant_types || [],
         depends_on_id: question.depends_on?.id,
         depends_on_operator: question.depends_on?.operator || 'equals',
         depends_on_value: question.depends_on?.value || ''
@@ -141,18 +141,18 @@ export function EditJobQuestionDialog({
 
           <div className="space-y-2">
             <Label className="flex items-center gap-2 text-[10px] font-bold uppercase text-slate-500">
-              <Users className="h-3.5 w-3.5" /> Applies To (Applicant Roles)
+              <Users className="h-3.5 w-3.5" /> Applies To (Entity Types)
             </Label>
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="outline" className="w-full justify-between h-auto min-h-10 bg-white">
                   <div className="flex gap-1 flex-wrap p-1">
-                    {(formData.applicant_types || []).length > 0 ? (
-                      formData.applicant_types?.map(t => (
+                    {(formData.entityTypes || []).length > 0 ? (
+                      formData.entityTypes?.map(t => (
                         <Badge key={t} variant="secondary" className="capitalize text-[10px]">{t}</Badge>
                       ))
                     ) : (
-                      <span className="text-muted-foreground text-xs font-normal">Select applicable roles...</span>
+                      <span className="text-muted-foreground text-xs font-normal">Select applicable entity types...</span>
                     )}
                   </div>
                   <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -168,14 +168,14 @@ export function EditJobQuestionDialog({
                         <CommandItem
                           key={opt.value}
                           onSelect={() => {
-                            const current = formData.applicant_types || [];
+                            const current = formData.entityTypes || [];
                             const updated = current.includes(opt.value) 
                               ? current.filter(t => t !== opt.value) 
                               : [...current, opt.value];
-                            updateField('applicant_types', updated);
+                            updateField('entityTypes', updated);
                           }}
                         >
-                          <Check className={cn("mr-2 h-4 w-4", (formData.applicant_types || []).includes(opt.value) ? "opacity-100" : "opacity-0")} />
+                          <Check className={cn("mr-2 h-4 w-4", (formData.entityTypes || []).includes(opt.value) ? "opacity-100" : "opacity-0")} />
                           {opt.label}
                         </CommandItem>
                       ))}

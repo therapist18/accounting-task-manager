@@ -42,6 +42,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
+import { ENTITY_TYPES, type EntityType } from "@/lib/constants/entity-types"
 
 import { DepartmentSidebar } from "../departments/main-shared-components/department-sidebar"
 import { fetchDepartments } from "../departments/departments/database"
@@ -91,64 +92,67 @@ export default function LettersPage() {
     return null;
   }, [selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
 
-  useEffect(() => {
-  const fetchLetterTypesForClass = async () => {
-    // 1. Ensure we have enough data to identify the hierarchy
-    if (!jobLevelObject || !selectedClass) {
-      setLetterTypes([]);
-      setSelectedLetter(null);
-      setSelectedBank(null);
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      // 2. Fetch requirements using the job_level JSONB column filters
-      let query = supabase
-        .from('tm_class_requirements')
-        .select('documents_and_fields')
-        .eq('job_level->>department_id', jobLevelObject.department_id.toString())
-        .eq('job_level->>subdepartment_id', jobLevelObject.subdepartment_id.toString())
-        .eq('job_level->>class_id', jobLevelObject.class_id.toString());
-
-      // Handle subclass (use .is() for null values in JSONB)
-      if (jobLevelObject.subclass_id) {
-        query = query.eq('job_level->>subclass_id', jobLevelObject.subclass_id.toString());
-      } else {
-        query = query.is('job_level->>subclass_id', null);
-      }
-
-      const { data: requirementsData, error: requirementsError } = await query.maybeSingle();
-
-      if (requirementsError) throw requirementsError;
-
-      if (!requirementsData?.documents_and_fields || requirementsData.documents_and_fields.length === 0) {
+useEffect(() => {
+    const fetchLetterTypesForClass = async () => {
+      // 1. Ensure we have enough data to identify the hierarchy
+      if (!jobLevelObject || !selectedClass) {
         setLetterTypes([]);
+        setSelectedLetter(null);
+        setSelectedBank(null);
         return;
       }
 
-      // 3. Extract IDs and fetch the actual KYC document definitions
-      const documentIds = requirementsData.documents_and_fields.map(df => df.id);
+      setIsLoading(true);
+      try {
+        // 2. Fetch requirements using exact JSON match on job_level
+        // We select 'requirements' instead of 'documents_and_fields'
+        const { data: requirementsData, error: requirementsError } = await supabase
+          .from('tm_class_requirements')
+          .select('requirements') 
+          .eq('job_level', JSON.stringify(jobLevelObject))
+          .maybeSingle();
 
-      let { data: documentsData, error: documentsError } = await supabase
-        .from('acc_portal_kyc')
-        .select('*')
-        .in('id', documentIds)
+        if (requirementsError) throw requirementsError;
 
-      if (documentsError) throw documentsError;
-      
-      setLetterTypes(documentsData || []);
-    } catch (error) {
-      console.error("Error fetching letter types:", error);
-      setLetterTypes([]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-  
-  // Dependency change: depend on jobLevelObject instead of constructedClassId
-  fetchLetterTypesForClass();
-}, [jobLevelObject, selectedClass]);
+        if (!requirementsData?.requirements || !Array.isArray(requirementsData.requirements)) {
+          setLetterTypes([]);
+          return;
+        }
+
+        // 3. Filter requirements where hasTemplate is true and extract KYC IDs
+        const templateRequirements = requirementsData.requirements.filter(
+          (req: any) => req.hasTemplate === true && req.kyc_document_ids && req.kyc_document_ids.length > 0
+        );
+
+        if (templateRequirements.length === 0) {
+          setLetterTypes([]);
+          return;
+        }
+
+        // Extract all unique KYC Document IDs from the filtered requirements
+        const kycDocumentIds = [
+          ...new Set(templateRequirements.flatMap((req: any) => req.kyc_document_ids))
+        ];
+
+        // 4. Fetch the actual KYC document definitions
+        let { data: documentsData, error: documentsError } = await supabase
+          .from('acc_portal_kyc')
+          .select('*')
+          .in('id', kycDocumentIds);
+
+        if (documentsError) throw documentsError;
+
+        setLetterTypes(documentsData || []);
+      } catch (error) {
+        console.error("Error fetching letter types:", error);
+        setLetterTypes([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchLetterTypesForClass();
+  }, [jobLevelObject, selectedClass]);
 
 const handleLetterClick = (letter: any) => {
     const hasBanks = letter.banks_applicable && letter.banks_applicable.length > 0;
@@ -605,7 +609,14 @@ function TemplateCard({ template, onEdit, onDelete }) {
         <CardDescription className="flex flex-col gap-2">
           <div className="flex">
             {template.entity_types && template.entity_types.length > 0
-              ? template.entity_types.map(et => <Badge key={et} variant="outline" className="capitalize">{et}</Badge>)
+              ? template.entity_types.map(et => {
+                  const entityConfig = ENTITY_TYPES.find(entityType => entityType.value === et);
+                  return (
+                    <Badge key={et} variant="outline">
+                      {entityConfig?.label || et}
+                    </Badge>
+                  );
+                })
               : <Badge variant="outline">Uncategorized</Badge>
             }
           </div>
@@ -692,9 +703,11 @@ useEffect(() => {
 
       if (Array.isArray(entityTypes) && entityTypes.length > 0) {
         entityTypes.forEach(type => {
-          tabs.add(type);
-          if (!categorized[type]) categorized[type] = [];
-          categorized[type].push(template);
+          const entityConfig = ENTITY_TYPES.find(entityType => entityType.value === type);
+          const label = entityConfig?.label || type;
+          tabs.add(label);
+          if (!categorized[label]) categorized[label] = [];
+          categorized[label].push(template);
         });
       } else {
         categorized.uncategorized.push(template);
