@@ -308,6 +308,15 @@ const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourc
         return relationshipData?.principal || extractedData || personData;
     }
 
+      if (normType === 'sponsor') {
+        if (entityIdMap?.sponsor) {
+             if (relationshipData?.sponsor && String(relationshipData.sponsor.id) === String(entityIdMap.sponsor)) {
+                 return relationshipData.sponsor;
+             }
+        }
+        return relationshipData?.sponsor || null;
+    }
+
     if (['dependant', 'dependant', 'spouse', 'child'].includes(normType)) {
         if (placeholder.dependant_relationship?.[0]) {
             const targetRel = placeholder.dependant_relationship[0].toLowerCase();
@@ -1220,41 +1229,16 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
 
     const groupedPlaceholders = useMemo(() => {
         if (!selectedTemplate?.placeholders) return { topLevel: [], blocks: {} };
-
         const topLevel = [];
         const blocks = {};
-
-        console.log('=== PLACEHOLDERS DEBUG ===');
-        console.log('🎯 Target Entity IDs:', entityIdMap);
-        console.log('👤 Person Data:', personData);
-        console.log('🏢 Company Data:', companyData);
-        console.log('📊 Extracted Data:', extractedData);
-        console.log('Total placeholders:', selectedTemplate.placeholders.length);
-
         selectedTemplate.placeholders.forEach(p => {
-            console.log(`\n📝 Placeholder: ${p.name}`);
-            console.log(`  Type: ${p.type}`);
-            console.log(`  Master Field IDs:`, p.master_field_ids);
-            console.log(`  Parent Name: ${p.parent_name}`);
-            console.log(`  Is Block Start: ${p.is_block_start}`);
-            
-            // Log master field details if available
-            if (p.master_field_ids && p.master_field_ids.length > 0) {
+           if (p.master_field_ids && p.master_field_ids.length > 0) {
                 p.master_field_ids.forEach((fieldId, index) => {
                     const masterField = masterFields.get(parseInt(fieldId));
                     if (masterField) {
-                        console.log(`  📋 Master Field ${index + 1}:`);
-                        console.log(`    ID: ${fieldId}`);
-                        console.log(`    Field Key: ${masterField.field_key}`);
-                        console.log(`    Label: ${masterField.label}`);
-                        console.log(`    Sources:`, masterField.sources);
-                    } else {
-                        console.log(`  ❌ Master Field ${index + 1}: ID ${fieldId} NOT FOUND`);
-                    }
+                    } 
                 });
-            } else {
-                console.log(`  📋 No Master Field IDs`);
-            }
+            } 
 
             if (p.is_block_start) {
                 blocks[p.name] = { config: p, children: [] };
@@ -1264,9 +1248,6 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                 topLevel.push(p);
             }
         });
-
-        console.log('\n=== END PLACEHOLDERS DEBUG ===\n');
-
         return { topLevel, blocks };
     }, [selectedTemplate, masterFields]);
 
@@ -1397,8 +1378,6 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                             liveData[blockName] = resolvedArray;
                         }
                     });
-                    console.log('Draft Form Data:', draftFormData);
-                    console.log('Live Data:', liveData);
                     const conflicts = await detectDataConflicts(draftFormData, liveData);
                     setFormData(draftFormData);
                     setOriginalFormData(JSON.parse(JSON.stringify(draftFormData)));

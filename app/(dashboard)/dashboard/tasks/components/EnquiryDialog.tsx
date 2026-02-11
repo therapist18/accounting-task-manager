@@ -412,24 +412,6 @@ export function EnquiryDialog({
         try {
             const participants: any[] = []
 
-            if (applicantType === 'principal') {
-                participants.push({
-                    id: selectedIndividual.id,
-                    name: selectedIndividual.full_name,
-                    role: ['principal'],
-                    type: "individual",
-                    is_primary: true
-                })
-            } else if (applicantType === 'dependant' && principalForDependant) {
-                participants.push({
-                    id: principalForDependant.id,
-                    name: principalForDependant.full_name,
-                    role: ['principal'],
-                    type: "individual",
-                    is_primary: true
-                })
-            }
-
             if (selectedCompany) {
                 const c = companies.find(x => x.id.toString() === selectedCompany)
                 if (c) participants.push({ id: c.id, name: c.company_name, role: ['company'], type: "company" })
@@ -493,6 +475,12 @@ export function EnquiryDialog({
                 job_description: formData.job_description,
                 individual_id: selectedIndividual.id,
                 company_id: selectedCompany ? Number(selectedCompany) : null,
+                applicant_details: {
+                    id: selectedIndividual.id,
+                    name: selectedIndividual.full_name,
+                    role: applicantType,
+                    type: "individual"
+                },
                 job_level: {
                     level: formData.class_id ? 3 : formData.subdepartment_id ? 2 : 1,
                     department_id: Number(formData.department_id),

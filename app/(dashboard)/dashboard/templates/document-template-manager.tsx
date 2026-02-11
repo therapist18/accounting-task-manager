@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Loader2, PlusCircle, Trash2, FileText, Pencil, Save, RefreshCw, ChevronDown, Check, ChevronsUpDown, Link2, X, Search, View, Download, UserCog, Users, User, Code, Hash, Database, Sparkles } from "lucide-react";
+import { Loader2, PlusCircle, Trash2, FileText, Pencil, Save, RefreshCw, ChevronDown, Check, ChevronsUpDown, Link2, X, Search, View, Download, UserCog, Users, User, Code, Hash, Database, Sparkles, HelpCircle } from "lucide-react";
 import { DocxLivePreview } from "@/components/DocxLivePreview";
 import { DocumentTemplate as BaseDocumentTemplate } from "./types";
 import { TableHeader, Table, TableBody, TableCell, TableHead, TableRow } from "@/components/ui/table";
@@ -43,6 +43,18 @@ interface JobField {
     priority: number;
     source_type?: string;
   }>;
+}
+
+interface JobQuestion {
+  id: string;
+  label: string;
+  type: string;
+}
+
+interface Requirement {
+  id: string;
+  label: string;
+  kyc_document_ids?: string[];
 }
 
 const sanitizeClassName = (cls: string | undefined): string => {
@@ -131,6 +143,9 @@ type Placeholder = {
   image_height?: string;
   is_ai_generated?: boolean;
   ai_prompt?: string;
+  // NEW: Job Questions and Requirements linking
+  linked_job_question_id?: string;
+  linked_requirement_id?: string;
 };
 
 const getCleanText = (str: string) => str.replace(/<[^>]+>/g, '');
@@ -261,6 +276,221 @@ function MasterFieldPicker({
   );
 }
 
+function JobQuestionPicker({
+  jobQuestions,
+  selectedQuestionId,
+  onSelect,
+  onClear,
+}: {
+  jobQuestions: JobQuestion[];
+  selectedQuestionId?: string;
+  onSelect: (question: JobQuestion) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const selectedQuestion = useMemo(() =>
+    jobQuestions.find(q => q.id === selectedQuestionId),
+    [jobQuestions, selectedQuestionId]);
+
+  const filteredQuestions = useMemo(() => {
+    if (!search) return jobQuestions;
+    const searchLower = search.toLowerCase();
+    return jobQuestions.filter(question =>
+      question.label.toLowerCase().includes(searchLower) ||
+      question.type.toLowerCase().includes(searchLower)
+    );
+  }, [jobQuestions, search]);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>
+            <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between">
+              <span className="truncate">
+                {selectedQuestion
+                  ? selectedQuestion.label
+                  : "Select job question..."}
+              </span>
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+            <Command>
+              <CommandInput
+                placeholder="Search job questions..."
+                value={search}
+                onValueChange={setSearch}
+              />
+              <CommandList>
+                <CommandEmpty>No job questions found.</CommandEmpty>
+                <CommandGroup className="max-h-[300px] overflow-y-auto">
+                  {filteredQuestions.map((question) => (
+                    <CommandItem
+                      key={question.id}
+                      value={question.label}
+                      onSelect={() => {
+                        onSelect(question);
+                        setOpen(false);
+                      }}
+                      className="cursor-pointer"
+                    >
+                      <div className="flex items-center">
+                        <div className={`mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary ${selectedQuestionId === question.id ? 'bg-primary text-primary-foreground' : 'opacity-50'}`}>
+                          {selectedQuestionId === question.id && <Check className="h-3 w-3" />}
+                        </div>
+                        <div>
+                          <div className="font-medium">{question.label}</div>
+                          <div className="text-xs text-muted-foreground capitalize">{question.type}</div>
+                        </div>
+                      </div>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+        {selectedQuestion && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClear();
+            }}
+          >
+            <X className="h-4 w-4 text-muted-foreground" />
+          </Button>
+        )}
+      </div>
+
+      {selectedQuestion && (
+        <div className="flex flex-wrap gap-2 mt-2">
+          <Badge
+            variant="secondary"
+            className="flex items-center gap-1.5 pr-1.5 bg-purple-50 text-purple-700 border-purple-200"
+          >
+            <HelpCircle className="h-3 w-3" />
+            <span className="max-w-[200px] truncate">{selectedQuestion.label}</span>
+          </Badge>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RequirementPicker({
+  requirements,
+  selectedRequirementId,
+  onSelect,
+  onClear,
+}: {
+  requirements: Requirement[];
+  selectedRequirementId?: string;
+  onSelect: (requirement: Requirement) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const selectedRequirement = useMemo(() =>
+    requirements.find(r => r.id === selectedRequirementId),
+    [requirements, selectedRequirementId]);
+
+  const filteredRequirements = useMemo(() => {
+    if (!search) return requirements;
+    const searchLower = search.toLowerCase();
+    return requirements.filter(requirement =>
+      requirement.label.toLowerCase().includes(searchLower)
+    );
+  }, [requirements, search]);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>
+            <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between">
+              <span className="truncate">
+                {selectedRequirement
+                  ? selectedRequirement.label
+                  : "Select requirement..."}
+              </span>
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+            <Command>
+              <CommandInput
+                placeholder="Search requirements..."
+                value={search}
+                onValueChange={setSearch}
+              />
+              <CommandList>
+                <CommandEmpty>No requirements found.</CommandEmpty>
+                <CommandGroup className="max-h-[300px] overflow-y-auto">
+                  {filteredRequirements.map((requirement) => (
+                    <CommandItem
+                      key={requirement.id}
+                      value={requirement.label}
+                      onSelect={() => {
+                        onSelect(requirement);
+                        setOpen(false);
+                      }}
+                      className="cursor-pointer"
+                    >
+                      <div className="flex items-center">
+                        <div className={`mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary ${selectedRequirementId === requirement.id ? 'bg-primary text-primary-foreground' : 'opacity-50'}`}>
+                          {selectedRequirementId === requirement.id && <Check className="h-3 w-3" />}
+                        </div>
+                        <div>
+                          <div className="font-medium">{requirement.label}</div>
+                          {requirement.kyc_document_ids && requirement.kyc_document_ids.length > 0 && (
+                            <div className="text-xs text-muted-foreground">
+                              {requirement.kyc_document_ids.length} document(s)
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+        {selectedRequirement && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClear();
+            }}
+          >
+            <X className="h-4 w-4 text-muted-foreground" />
+          </Button>
+        )}
+      </div>
+
+      {selectedRequirement && (
+        <div className="flex flex-wrap gap-2 mt-2">
+          <Badge
+            variant="secondary"
+            className="flex items-center gap-1.5 pr-1.5 bg-green-50 text-green-700 border-green-200"
+          >
+            <Database className="h-3 w-3" />
+            <span className="max-w-[200px] truncate">{selectedRequirement.label}</span>
+          </Badge>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DocumentTemplateManager({
   document,
   isOpen,
@@ -304,12 +534,16 @@ export default function DocumentTemplateManager({
       document_id_field: 'kyc_document_id'
     },
     image_width: '',
-    image_height: ''
+    image_height: '',
+    linked_job_question_id: undefined,
+    linked_requirement_id: undefined
   });
   const [directorType, setDirectorType] = useState<'all' | 'primary'>('all');
   const [dependantRelationship, setDependantRelationship] = useState<string[]>([]);
   const [templateFiles, setTemplateFiles] = useState<Map<string, File>>(new Map());
   const [masterFields, setMasterFields] = useState<JobField[]>([]);
+  const [jobQuestions, setJobQuestions] = useState<JobQuestion[]>([]);
+  const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [placeholderSearch, setPlaceholderSearch] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const currentTemplate = (currentTemplateIndex !== null && templates[currentTemplateIndex]) ? templates[currentTemplateIndex] : null;
@@ -547,9 +781,11 @@ export default function DocumentTemplateManager({
       (Array.isArray(p.entity_type) ? p.entity_type : [p.entity_type]).some(et => et?.toLowerCase().includes(searchLower)) ||
       (p.master_field_ids || []).some(id =>
         masterFieldMap.get(id)?.toLowerCase().includes(searchLower)
-      )
+      ) ||
+      (p.linked_job_question_id && jobQuestions.find(q => q.id === p.linked_job_question_id)?.label.toLowerCase().includes(searchLower)) ||
+      (p.linked_requirement_id && requirements.find(r => r.id === p.linked_requirement_id)?.label.toLowerCase().includes(searchLower))
     );
-  }, [currentTemplate?.placeholders, placeholderSearch, masterFieldMap]);
+  }, [currentTemplate?.placeholders, placeholderSearch, masterFieldMap, jobQuestions, requirements]);
 
   const fetchMasterFields = async () => {
     try {
@@ -562,9 +798,55 @@ export default function DocumentTemplateManager({
     }
   };
 
+  const fetchJobQuestions = async () => {
+    try {
+      // Fetch job-specific questions based on job level
+      if (jobLevel?.level) {
+        // Create complete job level object for query
+        const jobLevelObject = {
+          level: jobLevel.level,
+          department_id: jobLevel.department_id,
+          subdepartment_id: jobLevel.subdepartment_id,
+          class_id: jobLevel.class_id,
+          subclass_id: jobLevel.subclass_id
+        };
+
+        // Use filter instead of eq for complex objects
+        const { data, error } = await supabase
+          .from('tm_class_requirements')
+          .select('*')
+          .filter('job_level', 'eq', JSON.stringify(jobLevelObject))
+          .maybeSingle();
+
+        if (error) {
+          console.error('Error fetching job-specific questions:', error);
+        } else {
+          setJobQuestions(data?.job_specific_questions || []);
+          setRequirements(data?.requirements || []);
+        }
+      } else {
+        // Fallback: fetch all questions
+        const { data, error } = await supabase.from('tm_class_requirements').select('job_specific_questions, requirements');
+        if (error) throw error;
+        
+        const allQuestions = data?.flatMap(r => r.job_specific_questions || []) || [];
+        const uniqueQuestions = Array.from(new Map(allQuestions.map(q => [q.label, q])).values());
+        setJobQuestions(uniqueQuestions);
+        
+        const allRequirements = data?.flatMap(r => r.requirements || []) || [];
+        const uniqueRequirements = Array.from(new Map(allRequirements.map(r => [r.label, r])).values());
+        setRequirements(uniqueRequirements);
+      }
+    } catch (error) {
+      console.error('Error fetching job questions:', error);
+      toast({ title: 'Could not load job questions', variant: 'destructive' });
+    }
+  };
+
   useEffect(() => {
     if (isOpen) {
       fetchMasterFields();
+      fetchJobQuestions();
       const initialData = initialTemplates?.map(t => ({
         ...t,
         name: t.file_name,
@@ -576,7 +858,7 @@ export default function DocumentTemplateManager({
       setTemplates([]);
       setCurrentTemplateIndex(null);
     }
-  }, [isOpen, initialTemplates]);
+  }, [isOpen, initialTemplates, jobLevel]);
 
   const validateTemplate = async (file: File): Promise<boolean> => {
     try {
@@ -1333,7 +1615,9 @@ export default function DocumentTemplateManager({
       boolean_type: 'single',
       array_direction: 'vertical',
       image_width: '',
-      image_height: ''
+      image_height: '',
+      linked_job_question_id: undefined,
+      linked_requirement_id: undefined
     });
 
     setDirectorType('all');
@@ -1849,17 +2133,35 @@ export default function DocumentTemplateManager({
                                   </TableCell>
 
                                   <TableCell className="border-r">
-                                    {p.master_field_ids?.length > 0 ? (
-                                      <div className="flex flex-wrap gap-1">
-                                        {p.master_field_ids.map(id => (
-                                          <Badge key={id} variant="outline" className="text-[9px] bg-white">
-                                            {masterFieldMap.get(id) || id}
-                                          </Badge>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <span className="text-[10px] text-muted-foreground italic">Not Linked</span>
-                                    )}
+                                    <div className="space-y-1">
+                                      {p.master_field_ids?.length > 0 && (
+                                        <div className="flex flex-wrap gap-1">
+                                          {p.master_field_ids.map(id => (
+                                            <Badge key={id} variant="outline" className="text-[9px] bg-white">
+                                              {masterFieldMap.get(id) || id}
+                                            </Badge>
+                                          ))}
+                                        </div>
+                                      )}
+                                      
+                                      {p.linked_job_question_id && (
+                                        <Badge variant="outline" className="text-[9px] bg-purple-50 text-purple-700 border-purple-200">
+                                          <HelpCircle className="h-3 w-3 mr-1" />
+                                          {jobQuestions.find(q => q.id === p.linked_job_question_id)?.label || p.linked_job_question_id}
+                                        </Badge>
+                                      )}
+                                      
+                                      {p.linked_requirement_id && (
+                                        <Badge variant="outline" className="text-[9px] bg-green-50 text-green-700 border-green-200">
+                                          <Database className="h-3 w-3 mr-1" />
+                                          {requirements.find(r => r.id === p.linked_requirement_id)?.label || p.linked_requirement_id}
+                                        </Badge>
+                                      )}
+                                      
+                                      {!p.master_field_ids?.length && !p.linked_job_question_id && !p.linked_requirement_id && (
+                                        <span className="text-[10px] text-muted-foreground italic">Not Linked</span>
+                                      )}
+                                    </div>
                                   </TableCell>
 
                                   <TableCell className="text-right">
@@ -2852,6 +3154,38 @@ export default function DocumentTemplateManager({
                 onClear={() => setNewPlaceholder({
                   ...newPlaceholder,
                   master_field_ids: []
+                })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Link to Job Question (Optional)</Label>
+              <JobQuestionPicker
+                jobQuestions={jobQuestions}
+                selectedQuestionId={newPlaceholder.linked_job_question_id}
+                onSelect={(question) => setNewPlaceholder({
+                  ...newPlaceholder,
+                  linked_job_question_id: question.id
+                })}
+                onClear={() => setNewPlaceholder({
+                  ...newPlaceholder,
+                  linked_job_question_id: undefined
+                })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Link to Requirement (Optional)</Label>
+              <RequirementPicker
+                requirements={requirements}
+                selectedRequirementId={newPlaceholder.linked_requirement_id}
+                onSelect={(requirement) => setNewPlaceholder({
+                  ...newPlaceholder,
+                  linked_requirement_id: requirement.id
+                })}
+                onClear={() => setNewPlaceholder({
+                  ...newPlaceholder,
+                  linked_requirement_id: undefined
                 })}
               />
             </div>

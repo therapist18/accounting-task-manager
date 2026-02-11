@@ -276,28 +276,28 @@ export const AutomationMappingDialog = ({
   // Helper functions for document preview (moved inside component)
   const getFileUrl = (filePath: string) => {
     if (!filePath) return '';
-    
+
     // If it's already a full URL, return as is
     if (filePath.startsWith('http')) return filePath;
-    
+
     const bucketName = 'kyc-documents';
     let cleanPath = filePath;
-    
+
     // Ensure file path doesn't start with bucket name (avoid double prefix)
     if (cleanPath.startsWith(bucketName + '/')) {
       cleanPath = cleanPath.substring(bucketName.length + 1);
     }
-    
+
     // Construct full path
     const fullPath = `${bucketName}/${cleanPath}`;
-    
+
     // Build complete URL
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (!supabaseUrl) {
       console.error('NEXT_PUBLIC_SUPABASE_URL environment variable is not set');
       return '';
     }
-    
+
     // Use encodeURI for the entire path to handle spaces properly
     const encodedPath = encodeURI(fullPath);
     return `${supabaseUrl}/storage/v1/object/public/${encodedPath}`;
@@ -371,67 +371,84 @@ export const AutomationMappingDialog = ({
 
   const buildFileUrl = (linkedDoc: any): string | null => {
     if (!linkedDoc?.file_path) return null;
-    
-    // If it's already a full URL, return as is
     if (linkedDoc.file_path.startsWith('http')) return linkedDoc.file_path;
-    
+
     const bucketName = 'kyc-documents';
     let filePath = linkedDoc.file_path;
-    
-    // Ensure the file path doesn't start with the bucket name (avoid double prefix)
+
     if (filePath.startsWith(bucketName + '/')) {
       filePath = filePath.substring(bucketName.length + 1);
     }
-    
-    // Construct the full path
+
     const fullPath = `${bucketName}/${filePath}`;
-    
-    // Build the complete URL
+
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (!supabaseUrl) {
       console.error('NEXT_PUBLIC_SUPABASE_URL environment variable is not set');
       return null;
     }
-    
-    // Use encodeURI for the entire path to handle spaces properly
-    // This will encode spaces as %20 which is correct for URLs
     const encodedPath = encodeURI(fullPath);
     return `${supabaseUrl}/storage/v1/object/public/${encodedPath}`;
   };
 
   const resolveTargetEntityId = useCallback((field: any) => {
     const types = field.entityTypes || [];
-    if (types.includes('company')) return relationshipData?.company?.id || task?.company_id;
+
+    // 1. Try Dependant: Only return if a matching dependant is actually found
     if (types.includes('dependant')) {
       if (field.dependantRelationships && field.dependantRelationships.length > 0) {
         const dep = relationshipData?.dependants?.find((d: any) => field.dependantRelationships.includes(d.relationship?.toLowerCase()));
-        return dep?.id;
+        if (dep?.id) return dep.id;
+      } else {
+        // If no specific relationship requested, try first dependant
+        const dep = relationshipData?.dependants?.[0];
+        if (dep?.id) return dep.id;
       }
-      return relationshipData?.dependants?.[0]?.id;
+      // If we are here, 'dependant' was requested but none exist. 
+      // Do NOT return undefined; continue to check other types (like principal).
     }
-    if (types.includes('director')) return relationshipData?.directors?.[0]?.id;
-    if (types.includes('understudy')) return relationshipData?.understudy?.id;
+
+    // 2. Try Sponsor
+    if (types.includes('sponsor')) {
+      if (relationshipData?.sponsor?.id) return relationshipData.sponsor.id;
+    }
+
+    // 3. Try Director
+    if (types.includes('director')) {
+      if (relationshipData?.directors?.[0]?.id) return relationshipData.directors[0].id;
+    }
+
+    // 4. Try Understudy
+    if (types.includes('understudy')) {
+      if (relationshipData?.understudy?.id) return relationshipData.understudy.id;
+    }
+
+    // 5. Try Principal (This is the fallback for your case where Dependant is missing)
+    if (types.includes('principal')) {
+      const pid = relationshipData?.principal?.id || currentIndividualId;
+      if (pid) return pid;
+    }
+
+    // 6. Try Company
+    if (types.includes('company')) {
+      return relationshipData?.company?.id || task?.company_id;
+    }
+
+    // Default Fallback: If no types matched or no data found for requested types, default to Principal
     return relationshipData?.principal?.id || currentIndividualId;
   }, [relationshipData, currentIndividualId, task]);
 
   const getEntityNameAndId = useCallback((entityType?: string, entityId?: string) => {
-    // If no specific ID passed, use current context
     const targetId = entityId || currentIndividualId;
-
-    // Fallback if generic
     if (!entityType && !targetId) return { name: task?.applicant_name || individualName || 'Not specified', id: 'Not specified' };
-
     const type = entityType?.toLowerCase();
-
     if (type === 'company') {
       return {
         name: relationshipData?.company?.company_name || task?.company_name || `Company ${relationshipData?.company?.id || task?.company_id || ''}`,
         id: String(relationshipData?.company?.id || task?.company_id || 'Not specified')
       };
     }
-
     if (type === 'director') {
-      // Look for specific director by ID, otherwise default to first
       const director = relationshipData?.directors?.find((d: any) => String(d.id) === String(targetId)) || relationshipData?.directors?.[0];
       if (director) {
         return {
@@ -440,7 +457,6 @@ export const AutomationMappingDialog = ({
         };
       }
     }
-
     if (type === 'understudy') {
       const understudy = relationshipData?.understudy;
       if (understudy) {
@@ -450,9 +466,17 @@ export const AutomationMappingDialog = ({
         };
       }
     }
+    if (type === 'sponsor') {
+      const sponsor = relationshipData?.sponsor;
+      if (sponsor) {
+        return {
+          name: sponsor.name || sponsor.full_name || (sponsor.first_name && sponsor.last_name ? `${sponsor.first_name} ${sponsor.last_name}` : `Sponsor ${sponsor.id}`),
+          id: String(sponsor.id)
+        };
+      }
+    }
 
     if (type === 'dependant') {
-      // Look for specific dependant by ID, otherwise default to first
       const dependant = relationshipData?.dependants?.find((d: any) => String(d.id) === String(targetId)) || relationshipData?.dependants?.[0];
       if (dependant) {
         return {
@@ -462,33 +486,68 @@ export const AutomationMappingDialog = ({
       }
     }
 
-    // Default Fallback
     return {
       name: task?.applicant_name || individualName || targetId || 'Not specified',
       id: targetId || 'Not specified'
     };
   }, [relationshipData, task, individualName, currentIndividualId]);
+
   const getPrimaryEntityType = useCallback(() => {
     const activeAutomation = webData.find(w => w.automationId === selectedAutomationId);
     if (!activeAutomation?.fields) return 'principal';
     const entityTypes = new Set<string>();
     activeAutomation.fields.forEach((field: any) => { if (field.entityTypes && field.entityTypes.length > 0) field.entityTypes.forEach((type: string) => entityTypes.add(type)); });
-    
+
     // Check entity types in priority order using ENTITY_TYPES
-    const priorityOrder = ['company', 'director', 'understudy', 'dependant'];
+    const priorityOrder = ['company', 'director', 'understudy', 'sponsor', 'dependant', 'principal'];
     for (const type of priorityOrder) {
       if (entityTypes.has(type)) return type;
     }
-    
+
     return 'principal';
   }, [webData, selectedAutomationId]);
 
   const resolveEntityIdsForArray = (field: any, relationshipData: any) => {
     const types = field.entityTypes || [];
-    if (types.includes('dependant')) { if (field.dependantRelationships && field.dependantRelationships.length > 0) return (relationshipData?.dependants || []).filter((d: any) => field.dependantRelationships.includes(d.relationship?.toLowerCase())).map((d: any) => d.id); return (relationshipData?.dependants || []).map((d: any) => d.id); }
-    if (types.includes('director')) { if (field.directorType === 'primary') return (relationshipData?.directors || []).slice(0, 1).map((d: any) => d.id); return (relationshipData?.directors || []).map((d: any) => d.id); }
-    if (types.includes('principal')) { const pid = relationshipData?.principal?.id; return pid ? [pid] : []; }
-    return [];
+    const collectedIds = new Set<string>(); // Use Set to avoid duplicates
+
+    if (types.includes('principal')) {
+      const pid = relationshipData?.principal?.id || currentIndividualId;
+      if (pid) collectedIds.add(String(pid));
+    }
+
+    if (types.includes('dependant')) {
+      if (field.dependantRelationships && field.dependantRelationships.length > 0) {
+        const filtered = (relationshipData?.dependants || []).filter((d: any) =>
+          field.dependantRelationships.includes(d.relationship?.toLowerCase())
+        );
+        filtered.forEach((d: any) => collectedIds.add(String(d.id)));
+      } else {
+        (relationshipData?.dependants || []).forEach((d: any) => collectedIds.add(String(d.id)));
+      }
+    }
+
+    if (types.includes('director')) {
+      if (field.directorType === 'primary') {
+        const primary = (relationshipData?.directors || []).slice(0, 1);
+        primary.forEach((d: any) => collectedIds.add(String(d.id)));
+      } else {
+        (relationshipData?.directors || []).forEach((d: any) => collectedIds.add(String(d.id)));
+      }
+    }
+
+    if (types.includes('sponsor')) {
+      const sid = relationshipData?.sponsor?.id;
+      if (sid) collectedIds.add(String(sid));
+    }
+
+    if (types.includes('understudy')) {
+      const uid = relationshipData?.understudy?.id;
+      if (uid) collectedIds.add(String(uid));
+    }
+
+    const result = Array.from(collectedIds);
+    return result;
   };
 
   const toggleArrayFieldExpansion = (fieldVariableName: string) => setExpandedArrayFields(prev => { const newSet = new Set(prev); if (newSet.has(fieldVariableName)) newSet.delete(fieldVariableName); else newSet.add(fieldVariableName); return newSet; });
@@ -500,6 +559,32 @@ export const AutomationMappingDialog = ({
     entityIds.forEach((entityId, index) => {
       const columnValues: any = {};
       field.arrayItems?.forEach((item: any) => {
+        // Handle Job Specific Questions in Array
+        if (item.linkedJobQuestionId) {
+          // For job questions, we need to fetch the answer from the task data.
+          // getFieldValue handles job questions if passed the correct variable name (which maps to the question ID internally or via lookup).
+          // However, getFieldValue expects an entityID for standard fields. For job questions, it checks task data.
+          // We can directly access the answer here for clarity or use a modified getFieldValue call.
+
+          // Using direct access pattern similar to how renderFieldsTable handles it:
+          const taskRecord = sourceData['tm_tasks']?.[String(taskId)];
+          let value = "Missing Task Data";
+
+          if (taskRecord?.job_specific_answers) {
+            const questionId = String(item.linkedJobQuestionId);
+            const answer = taskRecord.job_specific_answers[questionId];
+            if (answer !== undefined && answer !== null) {
+              value = String(answer);
+            } else {
+              value = "Missing";
+            }
+          }
+
+          const columnKey = item.variableName;
+          columnValues[columnKey] = value;
+          return;
+        }
+
         const fieldIds = item.linkedMasterFields || (item.linkedMasterFieldId ? [item.linkedMasterFieldId] : []);
         const fieldId = String(fieldIds[0] || '');
         if (fieldId) {
@@ -513,7 +598,11 @@ export const AutomationMappingDialog = ({
       for (let i = 0; i < maxRows; i++) {
         const rowData: any = { index: arrayData.length + 1, entityId: String(entityId) };
         field.arrayItems?.forEach((item: any) => {
-          const columnKey = item.variableName || String((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId || '');
+          let columnKey = item.variableName;
+          if (!columnKey && !item.linkedJobQuestionId) {
+            columnKey = String((item.linkedMasterFields || [])[0] || item.linkedMasterFieldId || '');
+          }
+
           let value = columnValues[columnKey];
           if (Array.isArray(value)) { rowData[columnKey] = value[i] !== undefined && value[i] !== '' ? value[i] : ""; }
           else { rowData[columnKey] = (i === 0 && value !== undefined && value !== 'Computing...') ? value : ""; }
@@ -668,8 +757,6 @@ export const AutomationMappingDialog = ({
             return String(val);
           }
         }
-        // Computed failed or returned error string, proceed to next source
-        console.log(`[Field Debug] Computed value invalid/missing (${val}), trying next source...`);
         continue;
       }
 
@@ -681,8 +768,6 @@ export const AutomationMappingDialog = ({
     return "Missing";
   };
 
-  // ... (fetchDocumentFiles, useEffects remain unchanged)
-  // ... (fetchDocumentFiles, useEffect initial data, useEffect fetchSourceData, useEffect fetchIndividualName, useEffect runComputation)
   const fetchDocumentFiles = useCallback(async () => {
     if (!isOpen || !selectedAutomationId || !webData.length || isLoadingDocuments) return;
     setIsLoadingDocuments(true);
@@ -932,10 +1017,8 @@ export const AutomationMappingDialog = ({
 
   const saveEdit = async (isDropdown?: boolean, dropdownOptions?: { label: string, value: string }[]) => {
     if (!editingCell) return;
-
     const { table, path, entityId, fieldType, computedFunction, fieldId, sourceIdx } = editingCell;
 
-    // --- 1. RESOLVE VALUE ---
     let valueToSave = editValue;
     if (isDropdown && dropdownOptions && dropdownOptions.length > 0) {
       const selectedOption = dropdownOptions.find(opt => opt.value === editValue);
@@ -944,20 +1027,8 @@ export const AutomationMappingDialog = ({
       }
     }
 
-    // --- 2. REQUESTED LOGGING ---
-    console.group("💾 Saving Edit Operation");
-    console.log("Field Variable/ID:", fieldId);
-    console.log("New Value:", valueToSave);
-    console.log("Target Table:", table);
-    console.log("Entity ID (PK):", entityId);
-    console.log("Path/Column:", path);
-    console.groupEnd();
-
-    // --- 3. HANDLE COMPUTED FIELDS (Local State Only) ---
     if (fieldType === 'computed' || computedFunction) {
       setComputedFieldsPreview(prev => ({ ...prev, [editingCell.fieldId]: valueToSave }));
-      // If you maintain a global formData state, update it here too
-      // if (formData) { setFormData((prev: any) => ({ ...prev, [editingCell.fieldId]: valueToSave })); } 
       setEditingCell(null);
       setEditValue('');
       return;
@@ -972,19 +1043,14 @@ export const AutomationMappingDialog = ({
     setIsLoadingData(true);
 
     try {
-      // --- 4. FETCH CURRENT RECORD ---
-      // We need the current record to merge JSON data correctly
       let record = sourceData[table]?.[entityId];
 
       if (!record) {
-        // Fallback fetch if not in local cache
-        // FIX: Prioritize 'id' for tm_tasks to avoid PGRST116
         let query = supabase.from(table).select('*');
 
         if (table === 'tm_tasks') {
           query = query.eq('id', entityId);
         } else {
-          // Generic fallback for other tables
           query = query.or(`id.eq.${entityId},director_id.eq.${entityId},company_id.eq.${entityId}`);
         }
 
@@ -995,28 +1061,23 @@ export const AutomationMappingDialog = ({
 
         record = fetchedData;
 
-        // Update local cache
         setSourceData(prev => ({
           ...prev,
           [table]: { ...(prev[table] || {}), [entityId]: record }
         }));
       }
 
-      // --- 5. DETERMINE QUERY KEYS ---
-      // FIX: Explicitly handle tm_tasks to prevent accidental update by company_id
       let queryField = 'id';
       let recordPK = entityId;
 
       if (table === 'tm_tasks') {
         queryField = 'id';
-        recordPK = record.id; // Ensure we use the record's actual ID
+        recordPK = record.id;
       }
       else if (record.director_id) { queryField = 'director_id'; recordPK = record.director_id; }
       else if (record.company_id) { queryField = 'company_id'; recordPK = record.company_id; }
       else { queryField = 'id'; recordPK = record.id; }
 
-      // --- 6. PREPARE UPDATE ---
-      // Fetch latest version from DB to ensure atomic-like JSON update
       const { data: existing, error: fetchError } = await supabase
         .from(table)
         .select('*')
@@ -1201,8 +1262,15 @@ export const AutomationMappingDialog = ({
                           return (field.arrayItems || []).map((colItem: any, colIndex: number) => {
                             // --- Resolve Field Definition ---
                             const fieldIds = colItem.linkedMasterFields || (colItem.linkedMasterFieldId ? [colItem.linkedMasterFieldId] : []);
-                            const fieldId = String(fieldIds[0] || '');
-                            const masterFieldDef = jobFields[fieldId];
+                            const isArrayItemJobQuestion = !!colItem.linkedJobQuestionId; // Check if item is job question
+                            let fieldId = '';
+                            let masterFieldDef = null;
+
+                            if (!isArrayItemJobQuestion) {
+                              const fieldIds = colItem.linkedMasterFields || (colItem.linkedMasterFieldId ? [colItem.linkedMasterFieldId] : []);
+                              fieldId = String(fieldIds[0] || '');
+                              masterFieldDef = jobFields[fieldId];
+                            }
 
                             // --- Resolve Value ---
                             const columnKey = colItem.variableName || fieldId;
@@ -1231,11 +1299,18 @@ export const AutomationMappingDialog = ({
                               displayValue = foundDoc ? "Available" : "Missing";
                             }
 
-                            // --- Resolve Persistence/Source for Editing ---
                             let arrayPersistenceSource = null;
                             let specificPath = '';
 
-                            if (masterFieldDef) {
+                            // Handle Job Question Persistence
+                            if (isArrayItemJobQuestion) {
+                              arrayPersistenceSource = {
+                                table: 'tm_tasks',
+                                path: `job_specific_answers->>'${colItem.linkedJobQuestionId}'`,
+                                linking_variable: 'id',
+                                entityIdOverride: taskId // Job questions use Task ID
+                              };
+                            } else if (masterFieldDef) {
                               const baseSource = masterFieldDef.sources?.find((s: any) => s.source_type === entityCategory) || masterFieldDef.sources?.[0];
                               if (baseSource) {
                                 if (baseSource.path && baseSource.path.includes('[]')) {
@@ -1339,7 +1414,9 @@ export const AutomationMappingDialog = ({
 
                                 {/* Source Info */}
                                 <TableCell className="px-4 py-2 text-xs text-slate-600">
-                                  {arrayPersistenceSource ? (
+                                  {isArrayItemJobQuestion ? (
+                                    <div className="font-mono text-[10px] bg-purple-100 text-purple-700 p-1 rounded inline-flex items-center"><HelpCircle className="h-3 w-3 mr-1" /> Job Question</div>
+                                  ) : arrayPersistenceSource ? (
                                     <TooltipProvider delayDuration={300}>
                                       <Tooltip>
                                         <TooltipTrigger asChild>
@@ -1434,7 +1511,7 @@ export const AutomationMappingDialog = ({
                                           arrayPersistenceSource.linking_variable || 'id',
                                           undefined,
                                           undefined,
-                                          fieldId
+                                          isArrayItemJobQuestion ? undefined : fieldId
                                         );
                                       }}
                                     >
@@ -1707,18 +1784,6 @@ export const AutomationMappingDialog = ({
         {allDocFields.map((req, idx) => {
           const targetId = resolveTargetEntityId(req);
           const foundDoc = documentFiles.find(d => req.linkedKycDocuments?.includes(d.document_id) && String(d.owner_id) === String(targetId));
-
-          // --- LOGGING REQUESTED ---
-          console.groupCollapsed(`📄 Document Field: ${req.variableName}`);
-          console.log("Field Name:", req.variableName);
-          console.log("Entity Type:", req.entityTypes);
-          console.log("Target Entity ID:", targetId);
-          console.log("Linked KYC Documents:", req.linkedKycDocuments);
-          console.log("Fetched Value (foundDoc):", foundDoc);
-          console.groupEnd();
-          // -------------------------
-
-          // Display name logic: for array items, show "Array Field - Item Name"
           const displayName = req.isFromArray
             ? `${req.arrayFieldName} - ${req.displayName || req.name || req.variableName}`
             : req.displayName || req.efnsDisplayName || req.variableName;
@@ -1774,19 +1839,16 @@ export const AutomationMappingDialog = ({
               </div>
               <div>
                 <DialogTitle className="text-2xl font-black text-white tracking-tight">
-                  Data Mapping: {(() => {
-                    const primaryEntityType = getPrimaryEntityType();
-                    const entityInfo = getEntityNameAndId(primaryEntityType);
-                    return entityInfo.name; // UPDATED: Displays "John Doe" instead of "Dependant 1326"
-                  })()}
+                  Data Mapping: {task?.applicant_details?.name || task?.applicant_name || individualName || "Applicant"}
                 </DialogTitle>
                 <div className="flex items-center gap-2 text-white/80 text-sm mt-0.5">
                   <span className="bg-white/10 px-1.5 py-0.5 rounded font-mono">Task #{task?.id}</span>
                   <span>•</span>
                   <span>ID: {(() => {
+                    // Keep ID logic as fallback to specific entity found via automation context
                     const primaryEntityType = getPrimaryEntityType();
                     const entityInfo = getEntityNameAndId(primaryEntityType);
-                    return entityInfo.id;
+                    return entityInfo.id !== 'Not specified' ? entityInfo.id : (task?.applicant_details?.id || 'N/A');
                   })()}</span>
                 </div>
               </div>

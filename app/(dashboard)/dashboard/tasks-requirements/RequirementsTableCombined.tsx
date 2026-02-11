@@ -37,7 +37,7 @@ import { Badge } from "@/components/ui/badge"
 const getEntityTypeConfig = (type: string) => {
   const entityConfig = ENTITY_TYPES.find(et => et.value === type);
   if (!entityConfig) return { bgColor: 'bg-blue-600', Icon: User };
-  
+
   switch (type) {
     case 'company':
       return { bgColor: 'bg-slate-700', Icon: Briefcase };
@@ -446,7 +446,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   const checkApplicability = (colType: string, requirement: any) => {
     if (!requirement) return false;
 
-   const typeMap: Record<string, string> = {
+    const typeMap: Record<string, string> = {
       'principal': 'principal',
       'director': 'director', // Keep as 'director' to match requirements that expect 'director'
       'company': 'company',
@@ -633,7 +633,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         }
       }
 
- const sponsorParticipant = participants.find(p =>
+      const sponsorParticipant = participants.find(p =>
         p.type === 'individual' &&
         (Array.isArray(p.role) ? p.role.includes('sponsor') : p.role === 'sponsor')
       );
@@ -787,7 +787,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
   const fetchDocumentTemplates = async (documentId: string, task: any) => {
     try {
-      // Get bank ID from task's participants_details
       const bankParticipant = task.participants_details?.find((p: any) => p.type === 'bank');
       const bankId = bankParticipant?.id;
 
@@ -796,19 +795,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         .select('*')
         .eq('document_id', documentId);
 
-      // Filter by job_level if available
       if (jobLevel) {
-        // Since job_level is stored as an array, we need to check if it contains the matching object
-        // The correct syntax for Supabase is to use the @> operator with the array
-        const jobLevelJson = JSON.stringify([jobLevel]); // Wrap in array for proper matching
-        console.log('Debug - jobLevel:', jobLevel);
-        console.log('Debug - jobLevelJson (wrapped in array):', jobLevelJson);
+        const jobLevelJson = JSON.stringify([jobLevel]);
         query = query.filter('job_level', 'cs', jobLevelJson);
       }
-
       query = query.order('file_name', { ascending: true });
-
-      // If bank ID is found, filter templates by bank_id
       if (bankId) {
         query = query.filter('banks_associated', 'cs', `[{"bank_id":${bankId},"bank_name":"${bankParticipant.name}"}]`);
       }
@@ -828,15 +819,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   };
 
   const refreshDocumentData = useCallback(async () => {
-    // Re-fetch all document data to update states after draft discard
     setIsPreparingTemplate(true);
     try {
-      // Clear caches to force re-fetch
       setDocumentMetadataCache(new Map());
       setDocumentStatusCache(new Map());
       setCompositeStatusCache(new Map());
-
-      // The useEffect hooks will automatically re-fetch data when caches are cleared
 
       toast({
         title: "Data Refreshed",
@@ -857,7 +844,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   const handleOpenTemplateGenerator = async (docItem, task, colType, colId) => {
     setIsPreparingTemplate(true);
     try {
-      // 1. Setup Context Variables
       const participant = task.participants_details?.find(p => p.id === colId);
 
       let companyId = task.company_id;
@@ -880,10 +866,30 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         company: companyId,
         directors: companyRelationships?.directors?.map(d => d.id) || [],
         director: colType === 'director' ? colId : (companyRelationships?.directors?.[0]?.id || null),
-        principal: colType === 'principal' ? colId : (companyRelationships?.principal?.id || null),
+        principal: (() => {
+          if (colType === 'principal') return colId;
+
+          const principalPart = task.participants_details?.find((p: any) =>
+            p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')
+          );
+          if (principalPart) return principalPart.id;
+
+          // Try applicant details
+          if (task.applicant_details?.type === 'individual') return task.applicant_details.id;
+
+          return companyRelationships?.principal?.id || null;
+        })(),
         dependants: companyRelationships?.dependants?.map(d => d.id) || [],
-        understudy: companyRelationships?.understudy?.id || null
+        understudy: companyRelationships?.understudy?.id || null,
+        sponsor: (() => {
+          if (colType === 'sponsor') return colId;
+          const sponsorPart = task.participants_details?.find((p: any) =>
+            p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('sponsor') : p.role === 'sponsor')
+          );
+          return sponsorPart?.id || null;
+        })()
       };
+      console.log('  Final entityIdMap:', entityIdMap);
 
       // 2. Fetch Templates
       const templates = await fetchDocumentTemplates(docItem.document.id, task);
@@ -1011,6 +1017,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         principal: task.participants_details?.find(p => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')) || (task.applicant_details?.type === 'individual' ? task.applicant_details : null),
         dependants: task.participants_details?.filter(p => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('dependant') || p.role.includes('dependent') : p.role === 'dependant' || p.role === 'dependent')) || [],
         understudy: task.participants_details?.find(p => p.type === 'individual' && p.id === task.understudy_id),
+        sponsor: task.participants_details?.find(p => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('sponsor') : p.role === 'sponsor')),
       };
 
       const letterInfo = {
@@ -1026,7 +1033,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         extractedData: task.applicant_details || {},
         relationshipData: relationshipData,
       };
-
       setSelectedLetterInfo(letterInfo);
       setShowTemplateGenerator(true);
 
@@ -1153,7 +1159,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             name: uPart?.name || individualNames[uId] || 'Understudy'
           };
         })(),
-         sponsor: (() => {
+        sponsor: (() => {
           const sponsorParticipant = participants.find(p =>
             p.type === 'individual' &&
             (Array.isArray(p.role) ? p.role.includes('sponsor') : p.role === 'sponsor')

@@ -115,6 +115,7 @@ interface WebDataGroup {
     linkedMasterFields?: number[];
     linkedKycDocuments?: string[];
     linkedJobQuestionId?: string;
+    linkedJobQuestionIds?: string[];
     documentLogic?: 'merge' | 'fallback';
     dateFormat?: 'iso' | 'object_split' | 'dd_mm_yyyy';
     extractionMode?: 'latest' | 'all';
@@ -124,6 +125,7 @@ interface WebDataGroup {
   }>;
   linkedMasterFields: number[];
   linkedJobQuestionId?: string;
+  linkedJobQuestionIds?: string[];
   kycDocumentId?: string; // Legacy support
   linkedKycDocuments?: string[]; // Array of IDs
   documentLogic?: 'merge' | 'fallback';
@@ -144,7 +146,7 @@ interface KYCDocument {
 // --- Helper Functions for Field Name Formatting ---
 function formatDisplayName(input: string): string {
   if (!input) return '';
-  
+
   // Convert camelCase or PascalCase to space-separated words
   // e.g., "PinNo" -> "Pin No", "firstName" -> "First Name"
   let formatted = input
@@ -152,19 +154,19 @@ function formatDisplayName(input: string): string {
     .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2')  // Handle acronyms like "IDNumber" -> "ID Number"
     .replace(/[_-]/g, ' ')  // Replace underscores and hyphens with spaces
     .trim();
-  
+
   // Capitalize first letter of each word
   formatted = formatted
     .split(' ')
     .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join(' ');
-  
+
   return formatted;
 }
 
 function formatVariableName(input: string): string {
   if (!input) return '';
-  
+
   // Convert to camelCase
   return input
     .replace(/[_-]/g, ' ')  // Replace underscores and hyphens with spaces
@@ -334,6 +336,79 @@ function EntityConfigurator({
   );
 }
 
+function MultiJobQuestionPicker({
+  availableQuestions,
+  linkedQuestionIds,
+  onSelect
+}: {
+  availableQuestions: any[];
+  linkedQuestionIds: string[];
+  onSelect: (questionId: string) => void;
+}) {
+  const [open, setOpen] = useState(false)
+  const [searchTerm, setSearchTerm] = useState("")
+
+  const filteredQuestions = availableQuestions.filter(q =>
+    q.label.toLowerCase().includes(searchTerm.toLowerCase())
+  )
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="sm" type="button" className="h-6 w-6 p-0 rounded-md hover:bg-purple-50 text-purple-500 transition-colors">
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[280px] p-0" align="start">
+        <div className="p-3 border-b">
+          <Input
+            placeholder="Search job questions..."
+            className="h-9 text-sm"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        <ScrollArea className="h-[200px]">
+          <div className="p-1">
+            {filteredQuestions.length === 0 ? (
+              <div className="py-6 text-center text-sm text-slate-500">
+                No questions found.
+              </div>
+            ) : (
+              filteredQuestions.map((q) => {
+                const isLinked = linkedQuestionIds.includes(q.id);
+                return (
+                  <div
+                    key={q.id}
+                    className={cn(
+                      "flex items-center gap-2 p-2 rounded-sm cursor-pointer text-sm",
+                      isLinked ? "bg-slate-100 opacity-50 cursor-not-allowed" : "hover:bg-slate-100"
+                    )}
+                    onClick={() => {
+                      if (!isLinked) {
+                        onSelect(q.id);
+                        setOpen(false);
+                      }
+                    }}
+                  >
+                    <HelpCircle className="h-3 w-3 mr-2 text-purple-400" />
+                    <span className={cn("flex-1", isLinked && "line-through")}>
+                      {q.label}
+                    </span>
+                    {isLinked && (
+                      <Check className="h-3 w-3 text-green-600" />
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </ScrollArea>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 function ArrayConfigurator({ group, masterFields, kycDocuments, jobQuestions, onUpdate }: {
   group: WebDataGroup;
   masterFields: JobField[];
@@ -350,33 +425,40 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, jobQuestions, on
   };
 
   const addItem = () => {
-    const newItem = { 
-      name: '', 
+    const newItem = {
+      name: '',
       displayName: '',
-      variableName: '', 
+      variableName: '',
       type: 'text',
       entityTypes: group.entityTypes || ['principal'],
       dependantRelationships: [],
       directorType: undefined,
       linkedMasterFields: [],
-      linkedKycDocuments: []
+      linkedKycDocuments: [],
+      linkedJobQuestionIds: [] // Initialize empty array
     };
     onUpdate([...items, newItem]);
   };
 
-  const [itemToDelete, setItemToDelete] = useState<number | null>(null);
+  const [itemToDeleteIndex, setItemToDeleteIndex] = useState<number | null>(null);
   const [deleteItemDialogOpen, setDeleteItemDialogOpen] = useState(false);
 
   const removeItem = (idx: number) => {
-    setItemToDelete(idx);
+    setItemToDeleteIndex(idx);
+    setDeleteItemDialogOpen(true);
+  };
+
+  const requestDeleteItem = (idx: number) => {
+    setItemToDeleteIndex(idx);
     setDeleteItemDialogOpen(true);
   };
 
   const confirmRemoveItem = () => {
-    if (itemToDelete !== null) {
-      onUpdate(items.filter((_, i) => i !== itemToDelete));
+    if (itemToDeleteIndex !== null) {
+      const newItems = items.filter((_, i) => i !== itemToDeleteIndex);
+      onUpdate(newItems);
       setDeleteItemDialogOpen(false);
-      setItemToDelete(null);
+      setItemToDeleteIndex(null);
     }
   };
 
@@ -414,192 +496,212 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, jobQuestions, on
 
   const linkJobQuestion = (idx: number, questionId: string) => {
     const newItems = [...items];
-    newItems[idx] = { ...newItems[idx], linkedJobQuestionId: questionId };
-    onUpdate(newItems);
+    const current = newItems[idx].linkedJobQuestionIds || (newItems[idx].linkedJobQuestionId ? [newItems[idx].linkedJobQuestionId] : []) || [];
+    if (!current.includes(questionId)) {
+      newItems[idx] = { ...newItems[idx], linkedJobQuestionIds: [...current, questionId] };
+      onUpdate(newItems);
+    }
   };
 
-  const unlinkJobQuestion = (idx: number) => {
+  const unlinkJobQuestion = (idx: number, questionId: string) => {
     const newItems = [...items];
-    newItems[idx] = { ...newItems[idx], linkedJobQuestionId: undefined };
+    const current = newItems[idx].linkedJobQuestionIds || (newItems[idx].linkedJobQuestionId ? [newItems[idx].linkedJobQuestionId] : []) || [];
+    newItems[idx] = { ...newItems[idx], linkedJobQuestionIds: current.filter(id => id !== questionId) };
     onUpdate(newItems);
   };
 
   const [open, setOpen] = useState(false);
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className={cn(
-          "w-full justify-between px-3 text-sm bg-white border-slate-200",
-          items.length > 0 ? "text-blue-700 border-blue-200 bg-blue-50" : "text-slate-500"
-        )}>
-          <span className="flex items-center gap-2">
-            <TableIcon className="h-3.5 w-3.5" />
-            {items.length > 0 ? `${items.length} columns defined` : "Configure Array"}
-          </span>
-          <ChevronRight className="h-3 w-3 opacity-50" />
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="max-w-7xl max-h-[85vh] p-0">
-        <DialogHeader className="px-6 py-4 border-b bg-slate-50">
-          <DialogTitle className="flex items-center gap-2 text-slate-800">
-            <TableIcon className="h-4 w-4 text-blue-600" />
-            Array Column Mapping
-          </DialogTitle>
-          <DialogDescription>
-            Define the schema for rows within the <strong>{group.variableName}</strong> array.
-          </DialogDescription>
-          <Button size="sm" onClick={addItem} className="h-7 text-sm bg-blue-600 hover:bg-blue-700 text-white shadow-sm absolute right-6 top-4">
-            <Plus className="h-3 w-3 mr-1" /> Add Column
+    <>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogTrigger asChild>
+          <Button variant="outline" size="sm" className={cn(
+            "w-full justify-between px-3 text-sm bg-white border-slate-200",
+            items.length > 0 ? "text-blue-700 border-blue-200 bg-blue-50" : "text-slate-500"
+          )}>
+            <span className="flex items-center gap-2">
+              <TableIcon className="h-3.5 w-3.5" />
+              {items.length > 0 ? `${items.length} columns defined` : "Configure Array"}
+            </span>
+            <ChevronRight className="h-3 w-3 opacity-50" />
           </Button>
-        </DialogHeader>
+        </DialogTrigger>
+        <DialogContent className="max-w-7xl max-h-[85vh] p-0">
+          <DialogHeader className="px-6 py-4 border-b bg-slate-50">
+            <DialogTitle className="flex items-center gap-2 text-slate-800">
+              <TableIcon className="h-4 w-4 text-blue-600" />
+              Array Column Mapping
+            </DialogTitle>
+            <DialogDescription>
+              Define the schema for rows within the <strong>{group.variableName}</strong> array.
+            </DialogDescription>
+            <Button size="sm" onClick={addItem} className="h-7 text-sm bg-blue-600 hover:bg-blue-700 text-white shadow-sm absolute right-6 top-4">
+              <Plus className="h-3 w-3 mr-1" /> Add Column
+            </Button>
+          </DialogHeader>
 
-        <ScrollArea className="max-h-[600px]">
-          <div className="w-full">
-            <Table>
-              <TableHeader className="bg-slate-100/50 border-b border-slate-200 sticky top-0 z-10">
-                <TableRow>
-                  <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase">Display Name</TableHead>
-                  <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase">Web Key</TableHead>
-                  <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase">Type</TableHead>
-                  <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase">Scope</TableHead>
-                  <TableHead className="w-[30%] text-[10px] font-bold text-slate-500 uppercase">Source Mapping</TableHead>
-                  <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase">Mode</TableHead>
-                  <TableHead className="w-[10%] text-center text-[10px] font-bold text-slate-500 uppercase">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.length === 0 ? (
-                  <TableRow><TableCell colSpan={7} className="py-12 text-center text-slate-400">No columns defined.</TableCell></TableRow>
-                ) : (
-                  items.map((item, i) => (
-                    <TableRow key={i} className="hover:bg-slate-50 transition-colors">
-                      <TableCell className="p-2">
-                        <Input value={item.displayName || ''} onChange={e => handleItemChange(i, 'displayName', e.target.value)} className="h-8 text-sm" />
-                      </TableCell>
-                      <TableCell className="p-2">
-                        <Input value={item.variableName} onChange={e => handleItemChange(i, 'variableName', e.target.value)} className="h-8 text-sm" />
-                      </TableCell>
-                      <TableCell className="p-2">
-                        <div className="flex flex-col gap-1">
-                          <Select value={item.type} onValueChange={(val) => handleItemChange(i, 'type', val)}>
-                            <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="text">Text</SelectItem>
-                              <SelectItem value="number">Number</SelectItem>
-                              <SelectItem value="date">Date</SelectItem>
-                              <SelectItem value="boolean">Boolean</SelectItem>
-                              <SelectItem value="document">Document</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          {item.type === 'date' && (
-                            <Select value={item.dateFormat || 'iso'} onValueChange={(val) => handleItemChange(i, 'dateFormat', val)}>
-                              <SelectTrigger className="h-7 text-[10px] bg-blue-50"><SelectValue /></SelectTrigger>
+          <ScrollArea className="max-h-[600px]">
+            <div className="w-full">
+              <Table>
+                <TableHeader className="bg-slate-100/50 border-b border-slate-200 sticky top-0 z-10">
+                  <TableRow>
+                    <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase">Display Name</TableHead>
+                    <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase">Web Key</TableHead>
+                    <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase">Type</TableHead>
+                    <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase">Scope</TableHead>
+                    <TableHead className="w-[30%] text-[10px] font-bold text-slate-500 uppercase">Source Mapping</TableHead>
+                    <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase">Mode</TableHead>
+                    <TableHead className="w-[10%] text-center text-[10px] font-bold text-slate-500 uppercase">Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {items.length === 0 ? (
+                    <TableRow><TableCell colSpan={7} className="py-12 text-center text-slate-400">No columns defined.</TableCell></TableRow>
+                  ) : (
+                    items.map((item, i) => (
+                      <TableRow key={i} className="hover:bg-slate-50 transition-colors">
+                        <TableCell className="p-2">
+                          <Input value={item.displayName || ''} onChange={e => handleItemChange(i, 'displayName', e.target.value)} className="h-8 text-sm" />
+                        </TableCell>
+                        <TableCell className="p-2">
+                          <Input value={item.variableName} onChange={e => handleItemChange(i, 'variableName', e.target.value)} className="h-8 text-sm" />
+                        </TableCell>
+                        <TableCell className="p-2">
+                          <div className="flex flex-col gap-1">
+                            <Select value={item.type} onValueChange={(val) => handleItemChange(i, 'type', val)}>
+                              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="iso">YYYY-MM-DD</SelectItem>
-                                <SelectItem value="object_split">Object</SelectItem>
-                                <SelectItem value="dd_mm_yyyy">DD/MM/YYYY</SelectItem>
+                                <SelectItem value="text">Text</SelectItem>
+                                <SelectItem value="number">Number</SelectItem>
+                                <SelectItem value="date">Date</SelectItem>
+                                <SelectItem value="boolean">Boolean</SelectItem>
+                                <SelectItem value="document">Document</SelectItem>
                               </SelectContent>
                             </Select>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="p-2">
-                        <EntityConfigurator
-                          group={{ ...item, id: `item-${i}`, fieldType: item.type } as any}
-                          onUpdate={(updates) => handleItemChange(i, 'entityTypes', updates.entityTypes)}
-                        />
-                      </TableCell>
-                      <TableCell className="p-2">
-                        <div className="space-y-3">
-                          {item.type === 'document' ? (
-                            <div className="space-y-1">
-                              <div className="text-[9px] font-bold text-amber-600 uppercase">KYC Documents</div>
-                              <div className="flex flex-wrap gap-1 mb-1">
-                                {item.linkedKycDocuments?.map(docId => (
-                                  <Badge key={docId} variant="secondary" className="bg-amber-50 text-amber-700 h-6">
-                                    {kycDocuments.find(d => d.id === docId)?.display_name || docId}
-                                    <X className="h-3 w-3 ml-1 cursor-pointer" onClick={() => unlinkDocument(i, docId)} />
-                                  </Badge>
-                                ))}
-                              </div>
-                              <MultiDocumentPicker 
-                                availableDocuments={kycDocuments} 
-                                linkedDocumentIds={item.linkedKycDocuments || []} 
-                                onSelect={(doc) => linkDocument(i, doc.id)} 
-                              />
-                            </div>
-                          ) : (
-                            <div className="grid grid-cols-2 gap-4">
+                            {item.type === 'date' && (
+                              <Select value={item.dateFormat || 'iso'} onValueChange={(val) => handleItemChange(i, 'dateFormat', val)}>
+                                <SelectTrigger className="h-7 text-[10px] bg-blue-50"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="iso">YYYY-MM-DD</SelectItem>
+                                  <SelectItem value="object_split">Object</SelectItem>
+                                  <SelectItem value="dd_mm_yyyy">DD/MM/YYYY</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="p-2">
+                          <EntityConfigurator
+                            group={{ ...item, id: `item-${i}`, fieldType: item.type } as any}
+                            onUpdate={(updates) => handleItemChange(i, 'entityTypes', updates.entityTypes)}
+                          />
+                        </TableCell>
+                        <TableCell className="p-2">
+                          <div className="space-y-3">
+                            {item.type === 'document' ? (
                               <div className="space-y-1">
-                                <div className="text-[9px] font-bold text-blue-600 uppercase">DB Fields</div>
+                                <div className="text-[9px] font-bold text-amber-600 uppercase">KYC Documents</div>
                                 <div className="flex flex-wrap gap-1 mb-1">
-                                  {item.linkedMasterFields?.map(fieldId => (
-                                    <Badge key={fieldId} variant="secondary" className="bg-blue-50 text-blue-700 h-6">
-                                      {masterFields.find(f => f.id === fieldId)?.label || fieldId}
-                                      <X className="h-3 w-3 ml-1 cursor-pointer" onClick={() => unlinkMasterField(i, fieldId)} />
+                                  {item.linkedKycDocuments?.map(docId => (
+                                    <Badge key={docId} variant="secondary" className="bg-amber-50 text-amber-700 h-6">
+                                      {kycDocuments.find(d => d.id === docId)?.display_name || docId}
+                                      <X className="h-3 w-3 ml-1 cursor-pointer" onClick={() => unlinkDocument(i, docId)} />
                                     </Badge>
                                   ))}
                                 </div>
-                                <MultiMasterFieldPicker 
-                                  availableFields={masterFields} 
-                                  linkedFieldIds={item.linkedMasterFields || []} 
-                                  onSelect={(f) => linkMasterField(i, f)} 
+                                <MultiDocumentPicker
+                                  availableDocuments={kycDocuments}
+                                  linkedDocumentIds={item.linkedKycDocuments || []}
+                                  onSelect={(doc) => linkDocument(i, doc.id)}
                                 />
                               </div>
-                              <div className="space-y-1">
-                                <div className="text-[9px] font-bold text-purple-600 uppercase">Job Question</div>
-                                {item.linkedJobQuestionId ? (
-                                  <Badge variant="outline" className="bg-purple-50 text-purple-700 h-8 w-full justify-between">
-                                    <span className="truncate">{item.linkedJobQuestionId}</span>
-                                    <X className="h-3 w-3 ml-1 cursor-pointer" onClick={() => unlinkJobQuestion(i)} />
-                                  </Badge>
-                                ) : (
-                                  <JobQuestionPicker 
-                                    availableQuestions={jobQuestions} 
-                                    onSelect={(q) => linkJobQuestion(i, q.id)} 
+                            ) : (
+                              <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-1">
+                                  <div className="text-[9px] font-bold text-blue-600 uppercase">DB Fields</div>
+                                  <div className="flex flex-wrap gap-1 mb-1">
+                                    {item.linkedMasterFields?.map(fieldId => (
+                                      <Badge key={fieldId} variant="secondary" className="bg-blue-50 text-blue-700 h-6">
+                                        {masterFields.find(f => f.id === fieldId)?.label || fieldId}
+                                        <X className="h-3 w-3 ml-1 cursor-pointer" onClick={() => unlinkMasterField(i, fieldId)} />
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                  <MultiMasterFieldPicker
+                                    availableFields={masterFields}
+                                    linkedFieldIds={item.linkedMasterFields || []}
+                                    onSelect={(f) => linkMasterField(i, f)}
                                   />
-                                )}
+                                </div>
+                                <div className="space-y-1">
+                                  <div className="text-[9px] font-bold text-purple-600 uppercase">Job Questions</div>
+                                  <div className="flex flex-wrap gap-1 mb-1">
+                                    {(item.linkedJobQuestionIds || (item.linkedJobQuestionId ? [item.linkedJobQuestionId] : [])).map(qid => (
+                                      <Badge key={qid} variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 h-6">
+                                        <span className="truncate max-w-[80px]">{jobQuestions.find(q => q.id === qid)?.label || qid}</span>
+                                        <X className="h-3 w-3 ml-1 cursor-pointer" onClick={() => unlinkJobQuestion(i, qid)} />
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                  <MultiJobQuestionPicker
+                                    availableQuestions={jobQuestions}
+                                    linkedQuestionIds={item.linkedJobQuestionIds || (item.linkedJobQuestionId ? [item.linkedJobQuestionId] : [])}
+                                    onSelect={(qid) => linkJobQuestion(i, qid)}
+                                  />
+                                </div>
                               </div>
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="p-2">
-                        <Select value={item.extractionMode || 'latest'} onValueChange={(val) => handleItemChange(i, 'extractionMode', val)}>
-                          <SelectTrigger className="h-7 text-[10px]"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="latest">Latest</SelectItem>
-                            <SelectItem value="all">All</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                      <TableCell className="p-2 text-center">
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400" onClick={() => removeItem(i)}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </ScrollArea>
-      </DialogContent>
-    </Dialog>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="p-2">
+                          <Select value={item.extractionMode || 'latest'} onValueChange={(val) => handleItemChange(i, 'extractionMode', val)}>
+                            <SelectTrigger className="h-7 text-[10px]"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="latest">Latest</SelectItem>
+                              <SelectItem value="all">All</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                        <TableCell className="p-2 text-center">
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400" onClick={() => requestDeleteItem(i)}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
+      <AlertDialog open={deleteItemDialogOpen} onOpenChange={setDeleteItemDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Array Column</AlertDialogTitle>
+            <AlertDialogDescription>Are you sure you want to remove this column from the array definition?</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmRemoveItem} className="bg-red-600 hover:bg-red-700">Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 
-function JobQuestionPicker({ 
-  availableQuestions, 
-  onSelect 
-}: { 
-  availableQuestions: any[]; 
-  onSelect: (question: any) => void 
+function JobQuestionPicker({
+  availableQuestions,
+  onSelect
+}: {
+  availableQuestions: any[];
+  onSelect: (question: any) => void
 }) {
   const [open, setOpen] = useState(false);
-  
+
   // Log when questions are received
   useEffect(() => {
     console.log('JobQuestionPicker - Available questions:', availableQuestions);
@@ -626,9 +728,9 @@ function JobQuestionPicker({
             <CommandGroup heading="Available Questions">
               <ScrollArea className="h-[200px]">
                 {availableQuestions.map((q, idx) => (
-                  <CommandItem 
-                    key={`${q.label}-${idx}`} 
-                    onSelect={() => handleQuestionSelect(q)} 
+                  <CommandItem
+                    key={`${q.label}-${idx}`}
+                    onSelect={() => handleQuestionSelect(q)}
                     className="text-sm cursor-pointer"
                   >
                     <HelpCircle className="h-3.5 w-3.5 mr-2 text-purple-400" />
@@ -655,7 +757,7 @@ function WebDataGroupEditDialog({
   onSave,
   masterFields,
   kycDocuments,
-   jobQuestions 
+  jobQuestions
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -703,8 +805,21 @@ function WebDataGroupEditDialog({
     } : null);
   };
 
-  const unlinkJobQuestion = () => {
-    setEditingGroup(prev => prev ? ({ ...prev, linkedJobQuestionId: undefined }) : null);
+  const linkJobQuestion = (questionId: string) => {
+    setEditingGroup(prev => {
+      if (!prev) return null;
+      const current = prev.linkedJobQuestionIds || (prev.linkedJobQuestionId ? [prev.linkedJobQuestionId] : []) || [];
+      if (current.includes(questionId)) return prev;
+      return { ...prev, linkedJobQuestionIds: [...current, questionId] };
+    });
+  };
+
+  const unlinkJobQuestion = (questionId: string) => {
+    setEditingGroup(prev => {
+      if (!prev) return null;
+      const current = prev.linkedJobQuestionIds || (prev.linkedJobQuestionId ? [prev.linkedJobQuestionId] : []) || [];
+      return { ...prev, linkedJobQuestionIds: current.filter(id => id !== questionId) };
+    });
   };
 
   const addDocument = (docId: string) => {
@@ -737,9 +852,9 @@ function WebDataGroupEditDialog({
 
   const isDocument = editingGroup.fieldType === 'document';
   const isComputed = editingGroup.fieldType === 'computed';
-  
+
   // Show extraction mode if it's a job question, computed field, or any field with linked master fields
-  const showExtractionMode = editingGroup.linkedJobQuestionId || isComputed || 
+  const showExtractionMode = editingGroup.linkedJobQuestionId || isComputed ||
     (editingGroup.linkedMasterFields && editingGroup.linkedMasterFields.length > 0) ||
     (editingGroup.fieldType === 'array' && editingGroup.arrayItems && editingGroup.arrayItems.length > 0);
 
@@ -815,6 +930,27 @@ function WebDataGroupEditDialog({
                 onChange={(e) => updateField('customFieldSource', e.target.value)}
                 placeholder="e.g. Passport (Used for grouping fields in UI)"
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
+                <HelpCircle className="h-3 w-3" /> Linked Job Questions
+              </Label>
+              <div className="flex flex-wrap gap-2 p-2 bg-white border rounded min-h-[40px]">
+                {(editingGroup.linkedJobQuestionIds || (editingGroup.linkedJobQuestionId ? [editingGroup.linkedJobQuestionId] : [])).map(qid => (
+                  <Badge key={qid} variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 h-7 pl-2 pr-1 flex items-center gap-1">
+                    <span className="truncate max-w-[150px]">{jobQuestions.find(q => q.id === qid)?.label || qid}</span>
+                    <Button variant="ghost" size="icon" className="h-4 w-4 rounded-full hover:bg-purple-100" onClick={() => unlinkJobQuestion(qid)}>
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </Badge>
+                ))}
+                <MultiJobQuestionPicker
+                  availableQuestions={jobQuestions}
+                  linkedQuestionIds={editingGroup.linkedJobQuestionIds || (editingGroup.linkedJobQuestionId ? [editingGroup.linkedJobQuestionId] : [])}
+                  onSelect={linkJobQuestion}
+                />
+              </div>
             </div>
 
             <div className="space-y-4 border rounded-lg p-4 bg-slate-50">
@@ -916,7 +1052,7 @@ function WebDataGroupEditDialog({
                   group={editingGroup}
                   masterFields={masterFields}
                   kycDocuments={kycDocuments}
-                   jobQuestions={jobQuestions}
+                  jobQuestions={jobQuestions}
                   onUpdate={(items) => updateField('arrayItems', items)}
                 />
               ) : (
@@ -957,9 +1093,9 @@ function WebDataGroupEditDialog({
                           </Button>
                         </Badge>
                       ) : (
-                        <JobQuestionPicker 
-                          availableQuestions={jobQuestions} 
-                          onSelect={(q) => updateField('linkedJobQuestionId', q.id)} 
+                        <JobQuestionPicker
+                          availableQuestions={jobQuestions}
+                          onSelect={(q) => updateField('linkedJobQuestionId', q.id)}
                         />
                       )}
                     </div>
@@ -1352,19 +1488,19 @@ function BulkPasteFieldsDialog({
 
   const handleTextChange = (text: string) => {
     setPastedText(text);
-    
+
     // Parse the pasted text - split by newlines and filter empty lines
     const lines = text
       .split('\n')
       .map(line => line.trim())
       .filter(line => line.length > 0);
-    
+
     // Generate preview with formatted names
     const fields = lines.map(line => ({
       displayName: formatDisplayName(line),
       variableName: formatVariableName(line)
     }));
-    
+
     setPreviewFields(fields);
   };
 
@@ -1419,8 +1555,8 @@ function BulkPasteFieldsDialog({
 
         <DialogFooter className="border-t p-4 bg-slate-50">
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button 
-            size="sm" 
+          <Button
+            size="sm"
             onClick={handleAdd}
             disabled={previewFields.length === 0}
           >
@@ -1710,9 +1846,9 @@ function AddDataFieldDialog({
                     <h4 className="text-sm font-semibold text-green-900">Map Mandatory Requirements</h4>
                     <div className="flex gap-2">
                       {filteredRequirements.length > 0 && (
-                        <Button 
-                          size="sm" 
-                          variant="ghost" 
+                        <Button
+                          size="sm"
+                          variant="ghost"
                           className="h-7 text-[11px] font-bold text-green-700 hover:bg-green-100 uppercase"
                           onClick={() => {
                             if (selectedReqIds.length === filteredRequirements.length) {
@@ -1726,8 +1862,8 @@ function AddDataFieldDialog({
                         </Button>
                       )}
                       {selectedReqIds.length > 0 && (
-                        <Button 
-                          size="sm" 
+                        <Button
+                          size="sm"
                           className="h-7 text-[11px] font-bold bg-green-600 hover:bg-green-700 text-white uppercase"
                           onClick={() => {
                             selectedReqIds.forEach(id => {
@@ -1768,9 +1904,9 @@ function AddDataFieldDialog({
                       <div key={category} className="space-y-1.5">
                         <div className="px-2 py-1 flex items-center justify-between">
                           <Label className="text-[11px] font-extrabold text-slate-900 uppercase tracking-widest">{category}</Label>
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             className="h-5 px-2 text-[9px] text-blue-600 hover:bg-blue-50"
                             onClick={() => reqs.forEach(req => onAdd('requirement', req))}
                           >
@@ -1788,16 +1924,16 @@ function AddDataFieldDialog({
                                   isSelected ? "border-green-500 bg-green-50/30" : "border-slate-100 hover:border-green-300 hover:shadow-md hover:shadow-green-50"
                                 )}
                                 onClick={() => {
-                                  setSelectedReqIds(prev => 
-                                    prev.includes(req.id) 
-                                      ? prev.filter(id => id !== req.id) 
+                                  setSelectedReqIds(prev =>
+                                    prev.includes(req.id)
+                                      ? prev.filter(id => id !== req.id)
                                       : [...prev, req.id]
                                   );
                                 }}
                               >
-                                <Checkbox 
+                                <Checkbox
                                   checked={isSelected}
-                                  onCheckedChange={() => {}} // logic handled by parent div
+                                  onCheckedChange={() => { }} // logic handled by parent div
                                   className="data-[state=checked]:bg-green-600 data-[state=checked]:border-green-600"
                                 />
                                 <div className="h-8 w-8 rounded bg-green-50 text-green-600 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
@@ -1898,7 +2034,7 @@ export function AutomationDialog({
   const [webDataGroups, setWebDataGroups] = useState<WebDataGroup[]>([])
   const [masterFields, setMasterFields] = useState<JobField[]>([])
   const [kycDocuments, setKycDocuments] = useState<KYCDocument[]>([])
- const [jobQuestions, setJobQuestions] = useState<any[]>([]);
+  const [jobQuestions, setJobQuestions] = useState<any[]>([]);
   const [classRequirements, setClassRequirements] = useState<any>(null);
   const [isAddFieldOpen, setIsAddFieldOpen] = useState(false)
   const [isBulkPasteOpen, setIsBulkPasteOpen] = useState(false)
@@ -1943,7 +2079,7 @@ export function AutomationDialog({
     }
   }, [isOpen]);
 
-// ... existing code around line 1056 ...
+  // ... existing code around line 1056 ...
 
   useEffect(() => {
     const fetchQuestions = async () => {
@@ -1951,61 +2087,61 @@ export function AutomationDialog({
       // Flatten and get unique labels
       const allQuestions = data?.flatMap(r => r.job_specific_questions || []) || [];
       const unique = Array.from(new Map(allQuestions.map(q => [q.label, q])).values());
-      
+
       // LOG: Fallback/General Questions
       console.log('🔍 [Automation Dialog] Loaded Global Fallback Job Questions:', unique);
-      
+
       setJobQuestions(unique);
     };
     fetchQuestions();
   }, [isOpen]);
 
   useEffect(() => {
-  const fetchContextualData = async () => {
-    if (!isOpen) return;
+    const fetchContextualData = async () => {
+      if (!isOpen) return;
 
-    // 1. Fetch Job Fields and KYC as usual
-    const [fieldsRes, kycRes] = await Promise.all([
-      supabase.from('tm_job_fields').select('*').order('label'),
-      supabase.from('acc_portal_kyc').select('*').order('display_name')
-    ]);
-    setMasterFields(fieldsRes.data || []);
-    setKycDocuments(kycRes.data || []);
+      // 1. Fetch Job Fields and KYC as usual
+      const [fieldsRes, kycRes] = await Promise.all([
+        supabase.from('tm_job_fields').select('*').order('label'),
+        supabase.from('acc_portal_kyc').select('*').order('display_name')
+      ]);
+      setMasterFields(fieldsRes.data || []);
+      setKycDocuments(kycRes.data || []);
 
-    // 2. Fetch Job Questions matching the automation's job_level
-    if (initialData?.job_level) {
-      const jobLevelString = typeof initialData.job_level === 'string' 
-        ? initialData.job_level 
-        : JSON.stringify(initialData.job_level);
+      // 2. Fetch Job Questions matching the automation's job_level
+      if (initialData?.job_level) {
+        const jobLevelString = typeof initialData.job_level === 'string'
+          ? initialData.job_level
+          : JSON.stringify(initialData.job_level);
 
-      const { data, error } = await supabase
-        .from('tm_class_requirements')
-        .select('*')
-        .eq('job_level', jobLevelString)
-        .maybeSingle();
+        const { data, error } = await supabase
+          .from('tm_class_requirements')
+          .select('*')
+          .eq('job_level', jobLevelString)
+          .maybeSingle();
 
-      if (error) {
-        console.error(`❌ [Automation Dialog] Error fetching requirements for "${initialData.name}":`, error);
+        if (error) {
+          console.error(`❌ [Automation Dialog] Error fetching requirements for "${initialData.name}":`, error);
+        } else {
+          // LOG: Contextual Questions for this specific automation
+          console.log(`🎯 [Automation Dialog] Contextual Load for "${initialData.name}"`);
+          console.log(`   - Job Level:`, initialData.job_level);
+          console.log(`   - Questions Found:`, data?.job_specific_questions || []);
+
+          setJobQuestions(data?.job_specific_questions || []);
+          setClassRequirements(data || null);
+        }
       } else {
-        // LOG: Contextual Questions for this specific automation
-        console.log(`🎯 [Automation Dialog] Contextual Load for "${initialData.name}"`);
-        console.log(`   - Job Level:`, initialData.job_level);
-        console.log(`   - Questions Found:`, data?.job_specific_questions || []);
-        
-        setJobQuestions(data?.job_specific_questions || []);
-        setClassRequirements(data || null);
+        console.log(`ℹ️ [Automation Dialog] No Job Level defined for "${initialData?.name || 'New Automation'}". Using global question list.`);
+        setJobQuestions([]);
+        setClassRequirements(null);
       }
-    } else {
-      console.log(`ℹ️ [Automation Dialog] No Job Level defined for "${initialData?.name || 'New Automation'}". Using global question list.`);
-      setJobQuestions([]);
-      setClassRequirements(null);
-    }
-  };
+    };
 
-  fetchContextualData();
-}, [isOpen, initialData]);
+    fetchContextualData();
+  }, [isOpen, initialData]);
 
-// ... existing code ...
+  // ... existing code ...
   useEffect(() => {
     if (initialData) {
       form.reset({
@@ -2306,9 +2442,9 @@ export function AutomationDialog({
       arrayItems: []
     }));
     setWebDataGroups(prev => [...prev, ...newGroups]);
-    toast({ 
-      title: "Success", 
-      description: `Added ${fields.length} field${fields.length > 1 ? 's' : ''} successfully` 
+    toast({
+      title: "Success",
+      description: `Added ${fields.length} field${fields.length > 1 ? 's' : ''} successfully`
     });
   }
 
@@ -3028,7 +3164,7 @@ export function AutomationDialog({
         onSave={saveEditedGroup}
         masterFields={masterFields}
         kycDocuments={kycDocuments}
-        jobQuestions={jobQuestions} 
+        jobQuestions={jobQuestions}
       />
 
       {/* NEW Add Data Field Dialog */}
