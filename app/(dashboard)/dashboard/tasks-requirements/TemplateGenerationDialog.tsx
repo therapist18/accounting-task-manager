@@ -308,11 +308,11 @@ const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourc
         return relationshipData?.principal || extractedData || personData;
     }
 
-      if (normType === 'sponsor') {
+    if (normType === 'sponsor') {
         if (entityIdMap?.sponsor) {
-             if (relationshipData?.sponsor && String(relationshipData.sponsor.id) === String(entityIdMap.sponsor)) {
-                 return relationshipData.sponsor;
-             }
+            if (relationshipData?.sponsor && String(relationshipData.sponsor.id) === String(entityIdMap.sponsor)) {
+                return relationshipData.sponsor;
+            }
         }
         return relationshipData?.sponsor || null;
     }
@@ -592,12 +592,40 @@ const processTextField = (placeholder, targetEntity, combinedCache, masterFields
     return { value: '', source: null };
 };
 
-const processPlaceholderValue = (placeholder, relationshipData, combinedCache, masterFields, entityIdMap = null, extractedData, companyData, arrayIndex = null, sourceArray = null) => {
+const processPlaceholderValue = (placeholder, relationshipData, combinedCache, masterFields, entityIdMap = null, extractedData, companyData, arrayIndex = null, sourceArray = null, task = null) => {
     if (placeholder.name === 'DIR OCCUPATION') {
         console.log('Processing DIR OCCUPATION placeholder:', placeholder);
         console.log('Target entity:', getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData));
     }
-    // console.group(`🔍 Processing: ${placeholder.name} (${placeholder.type || 'text'})`);
+
+    if (placeholder.linked_job_question_id) {
+        let taskRecord = null;
+
+        if (combinedCache && combinedCache['tm_tasks']) {
+            const taskIds = Object.keys(combinedCache['tm_tasks']);
+            if (taskIds.length > 0) {
+                taskRecord = combinedCache['tm_tasks'][taskIds[0]];
+            }
+        }
+
+        if (!taskRecord && task) {
+            taskRecord = task;
+        }
+
+        if (taskRecord && taskRecord.job_specific_answers) {
+            const questionId = placeholder.linked_job_question_id;
+            const answer = taskRecord.job_specific_answers[questionId];
+
+            if (answer !== undefined && answer !== null) {
+                return {
+                    value: String(answer),
+                    source: 'Job Question'
+                };
+            }
+        }
+        return { value: '', source: 'Job Question (Missing)' };
+    }
+
     if (placeholder.master_field_ids?.length) {
         const dateResult = processCurrentDateField(placeholder, masterFields);
         if (dateResult.value) {
@@ -1044,7 +1072,7 @@ const PlaceholderInput = ({
     );
 };
 
-export default function TemplateGenerationDialog({ isOpen, onClose, template, availableTemplates = [], documentName, masterFields, entityIdMap, sourceDataCache, extractedData = {}, personData = {}, companyData = {}, relationshipData = { directors: [], dependants: [], company: {}, principal: null, understudy: null }, onDraftDiscarded, jobLevel }) {
+export default function TemplateGenerationDialog({ task, isOpen, onClose, template, availableTemplates = [], documentName, masterFields, entityIdMap, sourceDataCache, extractedData = {}, personData = {}, companyData = {}, relationshipData = { directors: [], dependants: [], company: {}, principal: null, understudy: null }, onDraftDiscarded, jobLevel }) {
     const [panelsVisible, setPanelsVisible] = useState({ form: true, preview: true, source: true });
     const { toast } = useToast();
     const [formData, setFormData] = useState(() => ({ ...extractedData, ...personData, ...companyData, directors: relationshipData.directors || [], company: relationshipData.company || {} }));
@@ -1232,13 +1260,13 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
         const topLevel = [];
         const blocks = {};
         selectedTemplate.placeholders.forEach(p => {
-           if (p.master_field_ids && p.master_field_ids.length > 0) {
+            if (p.master_field_ids && p.master_field_ids.length > 0) {
                 p.master_field_ids.forEach((fieldId, index) => {
                     const masterField = masterFields.get(parseInt(fieldId));
                     if (masterField) {
-                    } 
+                    }
                 });
-            } 
+            }
 
             if (p.is_block_start) {
                 blocks[p.name] = { config: p, children: [] };
@@ -1339,7 +1367,8 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                             masterFields,
                             entityIdMap,
                             extractedData,
-                            companyData
+                            companyData,
+                            task
                         );
 
                         let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
@@ -1371,7 +1400,8 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                             entityIdMap,
                             relationshipData,
                             extractedData,
-                            companyData
+                            companyData,
+                            task
                         );
 
                         if (resolvedArray.length > 0) {
@@ -1452,7 +1482,7 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                 variant: "destructive"
             });
         }
-    }, [selectedTemplate, formData, detectDataConflicts]);
+    }, [selectedTemplate, formData, detectDataConflicts, task]);
 
     useEffect(() => {
         if (isOpen && selectedTemplate && entityIdMap) {
@@ -1476,7 +1506,8 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                 masterFields,
                 entityIdMap,
                 extractedData,
-                companyData
+                companyData,
+                task
             );
 
             let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
@@ -1629,7 +1660,7 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
         });
         groupedPlaceholders.topLevel.forEach(p => {
             if (!init[p.name] || init[p.name] === '') {
-                const match = processPlaceholderValue(p, relationshipData, combinedCache, masterFields, entityIdMap, extractedData, companyData);
+                const match = processPlaceholderValue(p, relationshipData, combinedCache, masterFields, entityIdMap, extractedData, companyData, task);
                 let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
                 if (val && val !== '') {
                     init[p.name] = val;
@@ -1644,7 +1675,7 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
             setOriginalFormData(JSON.parse(JSON.stringify(init)));
             setAutoPopulatedFields(autoMap);
         }
-    }, [isOpen, selectedTemplate?.id, combinedCache, loadedDraft, fetchingTables]);
+    }, [isOpen, selectedTemplate?.id, combinedCache, loadedDraft, fetchingTables, task]);
 
     useEffect(() => {
         const fetchAvailableDocuments = async () => {
@@ -1780,7 +1811,8 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
                     extractedData, // Argument 6: extractedData
                     companyData,   // Argument 7: companyData
                     index,         // Argument 8: arrayIndex (Critical Fix)
-                    sourceArray    // Argument 9: sourceArray (Critical Fix)
+                    sourceArray,
+                    task
                 );
                 // For boolean fields, preserve the structure (array of options)
                 if (field.type === 'boolean') {
@@ -1799,7 +1831,7 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
 
         console.groupEnd();
         return result;
-    }, [extractedData, personData, companyData]);
+    }, [extractedData, personData, companyData, task]);
 
     const handleInputChange = (name, val) => {
         setFormData(prev => {
@@ -2722,7 +2754,7 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
 
         try {
             const fileName = `${documentName.replace(/[^\w\s-]/g, '_')}_draft_${formatDate(new Date(), 'YYYYMMDD_HHmmss')}`;
-            
+
             // Determine entity type from available data
             let entityType = 'company';
             if (personData?.entity_type) {
@@ -2732,7 +2764,7 @@ export default function TemplateGenerationDialog({ isOpen, onClose, template, av
             } else if (extractedData?.entity_type) {
                 entityType = extractedData.entity_type;
             }
-            
+
             const isCompany = entityType.toLowerCase() === 'company';
             const targetTable = isCompany ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents';
             const kycDocId = template?.document_id;
