@@ -576,7 +576,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                                         <TableCell className="py-2 text-xs capitalize text-slate-500">{field.entityType}</TableCell>
                                         <TableCell className="py-2 text-xs text-slate-400">
                                           {field.fieldType === 'document'
-                                            ? `Document: ${kycDocuments.find(d => d.id === field.kycDocumentId)?.display_name || 'Unknown'}`
+                                            ? `Document: ${kycDocuments.find(d => d.id === field.documentId)?.display_name || 'Unknown'}`
                                             : field.linkedMasterFields?.length
                                               ? field.linkedMasterFields.map(m => m.label).join(", ")
                                               : "Manual / None"}

@@ -507,112 +507,95 @@ export const AutomationMappingDialog = ({
     return 'principal';
   }, [webData, selectedAutomationId]);
 
-const resolveEntityIdsForArray = (field: any, relationshipData: any) => {
+  const resolveEntityIdsForArray = (field: any, relationshipData: any) => {
     const types = field.entityTypes || [];
-    console.log('Resolving entity IDs for field:', {
-        fieldName: field.variableName,
-        entityTypes: types,
-        currentIndividualId
-    });
-
     const collectedIds = new Set<string>();
 
     // Check entity types in priority order, return first match
     const checkEntityType = (type: string) => {
-        console.log('Checking entity type:', type);
-        switch(type) {
-            case 'principal':
-                const pid = relationshipData?.principal?.id || currentIndividualId;
-                console.log('Principal ID:', pid);
-                if (pid) {
-                    collectedIds.add(String(pid));
-                    return true;
-                }
-                break;
-                
-            case 'dependant':
-                console.log('Dependants:', relationshipData?.dependants);
-                if (field.dependantRelationships?.length > 0) {
-                    const filtered = (relationshipData?.dependants || []).filter((d: any) => {
-                        const match = field.dependantRelationships.includes(d.relationship?.toLowerCase());
-                        console.log('Checking dependant:', d.id, 'relationship:', d.relationship, 'matches:', match);
-                        return match;
-                    });
-                    if (filtered.length > 0) {
-                        filtered.forEach((d: any) => {
-                            console.log('Adding dependant ID:', d.id);
-                            collectedIds.add(String(d.id));
-                        });
-                        return true;
-                    }
-                } else if (relationshipData?.dependants?.length > 0) {
-                    console.log('Adding all dependants:', relationshipData.dependants.map((d: any) => d.id));
-                    relationshipData.dependants.forEach((d: any) => collectedIds.add(String(d.id)));
-                    return true;
-                }
-                break;
-                
-           case 'director':
-                if (relationshipData?.directors?.length > 0) {
-                    const directors = field.directorType === 'primary' 
-                        ? relationshipData.directors.slice(0, 1) 
-                        : relationshipData.directors;
-                    directors.forEach((d: any) => collectedIds.add(String(d.id)));
-                    return true;
-                }
-                break;
-                
-            case 'sponsor':
-                if (relationshipData?.sponsor?.id) {
-                    collectedIds.add(String(relationshipData.sponsor.id));
-                    return true;
-                }
-                break;
-                
-            case 'understudy':
-                if (relationshipData?.understudy?.id) {
-                    collectedIds.add(String(relationshipData.understudy.id));
-                    return true;
-                }
-                break;
-                
-            case 'company':
-                if (relationshipData?.company?.id) {
-                    collectedIds.add(String(relationshipData.company.id));
-                    return true;
-                }
-                break;
-        }
-        return false;
+      switch (type) {
+        case 'principal':
+          const pid = relationshipData?.principal?.id || currentIndividualId;
+          if (pid) {
+            collectedIds.add(String(pid));
+            return true;
+          }
+          break;
+
+        case 'dependant':
+          if (field.dependantRelationships?.length > 0) {
+            const filtered = (relationshipData?.dependants || []).filter((d: any) => {
+              const match = field.dependantRelationships.includes(d.relationship?.toLowerCase());
+              return match;
+            });
+            if (filtered.length > 0) {
+              filtered.forEach((d: any) => {
+                collectedIds.add(String(d.id));
+              });
+              return true;
+            }
+          } else if (relationshipData?.dependants?.length > 0) {
+            relationshipData.dependants.forEach((d: any) => collectedIds.add(String(d.id)));
+            return true;
+          }
+          break;
+
+        case 'director':
+          if (relationshipData?.directors?.length > 0) {
+            const directors = field.directorType === 'primary'
+              ? relationshipData.directors.slice(0, 1)
+              : relationshipData.directors;
+            directors.forEach((d: any) => collectedIds.add(String(d.id)));
+            return true;
+          }
+          break;
+
+        case 'sponsor':
+          if (relationshipData?.sponsor?.id) {
+            collectedIds.add(String(relationshipData.sponsor.id));
+            return true;
+          }
+          break;
+
+        case 'understudy':
+          if (relationshipData?.understudy?.id) {
+            collectedIds.add(String(relationshipData.understudy.id));
+            return true;
+          }
+          break;
+
+        case 'company':
+          if (relationshipData?.company?.id) {
+            collectedIds.add(String(relationshipData.company.id));
+            return true;
+          }
+          break;
+      }
+      return false;
     };
 
-    // Try each type in order until we find a match
     for (const type of types) {
-        if (checkEntityType(type)) {
-            console.log('Found match for type:', type, 'IDs collected:', Array.from(collectedIds));
-            break; // Stop after first match
-        }
+      if (checkEntityType(type)) {
+        break;
+      }
     }
 
-    console.log('Final collected IDs:', Array.from(collectedIds));
     return Array.from(collectedIds);
-};
+  };
   const toggleArrayFieldExpansion = (fieldVariableName: string) => setExpandedArrayFields(prev => { const newSet = new Set(prev); if (newSet.has(fieldVariableName)) newSet.delete(fieldVariableName); else newSet.add(fieldVariableName); return newSet; });
   const toggleSourceFieldExpansion = (fieldId: string) => setExpandedSourceFields(prev => { const newSet = new Set(prev); if (newSet.has(fieldId)) newSet.delete(fieldId); else newSet.add(fieldId); return newSet; });
 
-const getArrayFieldData = (field: any) => {
+  const getArrayFieldData = (field: any) => {
     const entityIds = resolveEntityIdsForArray(field, relationshipData);
     const arrayData = [];
 
     entityIds.forEach((entityId, index) => {
       const columnValues: any = {};
       field.arrayItems?.forEach((item: any) => {
-        // Handle Job Specific Questions in Array (including multiple IDs)
         const qIds = item.linkedJobQuestionIds || (item.linkedJobQuestionId ? [item.linkedJobQuestionId] : []);
         const fieldIds = item.linkedMasterFields || (item.linkedMasterFieldId ? [item.linkedMasterFieldId] : []);
-        
+
         if (qIds.length > 0) {
-          // Handle job questions
           const taskRecord = sourceData['tm_tasks']?.[String(taskId)];
           const answers = taskRecord?.job_specific_answers || {};
           for (const qId of qIds) {
@@ -623,12 +606,11 @@ const getArrayFieldData = (field: any) => {
             }
           }
         } else if (fieldIds.length > 0) {
-          // Handle multiple linked master fields
           const values = [];
           for (const fieldId of fieldIds) {
             const fieldIdStr = String(fieldId);
             const masterFieldDef = jobFields[fieldIdStr];
-            
+
             if (masterFieldDef?.is_computed || masterFieldDef?.computed_config?.is_computed) {
               const itemExtractionMode = item.extractionMode || 'latest';
               const key = `${fieldIdStr}_${entityId}_${itemExtractionMode}`;
@@ -643,30 +625,32 @@ const getArrayFieldData = (field: any) => {
               }
             }
           }
-          
+
           // Join multiple values with a space or comma based on field type
           if (values.length > 0) {
-            columnValues[item.variableName] = item.type === 'text' 
-              ? values.join(' ') 
+            columnValues[item.variableName] = item.type === 'text'
+              ? values.join(' ')
               : values.join(', ');
           }
         }
-        
+
         // Handle date formatting
         if (item.type === 'date' && columnValues[item.variableName]) {
+          const originalValue = columnValues[item.variableName];
           columnValues[item.variableName] = formatDateValue(
-            columnValues[item.variableName], 
+            columnValues[item.variableName],
             item.dateFormat
           );
         }
       });
 
       if (Object.keys(columnValues).length > 0) {
-        arrayData.push({
+        const arrayItem = {
           ...columnValues,
           entityId,
           index
-        });
+        }
+        arrayData.push(arrayItem);
       }
     });
 

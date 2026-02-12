@@ -114,7 +114,7 @@ export function EnquiryDialog({
     const [availableManagers, setAvailableManagers] = useState<any[]>([]);
     const [availableAssistants, setAvailableAssistants] = useState<any[]>([]);
     const [isIndividualPopoverOpen, setIsIndividualPopoverOpen] = useState(false);
- const [isSponsorPopoverOpen, setIsSponsorPopoverOpen] = useState(false);
+    const [isSponsorPopoverOpen, setIsSponsorPopoverOpen] = useState(false);
     // --- Form Reset Logic ---
     const resetForm = useCallback(() => {
         setFormData({
@@ -146,10 +146,10 @@ export function EnquiryDialog({
         setSelectedReferences([])
         setIncludeReferences(false)
     }, [])
-  useEffect(() => {
+    useEffect(() => {
         if (open && taskToEdit) {
             console.log("🔹 [EnquiryDialog] Populating Edit Mode for Task:", taskToEdit.id);
-            
+
             // 1. Basic Form Data
             setFormData({
                 job_description: taskToEdit.job_description || '',
@@ -200,24 +200,24 @@ export function EnquiryDialog({
         }
     }, [open, taskToEdit]);
 
-  const checkVisibility = useCallback((q: JobQuestion) => {
+    const checkVisibility = useCallback((q: JobQuestion) => {
         if (!q.depends_on || !q.depends_on.id) return true;
 
         const parentVal = jobAnswers[q.depends_on.id];
         const targetVal = q.depends_on.value;
 
         switch (q.depends_on.operator) {
-            case 'equals': 
+            case 'equals':
                 return String(parentVal) === String(targetVal);
-            case 'not_equals': 
+            case 'not_equals':
                 return String(parentVal) !== String(targetVal);
-            case 'is_not_empty': 
+            case 'is_not_empty':
                 if (Array.isArray(parentVal)) return parentVal.length > 0;
                 return parentVal !== undefined && parentVal !== null && parentVal !== '';
-            case 'is_empty': 
+            case 'is_empty':
                 if (Array.isArray(parentVal)) return parentVal.length === 0;
                 return parentVal === undefined || parentVal === null || parentVal === '';
-            default: 
+            default:
                 return true;
         }
     }, [jobAnswers]);
@@ -430,7 +430,7 @@ export function EnquiryDialog({
         fetchUnderstudies(value)
     }
 
-   const handleSubmit = async (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!selectedIndividual || !formData.department_id) return
 
@@ -507,7 +507,7 @@ export function EnquiryDialog({
                 toast({ title: "Success", description: "Enquiry created successfully." });
             }
 
-            onEnquiryCreated(result) 
+            onEnquiryCreated(result)
             onOpenChange(false)
         } catch (error) {
             console.error(error)
@@ -516,9 +516,11 @@ export function EnquiryDialog({
             setLoading(false)
         }
     }
+    const dialogTitle = taskToEdit
+        ? `Edit Enquiry: ${taskToEdit.applicant_details?.name || 'Loading...'}`
+        : "New Client Enquiry";
 
-        const dialogTitle = taskToEdit ? "Edit Enquiry" : "New Client Enquiry";
-   return (
+    return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-w-[1250px] max-h-[95vh] p-0 flex flex-col border-none shadow-2xl overflow-hidden bg-white">
                 {/* STATIC HEADER */}
@@ -527,8 +529,13 @@ export function EnquiryDialog({
                         <div className="flex items-center gap-4">
                             <div className="bg-white/20 p-2.5 rounded-xl"><ListTodo className="h-6 w-6" /></div>
                             <div>
-                                <DialogTitle className="text-2xl font-bold tracking-tight">{dialogTitle}</DialogTitle>
-                                <DialogDescription className="text-blue-100 font-medium">Logical requirement engine active</DialogDescription>
+                                {/* THE TITLE NOW RENDERS THE DYNAMIC STRING */}
+                                <DialogTitle className="text-2xl font-bold tracking-tight">
+                                    {dialogTitle}
+                                </DialogTitle>
+                                <DialogDescription className="text-blue-100 font-medium">
+                                    {taskToEdit ? "Updating existing records" : "Logical requirement engine active"}
+                                </DialogDescription>
                             </div>
                         </div>
                     </div>
@@ -708,7 +715,7 @@ export function EnquiryDialog({
                                                                 </Label>
 
                                                                 {q.type === 'text' && <Input value={jobAnswers[q.id] || ''} onChange={e => setJobAnswers(prev => ({ ...prev, [q.id]: e.target.value }))} className="h-10 bg-slate-50/50 border-blue-100" />}
-                                                                
+
                                                                 {q.type === 'boolean' && (
                                                                     <RadioGroup value={jobAnswers[q.id] === undefined ? "" : String(jobAnswers[q.id])} onValueChange={v => setJobAnswers(prev => ({ ...prev, [q.id]: v === 'true' }))} className="flex gap-4 h-10 items-center">
                                                                         <div className="flex items-center space-x-2 bg-slate-50 px-3 py-1.5 rounded-md border border-slate-100">

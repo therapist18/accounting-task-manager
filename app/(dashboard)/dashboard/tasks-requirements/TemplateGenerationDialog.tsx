@@ -136,8 +136,8 @@ const parseJsonValue = (data, path) => {
     if (!path || !data) return '';
     try {
         let currentValue = data;
-        const cleanPath = path.replace(/'/g, '');
-        const parts = cleanPath.split(/->>|->/);
+        const normalizedPath = path.replace(/->>/g, '->').replace(/'/g, '');
+        const parts = normalizedPath.split(/->|\./);
 
         for (let i = 0; i < parts.length; i++) {
             const key = parts[i].trim();
@@ -157,16 +157,20 @@ const parseJsonValue = (data, path) => {
                 } else {
                     const lowerKey = key.toLowerCase();
                     const foundKey = Object.keys(currentValue).find(k => k.toLowerCase() === lowerKey);
-                    currentValue = foundKey ? currentValue[foundKey] : undefined;
+                    if (foundKey) {
+                        currentValue = currentValue[foundKey];
+                    } else {
+                        currentValue = undefined;
+                    }
                 }
             } else if (i < parts.length - 1) {
                 return '';
             }
         }
 
-        return currentValue !== undefined && currentValue !== null ? String(currentValue) : '';
+        const finalValue = currentValue !== undefined && currentValue !== null ? String(currentValue) : '';
+        return finalValue;
     } catch (error) {
-        console.error(`[parseJsonValue] Error:`, error);
         return '';
     }
 };
@@ -1074,7 +1078,22 @@ const PlaceholderInput = ({
     );
 };
 
-export default function TemplateGenerationDialog({ task, isOpen, onClose, template, availableTemplates = [], documentName, masterFields, entityIdMap, sourceDataCache, extractedData = {}, personData = {}, companyData = {}, relationshipData = { directors: [], dependants: [], company: {}, principal: null, understudy: null }, onDraftDiscarded, jobLevel }) {
+export default function TemplateGenerationDialog({
+    task, isOpen, onClose, template, availableTemplates = [],
+    documentName, masterFields, entityIdMap, sourceDataCache,
+    extractedData = {}, personData = {}, companyData = {},
+    relationshipData = { directors: [], dependants: [], company: {}, principal: null, understudy: null },
+    onDraftDiscarded, jobLevel,
+    activeEntityType, // Added
+    activeEntityId ,refreshDocuments 
+}) {
+    console.log('[TemplateGenerationDialog] Selected entity ID map:', entityIdMap);
+    if (entityIdMap) {
+        const entityTypes = Object.keys(entityIdMap);
+        entityTypes.forEach(type => {
+            console.log(`[TemplateGenerationDialog] Selected ${type} entity ID:`, entityIdMap[type]);
+        });
+    }
     const [panelsVisible, setPanelsVisible] = useState({ form: true, preview: true, source: true });
     const { toast } = useToast();
     const [formData, setFormData] = useState(() => {
@@ -1082,7 +1101,7 @@ export default function TemplateGenerationDialog({ task, isOpen, onClose, templa
             acc[placeholder.name] = placeholder.default_value || '';
             return acc;
         }, {});
-        
+
         return {
             ...extractedData,
             ...personData,
@@ -1130,6 +1149,23 @@ export default function TemplateGenerationDialog({ task, isOpen, onClose, templa
         return { form: form ? 'col-span-12' : 'hidden', preview: preview ? 'col-span-12' : 'hidden', source: source ? 'col-span-12' : 'hidden' };
     }, [panelsVisible]);
 
+    const getTargetConfig = useCallback(() => {
+        const isCompany = activeEntityType === 'company';
+        const id = activeEntityId;
+
+        if (id === undefined || id === null || id === 'undefined') {
+            console.error('[TemplateGenerationDialog] Fatal: No valid ID for draft operation', { activeEntityType, activeEntityId });
+            return null;
+        }
+
+        return {
+            table: isCompany ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents',
+            idColumn: isCompany ? 'company_id' : 'director_id',
+            docIdColumn: isCompany ? 'kyc_document_id' : 'document_id',
+            entityId: id
+        };
+    }, [activeEntityType, activeEntityId]);
+
     const getDependentDropdownOptions = useCallback((placeholder, masterField, currentRow = null) => {
         const opts = masterField?.options;
         if (!opts?.isDependencyConfig) return Array.isArray(opts) ? opts.map(o => typeof o === 'string' ? { label: o, value: o } : o) : [];
@@ -1148,129 +1184,66 @@ export default function TemplateGenerationDialog({ task, isOpen, onClose, templa
         return opts.manualMapping?.[parentVal] || [];
     }, [formData, masterFields, selectedTemplate]);
 
-    const discardDraft = useCallback(async () => {
-        if (!loadedDraft) return;
-
-        try {
-            setIsLoadingDraft(true);
-
-            // Delete from storage bucket first
-            if (loadedDraft.file_path) {
-                const { error: storageError } = await supabase
-                    .storage
-                    .from('kyc-documents')
-                    .remove([loadedDraft.file_path]);
-
-                if (storageError) {
-                    console.error('Error deleting draft from storage:', storageError);
-                }
-            }
-            let deleteError;
-            if (entityIdMap.director || entityIdMap.principal) {
-                const { error } = await supabase
-                    .from('acc_portal_directors_documents')
-                    .delete()
-                    .eq('id', loadedDraft.id);
-                deleteError = error;
-            } else if (entityIdMap.company) {
-                const { error } = await supabase
-                    .from('acc_portal_kyc_uploads')
-                    .delete()
-                    .eq('id', loadedDraft.id);
-                deleteError = error;
-            }
-
-            if (deleteError) {
-                toast({
-                    title: "Error",
-                    description: "Could not delete draft from database",
-                    variant: "destructive"
-                });
-                return;
-            }
-            setLoadedDraft(null);
-            setFormData({});
-            setOriginalFormData({});
-            setImageStyles({});
-            if (onDraftDiscarded) {
-                onDraftDiscarded();
-            }
-            toast({
-                title: "Draft Discarded",
-                description: "Draft has been permanently deleted",
-            });
-
-        } catch (error) {
-            console.error('Error discarding draft:', error);
-            toast({
-                title: "Error",
-                description: "Failed to discard draft",
-                variant: "destructive"
-            });
-        } finally {
-            setIsLoadingDraft(false);
-        }
-    }, [loadedDraft, entityIdMap]);
-
     const loadExistingDraft = useCallback(async () => {
-        if (!isOpen || !selectedTemplate || !entityIdMap) return;
+        const config = getTargetConfig();
+        if (!isOpen || !selectedTemplate || !config) return;
 
         setIsLoadingDraft(true);
         try {
-            const documentId = selectedTemplate.document_id;
-            let query;
-            if (entityIdMap.director || entityIdMap.principal) {
-                const individualId = entityIdMap.director || entityIdMap.principal;
-                query = supabase
-                    .from('acc_portal_directors_documents')
-                    .select('*')
-                    .eq('document_id', documentId)
-                    .eq('director_id', individualId)
-                    .eq('status', 'draft')
-                    .order('created_at', { ascending: false })
-                    .limit(1)
-                    .single();
-            }
-            // For company documents
-            else if (entityIdMap.company) {
-                query = supabase
-                    .from('acc_portal_kyc_uploads')
-                    .select('*')
-                    .eq('document_id', documentId)
-                    .eq('company_id', entityIdMap.company)
-                    .eq('status', 'draft')
-                    .order('created_at', { ascending: false })
-                    .limit(1)
-                    .single();
-            }
+            const kycDocId = selectedTemplate.document_id;
 
-            if (!query) {
-                return;
-            }
-
-            const { data: draftData, error } = await query;
-            if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
-                return;
-            }
+            const { data: draftData, error } = await supabase
+                .from(config.table)
+                .select('*')
+                .eq(config.docIdColumn, kycDocId)
+                .eq(config.idColumn, config.entityId) // Uses strictly verified ID
+                .eq('status', 'draft')
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
 
             if (draftData) {
                 setLoadedDraft(draftData);
-
-                toast({
-                    title: "Draft Loaded",
-                    description: `Continuing from draft saved on ${new Date(draftData.created_at).toLocaleString()}`,
-                    duration: 5000,
-                });
                 await parseDraftAndPopulateForm(draftData);
-            } else {
             }
-
         } catch (error) {
-            console.error('[loadExistingDraft] Unexpected error:', error);
+            console.error('Error loading draft:', error);
         } finally {
             setIsLoadingDraft(false);
         }
-    }, [isOpen, selectedTemplate, entityIdMap]);
+    }, [isOpen, selectedTemplate, getTargetConfig]);
+
+const discardDraft = useCallback(async () => {
+    if (!loadedDraft) return;
+    const config = getTargetConfig();
+    
+    setIsLoadingDraft(true);
+    try {
+        // 1. Storage cleanup
+        if (loadedDraft.file_path) {
+            await supabase.storage.from('kyc-documents').remove([loadedDraft.file_path]);
+        }
+
+        // 2. DB cleanup
+        const { error: dbError } = await supabase
+            .from(config.table)
+            .delete()
+            .eq('id', loadedDraft.id);
+
+        if (dbError) throw dbError;
+
+        // 3. UI Sync
+        setLoadedDraft(null);
+        if (onDraftDiscarded) onDraftDiscarded();
+        if (refreshDocuments) await refreshDocuments();
+
+        toast({ title: "Draft Discarded" });
+    } catch (error) {
+        toast({ title: "Error", description: error.message, variant: "destructive" });
+    } finally {
+        setIsLoadingDraft(false);
+    }
+}, [loadedDraft, getTargetConfig, refreshDocuments, onDraftDiscarded]);
 
     const groupedPlaceholders = useMemo(() => {
         if (!selectedTemplate?.placeholders) return { topLevel: [], blocks: {} };
@@ -2498,67 +2471,89 @@ export default function TemplateGenerationDialog({ task, isOpen, onClose, templa
         setIsSavingProfile(true);
 
         try {
-            const updates = [];
-
-            for (const change of changedFields) {
-                if (!change.targetInfo?.table || !change.targetInfo?.entityId) continue;
-
-                const { table, path, linkingVariable, entityId } = change.targetInfo;
-
-                if (path) {
-                    const pathParts = path.replace(/'/g, '').split(/->>|->/);
-                    const updatePayload = {};
-
-                    let current = updatePayload;
-                    for (let i = 0; i < pathParts.length - 1; i++) {
-                        const part = pathParts[i].trim();
-                        if (part) {
-                            current[part] = {};
-                            current = current[part];
-                        }
-                    }
-
-                    const finalKey = pathParts[pathParts.length - 1].trim();
-                    if (finalKey) {
-                        current[finalKey] = change.newValue;
-                    }
-
-                    updates.push({ table, id: entityId, linkingVariable, data: updatePayload });
+            // 1. Group changes by Table and Entity ID to minimize DB calls
+            const groups = changedFields.reduce((acc, change) => {
+                if (!change.targetInfo?.table || !change.targetInfo?.entityId) return acc;
+                const key = `${change.targetInfo.table}:${change.targetInfo.entityId}`;
+                if (!acc[key]) {
+                    acc[key] = {
+                        table: change.targetInfo.table,
+                        entityId: change.targetInfo.entityId,
+                        linkingVariable: change.targetInfo.linkingVariable || 'id',
+                        changes: []
+                    };
                 }
-            }
+                acc[key].changes.push(change);
+                return acc;
+            }, {});
 
             const results = [];
-            for (const update of updates) {
-                const { error, data } = await supabase
-                    .from(update.table)
-                    .update(update.data)
-                    .eq(update.linkingVariable || 'id', update.id)
-                    .select();
 
-                if (error) {
-                    console.error(`Error updating ${update.table}:`, error);
-                    results.push({ success: false, error });
-                } else {
-                    results.push({ success: true, data });
+            // 2. Process each entity group
+            for (const key in groups) {
+                const { table, entityId, linkingVariable, changes } = groups[key];
+
+                // 3. Fetch current state from DB to avoid wiping out sibling JSON fields
+                const { data: existingRecord, error: fetchError } = await supabase
+                    .from(table)
+                    .select('*')
+                    .eq(linkingVariable, entityId)
+                    .maybeSingle();
+
+                if (fetchError) throw fetchError;
+
+                let updatePayload = {};
+                const recordToUpdate = existingRecord || {};
+
+                for (const change of changes) {
+                    const { path } = change.targetInfo;
+                    const valueToSave = change.newValue;
+
+                    if (path) {
+                        // Parse path: "residential_address_details -> location -> city" 
+                        // or "metadata->>'phone'"
+                        const pathParts = path
+                            .split(/->>|->|\./) // Split by Supabase operators OR dots
+                            .map(p => p.trim().replace(/['"]/g, ''))
+                            .filter(Boolean);
+
+                        const column = pathParts[0];
+                        const nestedPath = pathParts.slice(1);
+
+                        if (nestedPath.length > 0) {
+                            // It's a JSON column update
+                            // Initialize with existing JSON data if available
+                            const existingJson = { ...(recordToUpdate[column] || {}) };
+                            const updatedJson = setDeepValue(existingJson, nestedPath, valueToSave);
+                            updatePayload[column] = updatedJson;
+                        } else {
+                            // Standard column update
+                            updatePayload[column] = valueToSave;
+                        }
+                    }
+                }
+
+                // 4. Push update to Supabase
+                if (Object.keys(updatePayload).length > 0) {
+                    const { error: updateError } = await supabase
+                        .from(table)
+                        .update({ ...updatePayload, updated_at: new Date().toISOString() })
+                        .eq(linkingVariable, entityId);
+
+                    results.push({ success: !updateError, error: updateError });
                 }
             }
 
             const successCount = results.filter(r => r.success).length;
-            const failCount = results.filter(r => !r.success).length;
-
             if (successCount > 0) {
                 toast({
                     title: "Profile Updated",
-                    description: `Successfully saved ${successCount} change${successCount > 1 ? 's' : ''}${failCount > 0 ? ` (${failCount} failed)` : ''}`,
+                    description: `Successfully saved changes to ${successCount} record(s).`,
                 });
-
                 setOriginalFormData(JSON.parse(JSON.stringify(formData)));
                 setManuallyEditedFields(new Set());
                 setShowUpdateDialog(false);
-            } else {
-                throw new Error('All updates failed');
             }
-
         } catch (error) {
             console.error('[Update Profile] Error:', error);
             toast({
@@ -2571,15 +2566,17 @@ export default function TemplateGenerationDialog({ task, isOpen, onClose, templa
         }
     };
 
-    const updateJsonValue = (existingData, path, newValue) => {
-        if (!path || !path.includes('->')) return { [path]: newValue };
-        try {
-            const parts = path.split(/->>|->/);
-            const column = parts[0].trim().replace(/['"]/g, '');
-            const targetKey = parts[1].trim().replace(/['"]/g, '');
-            const current = existingData?.[column] || {};
-            return { [column]: { ...current, [targetKey]: newValue } };
-        } catch (e) { return {}; }
+    const setDeepValue = (obj, pathParts, value) => {
+        let current = obj;
+        for (let i = 0; i < pathParts.length - 1; i++) {
+            const key = pathParts[i];
+            if (!(key in current) || typeof current[key] !== 'object') {
+                current[key] = {};
+            }
+            current = current[key];
+        }
+        current[pathParts[pathParts.length - 1]] = value;
+        return obj;
     };
 
     const saveFieldToDatabase = async (placeholder, newValue) => {
@@ -2601,17 +2598,47 @@ export default function TemplateGenerationDialog({ task, isOpen, onClose, templa
         try {
             const { table, path, linking_variable } = src;
             const linkVar = linking_variable || 'id';
-            let payload = {};
-            if (path && path.includes('->')) {
-                const { data: existing } = await supabase.from(table).select('*').eq(linkVar, entId).maybeSingle();
-                payload = updateJsonValue(existing || {}, path, newValue);
-            } else { payload = { [path || placeholder.name]: newValue }; }
 
-            const { error } = await supabase.from(table).update({ ...payload, updated_at: new Date().toISOString() }).eq(linkVar, entId);
+            // 1. Get current record first
+            const { data: existing } = await supabase
+                .from(table)
+                .select('*')
+                .eq(linkVar, entId)
+                .maybeSingle();
+
+            let payload = {};
+
+            if (path && (path.includes('->') || path.includes('.'))) {
+                const pathParts = path
+                    .split(/->>|->|\./)
+                    .map(p => p.trim().replace(/['"]/g, ''))
+                    .filter(Boolean);
+
+                const column = pathParts[0];
+                const nestedPath = pathParts.slice(1);
+
+                if (nestedPath.length > 0) {
+                    const existingJson = { ...(existing?.[column] || {}) };
+                    payload[column] = setDeepValue(existingJson, nestedPath, newValue);
+                } else {
+                    payload[column] = newValue;
+                }
+            } else {
+                payload = { [path || placeholder.name]: newValue };
+            }
+
+            const { error } = await supabase
+                .from(table)
+                .update({ ...payload, updated_at: new Date().toISOString() })
+                .eq(linkVar, entId);
+
             if (error) throw error;
+
             setOriginalFormData(prev => ({ ...prev, [placeholder.name]: newValue }));
             toast({ title: "Saved to Profile", description: `${placeholder.name} updated.` });
-        } catch (e) { toast({ title: "Save Failed", description: e.message, variant: "destructive" }); }
+        } catch (e) {
+            toast({ title: "Save Failed", description: e.message, variant: "destructive" });
+        }
     };
 
     const refineFieldWithAI = async (placeholder, allFormData) => {
@@ -2766,106 +2793,146 @@ export default function TemplateGenerationDialog({ task, isOpen, onClose, templa
         };
     }, [formData, groupedPlaceholders]);
 
-    const saveAsDraft = async () => {
-        setIsGenerating(true);
+const saveAsDraft = async () => {
+    const config = getTargetConfig();
+    if (!config) {
+      toast({ title: "Error", description: "Entity context missing", variant: "destructive" });
+      return;
+    }
 
-        try {
-            const fileName = `${documentName.replace(/[^\w\s-]/g, '_')}_draft_${formatDate(new Date(), 'YYYYMMDD_HHmmss')}`;
+    setIsGenerating(true);
+    try {
+      const kycDocId = selectedTemplate?.document_id || template?.document_id;
+      
+      // --- 1. ROBUST BUFFER RECOVERY ---
+      let templateBuffer = docxTemplateBuffer.current;
 
-            // Determine entity type from available data
-            let entityType = 'company';
-            if (personData?.entity_type) {
-                entityType = personData.entity_type;
-            } else if (companyData?.entity_type) {
-                entityType = companyData.entity_type;
-            } else if (extractedData?.entity_type) {
-                entityType = extractedData.entity_type;
-            }
+      // If buffer is missing and it's a Word template, try fetching it now
+      if (!templateBuffer && isWordTemplate) {
+          const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${selectedTemplate.file_path}`;
+          const res = await fetch(publicUrl);
+          if (!res.ok) throw new Error("Failed to fetch template source from storage");
+          templateBuffer = await res.arrayBuffer();
+          docxTemplateBuffer.current = templateBuffer; // Cache it for next time
+      }
+      
+      let storagePath = null;
 
-            const isCompany = entityType.toLowerCase() === 'company';
-            const targetTable = isCompany ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents';
-            const kycDocId = template?.document_id;
+      // --- 2. GENERATE AND UPLOAD PHYSICAL FILE ---
+      if (isWordTemplate && templateBuffer) {
+          const renderData = await prepareRenderData(formData);
+          const zip = new PizZip(templateBuffer);
+          const doc = new Docxtemplater(zip, {
+              paragraphLoop: true,
+              linebreaks: true,
+              nullGetter: () => ""
+          });
 
-            const draftMetadata = {
-                formData: formData,
-                imageStyles: imageStyles,
-                savedAt: new Date().toISOString(),
-                templateId: selectedTemplate?.id,
-                documentName: documentName,
-                version: 1,
-                arrayFields: Object.keys(formData).filter(key =>
-                    Array.isArray(formData[key]) &&
-                    formData[key].some(item => typeof item === 'object' && item !== null)
-                )
-            };
+          doc.setData(renderData);
+          doc.render();
+          const docBlob = doc.getZip().generate({
+              type: "blob",
+              mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          });
 
-            const insertPayload = {
-                file_path: null,
-                file_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                created_at: new Date().toISOString(),
-                status: 'draft',
-                metadata: draftMetadata
-            };
+          const timestamp = Date.now();
+          const path = `drafts/${config.entityId}/${kycDocId}_${timestamp}.docx`;
+          
+          const { data: storageData, error: storageError } = await supabase.storage
+              .from('kyc-documents')
+              .upload(path, docBlob, { cacheControl: '3600', upsert: true });
 
-            if (isCompany) {
-                insertPayload.company_id = entityIdMap?.company || relationshipData?.company?.id;
-                insertPayload.kyc_document_id = kycDocId;
-            } else {
-                insertPayload.director_id = entityIdMap?.principal || entityIdMap?.director || relationshipData?.principal?.id;
-                insertPayload.document_id = kycDocId;
-            }
-            let query;
-            if (isCompany) {
-                query = supabase
-                    .from(targetTable)
-                    .select('id')
-                    .eq('kyc_document_id', kycDocId)
-                    .eq('company_id', insertPayload.company_id)
-                    .eq('status', 'draft')
-                    .single();
-            } else {
-                query = supabase
-                    .from(targetTable)
-                    .select('id')
-                    .eq('document_id', kycDocId)
-                    .eq('director_id', insertPayload.director_id)
-                    .eq('status', 'draft')
-                    .single();
-            }
+          if (storageError) throw storageError;
+          storagePath = storageData.path;
+      } else if (isWordTemplate && !templateBuffer) {
+          // Word template but no buffer - create a simple HTML file as fallback
+          console.warn('⚠️ Word template buffer missing, creating HTML fallback for storage');
+          const renderData = await prepareRenderData(formData);
+          const htmlContent = populateHtmlContent(renderData, selectedTemplate?.placeholders || [], imageStyles);
+          const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
+          
+          const timestamp = Date.now();
+          const path = `drafts/${config.entityId}/${kycDocId}_${timestamp}_fallback.html`;
+          
+          const { data: storageData, error: storageError } = await supabase.storage
+              .from('kyc-documents')
+              .upload(path, htmlBlob, { cacheControl: '3600', upsert: true });
 
-            const { data: existingDraft } = await query;
+          if (storageError) throw storageError;
+          storagePath = storageData.path;
+      } else {
+          // Handle HTML templates - create HTML file and upload to storage
+          const renderData = await prepareRenderData(formData);
+          const htmlContent = populateHtmlContent(renderData, selectedTemplate?.placeholders || [], imageStyles);
+          const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
+          
+          const timestamp = Date.now();
+          const path = `drafts/${config.entityId}/${kycDocId}_${timestamp}.html`;
+          
+          const { data: storageData, error: storageError } = await supabase.storage
+              .from('kyc-documents')
+              .upload(path, htmlBlob, { cacheControl: '3600', upsert: true });
 
-            let result;
-            if (existingDraft) {
-                result = await supabase
-                    .from(targetTable)
-                    .update(insertPayload)
-                    .eq('id', existingDraft.id)
-                    .select();
-            } else {
-                result = await supabase
-                    .from(targetTable)
-                    .insert(insertPayload)
-                    .select();
-            }
-            if (result.error) throw result.error;
-            setLoadedDraft(result.data[0]);
-            toast({
-                title: "Success",
-                description: `Draft ${existingDraft ? 'updated' : 'saved'} successfully`,
-            });
+          if (storageError) throw storageError;
+          storagePath = storageData.path;
+      }
 
-        } catch (e) {
-            const errorMessage = e instanceof Error ? e.message : String(e);
-            toast({
-                title: "Error",
-                description: errorMessage,
-                variant: "destructive"
-            });
-        } finally {
-            setIsGenerating(false);
-        }
-    };
+      // --- 3. PREPARE DATABASE PAYLOAD ---
+      const draftMetadata = {
+          formData: formData,
+          imageStyles: imageStyles,
+          savedAt: new Date().toISOString(),
+          templateId: selectedTemplate?.id,
+          activeEntityType,
+          activeEntityId
+      };
+
+      const payload = {
+          [config.idColumn]: config.entityId,
+          [config.docIdColumn]: kycDocId,
+          file_path: storagePath, 
+          file_type: isWordTemplate ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'text/html',
+          status: 'draft',
+          metadata: draftMetadata,
+          updated_at: new Date().toISOString()
+      };
+
+      // --- 4. SAVE TO DATABASE ---
+      const { data: existingDraft } = await supabase
+          .from(config.table)
+          .select('id, file_path')
+          .eq(config.docIdColumn, kycDocId)
+          .eq(config.idColumn, config.entityId)
+          .eq('status', 'draft')
+          .maybeSingle();
+
+      let result;
+      if (existingDraft) {
+          if (existingDraft.file_path && storagePath && existingDraft.file_path !== storagePath) {
+              await supabase.storage.from('kyc-documents').remove([existingDraft.file_path]);
+          }
+          result = await supabase.from(config.table).update(payload).eq('id', existingDraft.id).select();
+      } else {
+          result = await supabase.from(config.table).insert([{ ...payload, created_at: new Date().toISOString() }]).select();
+      }
+
+      if (result.error) throw result.error;
+
+      // --- 5. SYNC UI ---
+      setLoadedDraft(result.data[0]);
+      setOriginalFormData(JSON.parse(JSON.stringify(formData)));
+      setManuallyEditedFields(new Set());
+      
+      toast({ title: "Draft Saved", description: "Progress has been stored successfully." });
+      if (refreshDocuments) await refreshDocuments();
+
+    } catch (e) {
+      console.error('[saveAsDraft] Error:', e);
+      toast({ title: "Save Error", description: e.message, variant: "destructive" });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
     const generateAndDownload = async (type) => {
         setIsGenerating(true);
@@ -3331,19 +3398,20 @@ export default function TemplateGenerationDialog({ task, isOpen, onClose, templa
                             {isWordTemplate ? 'Word + Images' : 'HTML'}
                         </div>
                         <div className='flex gap-2'>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={saveAsDraft}
-                                disabled={isGenerating}
-                            >
-                                {isGenerating ? (
-                                    <Loader2 className="animate-spin mr-2 h-4 w-4" />
-                                ) : (
-                                    <Save className="mr-2 h-4 w-4" />
-                                )}
-                                {loadedDraft ? 'Update Draft' : 'Save as Draft'}
-                            </Button>
+                          <Button
+    variant="outline"
+    size="sm"
+    onClick={saveAsDraft}
+    // ADD isPreviewLoading here
+    disabled={isGenerating || isPreviewLoading}
+>
+    {isGenerating || isPreviewLoading ? (
+        <Loader2 className="animate-spin mr-2 h-4 w-4" />
+    ) : (
+        <Save className="mr-2 h-4 w-4" />
+    )}
+    {loadedDraft ? 'Update Draft' : 'Save as Draft'}
+</Button>
                             <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>

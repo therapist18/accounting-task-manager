@@ -842,6 +842,14 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   }, []);
 
   const handleOpenTemplateGenerator = async (docItem, task, colType, colId) => {
+    // Log the column/ID information when template dialog is being opened
+    console.log('[RequirementsTableCombined] Opening template dialog from:');
+    console.log('  - Column Type:', colType);
+    console.log('  - Column ID:', colId);
+    console.log('  - Document Item:', docItem);
+    console.log('  - Task ID:', task?.id);
+    console.log('  - Task Name:', task?.name);
+    
     setIsPreparingTemplate(true);
     try {
       const participant = task.participants_details?.find(p => p.id === colId);
@@ -1015,21 +1023,24 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         sponsor: task.participants_details?.find(p => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('sponsor') : p.role === 'sponsor')),
       };
 
-      const letterInfo = {
-        document: docItem.document,
-        task: task,
-        masterFields: masterFields,
-        entityIdMap: entityIdMap,
-        sourceDataCache: sourceDataCache,
-        availableTemplates: templates,
-        template: templates.length === 1 ? templates[0] : null,
-        personData: task.applicant_details?.type === 'individual' ? task.applicant_details : {},
-        companyData: task.applicant_details?.type === 'company' ? task.applicant_details : {},
-        extractedData: task.applicant_details || {},
-        relationshipData: relationshipData,
-      };
-      setSelectedLetterInfo(letterInfo);
-      setShowTemplateGenerator(true);
+const letterInfo = {
+    document: docItem.document,
+    task: task,
+    masterFields: masterFields,
+    entityIdMap: entityIdMap,
+    sourceDataCache: sourceDataCache,
+    availableTemplates: templates,
+    template: templates.length === 1 ? templates[0] : null,
+    personData: task.applicant_details?.type === 'individual' ? task.applicant_details : {},
+    companyData: task.applicant_details?.type === 'company' ? task.applicant_details : {},
+    extractedData: task.applicant_details || {},
+    relationshipData: relationshipData,
+    // Add these two context keys
+    activeEntityType: colType, 
+    activeEntityId: colId
+};
+setSelectedLetterInfo(letterInfo);
+setShowTemplateGenerator(true);
 
     } catch (error) {
       console.error("❌FATAL ERROR:", error);
@@ -2446,9 +2457,29 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         </div>
       </div>
 
-      {showTemplateGenerator && selectedLetterInfo && (
-        <TemplateGenerationDialog isOpen={showTemplateGenerator} onClose={() => setShowTemplateGenerator(false)} template={selectedLetterInfo.template} availableTemplates={selectedLetterInfo.availableTemplates} documentName={selectedLetterInfo.document.display_name} onSave={handleSaveGeneratedLetter} masterFields={selectedLetterInfo.masterFields} entityIdMap={selectedLetterInfo.entityIdMap} sourceDataCache={selectedLetterInfo.sourceDataCache} extractedData={selectedLetterInfo.extractedData} personData={selectedLetterInfo.personData} companyData={selectedLetterInfo.companyData} relationshipData={selectedLetterInfo.relationshipData} onDraftDiscarded={refreshDocumentData} jobLevel={jobLevel} />
-      )}
+ {showTemplateGenerator && selectedLetterInfo && (
+    <TemplateGenerationDialog 
+        isOpen={showTemplateGenerator} 
+        onClose={() => setShowTemplateGenerator(false)} 
+        template={selectedLetterInfo.template} 
+        availableTemplates={selectedLetterInfo.availableTemplates} 
+        documentName={selectedLetterInfo.document.display_name} 
+        onSave={handleSaveGeneratedLetter} 
+        masterFields={selectedLetterInfo.masterFields} 
+        entityIdMap={selectedLetterInfo.entityIdMap} 
+        sourceDataCache={selectedLetterInfo.sourceDataCache} 
+        extractedData={selectedLetterInfo.extractedData} 
+        personData={selectedLetterInfo.personData} 
+        companyData={selectedLetterInfo.companyData} 
+        relationshipData={selectedLetterInfo.relationshipData} 
+        onDraftDiscarded={refreshDocumentData} 
+        jobLevel={jobLevel}
+        activeEntityType={selectedLetterInfo.activeEntityType}
+        activeEntityId={selectedLetterInfo.activeEntityId}
+        // ADD THIS PROP:
+        refreshDocuments={refreshDocuments} 
+    />
+)}
     </div >
   );
 }

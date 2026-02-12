@@ -58,7 +58,7 @@ export function EditRequirementDialog({
     type: 'document',
     isVisible: true,
     isRequired: true,
-    kycDocumentIds: [],
+    documentIds: [],
     hasWebForm: false,
     webFormName: '',
     automationId: '',
@@ -99,7 +99,7 @@ export function EditRequirementDialog({
         type: requirement.type || 'document',
         isVisible: requirement.isVisible !== false,
         isRequired: requirement.isRequired !== false || requirement.is_mandatory !== false,
-        kycDocumentIds: requirement.document_ids || (requirement.document_id ? [requirement.document_id] : []),
+        documentIds: requirement.document_ids || (requirement.document_id ? [requirement.document_id] : []),
         hasWebForm: !!automationId || requirement.hasWebForm === true,
         webFormName: webFormName,
         automationId: automationId ? String(automationId) : '',
@@ -125,7 +125,7 @@ export function EditRequirementDialog({
 
   useEffect(() => {
     const fetchTemplates = async () => {
-      const docIds = formData.kycDocumentIds || [];
+      const docIds = formData.documentIds || [];
       if (docIds.length === 0 || !formData.hasTemplate) {
         setTemplates([]);
         return;
@@ -169,7 +169,7 @@ export function EditRequirementDialog({
       }
     };
     if (isOpen) fetchTemplates();
-  }, [formData.kycDocumentIds, formData.hasTemplate, formData.entityTypes, isOpen]);
+  }, [formData.documentIds, formData.hasTemplate, formData.entityTypes, isOpen]);
 
   const fetchKycDocuments = async () => {
     try {
@@ -197,18 +197,18 @@ export function EditRequirementDialog({
   }
 
   const toggleKycDoc = (docId: string) => {
-    const current = formData.kycDocumentIds || []
+    const current = formData.documentIds || []
     const updated = current.includes(docId) ? current.filter(id => id !== docId) : [...current, docId]
-    updateField('kycDocumentIds', updated)
+    updateField('documentIds', updated)
   }
 
   const removeKycDoc = (docId: string) => {
-    const current = formData.kycDocumentIds || []
-    updateField('kycDocumentIds', current.filter(id => id !== String(docId)))
+    const current = formData.documentIds || []
+    updateField('documentIds', current.filter(id => id !== String(docId)))
   }
 
   const getSelectedDocumentNames = () => {
-    const selectedIds = formData.kycDocumentIds || []
+    const selectedIds = formData.documentIds || []
     return selectedIds.map(id => {
       const doc = kycDocuments.find(d => String(d.id) === String(id))
       return { id, name: doc?.display_name || doc?.name || `Document ${id}` }
@@ -457,7 +457,7 @@ export function EditRequirementDialog({
                             <CommandGroup className="max-h-[300px] overflow-y-auto">
                               {kycDocuments.map(doc => (
                                 <CommandItem key={doc.id} onSelect={() => toggleKycDoc(doc.id.toString())}>
-                                  <Check className={cn("mr-2 h-4 w-4", (formData.kycDocumentIds || []).includes(doc.id.toString()) ? "opacity-100" : "opacity-0")} />
+                                  <Check className={cn("mr-2 h-4 w-4", (formData.documentIds || []).includes(doc.id.toString()) ? "opacity-100" : "opacity-0")} />
                                   {doc.display_name || doc.name}
                                 </CommandItem>
                               ))}

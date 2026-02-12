@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
-import { Briefcase, FileText, Loader2, Search, UploadCloud, Eye, Zap, FileType, Wand2, Download, FileUp, Trash2, AlertCircle } from "lucide-react"
+import { Briefcase, FileText, Loader2, Search, UploadCloud, Eye, Zap, FileType, Wand2, Download, FileUp, Trash2, AlertCircle, Edit3 } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
@@ -57,14 +57,15 @@ interface DocumentStatus {
   documents: any[]
   count: number
 }
+
 interface RequirementsTableProps {
   tasks: any[]
   loading: boolean
   error: string | null
   activeTab?: string
   handleDeleteDocument?: (document: any) => Promise<void>
+  onTaskAction?: (action: 'edit' | 'delete', task: any) => void; // Add this
 }
-
 
 const REFERENCE_SUBDEPARTMENT_IDS = [10, 5];
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -83,6 +84,7 @@ export function RequirementsTable({
   error,
   activeTab = "enquiry",
   handleDeleteDocument,
+  onTaskAction,
 }: RequirementsTableProps) {
   const [documents, setDocuments] = useState<any[]>([])
   const [documentsLoading, setDocumentsLoading] = useState(true)
@@ -1175,15 +1177,36 @@ export function RequirementsTable({
                       )}
                     </div>
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity text-red-600 hover:text-red-700 hover:bg-red-50"
-                    onClick={(e) => handleDeleteApplicantTasks(group, e)}
-                    title={`Delete ${group.tasks.length} task(s) for ${group.applicantName}`}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+
+                    {/* EDIT BUTTON */}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        // Edit the first task in the group
+                        if (onTaskAction && group.tasks.length > 0) {
+                          onTaskAction('edit', group.tasks[0]);
+                        }
+                      }}
+                      title={`Edit enquiry for ${group.applicantName}`}
+                    >
+                      <Edit3 className="h-4 w-4" />
+                    </Button>
+
+                    {/* DELETE BUTTON */}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                      onClick={(e) => handleDeleteApplicantTasks(group, e)}
+                      title={`Delete ${group.tasks.length} task(s) for ${group.applicantName}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               );
             })}

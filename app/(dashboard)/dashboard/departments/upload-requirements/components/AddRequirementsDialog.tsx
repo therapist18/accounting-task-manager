@@ -43,7 +43,7 @@ export interface RequirementForm {
   type: 'standard' | 'conditional' | 'optional' | 'company' | 'multi-document'
   isRequired: boolean
   isVisible: boolean
-  kycDocumentIds: string[]
+  documentIds: string[]
   entityTypes: EntityType[]
   requiredDocumentCount: number
   instructions: string
@@ -78,7 +78,7 @@ const DEFAULT_REQUIREMENT = (category: RequirementCategory): RequirementForm => 
   type: 'standard',
   isRequired: true,
   isVisible: true,
-  kycDocumentIds: [],
+  documentIds: [],
   entityTypes: ['principal'],
   requiredDocumentCount: 1,
   instructions: '',
@@ -214,13 +214,13 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
     }
   }
 
-  // Fetch templates when hasTemplate or kycDocumentIds change
+  // Fetch templates when hasTemplate or documentIds change
   useEffect(() => {
     if (!isOpen) return;
     
     const allDocIds = [...generalReqs, ...processingReqs, ...issuanceReqs, ...jobSpecificReqs]
-      .filter(req => req.hasTemplate && req.kycDocumentIds.length > 0)
-      .flatMap(req => req.kycDocumentIds);
+      .filter(req => req.hasTemplate && req.documentIds.length > 0)
+      .flatMap(req => req.documentIds);
     
     const allEntityTypes = [...generalReqs, ...processingReqs, ...issuanceReqs, ...jobSpecificReqs]
       .filter(req => req.hasTemplate)
@@ -753,18 +753,18 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                         <div className="space-y-2">
                           <Label className="text-xs font-bold text-slate-500">Document Links</Label>
                           <div className="space-y-2">
-                            {req.kycDocumentIds.length > 0 && (
+                            {req.documentIds.length > 0 && (
                               <div className="flex flex-wrap gap-1">
-                                {req.kycDocumentIds.map(docId => {
+                                {req.documentIds.map(docId => {
                                   const doc = kycDocuments.find(d => String(d.id) === String(docId))
                                   return doc ? (
                                     <Badge key={docId} variant="secondary" className="text-xs px-2 py-1">
                                       {doc.display_name || doc.name}
                                       <button
                                         onClick={() => {
-                                          const current = req.kycDocumentIds;
+                                          const current = req.documentIds;
                                           const updated = current.filter(id => id !== String(docId));
-                                          updateCurrentReq(idx, { kycDocumentIds: updated });
+                                          updateCurrentReq(idx, { documentIds: updated });
                                         }}
                                         className="ml-1 hover:text-red-600"
                                       >
@@ -789,13 +789,13 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                                     <CommandGroup className="max-h-[300px] overflow-y-auto">
                                       {kycDocuments.map(doc => (
                                         <CommandItem key={doc.id} onSelect={() => {
-                                          const current = req.kycDocumentIds;
+                                          const current = req.documentIds;
                                           const updated = current.includes(String(doc.id)) 
                                             ? current.filter(id => id !== String(doc.id)) 
                                             : [...current, String(doc.id)];
-                                          updateCurrentReq(idx, { kycDocumentIds: updated });
+                                          updateCurrentReq(idx, { documentIds: updated });
                                         }}>
-                                          <Check className={cn("mr-2 h-4 w-4", req.kycDocumentIds.includes(String(doc.id)) ? "opacity-100" : "opacity-0")} />
+                                          <Check className={cn("mr-2 h-4 w-4", req.documentIds.includes(String(doc.id)) ? "opacity-100" : "opacity-0")} />
                                           {doc.display_name || doc.name}
                                         </CommandItem>
                                       ))}
