@@ -1942,7 +1942,7 @@ function AddDataFieldDialog({
                                 <div className="flex-1 min-w-0">
                                   <div className="text-sm font-semibold text-slate-800 truncate">{req.name}</div>
                                   <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1.5">
-                                    <span className="bg-slate-100 px-1 rounded">{req.kyc_document_ids?.length || 0} Docs</span>
+                                    <span className="bg-slate-100 px-1 rounded">{req.document_ids?.length || 0} Docs</span>
                                     <span className="w-1 h-1 bg-slate-300 rounded-full" />
                                     <span className="truncate">{req.applicantTypes?.join(', ')}</span>
                                   </div>
@@ -2412,7 +2412,7 @@ export function AutomationDialog({
         fieldType: 'document',
         entityTypes: (data.applicantTypes && data.applicantTypes.length > 0) ? data.applicantTypes : ['principal'],
         linkedMasterFields: [],
-        linkedKycDocuments: data.kyc_document_ids || [],
+        linkedKycDocuments: data.document_ids || [],
         documentLogic: 'merge',
         linkedJobQuestionId: data.id
       }]);
@@ -3040,7 +3040,7 @@ export function AutomationDialog({
                                         </TableCell>
                                         <TableCell>
                                           <div className="flex flex-col gap-1">
-                                            {(req.kyc_document_ids || []).map(id => {
+                                            {(req.document_ids || []).map(id => {
                                               const doc = kycDocuments.find(d => d.id === id);
                                               return (
                                                 <div key={id} className="flex items-center gap-2 text-xs text-slate-600">

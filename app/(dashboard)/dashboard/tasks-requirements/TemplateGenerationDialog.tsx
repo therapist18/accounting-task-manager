@@ -940,18 +940,20 @@ const PlaceholderInput = ({
         : (placeholder.options || []).map(o => typeof o === 'string' ? { label: o, value: o } : o);
 
     const FieldHeader = () => {
-        if (!showLabel && !canSave && !placeholder.is_ai_generated) return null;
+        const hasDefault = placeholder.default_value && placeholder.default_value.trim() !== '';
         return (
             <div className="flex items-center justify-between mb-1.5">
                 {showLabel && (
                     <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">
                         {placeholder.name.replace(/_/g, ' ')}
+                        {hasDefault && <span className="ml-1 text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded">DEFAULT</span>}
                     </Label>
                 )}
                 <div className="flex items-center gap-2 ml-auto">
+                    {hasDefault && <span className="text-xs text-blue-500">Has default value</span>}
                     {canSave && hasChanged && (
-                        <Button size="sm" variant="ghost" className="h-6 px-2 text-green-600 hover:bg-green-50 border border-green-200" onClick={() => onSaveToDb(placeholder, value)} disabled={isSaving}>
-                            {isSaving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Save className="h-3 w-3 mr-1" />}
+                        <Button size="sm" variant="ghost" className="h-6 px-2 text-green-600 hover:text-green-700 hover:bg-green-50 border border-green-200" onClick={() => onSaveToDb(placeholder, value)} disabled={isSaving}>
+                            <Save className="h-3 w-3 mr-1" />
                             <span className="text-[9px] font-bold">SAVE TO PROFILE</span>
                         </Button>
                     )}
@@ -1075,7 +1077,22 @@ const PlaceholderInput = ({
 export default function TemplateGenerationDialog({ task, isOpen, onClose, template, availableTemplates = [], documentName, masterFields, entityIdMap, sourceDataCache, extractedData = {}, personData = {}, companyData = {}, relationshipData = { directors: [], dependants: [], company: {}, principal: null, understudy: null }, onDraftDiscarded, jobLevel }) {
     const [panelsVisible, setPanelsVisible] = useState({ form: true, preview: true, source: true });
     const { toast } = useToast();
-    const [formData, setFormData] = useState(() => ({ ...extractedData, ...personData, ...companyData, directors: relationshipData.directors || [], company: relationshipData.company || {} }));
+    const [formData, setFormData] = useState(() => {
+        const defaultValues = template?.placeholders?.reduce((acc, placeholder) => {
+            acc[placeholder.name] = placeholder.default_value || '';
+            return acc;
+        }, {});
+        
+        return {
+            ...extractedData,
+            ...personData,
+            ...companyData,
+            directors: relationshipData.directors || [],
+            company: relationshipData.company || {},
+            principal: relationshipData.principal || null,
+            ...defaultValues
+        };
+    });
     const [originalFormData, setOriginalFormData] = useState({ ...formData });
     const [refiningFields, setRefiningFields] = useState(new Set());
     const [isGenerating, setIsGenerating] = useState(false);
@@ -1219,7 +1236,7 @@ export default function TemplateGenerationDialog({ task, isOpen, onClose, templa
                 query = supabase
                     .from('acc_portal_kyc_uploads')
                     .select('*')
-                    .eq('kyc_document_id', documentId)
+                    .eq('document_id', documentId)
                     .eq('company_id', entityIdMap.company)
                     .eq('status', 'draft')
                     .order('created_at', { ascending: false })
@@ -3242,11 +3259,6 @@ export default function TemplateGenerationDialog({ task, isOpen, onClose, templa
                                                             isAIRefining={refiningFields.has(p.name)}
                                                             showLabel={false} // Hides the internal vertical label
                                                         />
-                                                        {autoPopulatedFields.get(p.name) && (
-                                                            <p className="text-[9px] text-blue-500 mt-1 font-medium italic">
-                                                                Source: {autoPopulatedFields.get(p.name)}
-                                                            </p>
-                                                        )}
                                                     </div>
                                                 </div>
                                             );

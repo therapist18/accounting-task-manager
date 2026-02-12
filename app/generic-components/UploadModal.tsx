@@ -550,7 +550,7 @@ export function UploadModal({
       // Transform selectedDoc to use UUID instead of legacy ID
       const transformedDoc = selectedDoc ? {
         ...selectedDoc,
-        id: selectedDoc.kyc_document_ids?.[0] || selectedDoc.kyc_document_id || selectedDoc.id
+        id: selectedDoc.document_ids?.[0] || selectedDoc.kyc_document_id || selectedDoc.id
       } : null;
       setFinalSelectedDoc(transformedDoc);
       setUploadedDocs([]);
@@ -572,7 +572,7 @@ export function UploadModal({
   }, [selectedMember, entityId]);
 
   const docId = useMemo(() => {
-    return finalSelectedDoc?.kyc_document_ids?.[0] || finalSelectedDoc?.kyc_document_id || selectedDoc?.kyc_document_ids?.[0] || selectedDoc?.kyc_document_id;
+    return finalSelectedDoc?.document_ids?.[0] || finalSelectedDoc?.kyc_document_id || selectedDoc?.document_ids?.[0] || selectedDoc?.kyc_document_id;
   }, [finalSelectedDoc, selectedDoc]);
 
   const handleFileUpload = async (files: File[]) => {
@@ -598,7 +598,7 @@ export function UploadModal({
       fileName: file.name,
       validationStatus: 'pending' as const,
       validationMessage: 'Processing...',
-      selectedDocTypeId: allowMultipleTypes ? '' : (finalSelectedDoc?.kyc_document_ids?.[0] || finalSelectedDoc?.kyc_document_id || selectedDoc?.kyc_document_ids?.[0] || selectedDoc?.kyc_document_id)
+      selectedDocTypeId: allowMultipleTypes ? '' : (finalSelectedDoc?.document_ids?.[0] || finalSelectedDoc?.kyc_document_id || selectedDoc?.document_ids?.[0] || selectedDoc?.kyc_document_id)
     }));
     setUploadedDocs(prev => [...prev, ...newDocs]);
 

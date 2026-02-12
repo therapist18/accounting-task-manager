@@ -107,7 +107,7 @@ interface ApiRequirement {
   order: number
   isVisible: boolean
   isRequired: boolean
-  kyc_document_ids?: string[]
+  document_ids?: string[]
   hasWebForm?: boolean
   webFormName?: string
   automationId?: string
@@ -192,7 +192,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     return record.requirements.map((r: any) => ({
       ...r,
       entityTypes: r.entityTypes || [],
-      kyc_document_ids: r.kyc_document_ids || (r.kycDocumentId ? [r.kycDocumentId] : []),
+      document_ids: r.document_ids || (r.documentId ? [r.documentId] : []),
     }))
   }
 
@@ -676,7 +676,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   }
 
   const getDocumentsDisplay = (req: RequirementTableEntry) => {
-    const documentIds = req.kyc_document_ids || []
+    const documentIds = req.document_ids || []
     const documentCount = documentIds.length
     const documentNames = getDocumentNames(documentIds)
     if (documentCount === 0) return <span className="text-gray-400 text-[11px]">No documents</span>

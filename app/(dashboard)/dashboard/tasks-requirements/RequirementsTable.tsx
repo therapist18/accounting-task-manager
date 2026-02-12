@@ -157,8 +157,8 @@ export function RequirementsTable({
     Object.values(taskClassRequirements).forEach(classReq => {
       if (classReq?.requirements) {
         classReq.requirements.forEach(req => {
-          if (req.kyc_document_id) ids.add(req.kyc_document_id);
-          if (req.kyc_document_ids) req.kyc_document_ids.forEach(id => ids.add(id));
+          if (req.document_id) ids.add(req.document_id);
+          if (req.document_ids) req.document_ids.forEach(id => ids.add(id));
         });
       }
     });
@@ -244,7 +244,7 @@ export function RequirementsTable({
         .from('acc_portal_kyc_uploads')
         .select('*, acc_portal_kyc (id, name, display_name)')
         .in('company_id', companyIds)
-        .in('kyc_document_id', requiredKycIds)
+        .in('document_id', requiredKycIds)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -392,9 +392,9 @@ export function RequirementsTable({
         Object.values(classReqMap).forEach((cr: any) => {
           const list = cr.requirements || cr.documents_and_fields || [];
           list.forEach((r: any) => {
-            if (r.kyc_document_id && UUID_REGEX.test(r.kyc_document_id)) requiredKycIds.add(r.kyc_document_id);
-            if (r.kyc_document_ids) {
-              r.kyc_document_ids.forEach((id: string) => {
+            if (r.document_id && UUID_REGEX.test(r.document_id)) requiredKycIds.add(r.document_id);
+            if (r.document_ids) {
+              r.document_ids.forEach((id: string) => {
                 if (UUID_REGEX.test(id)) requiredKycIds.add(id);
               });
             }
@@ -424,7 +424,7 @@ export function RequirementsTable({
         if (indIds.length && kycIds.length) promises.push(supabase.from('acc_portal_directors_documents').select('*, acc_portal_kyc (id, name, display_name)').in('director_id', indIds).in('document_id', kycIds));
         else promises.push(Promise.resolve({ data: [] }));
 
-        if (coIds.length && kycIds.length) promises.push(supabase.from('acc_portal_kyc_uploads').select('*, acc_portal_kyc (id, name, display_name)').in('company_id', coIds).in('kyc_document_id', kycIds));
+        if (coIds.length && kycIds.length) promises.push(supabase.from('acc_portal_kyc_uploads').select('*, acc_portal_kyc (id, name, display_name)').in('company_id', coIds).in('document_id', kycIds));
         else promises.push(Promise.resolve({ data: [] }));
 
         if (coIds.length) promises.push(supabase.from('acc_portal_company_duplicate').select('id, company_name').in('id', coIds));
@@ -451,7 +451,6 @@ export function RequirementsTable({
     loadData();
     return () => { isMounted = false; };
   }, [filteredTasks]);
-
 
   const hasReferencesColumn = useMemo(() => filteredTasks.some(task => REFERENCE_SUBDEPARTMENT_IDS.includes(task.subdepartment?.id) || REFERENCE_SUBDEPARTMENT_IDS.includes(task.subdepartment?.parent_id)), [filteredTasks]);
 
@@ -522,7 +521,7 @@ export function RequirementsTable({
         requirementsToProcess = classReqs.documents_and_fields.map(doc => ({
           id: doc.id,
           name: doc.id, // Use document ID as name for legacy structure
-          kyc_document_ids: [doc.id],
+          document_ids: [doc.id],
           hasTemplate: false,
           web_automation: null,
           entityTypes: doc.Principal ? ['principal'] : doc.Company ? ['company'] : doc.Dependent ? ['dependent'] : []
@@ -532,21 +531,21 @@ export function RequirementsTable({
       if (requirementsToProcess.length === 0) return;
 
       requirementsToProcess.forEach((req: any) => {
-        const kycDocIds = req.kyc_document_ids || (req.kyc_document_id ? [req.kyc_document_id] : []);
+        const docIds = req.document_ids || (req.document_id ? [req.document_id] : []);
 
-        if (kycDocIds.length === 0) return;
+        if (docIds.length === 0) return;
 
         // Check if we already have this requirement (by ID, not name)
         const existingReq = requirementRows.find(r => r.id === req.id);
         if (existingReq) return; // Skip duplicates from multiple tasks
 
         // Get the first document for display purposes
-        const firstDocId = kycDocIds[0];
+        const firstDocId = docIds[0];
         const firstDocDef = documents.find(d => d.id === firstDocId);
 
         // Determine if this is a composite requirement (multiple different document types)
         const uniqueDocTypes = new Set(
-          kycDocIds.map(docId => {
+          docIds.map(docId => {
             const doc = documents.find(d => d.id === docId);
             return doc?.display_name || doc?.name || 'Unknown';
           })
@@ -560,11 +559,11 @@ export function RequirementsTable({
         requirementRows.push({
           ...req,
           documentDefinition: firstDocDef, // For fields and metadata
-          kyc_document_ids: kycDocIds, // All document IDs
-          kyc_document_id: firstDocId, // First ID for backward compatibility
+          document_ids: docIds, // All document IDs
+          document_id: firstDocId, // First ID for backward compatibility
           uniqueId: req.id, // Use requirement ID as unique identifier
           name: requirementName, // Use requirement name
-          documentCount: kycDocIds.length, // Total number of document types
+          documentCount: docIds.length, // Total number of document types
           isMultiDocument: isComposite, // True if multiple different types
           // Separate section_type from actual category
           section_type: (() => {
@@ -714,7 +713,7 @@ export function RequirementsTable({
       }, {});
 
       // 3. Find doc definition for expiry calculation
-      const docId = doc.document_id || doc.kyc_document_id;
+      const docId = doc.document_id;
       const docDef = documents.find(d => d.id === docId);
 
       // 4. Calculate new expiry if applicable (imported from utils)
@@ -792,7 +791,6 @@ export function RequirementsTable({
     }
   }, [filteredTasks, getRequiredKycIds, fetchAllIndividualData, fetchAllCompanyDocuments]);
 
-
   const handleDocumentUploadSuccess = (uploadedDocument: any) => {
     toast.success('Document uploaded successfully!');
     setShowUploadModal(false);
@@ -818,7 +816,6 @@ export function RequirementsTable({
     }
   }, [filteredTasks, getRequiredKycIds, fetchAllIndividualData, fetchAllCompanyDocuments]);
 
-
   const handleAutomationAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number, relationshipData?: any) => {
     setSelectedAutomationData({ task, document: item, columnType, applicantId, relationshipData });
     setIsAutomationDialogOpen(true);
@@ -827,9 +824,9 @@ export function RequirementsTable({
   const getDocumentStatusForColumn = useCallback((task: any, reqItem: any, columnType: ApplicantType, applicantId?: number):
     DocumentStatus => {
     const baseStatus = { documents: [], count: 0 };
-    const kycDocIds = reqItem.kyc_document_ids || (reqItem.kyc_document_id ? [reqItem.kyc_document_id] : []);
+    const docIds = reqItem.document_ids || (reqItem.document_id ? [reqItem.document_id] : []);
 
-    if (kycDocIds.length === 0) return baseStatus;
+    if (docIds.length === 0) return baseStatus;
 
     const allowedTypes = reqItem.entityTypes || (reqItem.applicantType ? [reqItem.applicantType] : []);
 
@@ -858,7 +855,7 @@ export function RequirementsTable({
 
       if (companyId && allCompanyDocuments[companyId]) {
         foundDocuments = allCompanyDocuments[companyId].filter(doc =>
-          kycDocIds.includes(doc.kyc_document_id)
+          docIds.includes(doc.document_id)
         );
       }
     } else {
@@ -892,7 +889,7 @@ export function RequirementsTable({
 
       if (individualId && allIndividualDocuments[individualId]) {
         foundDocuments = allIndividualDocuments[individualId].filter(doc =>
-          kycDocIds.includes(doc.document_id)
+          docIds.includes(doc.document_id)
         );
       }
     }
@@ -1292,7 +1289,7 @@ export function RequirementsTable({
         dropdowns={[]}
         targetTable={selectedDocForUpload?.person?.type === 'company' ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents'}
         idFieldName={selectedDocForUpload?.person?.type === 'company' ? 'company_id' : 'director_id'}
-        documentIdFieldName={selectedDocForUpload?.person?.type === 'company' ? 'kyc_document_id' : 'document_id'}
+        documentIdFieldName='document_id'
         isCompanyUpload={selectedDocForUpload?.person?.type === 'company'}
         additionalFields={{
           issue_date: new Date().toISOString().split('T')[0],

@@ -678,10 +678,10 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
           : (allIndividualDocuments[personId] || []);
 
         for (const doc of docsToCheck) {
-          const docId = doc.kyc_document_id || doc.document_id;
+          const docId = doc.document_id;
           const cacheKey = `${col.task.id}-${docId}-${col.type}-${personId}`;
 
-          // Only fetch if not already in cache and we have the metadata definition
+          // Only fetch if not already in cache and we have metadata definition
           if (!newStatuses.has(cacheKey) && documentMetadataCache.has(docId)) {
             const status = await getDocumentStatus(col.task, docId, col.type, personId, doc);
             newStatuses.set(cacheKey, status);
@@ -747,13 +747,13 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       // Helper to extract IDs from requirements
       const extractIds = (reqList: any[]) => {
         reqList.forEach(req => {
-          if (req.kyc_document_ids) {
-            req.kyc_document_ids.forEach(id => {
+          if (req.document_ids) {
+            req.document_ids.forEach(id => {
               if (UUID_REGEX.test(id)) allDocIds.add(id);
             });
           }
-          if (req.kyc_document_id && UUID_REGEX.test(req.kyc_document_id)) {
-            allDocIds.add(req.kyc_document_id);
+          if (req.document_id && UUID_REGEX.test(req.document_id)) {
+            allDocIds.add(req.document_id);
           }
         });
       };
@@ -963,19 +963,14 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
       const fetchPromises = Array.from(queriesToRun.entries()).map(async ([table, { docIds, links }]) => {
         const records = new Map();
-        const docIdField = (table === 'acc_portal_kyc_uploads') ? 'kyc_document_id' : 'document_id';
 
-        // 4a. Fetch by Document IDs (if special tables)
-        if ((table === 'acc_portal_kyc_uploads' || table === 'acc_portal_directors_documents') && docIds.size > 0) {
+        // 4a. Fetch by Document IDs - use document_id field consistently
+        if (docIds.size > 0) {
           const validDocIds = [...docIds].filter(id => UUID_REGEX.test(id));
           if (validDocIds.length > 0) {
-            const { data } = await supabase.from(table).select('*').in(docIdField, validDocIds);
+            const { data } = await supabase.from(table).select('*').in('document_id', validDocIds);
             (data || []).forEach(rec => records.set(rec.id, rec));
           }
-        } else if (docIds.size > 0) {
-          // Generic table document_id fetch
-          const { data } = await supabase.from(table).select('*').in('document_id', [...docIds]);
-          (data || []).forEach(rec => records.set(rec.id, rec));
         }
 
         // 4b. Fetch by Linking Variables (Parallelize internal link queries too)
@@ -1178,7 +1173,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
   const relationshipData = useMemo(() => getRelationshipData(), [getRelationshipData]);
 
-
   const handleViewDocuments = (documents: any[], docInfo: any, column: any, requirementId?: string) => {
     if (!documents || documents.length === 0) return;
 
@@ -1246,7 +1240,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   const handleGenerateTemplate = async (reqItem: any, task: any, columnType: string, columnId?: number) => {
     const docItem = {
       document: {
-        id: reqItem.kyc_document_ids?.[0] || reqItem.id,
+        id: reqItem.document_ids?.[0] || reqItem.id,
         display_name: reqItem.documentDefinition?.display_name || reqItem.name,
         name: reqItem.documentDefinition?.name || reqItem.name
       }
@@ -1258,24 +1252,24 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   const getDocumentDataForPreview = useCallback((task: any, reqItem: any, columnType: string, entityId?: number) => {
     if (!reqItem) return null;
 
-    const kycDocIds = reqItem.kyc_document_ids || (reqItem.kyc_document_id ? [reqItem.kyc_document_id] : []);
-    if (kycDocIds.length === 0) return null;
+    const docIds = reqItem.document_ids || (reqItem.document_id ? [reqItem.document_id] : []);
+    if (docIds.length === 0) return null;
 
     if (columnType === 'company') {
       const companyId = task.participants_details?.find(p => p.type === 'company')?.id || task.company_id;
       const companyDocs = allCompanyDocuments[companyId] || [];
-      return companyDocs.find(doc => kycDocIds.includes(doc.kyc_document_id));
+      return companyDocs.find(doc => docIds.includes(doc.document_id));
     } else {
       const individualId = entityId || task.applicant_details?.id || task.individual_id;
       const indDocs = allIndividualDocuments[individualId] || [];
-      return indDocs.find(doc => kycDocIds.includes(doc.document_id));
+      return indDocs.find(doc => docIds.includes(doc.document_id));
     }
   }, [allCompanyDocuments, allIndividualDocuments]);
 
   const getDocumentStatusText = useCallback((task: any, docItem: any, columnType: string, entityId?: number) => {
     const reqItem = {
-      kyc_document_ids: [docItem.id],
-      kyc_document_id: docItem.id
+      document_ids: [docItem.id],
+      document_id: docItem.id
     };
 
     const docData = getDocumentDataForPreview(task, reqItem, columnType, entityId);
@@ -1290,8 +1284,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       return compositeStatusCache.get(cacheKey);
     }
 
-    const kycDocIds = reqItem.kyc_document_ids || [];
-    if (kycDocIds.length === 0) return { type: 'missing', count: 0, total: 0, latestStatus: null };
+    const docIds = reqItem.document_ids || [];
+    if (docIds.length === 0) return { type: 'missing', count: 0, total: 0, latestStatus: null };
 
     const personId = columnType === 'company' ? (task.company_id || task.participants_details?.find(p => p.type === 'company')?.id) :
       (columnType === 'principal' || columnType === 'director') ? (task.individual_id || task.applicant_details?.id) :
@@ -1304,8 +1298,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       ? (allCompanyDocuments[personId] || [])
       : (allIndividualDocuments[personId] || []);
 
-    kycDocIds.forEach(docId => {
-      const matchingDocs = docsToSearch.filter(d => (d.kyc_document_id === docId || d.document_id === docId));
+    docIds.forEach(docId => {
+      const matchingDocs = docsToSearch.filter(d => d.document_id === docId);
       if (matchingDocs.length > 0) {
         const mostRecent = matchingDocs.reduce((prev, curr) =>
           (new Date(curr.created_at) > new Date(prev.created_at)) ? curr : prev
@@ -1317,15 +1311,15 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       }
     });
 
-    const foundCount = kycDocIds.filter(docId =>
-      docsToSearch.some(d => (d.kyc_document_id === docId || d.document_id === docId))
+    const foundCount = docIds.filter(docId =>
+      docsToSearch.some(d => d.document_id === docId)
     ).length;
 
     // Check if any documents are valid (not expired)
     let validCount = 0;
     if (foundCount > 0) {
-      for (const docId of kycDocIds) {
-        const matchingDocs = docsToSearch.filter(d => (d.kyc_document_id === docId || d.document_id === docId));
+      for (const docId of docIds) {
+        const matchingDocs = docsToSearch.filter(d => d.document_id === docId);
         if (matchingDocs.length > 0) {
           // Check if any of these documents are valid
           for (const doc of matchingDocs) {
@@ -1351,7 +1345,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       type: validCount > 0 ? 'uploaded' : 'missing',
       count: foundCount,
       validCount: validCount,
-      total: kycDocIds.length,
+      total: docIds.length,
       latestStatus: latestStatus || (latestDocId ? { status: 'loading', label: 'Loading...', color: 'text-gray-400', bgColor: 'bg-gray-50' } : null)
     };
 
@@ -1373,7 +1367,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     if (columnType === 'company') {
       const companyId = task.participants_details?.find(p => p.type === 'company')?.id || task.company_id;
       const companyDocs = allCompanyDocuments[companyId] || [];
-      return companyDocs.filter(doc => doc.kyc_document_id === docTypeId);
+      return companyDocs.filter(doc => doc.document_id === docTypeId);
     } else {
       const individualId = entityId || task.applicant_details?.id || task.individual_id;
       const indDocs = allIndividualDocuments[individualId] || [];
@@ -1480,7 +1474,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             const fieldsToRender = docDef?.fields || [];
 
             // Check if this is a composite requirement (multiple document types)
-            const isComposite = reqItem.isMultiDocument && reqItem.kyc_document_ids?.length > 1;
+            const isComposite = reqItem.isMultiDocument && reqItem.document_ids?.length > 1;
 
             return (
               <React.Fragment key={`${sectionName}-${category}-${requirementId}`}>
@@ -1596,15 +1590,15 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                         size="sm"
                                         className="h-8 w-8 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
                                         onClick={() => {
-                                          const latestDocId = reqItem.kyc_document_ids?.find((docId: string) => {
+                                          const latestDocId = reqItem.document_ids?.find((docId: string) => {
                                             const docs = isCompanyType(col.type)
-                                              ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.kyc_document_id === docId)
+                                              ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.document_id === docId)
                                               : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === docId);
                                             return docs && docs.length > 0;
                                           });
                                           if (latestDocId) {
                                             const docs = isCompanyType(col.type)
-                                              ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.kyc_document_id === latestDocId)
+                                              ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.document_id === latestDocId)
                                               : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === latestDocId);
                                             if (docs && docs.length > 0) {
                                               setPreviewingDocuments(docs);
@@ -1663,7 +1657,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                 </TableRow>
 
                 {/* Expanded view for composite requirements showing individual document types */}
-                {isComposite && isCompositeExpanded && reqItem.kyc_document_ids?.map((docId: string, docIdx: number) => {
+                {isComposite && isCompositeExpanded && reqItem.document_ids?.map((docId: string, docIdx: number) => {
                   const docMetadata = documentMetadataCache.get(docId);
                   if (!docMetadata) return null;
 
@@ -1827,7 +1821,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     if (colType === 'company') {
       if (task.company_id && allCompanyDocuments[task.company_id]) {
         const draft = allCompanyDocuments[task.company_id].find(
-          doc => (doc.kyc_document_id === requiredDocId || doc.document_id === requiredDocId) &&
+          doc => doc.document_id === requiredDocId &&
             doc.status === 'draft'
         );
         return draft;
@@ -1840,7 +1834,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
       if (individualId && allIndividualDocuments[individualId]) {
         const draft = allIndividualDocuments[individualId].find(
-          doc => (doc.document_id === requiredDocId || doc.kyc_document_id === requiredDocId) &&
+          doc => doc.document_id === requiredDocId &&
             doc.status === 'draft'
         );
         return draft;
@@ -1860,7 +1854,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       const fieldsToRender = docDef?.fields || [];
 
       // Check if this is a composite requirement (multiple document types)
-      const isComposite = reqItem.isMultiDocument && reqItem.kyc_document_ids?.length > 1;
+      const isComposite = reqItem.isMultiDocument && reqItem.document_ids?.length > 1;
 
       return (
         <React.Fragment key={`${reqItem.category}-${requirementId}`}>
@@ -1971,15 +1965,15 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                   size="sm"
                                   className="h-8 w-8 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
                                   onClick={() => {
-                                    const latestDocId = reqItem.kyc_document_ids?.find((docId: string) => {
+                                    const latestDocId = reqItem.document_ids?.find((docId: string) => {
                                       const docs = isCompanyType(col.type)
-                                        ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.kyc_document_id === docId)
+                                        ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.document_id === docId)
                                         : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === docId);
                                       return docs && docs.length > 0;
                                     });
                                     if (latestDocId) {
                                       const docs = isCompanyType(col.type)
-                                        ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.kyc_document_id === latestDocId)
+                                        ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.document_id === latestDocId)
                                         : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === latestDocId);
                                       if (docs && docs.length > 0) {
                                         setPreviewingDocuments(docs);
@@ -2037,7 +2031,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
           </TableRow>
 
           {/* Expanded view for composite requirements */}
-          {isComposite && isCompositeExpanded && reqItem.kyc_document_ids?.map((docId: string, docIdx: number) => {
+          {isComposite && isCompositeExpanded && reqItem.document_ids?.map((docId: string, docIdx: number) => {
             const docMetadata = documentMetadataCache.get(docId);
             if (!docMetadata) return null;
 
@@ -2211,7 +2205,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         dropdowns={selectedDocForUpload?.dropdowns || []}
         targetTable={selectedDocForUpload?.person?.type === 'company' ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents'}
         idFieldName={selectedDocForUpload?.person?.type === 'company' ? 'company_id' : 'director_id'}
-        documentIdFieldName={selectedDocForUpload?.person?.type === 'company' ? 'kyc_document_id' : 'document_id'}
+        documentIdFieldName='document_id'
         isCompanyUpload={selectedDocForUpload?.person?.type === 'company'}
         additionalFields={{
           issue_date: new Date().toISOString().split('T')[0],

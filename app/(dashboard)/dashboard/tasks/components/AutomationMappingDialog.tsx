@@ -765,6 +765,29 @@ export const AutomationMappingDialog = ({
       const value = getSourceValue(source.table, source.path, lookupId, extractionMode as 'latest' | 'all');
       if (value !== null && value !== undefined && value !== '' && value !== 'Missing') return value;
     }
+    
+    // Check for default value if all sources returned "Missing"
+    if (fieldDef?.default_value) {
+      return fieldDef.default_value;
+    }
+    
+    // Handle image properties - return structured object for image fields with dimensions and alignment
+    if (fieldDef?.fieldType === 'image') {
+      const imageProps = {
+        url: "Missing",
+        width: fieldDef.image_width || 'auto',
+        height: fieldDef.image_height || 'auto',
+        alignment: fieldDef.image_alignment || 'left'
+      };
+      
+      // If we have a default value, try to parse it as image URL
+      if (fieldDef.default_value && fieldDef.default_value !== "Missing") {
+        imageProps.url = fieldDef.default_value;
+      }
+      
+      return JSON.stringify(imageProps);
+    }
+    
     return "Missing";
   };
 

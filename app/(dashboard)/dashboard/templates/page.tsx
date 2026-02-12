@@ -121,7 +121,7 @@ useEffect(() => {
 
         // 3. Filter requirements where hasTemplate is true and extract KYC IDs
         const templateRequirements = requirementsData.requirements.filter(
-          (req: any) => req.hasTemplate === true && req.kyc_document_ids && req.kyc_document_ids.length > 0
+          (req: any) => req.hasTemplate === true && req.document_ids && req.document_ids.length > 0
         );
 
         if (templateRequirements.length === 0) {
@@ -131,7 +131,7 @@ useEffect(() => {
 
         // Extract all unique KYC Document IDs from the filtered requirements
         const kycDocumentIds = [
-          ...new Set(templateRequirements.flatMap((req: any) => req.kyc_document_ids))
+          ...new Set(templateRequirements.flatMap((req: any) => req.document_ids))
         ];
 
         // 4. Fetch the actual KYC document definitions

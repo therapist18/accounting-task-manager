@@ -54,7 +54,7 @@ interface JobQuestion {
 interface Requirement {
   id: string;
   label: string;
-  kyc_document_ids?: string[];
+  document_ids?: string[];
 }
 
 const sanitizeClassName = (cls: string | undefined): string => {
@@ -146,6 +146,8 @@ type Placeholder = {
   // NEW: Job Questions and Requirements linking
   linked_job_question_id?: string;
   linked_requirement_id?: string;
+  // NEW: Default value field
+  default_value?: string;
 };
 
 const getCleanText = (str: string) => str.replace(/<[^>]+>/g, '');
@@ -447,9 +449,9 @@ function RequirementPicker({
                         </div>
                         <div>
                           <div className="font-medium">{requirement.label}</div>
-                          {requirement.kyc_document_ids && requirement.kyc_document_ids.length > 0 && (
+                          {requirement.document_ids && requirement.document_ids.length > 0 && (
                             <div className="text-xs text-muted-foreground">
-                              {requirement.kyc_document_ids.length} document(s)
+                              {requirement.document_ids.length} document(s)
                             </div>
                           )}
                         </div>
@@ -527,6 +529,7 @@ export default function DocumentTemplateManager({
     type: 'text',
     required: false,
     entity_type: [],
+    default_value: '',
     array_direction: 'vertical',
     checklist_data_source: {
       table: 'acc_portal_kyc_uploads',
@@ -1332,6 +1335,17 @@ export default function DocumentTemplateManager({
               )}
             </div>
           </TableCell>
+
+          <TableCell className="border-r">
+            {p.default_value ? (
+              <Badge variant="secondary" className="text-[9px] bg-blue-50 text-blue-700">
+                {p.default_value.length > 15 ? `${p.default_value.substring(0, 15)}...` : p.default_value}
+              </Badge>
+            ) : (
+              <span className="text-[10px] text-muted-foreground italic">None</span>
+            )}
+          </TableCell>
+
           <TableCell className="text-right">
             <div className="flex justify-end gap-1">
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => editPlaceholder(originalIndex)}>
@@ -1374,7 +1388,8 @@ export default function DocumentTemplateManager({
         type: isImage ? 'image' : isArray ? 'array' : 'text',
         required: true,
         entity_type: (sourceType as EntityType) || 'principal', // Use source_type from master field or default to 'principal'
-        master_field_ids: matchingFieldIds
+        master_field_ids: matchingFieldIds,
+        default_value: ''
       };
     });
   };
@@ -1430,7 +1445,8 @@ export default function DocumentTemplateManager({
           type: isImageTag ? 'image' : isArray ? 'array' : 'text',
           required: true,
           entity_type: (sourceType as EntityType) || 'principal', // Use source_type from master field or default to 'principal'
-          master_field_ids: matchingFieldIds
+          master_field_ids: matchingFieldIds,
+          default_value: ''
         });
       }
       processedNames.add(cleanName);
@@ -1582,7 +1598,9 @@ export default function DocumentTemplateManager({
           linking_variable: 'company_id',
           document_id_field: 'kyc_document_id'
         }
-      })
+      }),
+      // Include default_value field
+      default_value: newPlaceholder.default_value || ''
     };
 
     if (isEditingPlaceholder !== null) {
@@ -1610,6 +1628,7 @@ export default function DocumentTemplateManager({
       type: 'text',
       required: false,
       entity_type: [],
+      default_value: '',
       conditions: [],
       boolean_conditions: [],
       boolean_type: 'single',
@@ -1642,6 +1661,7 @@ export default function DocumentTemplateManager({
       boolean_type: placeholder.boolean_type || 'single',
       is_ai_generated: placeholder.is_ai_generated || false, // Add this
       ai_prompt: placeholder.ai_prompt || '',
+      default_value: placeholder.default_value || '',
     });
 
     // Set director type if applicable
@@ -2080,6 +2100,7 @@ export default function DocumentTemplateManager({
                             <TableHead className="border-r font-bold text-gray-700">Type</TableHead>
                             <TableHead className="border-r font-bold text-gray-700">Entity</TableHead>
                             <TableHead className="border-r font-bold text-gray-700">Linked Master Field</TableHead>
+                            <TableHead className="border-r font-bold text-gray-700">Default Value</TableHead>
                             <TableHead className="text-right border-r font-bold text-gray-700">Actions</TableHead>
                           </TableRow></TableHeader>
                           <TableBody>
@@ -2218,6 +2239,16 @@ export default function DocumentTemplateManager({
                 placeholder="A short description for this field"
                 value={newPlaceholder.description}
                 onChange={(e) => setNewPlaceholder({ ...newPlaceholder, description: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="default_value">Default Value</Label>
+              <Input
+                id="default_value"
+                placeholder="Optional default value..."
+                value={newPlaceholder.default_value || ''}
+                onChange={(e) => setNewPlaceholder({ ...newPlaceholder, default_value: e.target.value })}
               />
             </div>
 
