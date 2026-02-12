@@ -1085,7 +1085,7 @@ export default function TemplateGenerationDialog({
     relationshipData = { directors: [], dependants: [], company: {}, principal: null, understudy: null },
     onDraftDiscarded, jobLevel,
     activeEntityType, // Added
-    activeEntityId ,refreshDocuments 
+    activeEntityId, refreshDocuments
 }) {
     console.log('[TemplateGenerationDialog] Selected entity ID map:', entityIdMap);
     if (entityIdMap) {
@@ -1213,37 +1213,37 @@ export default function TemplateGenerationDialog({
         }
     }, [isOpen, selectedTemplate, getTargetConfig]);
 
-const discardDraft = useCallback(async () => {
-    if (!loadedDraft) return;
-    const config = getTargetConfig();
-    
-    setIsLoadingDraft(true);
-    try {
-        // 1. Storage cleanup
-        if (loadedDraft.file_path) {
-            await supabase.storage.from('kyc-documents').remove([loadedDraft.file_path]);
+    const discardDraft = useCallback(async () => {
+        if (!loadedDraft) return;
+        const config = getTargetConfig();
+
+        setIsLoadingDraft(true);
+        try {
+            // 1. Storage cleanup
+            if (loadedDraft.file_path) {
+                await supabase.storage.from('kyc-documents').remove([loadedDraft.file_path]);
+            }
+
+            // 2. DB cleanup
+            const { error: dbError } = await supabase
+                .from(config.table)
+                .delete()
+                .eq('id', loadedDraft.id);
+
+            if (dbError) throw dbError;
+
+            // 3. UI Sync
+            setLoadedDraft(null);
+            if (onDraftDiscarded) onDraftDiscarded();
+            if (refreshDocuments) await refreshDocuments();
+
+            toast({ title: "Draft Discarded" });
+        } catch (error) {
+            toast({ title: "Error", description: error.message, variant: "destructive" });
+        } finally {
+            setIsLoadingDraft(false);
         }
-
-        // 2. DB cleanup
-        const { error: dbError } = await supabase
-            .from(config.table)
-            .delete()
-            .eq('id', loadedDraft.id);
-
-        if (dbError) throw dbError;
-
-        // 3. UI Sync
-        setLoadedDraft(null);
-        if (onDraftDiscarded) onDraftDiscarded();
-        if (refreshDocuments) await refreshDocuments();
-
-        toast({ title: "Draft Discarded" });
-    } catch (error) {
-        toast({ title: "Error", description: error.message, variant: "destructive" });
-    } finally {
-        setIsLoadingDraft(false);
-    }
-}, [loadedDraft, getTargetConfig, refreshDocuments, onDraftDiscarded]);
+    }, [loadedDraft, getTargetConfig, refreshDocuments, onDraftDiscarded]);
 
     const groupedPlaceholders = useMemo(() => {
         if (!selectedTemplate?.placeholders) return { topLevel: [], blocks: {} };
@@ -2793,146 +2793,247 @@ const discardDraft = useCallback(async () => {
         };
     }, [formData, groupedPlaceholders]);
 
-const saveAsDraft = async () => {
-    const config = getTargetConfig();
-    if (!config) {
-      toast({ title: "Error", description: "Entity context missing", variant: "destructive" });
-      return;
-    }
+    const saveAsDraft = async () => {
+        console.log('🚀 [saveAsDraft] Starting draft save process...');
 
-    setIsGenerating(true);
-    try {
-      const kycDocId = selectedTemplate?.document_id || template?.document_id;
-      
-      // --- 1. ROBUST BUFFER RECOVERY ---
-      let templateBuffer = docxTemplateBuffer.current;
+        const config = getTargetConfig();
+        console.log('📋 [saveAsDraft] Config:', config);
 
-      // If buffer is missing and it's a Word template, try fetching it now
-      if (!templateBuffer && isWordTemplate) {
-          const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${selectedTemplate.file_path}`;
-          const res = await fetch(publicUrl);
-          if (!res.ok) throw new Error("Failed to fetch template source from storage");
-          templateBuffer = await res.arrayBuffer();
-          docxTemplateBuffer.current = templateBuffer; // Cache it for next time
-      }
-      
-      let storagePath = null;
+        if (!config) {
+            console.error('❌ [saveAsDraft] Entity context missing');
+            toast({ title: "Error", description: "Entity context missing", variant: "destructive" });
+            return;
+        }
 
-      // --- 2. GENERATE AND UPLOAD PHYSICAL FILE ---
-      if (isWordTemplate && templateBuffer) {
-          const renderData = await prepareRenderData(formData);
-          const zip = new PizZip(templateBuffer);
-          const doc = new Docxtemplater(zip, {
-              paragraphLoop: true,
-              linebreaks: true,
-              nullGetter: () => ""
-          });
+        setIsGenerating(true);
+        try {
+            const kycDocId = selectedTemplate?.document_id || template?.document_id;
+            console.log('📄 [saveAsDraft] KYC Doc ID:', kycDocId);
+            console.log('📋 [saveAsDraft] Selected Template:', selectedTemplate);
+            console.log('📋 [saveAsDraft] Template:', template);
 
-          doc.setData(renderData);
-          doc.render();
-          const docBlob = doc.getZip().generate({
-              type: "blob",
-              mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-          });
+            // --- 1. ROBUST BUFFER RECOVERY ---
+            let templateBuffer = docxTemplateBuffer.current;
+            console.log('💾 [saveAsDraft] Initial templateBuffer exists:', !!templateBuffer);
+            console.log('📝 [saveAsDraft] isWordTemplate:', isWordTemplate);
 
-          const timestamp = Date.now();
-          const path = `drafts/${config.entityId}/${kycDocId}_${timestamp}.docx`;
-          
-          const { data: storageData, error: storageError } = await supabase.storage
-              .from('kyc-documents')
-              .upload(path, docBlob, { cacheControl: '3600', upsert: true });
+            // If buffer is missing and it's a Word template, try fetching it now
+            if (!templateBuffer && isWordTemplate) {
+                console.log('🔄 [saveAsDraft] Template buffer missing, attempting to fetch...');
+                const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${selectedTemplate.file_path}`;
+                console.log('🌐 [saveAsDraft] Fetching from URL:', publicUrl);
 
-          if (storageError) throw storageError;
-          storagePath = storageData.path;
-      } else if (isWordTemplate && !templateBuffer) {
-          // Word template but no buffer - create a simple HTML file as fallback
-          console.warn('⚠️ Word template buffer missing, creating HTML fallback for storage');
-          const renderData = await prepareRenderData(formData);
-          const htmlContent = populateHtmlContent(renderData, selectedTemplate?.placeholders || [], imageStyles);
-          const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
-          
-          const timestamp = Date.now();
-          const path = `drafts/${config.entityId}/${kycDocId}_${timestamp}_fallback.html`;
-          
-          const { data: storageData, error: storageError } = await supabase.storage
-              .from('kyc-documents')
-              .upload(path, htmlBlob, { cacheControl: '3600', upsert: true });
+                const res = await fetch(publicUrl);
+                console.log('📡 [saveAsDraft] Fetch response status:', res.status);
 
-          if (storageError) throw storageError;
-          storagePath = storageData.path;
-      } else {
-          // Handle HTML templates - create HTML file and upload to storage
-          const renderData = await prepareRenderData(formData);
-          const htmlContent = populateHtmlContent(renderData, selectedTemplate?.placeholders || [], imageStyles);
-          const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
-          
-          const timestamp = Date.now();
-          const path = `drafts/${config.entityId}/${kycDocId}_${timestamp}.html`;
-          
-          const { data: storageData, error: storageError } = await supabase.storage
-              .from('kyc-documents')
-              .upload(path, htmlBlob, { cacheControl: '3600', upsert: true });
+                if (!res.ok) {
+                    console.error('❌ [saveAsDraft] Failed to fetch template source from storage');
+                    throw new Error("Failed to fetch template source from storage");
+                }
 
-          if (storageError) throw storageError;
-          storagePath = storageData.path;
-      }
+                templateBuffer = await res.arrayBuffer();
+                console.log('✅ [saveAsDraft] Successfully fetched template buffer, size:', templateBuffer.byteLength);
+                docxTemplateBuffer.current = templateBuffer; // Cache it for next time
+            }
 
-      // --- 3. PREPARE DATABASE PAYLOAD ---
-      const draftMetadata = {
-          formData: formData,
-          imageStyles: imageStyles,
-          savedAt: new Date().toISOString(),
-          templateId: selectedTemplate?.id,
-          activeEntityType,
-          activeEntityId
-      };
+            let storagePath = null;
 
-      const payload = {
-          [config.idColumn]: config.entityId,
-          [config.docIdColumn]: kycDocId,
-          file_path: storagePath, 
-          file_type: isWordTemplate ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'text/html',
-          status: 'draft',
-          metadata: draftMetadata,
-          updated_at: new Date().toISOString()
-      };
+            // --- 2. GENERATE AND UPLOAD PHYSICAL FILE ---
+            if (isWordTemplate && templateBuffer) {
+                console.log('📝 [saveAsDraft] Processing Word template with buffer...');
+                const renderData = await prepareRenderData(formData);
+                console.log('🔧 [saveAsDraft] Render data prepared, keys:', Object.keys(renderData));
 
-      // --- 4. SAVE TO DATABASE ---
-      const { data: existingDraft } = await supabase
-          .from(config.table)
-          .select('id, file_path')
-          .eq(config.docIdColumn, kycDocId)
-          .eq(config.idColumn, config.entityId)
-          .eq('status', 'draft')
-          .maybeSingle();
+                const zip = new PizZip(templateBuffer);
+                const doc = new Docxtemplater(zip, {
+                    paragraphLoop: true,
+                    linebreaks: true,
+                    nullGetter: () => ""
+                });
 
-      let result;
-      if (existingDraft) {
-          if (existingDraft.file_path && storagePath && existingDraft.file_path !== storagePath) {
-              await supabase.storage.from('kyc-documents').remove([existingDraft.file_path]);
-          }
-          result = await supabase.from(config.table).update(payload).eq('id', existingDraft.id).select();
-      } else {
-          result = await supabase.from(config.table).insert([{ ...payload, created_at: new Date().toISOString() }]).select();
-      }
+                doc.setData(renderData);
+                doc.render();
+                const docBlob = doc.getZip().generate({
+                    type: "blob",
+                    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                });
 
-      if (result.error) throw result.error;
+                console.log(' [saveAsDraft] Document blob generated, size:', docBlob.size);
 
-      // --- 5. SYNC UI ---
-      setLoadedDraft(result.data[0]);
-      setOriginalFormData(JSON.parse(JSON.stringify(formData)));
-      setManuallyEditedFields(new Set());
-      
-      toast({ title: "Draft Saved", description: "Progress has been stored successfully." });
-      if (refreshDocuments) await refreshDocuments();
+                const timestamp = Date.now();
+                const entityFolder = activeEntityType === 'company' ? 'company-documents' : 'individuals-documents';
+                const path = `${entityFolder}/${config.entityId}/${kycDocId}_${timestamp}.docx`;
+                console.log(' [saveAsDraft] Uploading to path:', path);
 
-    } catch (e) {
-      console.error('[saveAsDraft] Error:', e);
-      toast({ title: "Save Error", description: e.message, variant: "destructive" });
-    } finally {
-      setIsGenerating(false);
-    }
-  };
+                const { data: storageData, error: storageError } = await supabase.storage
+                    .from('kyc-documents')
+                    .upload(path, docBlob, { cacheControl: '3600', upsert: true });
+
+                console.log(' [saveAsDraft] Storage upload response:', { storageData, storageError });
+
+                if (storageError) {
+                    console.error(' [saveAsDraft] Storage upload error:', storageError);
+                    throw storageError;
+                }
+                storagePath = storageData.path;
+                console.log(' [saveAsDraft] File uploaded successfully to:', storagePath);
+            } else if (isWordTemplate && !templateBuffer) {
+                // Word template but no buffer - create a simple HTML file as fallback
+                console.warn(' [saveAsDraft] Word template buffer missing, creating HTML fallback for storage');
+                const renderData = await prepareRenderData(formData);
+                const htmlContent = populateHtmlContent(renderData, selectedTemplate?.placeholders || [], imageStyles);
+                const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
+
+                console.log(' [saveAsDraft] HTML fallback blob size:', htmlBlob.size);
+
+                const timestamp = Date.now();
+                const entityFolder = activeEntityType === 'company' ? 'company-documents' : 'individuals-documents';
+                const path = `${entityFolder}/${config.entityId}/${kycDocId}_${timestamp}_fallback.html`;
+                console.log(' [saveAsDraft] Uploading HTML fallback to path:', path);
+
+                const { data: storageData, error: storageError } = await supabase.storage
+                    .from('kyc-documents')
+                    .upload(path, htmlBlob, { cacheControl: '3600', upsert: true });
+
+                console.log(' [saveAsDraft] HTML fallback storage response:', { storageData, storageError });
+
+                if (storageError) {
+                    console.error(' [saveAsDraft] HTML fallback storage error:', storageError);
+                    throw storageError;
+                }
+                storagePath = storageData.path;
+                console.log(' [saveAsDraft] HTML fallback uploaded successfully to:', storagePath);
+            } else {
+                // Handle HTML templates - convert to PDF and upload to storage
+                console.log(' [saveAsDraft] Processing HTML template...');
+                const renderData = await prepareRenderData(formData);
+                const htmlContent = populateHtmlContent(renderData, selectedTemplate?.placeholders || [], imageStyles);
+
+                console.log(' [saveAsDraft] Converting HTML to PDF for storage...');
+
+                // Create a temporary element for PDF generation
+                const element = document.createElement('div');
+                element.innerHTML = htmlContent;
+                element.className = EDITOR_PREVIEW_STYLES + ' p-10 bg-white';
+                element.style.width = '800px';
+
+                // Import html2pdf dynamically
+                const html2pdf = (await import('html2pdf.js')).default;
+
+                const pdfBlob = await html2pdf()
+                    .set({
+                        margin: 10,
+                        html2canvas: {
+                            scale: 2,
+                            useCORS: true,
+                            logging: false
+                        },
+                        jsPDF: {
+                            unit: 'mm',
+                            format: 'a4',
+                            orientation: 'portrait'
+                        }
+                    })
+                    .from(element)
+                    .output('blob');
+
+                console.log(' [saveAsDraft] PDF blob generated, size:', pdfBlob.size);
+
+                const timestamp = Date.now();
+                const entityFolder = activeEntityType === 'company' ? 'company-documents' : 'individuals-documents';
+                const path = `${entityFolder}/${config.entityId}/${kycDocId}_${timestamp}.pdf`;
+                console.log(' [saveAsDraft] Uploading PDF to path:', path);
+
+                const { data: storageData, error: storageError } = await supabase.storage
+                    .from('kyc-documents')
+                    .upload(path, pdfBlob, { cacheControl: '3600', upsert: true });
+
+                console.log(' [saveAsDraft] PDF storage response:', { storageData, storageError });
+
+                if (storageError) {
+                    console.error(' [saveAsDraft] PDF storage error:', storageError);
+                    throw storageError;
+                }
+                storagePath = storageData.path;
+                console.log(' [saveAsDraft] PDF uploaded successfully to:', storagePath);
+            }
+
+            // --- 3. PREPARE DATABASE PAYLOAD ---
+            console.log(' [saveAsDraft] Preparing database payload...');
+            const draftMetadata = {
+                formData: formData,
+                imageStyles: imageStyles,
+                savedAt: new Date().toISOString(),
+                templateId: selectedTemplate?.id,
+                activeEntityType,
+                activeEntityId
+            };
+            console.log(' [saveAsDraft] Draft metadata prepared');
+
+            const payload = {
+                [config.idColumn]: config.entityId,
+                [config.docIdColumn]: kycDocId,
+                file_path: storagePath,
+                file_type: isWordTemplate ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'application/pdf',
+                status: 'draft',
+                metadata: draftMetadata,
+                updated_at: new Date().toISOString()
+            };
+            console.log(' [saveAsDraft] Database payload:', payload);
+
+            // --- 4. SAVE TO DATABASE ---
+            console.log(' [saveAsDraft] Checking for existing draft...');
+            const { data: existingDraft, error: existingDraftError } = await supabase
+                .from(config.table)
+                .select('id, file_path')
+                .eq(config.docIdColumn, kycDocId)
+                .eq(config.idColumn, config.entityId)
+                .eq('status', 'draft')
+                .maybeSingle();
+
+            console.log('🔍 [saveAsDraft] Existing draft check result:', { existingDraft, existingDraftError });
+
+            let result;
+            if (existingDraft) {
+                console.log('🔄 [saveAsDraft] Updating existing draft...');
+                if (existingDraft.file_path && storagePath && existingDraft.file_path !== storagePath) {
+                    console.log('🗑️ [saveAsDraft] Removing old file:', existingDraft.file_path);
+                    await supabase.storage.from('kyc-documents').remove([existingDraft.file_path]);
+                }
+                result = await supabase.from(config.table).update(payload).eq('id', existingDraft.id).select();
+                console.log('✅ [saveAsDraft] Draft updated successfully');
+            } else {
+                console.log('➕ [saveAsDraft] Creating new draft...');
+                result = await supabase.from(config.table).insert([{ ...payload, created_at: new Date().toISOString() }]).select();
+                console.log('✅ [saveAsDraft] New draft created successfully');
+            }
+
+            console.log('📊 [saveAsDraft] Database operation result:', result);
+
+            if (result.error) {
+                console.error('❌ [saveAsDraft] Database error:', result.error);
+                throw result.error;
+            }
+
+            // --- 5. SYNC UI ---
+            console.log('🔄 [saveAsDraft] Syncing UI state...');
+            setLoadedDraft(result.data[0]);
+            setOriginalFormData(JSON.parse(JSON.stringify(formData)));
+            setManuallyEditedFields(new Set());
+
+            console.log('🎉 [saveAsDraft] Draft save process completed successfully');
+            toast({ title: "Draft Saved", description: "Progress has been stored successfully." });
+            if (refreshDocuments) await refreshDocuments();
+
+        } catch (e) {
+            console.error('❌ [saveAsDraft] Error:', e);
+            console.error('❌ [saveAsDraft] Error stack:', e.stack);
+            toast({ title: "Save Error", description: e.message, variant: "destructive" });
+        } finally {
+            setIsGenerating(false);
+            console.log('🏁 [saveAsDraft] Draft save process finished');
+        }
+    };
 
     const generateAndDownload = async (type) => {
         setIsGenerating(true);
@@ -3398,20 +3499,20 @@ const saveAsDraft = async () => {
                             {isWordTemplate ? 'Word + Images' : 'HTML'}
                         </div>
                         <div className='flex gap-2'>
-                          <Button
-    variant="outline"
-    size="sm"
-    onClick={saveAsDraft}
-    // ADD isPreviewLoading here
-    disabled={isGenerating || isPreviewLoading}
->
-    {isGenerating || isPreviewLoading ? (
-        <Loader2 className="animate-spin mr-2 h-4 w-4" />
-    ) : (
-        <Save className="mr-2 h-4 w-4" />
-    )}
-    {loadedDraft ? 'Update Draft' : 'Save as Draft'}
-</Button>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={saveAsDraft}
+                                // ADD isPreviewLoading here
+                                disabled={isGenerating || isPreviewLoading}
+                            >
+                                {isGenerating || isPreviewLoading ? (
+                                    <Loader2 className="animate-spin mr-2 h-4 w-4" />
+                                ) : (
+                                    <Save className="mr-2 h-4 w-4" />
+                                )}
+                                {loadedDraft ? 'Update Draft' : 'Save as Draft'}
+                            </Button>
                             <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>

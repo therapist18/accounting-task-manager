@@ -1867,6 +1867,10 @@ setShowTemplateGenerator(true);
       // Check if this is a composite requirement (multiple document types)
       const isComposite = reqItem.isMultiDocument && reqItem.document_ids?.length > 1;
 
+      // LOGGING ADDED HERE
+      if (!isComposite) {
+        console.log(`[Combined] Rendering Single Req: ${reqItem.name} (ID: ${requirementId})`);
+      }
       return (
         <React.Fragment key={`${reqItem.category}-${requirementId}`}>
           <TableRow className={`group hover:bg-gray-50 ${reqIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>

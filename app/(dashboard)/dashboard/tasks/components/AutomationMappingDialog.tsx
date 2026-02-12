@@ -1013,19 +1013,34 @@ export const AutomationMappingDialog = ({
                 return { ...col, value: cleanFieldValue(val), fieldId: 'job_question' };
               }
               const fieldIds = col.linkedMasterFields || (col.linkedMasterFieldId ? [col.linkedMasterFieldId] : []);
-              const fieldId = String(fieldIds[0] || '');
-              if (fieldId) {
-                const field = jobFields[fieldId];
-                if (field?.is_computed || field?.computed_config?.is_computed) {
-                  const itemExtractionMode = col.extractionMode || 'latest';
-                  const key = `${field.id}_${id}_${itemExtractionMode}`;
-                  val = masterFieldComputedValues[key];
-                } else if (field?.sources?.[0]) {
-                  val = getFieldValue(fieldId, String(id), 0, col.extractionMode || 'latest');
-                  if (val === 'Missing' || val === 'Missing Config' || val === 'No Source') val = '';
+              if (fieldIds.length > 0) {
+                const values = [];
+                for (const fieldId of fieldIds) {
+                  const fieldIdStr = String(fieldId);
+                  const field = jobFields[fieldIdStr];
+                  if (field?.is_computed || field?.computed_config?.is_computed) {
+                    const itemExtractionMode = col.extractionMode || 'latest';
+                    const key = `${field.id}_${id}_${itemExtractionMode}`;
+                    const val = masterFieldComputedValues[key];
+                    if (val && val !== 'Missing' && val !== 'Computing...') {
+                      values.push(cleanFieldValue(val));
+                    }
+                  } else if (field?.sources?.[0]) {
+                    const val = getFieldValue(fieldIdStr, String(id), 0, col.extractionMode || 'latest');
+                    if (val && val !== 'Missing' && val !== 'Missing Config' && val !== 'No Source') {
+                      values.push(cleanFieldValue(val));
+                    }
+                  }
+                }
+
+                // Join multiple values with a space or comma based on field type (matching UI logic)
+                if (values.length > 0) {
+                  val = col.type === 'text'
+                    ? values.join(' ')
+                    : values.join(', ');
                 }
               }
-              return { ...col, value: cleanFieldValue(val), fieldId };
+              return { ...col, value: cleanFieldValue(val), fieldId: fieldIds[0] || 'master_field' };
             });
             const maxRows = Math.max(1, ...columnsData.map((c: any) => Array.isArray(c.value) ? c.value.length : 1));
             for (let i = 0; i < maxRows; i++) {

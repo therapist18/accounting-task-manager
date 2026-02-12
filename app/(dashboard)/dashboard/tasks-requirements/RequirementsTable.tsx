@@ -107,6 +107,7 @@ export function RequirementsTable({
       fields: any[];
       name?: string;
       uploadedAt?: string;
+      originalDoc: any; // Added to store original doc for save actions
     }>;
     currentIndex: number;
   } | null>(null);
@@ -132,6 +133,7 @@ export function RequirementsTable({
 
   const filteredTasks = useMemo(() => tasks.filter(task => activeTab === "completed" ? (task.status === "completed" || task.status === "approved") : (task.status !== "completed" && task.status !== "approved")), [tasks, activeTab]);
 
+  // ... (keeping existing useMemos and fetches) ...
   const companyIds = useMemo(() =>
     [...new Set(filteredTasks.map(t => t.company_id).filter(Boolean))],
     [filteredTasks]
@@ -175,7 +177,6 @@ export function RequirementsTable({
     const individualTypeMap = new Map<number, string>();
 
     tasksToFetch.forEach(task => {
-      // Use individual_id for Principal/Applicant to match director_id in DB
       const pId = task.individual_id || task.applicant_details?.id;
       if (pId) {
         uniqueIds.add(pId);
@@ -203,7 +204,6 @@ export function RequirementsTable({
     }
 
     try {
-      // SINGLE QUERY for all individuals and all document types
       const { data: documentsRes, error } = await supabase
         .from('acc_portal_directors_documents')
         .select('*, acc_portal_kyc (id, name, display_name)')
@@ -212,8 +212,6 @@ export function RequirementsTable({
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-
-      const endTime = performance.now();
 
       const documentsByDirector = documentsRes?.reduce((acc, doc) => {
         if (!acc[doc.director_id]) acc[doc.director_id] = [];
@@ -241,7 +239,6 @@ export function RequirementsTable({
     }
 
     try {
-      // SINGLE QUERY for all companies and all document types
       const { data, error } = await supabase
         .from('acc_portal_kyc_uploads')
         .select('*, acc_portal_kyc (id, name, display_name)')
@@ -250,8 +247,6 @@ export function RequirementsTable({
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-
-      const endTime = performance.now();
 
       const docsByCompany = data?.reduce((acc, doc) => {
         if (!acc[doc.company_id]) acc[doc.company_id] = [];
@@ -289,7 +284,6 @@ export function RequirementsTable({
       return;
     }
 
-    // SINGLE QUERY for all companies
     try {
       const { data, error } = await supabase
         .from('acc_portal_company_duplicate')
@@ -297,8 +291,6 @@ export function RequirementsTable({
         .in('id', companyIds);
 
       if (error) throw error;
-
-      const endTime = performance.now();
 
       const companiesMap = data?.reduce((acc, co) => {
         acc[co.id] = co;
@@ -312,6 +304,7 @@ export function RequirementsTable({
     }
   }, []);
 
+  // ... (useEffect for loading data remains same) ...
   useEffect(() => {
     let isMounted = true;
     const loadData = async () => {
@@ -319,26 +312,16 @@ export function RequirementsTable({
       setDocumentsLoading(true);
 
       try {
-        // 1. Get unique IDs strictly excluding null/undefined/empty
         const uniqueClassIds = [...new Set(filteredTasks.map(t => t.class_id).filter(id => id != null && id !== ''))];
         const uniqueSubdepartmentIds = [...new Set(filteredTasks.map(t => t.subdepartment_id).filter(id => id != null && id !== ''))];
         const uniqueDepartmentIds = [...new Set(filteredTasks.map(t => t.department_id).filter(id => id != null && id !== ''))];
 
         let reqQuery = supabase.from('tm_class_requirements').select('*');
 
-        // Build AND conditions for exact matching
-        let filterConditions = {};
-        if (uniqueClassIds.length > 0) {
-          reqQuery = reqQuery.filter('job_level->>class_id', 'in', `(${uniqueClassIds.join(',')})`);
-        }
-        if (uniqueSubdepartmentIds.length > 0) {
-          reqQuery = reqQuery.filter('job_level->>subdepartment_id', 'in', `(${uniqueSubdepartmentIds.join(',')})`);
-        }
-        if (uniqueDepartmentIds.length > 0) {
-          reqQuery = reqQuery.filter('job_level->>department_id', 'in', `(${uniqueDepartmentIds.join(',')})`);
-        }
+        if (uniqueClassIds.length > 0) reqQuery = reqQuery.filter('job_level->>class_id', 'in', `(${uniqueClassIds.join(',')})`);
+        if (uniqueSubdepartmentIds.length > 0) reqQuery = reqQuery.filter('job_level->>subdepartment_id', 'in', `(${uniqueSubdepartmentIds.join(',')})`);
+        if (uniqueDepartmentIds.length > 0) reqQuery = reqQuery.filter('job_level->>department_id', 'in', `(${uniqueDepartmentIds.join(',')})`);
 
-        // Use the built query
         const reqPromise = (uniqueClassIds.length > 0 || uniqueSubdepartmentIds.length > 0 || uniqueDepartmentIds.length > 0)
           ? reqQuery
           : Promise.resolve({ data: [], error: null });
@@ -352,41 +335,28 @@ export function RequirementsTable({
         if (metadataRes.error) throw metadataRes.error;
         if (classRequirementsRes.error) throw classRequirementsRes.error;
 
-        // Client-side filtering to ensure exact matches (ALL criteria must match)
         const filteredRequirements = (classRequirementsRes.data || []).filter(req => {
           const jobLevel = req.job_level;
           if (!jobLevel) return false;
-
-          // Check if this record matches ALL of our criteria
           const matchesClass = uniqueClassIds.length === 0 || uniqueClassIds.includes(jobLevel.class_id);
           const matchesSubdept = uniqueSubdepartmentIds.length === 0 || uniqueSubdepartmentIds.includes(jobLevel.subdepartment_id);
           const matchesDept = uniqueDepartmentIds.length === 0 || uniqueDepartmentIds.includes(jobLevel.department_id);
-
-          // ALL criteria must match (AND logic)
-          const hasMatch = matchesClass && matchesSubdept && matchesDept;
-
-          return hasMatch;
+          return matchesClass && matchesSubdept && matchesDept;
         });
         setDocuments((metadataRes.data || []).map(doc => ({ ...doc, display_name: doc.display_name || doc.name })));
 
-        // 3. Map Requirements Logic (Hierarchy: Class > Subdept > Dept)
         const classReqMap: Record<string, any> = {};
         const reqs = filteredRequirements;
 
         filteredTasks.forEach(task => {
           let match = null;
-          // Priority 1: Exact Class Match
           if (task.class_id) match = reqs.find(r => r.job_level?.class_id == task.class_id);
-          // Priority 2: Subdepartment Match (if no class ID in task)
           if (!match && task.subdepartment_id) match = reqs.find(r => r.job_level?.subdepartment_id == task.subdepartment_id && !r.job_level?.class_id);
-          // Priority 3: Department Match
           if (!match && task.department_id) match = reqs.find(r => r.job_level?.department_id == task.department_id && !r.job_level?.subdepartment_id && !r.job_level?.class_id);
-
           if (match) classReqMap[task.id] = match;
         });
         setTaskClassRequirements(classReqMap);
 
-        // 4. Fetch Documents (Parallel)
         const allIndividualIds = new Set<number>();
         const allCompanyIds = new Set<number>();
         const requiredKycIds = new Set<string>();
@@ -400,16 +370,13 @@ export function RequirementsTable({
                 if (UUID_REGEX.test(id)) requiredKycIds.add(id);
               });
             }
-            // Handle legacy documents_and_fields ID if necessary - BUT ensure it is UUID
             if (cr.documents_and_fields && r.id && UUID_REGEX.test(r.id)) requiredKycIds.add(r.id);
           });
         });
 
         filteredTasks.forEach(task => {
-          // Use individual_id for Principal/Applicant to match director_id in DB
           const pId = task.individual_id || task.applicant_details?.id;
           if (pId) allIndividualIds.add(pId);
-
           task.participants_details?.forEach(p => {
             if (p.type === 'individual' && p.id) allIndividualIds.add(p.id);
             if (p.type === 'company' && p.id) allCompanyIds.add(p.id);
@@ -460,7 +427,6 @@ export function RequirementsTable({
     const groups = new Map<string, any[]>();
     filteredTasks.forEach(task => {
       let applicantName = 'Unknown Applicant';
-
       if (task.applicant_details?.name) {
         applicantName = task.applicant_details.name;
       } else if (task.participants_details?.length) {
@@ -468,7 +434,6 @@ export function RequirementsTable({
           p.type === 'individual' &&
           (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')
         );
-
         if (principal) {
           applicantName = principal.name;
         } else {
@@ -478,7 +443,6 @@ export function RequirementsTable({
           }
         }
       }
-
       if (!groups.has(applicantName)) groups.set(applicantName, []);
       groups.get(applicantName)!.push(task);
     });
@@ -508,21 +472,14 @@ export function RequirementsTable({
 
     allTasks.forEach(task => {
       const classReqs = taskClassRequirements[task.id];
-
-      // Handle both data structures: requirements array OR documents_and_fields
       if (!classReqs) return;
-
       let requirementsToProcess = [];
-
-      // Structure 1: requirements array with hasTemplate and web_automation
       if (classReqs?.requirements && Array.isArray(classReqs.requirements)) {
         requirementsToProcess = classReqs.requirements;
-      }
-      // Structure 2: documents_and_fields array (legacy structure)
-      else if (classReqs?.documents_and_fields && Array.isArray(classReqs.documents_and_fields)) {
+      } else if (classReqs?.documents_and_fields && Array.isArray(classReqs.documents_and_fields)) {
         requirementsToProcess = classReqs.documents_and_fields.map(doc => ({
           id: doc.id,
-          name: doc.id, // Use document ID as name for legacy structure
+          name: doc.id,
           document_ids: [doc.id],
           hasTemplate: false,
           web_automation: null,
@@ -534,67 +491,39 @@ export function RequirementsTable({
 
       requirementsToProcess.forEach((req: any) => {
         const docIds = req.document_ids || (req.document_id ? [req.document_id] : []);
-
         if (docIds.length === 0) return;
 
-        // Check if we already have this requirement (by ID, not name)
         const existingReq = requirementRows.find(r => r.id === req.id);
-        if (existingReq) return; // Skip duplicates from multiple tasks
+        if (existingReq) return;
 
-        // Get the first document for display purposes
         const firstDocId = docIds[0];
         const firstDocDef = documents.find(d => d.id === firstDocId);
-
-        // Determine if this is a composite requirement (multiple different document types)
-        const uniqueDocTypes = new Set(
-          docIds.map(docId => {
-            const doc = documents.find(d => d.id === docId);
-            return doc?.display_name || doc?.name || 'Unknown';
-          })
-        );
+        const uniqueDocTypes = new Set(docIds.map(docId => {
+          const doc = documents.find(d => d.id === docId);
+          return doc?.display_name || doc?.name || 'Unknown';
+        }));
 
         const isComposite = uniqueDocTypes.size > 1;
-
-        // Use requirement name, not document name
         const requirementName = req.name || firstDocDef?.display_name || firstDocDef?.name || 'Unnamed Requirement';
 
         requirementRows.push({
           ...req,
-          documentDefinition: firstDocDef, // For fields and metadata
-          document_ids: docIds, // All document IDs
-          document_id: firstDocId, // First ID for backward compatibility
-          uniqueId: req.id, // Use requirement ID as unique identifier
-          name: requirementName, // Use requirement name
-          documentCount: docIds.length, // Total number of document types
-          isMultiDocument: isComposite, // True if multiple different types
-          // Separate section_type from actual category
+          documentDefinition: firstDocDef,
+          document_ids: docIds,
+          document_id: firstDocId,
+          uniqueId: req.id,
+          name: requirementName,
+          documentCount: docIds.length,
+          isMultiDocument: isComposite,
           section_type: (() => {
-            // Priority 1: Check for automation first
-            if (req.web_automation?.automationId) {
-              return 'automation';
-            }
-
-            // Priority 2: Check for template
-            if (req.hasTemplate) {
-              return 'template';
-            }
-
+            if (req.web_automation?.automationId) return 'automation';
+            if (req.hasTemplate) return 'template';
             const entityTypes = req.entityTypes || (req.applicantType ? [req.applicantType] : []);
-            if (entityTypes.includes('company')) {
-              return 'company';
-            }
-
-            if (firstDocDef?.category === 'company-docs') {
-              return 'company';
-            }
-
-            if (firstDocDef?.has_template) {
-              return 'template';
-            }
-
+            if (entityTypes.includes('company')) return 'company';
+            if (firstDocDef?.category === 'company-docs') return 'company';
+            if (firstDocDef?.has_template) return 'template';
             return 'individual';
           })(),
-          // Explicitly preserve the original category for sub-sectioning
           category: req.category || 'general'
         });
       });
@@ -620,50 +549,32 @@ export function RequirementsTable({
 
   const confirmDelete = useCallback(async () => {
     if (!groupToDelete) return;
-
     const taskIds = groupToDelete.tasks.map(t => t.id);
     if (taskIds.length === 0) return;
-
     const toastId = toast.loading(`Deleting ${taskIds.length} task(s)...`);
-
     try {
-      const { error } = await supabase
-        .from('tm_tasks')
-        .delete()
-        .in('id', taskIds);
-
+      const { error } = await supabase.from('tm_tasks').delete().in('id', taskIds);
       if (error) throw error;
-
       toast.success(`Successfully deleted ${taskIds.length} task(s)`, { id: toastId });
-
-      // Reset selection if deleted applicant was selected
-      if (selectedApplicant === groupToDelete.applicantName) {
-        setSelectedApplicant(null);
-      }
-
+      if (selectedApplicant === groupToDelete.applicantName) setSelectedApplicant(null);
       setDeleteConfirmOpen(false);
       setGroupToDelete(null);
-
-      // The parent component will automatically re-render with updated tasks
-      // since the tasks prop is derived from the database query
     } catch (error) {
       console.error('Delete error:', error);
       toast.error(`Failed to delete tasks: ${error.message}`, { id: toastId });
     }
   }, [groupToDelete, selectedApplicant]);
+
   const toggleDocumentExpansion = useCallback((docId: string) => setExpandedDocuments(prev => { const newSet = new Set(prev); newSet.has(docId) ? newSet.delete(docId) : newSet.add(docId); return newSet; }), []);
+
   const handleUploadAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number) => {
     let personName = individualNames[applicantId || task.individual_id] || 'Unknown Person';
     if (applicantId && task.participants_details) {
       const participant = task.participants_details.find(p => p.id === applicantId);
-      if (participant && participant.name) {
-        personName = participant.name;
-      }
+      if (participant && participant.name) personName = participant.name;
     }
     if (!personName || personName === 'Unknown Person') {
-      personName = individualNames[task.applicant_details?.id] ||
-        task.applicant_details?.name ||
-        'Individual';
+      personName = individualNames[task.applicant_details?.id] || task.applicant_details?.name || 'Individual';
     }
 
     setSelectedDocForUpload({
@@ -684,29 +595,16 @@ export function RequirementsTable({
   const handleSaveDocument = useCallback(async (doc: any, editedData?: any) => {
     if (!doc) return;
     const toastId = toast.loading('Saving changes...');
-
     try {
-      // 1. Determine target table and ID field
       const isIndividual = !!doc.director_id;
       const targetTable = isIndividual ? 'acc_portal_directors_documents' : 'acc_portal_kyc_uploads';
-
-      // 2. Prepare data to save - CLEAN IT to remove circular references
       let rawData = editedData || doc.edited_details || doc.extracted_details || {};
-
-      // Remove any nested file/document objects that cause circular references
       const dataToSave = Object.keys(rawData).reduce((clean, key) => {
         const value = rawData[key];
-        // Skip keys that contain nested objects with circular references
-        if (key === 'file' || key === 'document' || key === 'fileUrl' || key === 'fileName' || key === 'documentName' || key === 'type') {
-          return clean;
-        }
-        // Only include primitive values, arrays, and simple objects
+        if (key === 'file' || key === 'document' || key === 'fileUrl' || key === 'fileName' || key === 'documentName' || key === 'type') return clean;
         if (value !== null && value !== undefined) {
           if (typeof value === 'object' && !Array.isArray(value)) {
-            // For objects, only include if they don't have nested file references
-            if (!value.file && !value.document && !value.extracted_details) {
-              clean[key] = value;
-            }
+            if (!value.file && !value.document && !value.extracted_details) clean[key] = value;
           } else {
             clean[key] = value;
           }
@@ -714,63 +612,36 @@ export function RequirementsTable({
         return clean;
       }, {});
 
-      // 3. Find doc definition for expiry calculation
       const docId = doc.document_id;
       const docDef = documents.find(d => d.id === docId);
+      let updatePayload = { extracted_details: dataToSave };
 
-      // 4. Calculate new expiry if applicable (imported from utils)
-      let updatePayload = {
-        extracted_details: dataToSave,
-      };
-
-      // If your project has a getExpiryDate utility:
       if (typeof getExpiryDate === 'function' && docDef) {
         const newExpiry = getExpiryDate({ extracted_details: dataToSave }, docDef);
         updatePayload.expiry_date = newExpiry ? newExpiry.toISOString() : null;
       }
 
-      // 5. Execute Database Update
-      const { error } = await supabase
-        .from(targetTable)
-        .update(updatePayload)
-        .eq('id', doc.id);
-
+      const { error } = await supabase.from(targetTable).update(updatePayload).eq('id', doc.id);
       if (error) throw error;
 
-      // 6. Fetch fresh data from database to ensure UI is in sync
-      const { data: freshDoc, error: fetchError } = await supabase
-        .from(targetTable)
-        .select('*')
-        .eq('id', doc.id)
-        .single();
+      const { data: freshDoc, error: fetchError } = await supabase.from(targetTable).select('*').eq('id', doc.id).single();
+      if (fetchError) console.warn('Could not fetch fresh data:', fetchError);
 
-      if (fetchError) {
-        console.warn('Could not fetch fresh data:', fetchError);
-      }
-
-      // 7. Update State with fresh data
       const docToUpdate = freshDoc || { ...doc, ...updatePayload };
 
       if (isIndividual) {
         setAllIndividualDocuments(prev => {
           const directorId = doc.director_id;
           if (!prev[directorId]) return prev;
-          return {
-            ...prev,
-            [directorId]: prev[directorId].map(d => d.id === doc.id ? docToUpdate : d)
-          };
+          return { ...prev, [directorId]: prev[directorId].map(d => d.id === doc.id ? docToUpdate : d) };
         });
       } else {
         setAllCompanyDocuments(prev => {
           const companyId = doc.company_id;
           if (!prev[companyId]) return prev;
-          return {
-            ...prev,
-            [companyId]: prev[companyId].map(d => d.id === doc.id ? docToUpdate : d)
-          };
+          return { ...prev, [companyId]: prev[companyId].map(d => d.id === doc.id ? docToUpdate : d) };
         });
       }
-
       toast.success('Document updated successfully', { id: toastId });
     } catch (error) {
       console.error('Save error:', error);
@@ -796,7 +667,7 @@ export function RequirementsTable({
   const handleDocumentUploadSuccess = (uploadedDocument: any) => {
     toast.success('Document uploaded successfully!');
     setShowUploadModal(false);
-    refreshDocuments(); // Call the refreshDocuments function here
+    refreshDocuments();
   };
 
   const handleGenerateLetterAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number) => {
@@ -823,82 +694,72 @@ export function RequirementsTable({
     setIsAutomationDialogOpen(true);
   }, []);
 
-  const getDocumentStatusForColumn = useCallback((task: any, reqItem: any, columnType: ApplicantType, applicantId?: number):
-    DocumentStatus => {
+  const getDocumentStatusForColumn = useCallback((task: any, reqItem: any, columnType: ApplicantType, applicantId?: number): DocumentStatus => {
     const baseStatus = { documents: [], count: 0 };
     const docIds = reqItem.document_ids || (reqItem.document_id ? [reqItem.document_id] : []);
-
     if (docIds.length === 0) return baseStatus;
 
     const allowedTypes = reqItem.entityTypes || (reqItem.applicantType ? [reqItem.applicantType] : []);
-
-    // If no allowed types specified, allow all
-    if (!allowedTypes || allowedTypes.length === 0) {
-      console.log('✅ No restrictions - allowing all types');
-    } else if (!allowedTypes.includes(columnType)) {
+    if (allowedTypes && allowedTypes.length > 0 && !allowedTypes.includes(columnType)) {
       return { ...baseStatus, type: 'na' };
     }
 
     let foundDocuments: any[] = [];
-
     if (columnType === 'company') {
       let companyId = null;
-
       if (task.applicant_details?.type === 'company' && task.applicant_details?.id) {
         companyId = task.applicant_details.id;
       } else if (task.participants_details) {
         const companyPart = task.participants_details.find(p => p.type === 'company');
         companyId = companyPart?.id;
       }
-
-      if (!companyId) {
-        companyId = task.company_id;
-      }
-
+      if (!companyId) companyId = task.company_id;
       if (companyId && allCompanyDocuments[companyId]) {
-        foundDocuments = allCompanyDocuments[companyId].filter(doc =>
-          docIds.includes(doc.document_id)
-        );
+        foundDocuments = allCompanyDocuments[companyId].filter(doc => docIds.includes(doc.document_id));
       }
     } else {
       let individualId = applicantId;
-
       if (columnType === 'principal') {
         if (task.applicant_details?.type === 'individual' && task.applicant_details?.id) {
           individualId = task.applicant_details.id;
         } else if (task.participants_details) {
-          const principalIndividual = task.participants_details.find(p =>
-            p.type === 'individual' &&
-            (p.role === 'principal' || p.role === 'applicant' || (!p.role && !p.relationship))
-          );
+          const principalIndividual = task.participants_details.find(p => p.type === 'individual' && (p.role === 'principal' || p.role === 'applicant' || (!p.role && !p.relationship)));
           individualId = principalIndividual?.id || task.individual_id;
         } else {
           individualId = task.individual_id;
         }
       } else if (columnType === 'director') {
-        // Handle director type specifically - use the passed applicantId directly
         individualId = applicantId;
-        // If applicantId is not provided, try to find the director
         if (!individualId && task.participants_details) {
-          const directorIndividual = task.participants_details.find(p =>
-            p.type === 'individual' && (p.role === 'director' || p.role === 'shareholder')
-          );
+          const directorIndividual = task.participants_details.find(p => p.type === 'individual' && (p.role === 'director' || p.role === 'shareholder'));
           individualId = directorIndividual?.id;
         }
       } else if (columnType === 'understudy') {
         individualId = task.understudy;
       }
-
       if (individualId && allIndividualDocuments[individualId]) {
-        foundDocuments = allIndividualDocuments[individualId].filter(doc =>
-          docIds.includes(doc.document_id)
-        );
+        foundDocuments = allIndividualDocuments[individualId].filter(doc => docIds.includes(doc.document_id));
       }
     }
 
     const type = foundDocuments.length > 0 ? 'view' : 'upload';
     return { ...baseStatus, documents: foundDocuments, count: foundDocuments.length, type };
   }, [allCompanyDocuments, allIndividualDocuments]);
+
+  // NEW: Add preview data change handler
+  const handlePreviewDataChange = useCallback((docId, fieldName, value) => {
+    setPreviewDocument(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        documents: prev.documents.map(d =>
+          d.id === docId
+            ? { ...d, extractedData: { ...d.extractedData, [fieldName]: value } }
+            : d
+        )
+      };
+    });
+  }, []);
 
   const renderDocumentStatus = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number, relationshipData?: any) => {
     const status = getDocumentStatusForColumn(task, item, columnType, applicantId);
@@ -928,15 +789,8 @@ export function RequirementsTable({
                 .select('fields')
                 .eq('id', doc.document_id)
                 .single();
-
-              if (!kycError && kycData) {
-                fields = kycData.fields || [];
-              } else if (kycError) {
-                console.warn('Failed to fetch KYC fields for document:', doc.id, kycError);
-              }
-            } catch (err) {
-              console.warn('Error fetching KYC fields:', err);
-            }
+              if (!kycError && kycData) fields = kycData.fields || [];
+            } catch (err) { console.warn('Error fetching KYC fields:', err); }
           }
 
           return {
@@ -945,7 +799,8 @@ export function RequirementsTable({
             extractedData: doc.extracted_details || {},
             fields: fields,
             name: doc.acc_portal_kyc?.display_name || item.display_name,
-            uploadedAt: doc.created_at
+            uploadedAt: doc.created_at,
+            originalDoc: doc // Store original for save
           };
         }))).filter(Boolean);
 
@@ -953,7 +808,6 @@ export function RequirementsTable({
           documents: documentPreviews,
           currentIndex: 0
         });
-
         setDocumentPreviewOpen(true);
       } catch (err) {
         console.error('Error loading individual document previews:', err);
@@ -962,7 +816,6 @@ export function RequirementsTable({
     };
 
     if (status.type === 'na') return <div className="text-gray-400 text-[10px]">N/A</div>;
-
     return (
       <div className="flex items-center justify-center gap-1 h-full">
         {item.web_automation?.automationId && (
@@ -1026,41 +879,29 @@ export function RequirementsTable({
     const firstTask = filteredGroupedTasks[0]?.tasks?.[0];
     if (!firstTask) return [];
     const requirements = taskClassRequirements[firstTask.id];
-    const result = requirements ? [requirements] : [];
-    return result;
+    return requirements ? [requirements] : [];
   }, [filteredGroupedTasks, taskClassRequirements]);
 
   const getCompanyName = (group) => {
     const task = group.tasks[0];
     if (!task) return null;
-
-    if (task.applicant_details?.type === 'company') {
-      return task.applicant_details.name;
-    }
-
+    if (task.applicant_details?.type === 'company') return task.applicant_details.name;
     if (Array.isArray(task.participants_details)) {
       const company = task.participants_details.find(p => p.type === 'company');
       if (company) return company.name;
     }
-
-    if (task.company_id && companyData[task.company_id]) {
-      return companyData[task.company_id].company_name;
-    }
-
+    if (task.company_id && companyData[task.company_id]) return companyData[task.company_id].company_name;
     return null;
   };
 
   const handleExportChecklist = () => {
     const worksheetData: any[] = [];
     const headers = ["#", "Requirement"];
-
     filteredGroupedTasks.forEach(group => {
       const companyId = group.tasks[0]?.company_id;
       const company = companyId ? companyData[companyId] : null;
       headers.push(company ? company.company_name : "Company");
-      const principal = group.tasks[0]?.participants_details?.find(p =>
-        (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')
-      );
+      const principal = group.tasks[0]?.participants_details?.find(p => (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal'));
       const principalId = principal?.id || group.tasks[0]?.individual_id;
       headers.push(principal?.name || individualNames[principalId] || "Principal");
       (group.dependantIds || []).forEach((id, index) => headers.push(individualNames[id] || `Dependant ${index + 1}`));
@@ -1070,14 +911,9 @@ export function RequirementsTable({
 
     worksheetData.push(headers);
     worksheetData.push(["Company Documents", ...Array(headers.length - 1).fill("")]);
-    organizedRequirements.documents.company
-      .sort((a, b) => (a.document.custom_order || 999) - (b.document.custom_order || 999))
-      .forEach((docItem, index) => worksheetData.push([`${index + 1}.`, docItem.document.display_name, ...Array(headers.length - 2).fill(" ")]));
-
+    organizedRequirements.documents.company.sort((a, b) => (a.document.custom_order || 999) - (b.document.custom_order || 999)).forEach((docItem, index) => worksheetData.push([`${index + 1}.`, docItem.document.display_name, ...Array(headers.length - 2).fill(" ")]));
     worksheetData.push(["Individual Documents", ...Array(headers.length - 1).fill("")]);
-    organizedRequirements.documents.individual
-      .sort((a, b) => (a.document.custom_order || 999) - (b.document.custom_order || 999))
-      .forEach((docItem, index) => worksheetData.push([`${index + 1}.`, docItem.document.display_name, ...Array(headers.length - 2).fill(" ")]));
+    organizedRequirements.documents.individual.sort((a, b) => (a.document.custom_order || 999) - (b.document.custom_order || 999)).forEach((docItem, index) => worksheetData.push([`${index + 1}.`, docItem.document.display_name, ...Array(headers.length - 2).fill(" ")]));
 
     const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
     const workbook = XLSX.utils.book_new();
@@ -1089,23 +925,16 @@ export function RequirementsTable({
     const worksheetData: any[] = [];
     const headers = ["#", "Requirement"];
     const entityColumns: { type: string, id?: number, name: string, groupIndex: number }[] = [];
-
     filteredGroupedTasks.forEach((group, groupIndex) => {
       const companyId = group.tasks[0]?.company_id;
       const company = companyId ? companyData[companyId] : null;
       headers.push(company ? company.company_name : `Company (Group ${groupIndex + 1})`);
       entityColumns.push({ type: 'company', name: 'company', groupIndex });
-
       const participants = group.tasks[0]?.participants_details || [];
-      const principal = participants.find(p =>
-        (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')
-      );
-      const understudy = participants.find(p =>
-        (Array.isArray(p.role) ? p.role.includes('understudy') : p.role === 'understudy')
-      );
+      const principal = participants.find(p => (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal'));
+      const understudy = participants.find(p => (Array.isArray(p.role) ? p.role.includes('understudy') : p.role === 'understudy'));
       const principalId = principal?.id || null;
       const understudyId = understudy?.id || null;
-
       headers.push(individualNames[principalId] || `Principal (Group ${groupIndex + 1})`);
       entityColumns.push({ type: 'principal', name: 'principal', groupIndex });
       (group.dependantIds || []).forEach((id, depIndex) => {
@@ -1124,25 +953,20 @@ export function RequirementsTable({
       });
     }
     worksheetData.push(headers);
-
     const processDocuments = (docType: string, documents: any[]) => {
       worksheetData.push([`${docType} Documents`, ...Array(headers.length - 1).fill("")]);
-      documents
-        .sort((a, b) => (a.order || 999) - (b.order || 999))
-        .forEach((reqItem, index) => {
-          const docDef = reqItem.documentDefinition;
-          const row = [`${index + 1}.`, docDef?.display_name || docDef?.name || reqItem.name];
-          entityColumns.forEach(col => {
-            const task = filteredGroupedTasks[col.groupIndex]?.tasks[0];
-            row.push(task ? getDocumentStatusText(task, docDef, col.type, col.id) : "N/A");
-          });
-          worksheetData.push(row);
+      documents.sort((a, b) => (a.order || 999) - (b.order || 999)).forEach((reqItem, index) => {
+        const docDef = reqItem.documentDefinition;
+        const row = [`${index + 1}.`, docDef?.display_name || docDef?.name || reqItem.name];
+        entityColumns.forEach(col => {
+          const task = filteredGroupedTasks[col.groupIndex]?.tasks[0];
+          row.push(task ? getDocumentStatusText(task, docDef, col.type, col.id) : "N/A");
         });
+        worksheetData.push(row);
+      });
     };
-
     processDocuments("Company", organizedRequirements.documents.company);
     processDocuments("Individual", organizedRequirements.documents.individual);
-
     const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Requirements Data");
@@ -1152,6 +976,7 @@ export function RequirementsTable({
   return (
     <div className="flex h-[85vh] w-full bg-white">
       <div className="w-74 border-r bg-white flex flex-col">
+        {/* Sidebar content */}
         <div className="p-4 border-b"><h2 className="text-lg font-semibold">Applicants</h2></div>
         <div className="p-2 border-b"><div className="relative"><Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" /><Input placeholder="Search..." className="pl-8" value={sidebarSearchQuery} onChange={(e) => setSidebarSearchQuery(e.target.value)} /></div></div>
         <ScrollArea className="flex-1">
@@ -1166,46 +991,17 @@ export function RequirementsTable({
                     onClick={() => handleSelectApplicant(group.applicantName)}
                   >
                     <div className="flex flex-col items-start w-full">
-                      <span className="truncate text-left text-sm font-medium">
-                        {group.applicantName}
-                      </span>
+                      <span className="truncate text-left text-sm font-medium">{group.applicantName}</span>
                       {companyName && (
                         <span className="text-xs text-muted-foreground truncate w-full text-left mt-1 flex items-center">
-                          <Briefcase className="h-3 w-3 inline-block mr-1.5" />
-                          {companyName}
+                          <Briefcase className="h-3 w-3 inline-block mr-1.5" />{companyName}
                         </span>
                       )}
                     </div>
                   </Button>
                   <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-
-                    {/* EDIT BUTTON */}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        // Edit the first task in the group
-                        if (onTaskAction && group.tasks.length > 0) {
-                          onTaskAction('edit', group.tasks[0]);
-                        }
-                      }}
-                      title={`Edit enquiry for ${group.applicantName}`}
-                    >
-                      <Edit3 className="h-4 w-4" />
-                    </Button>
-
-                    {/* DELETE BUTTON */}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
-                      onClick={(e) => handleDeleteApplicantTasks(group, e)}
-                      title={`Delete ${group.tasks.length} task(s) for ${group.applicantName}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50" onClick={(e) => { e.stopPropagation(); if (onTaskAction && group.tasks.length > 0) { onTaskAction('edit', group.tasks[0]); } }} title={`Edit enquiry for ${group.applicantName}`}><Edit3 className="h-4 w-4" /></Button>
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50" onClick={(e) => handleDeleteApplicantTasks(group, e)} title={`Delete ${group.tasks.length} task(s) for ${group.applicantName}`}><Trash2 className="h-4 w-4" /></Button>
                   </div>
                 </div>
               );
@@ -1220,27 +1016,14 @@ export function RequirementsTable({
           <div className="p-4 border-b flex justify-between">
             <div className="relative">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search requirements..."
-                className="pl-10"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
+              <Input placeholder="Search requirements..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
             </div>
             <div className="flex justify-end">
               <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline">
-                    <Download className="mr-2 h-4 w-4" /> Export
-                  </Button>
-                </DropdownMenuTrigger>
+                <DropdownMenuTrigger asChild><Button variant="outline"><Download className="mr-2 h-4 w-4" /> Export</Button></DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={handleExportChecklist}>
-                    <FileText className="mr-2 h-4 w-4" /> Export Requirements Checklist
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleExportData}>
-                    <FileUp className="mr-2 h-4 w-4" /> Export Data
-                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleExportChecklist}><FileText className="mr-2 h-4 w-4" /> Export Requirements Checklist</DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleExportData}><FileUp className="mr-2 h-4 w-4" /> Export Data</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -1275,24 +1058,59 @@ export function RequirementsTable({
           </div>
         </div>
       ) : (
-        <div className="flex-1 flex items-center justify-center border rounded-md bg-background">
-          <p className="text-muted-foreground">No applicants found</p>
-        </div>
+        <div className="flex-1 flex items-center justify-center border rounded-md bg-background"><p className="text-muted-foreground">No applicants found</p></div>
       )}
+
+      {/* REPLACED EXTRACTION PREVIEW WITH DIALOG WRAPPER */}
       {previewDocument && previewDocument.documents.length > 0 && (
-        <ExtractionPreview
-          open={documentPreviewOpen}
-          onOpenChange={setDocumentPreviewOpen}
-          documents={previewDocument.documents}
-          initialIndex={previewDocument.currentIndex}
-          onDocumentChange={(index) => {
-            setPreviewDocument(prev => prev ? {
-              ...prev,
-              currentIndex: index
-            } : null);
-          }}
-        />
+        <Dialog open={documentPreviewOpen} onOpenChange={setDocumentPreviewOpen}>
+          <DialogContent className="max-w-[95vw] w-full max-h-[95vh] flex flex-col p-0 overflow-hidden bg-slate-50">
+            <DialogHeader className="p-4 border-b bg-white shrink-0">
+              <div className="flex items-center justify-between">
+                <div>
+                  <DialogTitle className="text-xl">
+                    <div className="flex items-center p-2">
+                      <div className="bg-white p-2 rounded-lg border shadow-sm">
+                        <FileText className="h-5 w-5 text-blue-600" />
+                      </div>
+                      <div className="flex flex-col">
+                        <p className="text-xl font-bold text-slate-800 line-clamp-1">{previewDocument?.documents[0]?.name || 'Document'}</p>
+                      </div>
+                    </div>
+                  </DialogTitle>
+                </div>
+                <div className="text-sm font-medium bg-blue-50 text-blue-700 px-3 py-1 rounded-full border border-blue-100">
+                  {previewDocument?.documents.length || 0} File(s)
+                </div>
+              </div>
+            </DialogHeader>
+
+            <div className="flex-1 overflow-y-auto">
+              <div className="space-y-10 mx-auto">
+                {previewDocument?.documents.map((doc, index) => (
+                  <div key={doc.id || index} className="p-0 lg:p-4">
+                    <ExtractionPreview
+                      documentName={doc.name}
+                      extractedData={doc.extractedData}
+                      fields={doc.fields}
+                      fileUrl={doc.fileUrl}
+                      expanded={true}
+                      showSaveButton={true}
+                      onSave={(data) => handleSaveDocument(doc.originalDoc, data)}
+                      onDataChange={(fieldName, value) => handlePreviewDataChange(doc.id, fieldName, value)}
+                      onDelete={() => handleDeleteDocument?.(doc.originalDoc)}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="p-4 border-t bg-white flex justify-end shrink-0">
+              <Button variant="outline" onClick={() => setDocumentPreviewOpen(false)} className="w-24">Close</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
+
       <UploadModal
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
