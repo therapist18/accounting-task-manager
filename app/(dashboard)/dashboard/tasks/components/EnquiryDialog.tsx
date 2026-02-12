@@ -58,7 +58,8 @@ export function EnquiryDialog({
     onEnquiryCreated,
     departments = [],
     users = [],
-    officers = []
+    officers = [],
+    taskToEdit = null
 }: any) {
     const [loading, setLoading] = useState(false)
     const [searchLoading, setSearchLoading] = useState(false)
@@ -145,34 +146,59 @@ export function EnquiryDialog({
         setSelectedReferences([])
         setIncludeReferences(false)
     }, [])
-
-    useEffect(() => {
-        if (!open) {
+  useEffect(() => {
+        if (open && taskToEdit) {
+            console.log("🔹 [EnquiryDialog] Populating Edit Mode for Task:", taskToEdit.id);
+            
+            // 1. Basic Form Data
             setFormData({
-                job_description: '',
-                department_id: '',
-                subdepartment_id: '',
-                class_id: '',
-                officer_id: '',
-                task_manager_id: '',
-                task_assistant_id: '',
-                enquiry_date: new Date().toISOString().split('T')[0],
-                job_level: {
-                    level: 1,
-                    department_id: null,
-                    subdepartment_id: null,
-                    class_id: null,
-                    subclass_id: null
-                }
-            })
-            setSelectedIndividual(null)
-            setSelectedCompany('')
-            setSelectedUnderstudy('')
-            setJobAnswers({})
-            setIncludeDependants(false)
-            setIncludeReferences(false)
+                job_description: taskToEdit.job_description || '',
+                department_id: String(taskToEdit.job_level?.department_id || ''),
+                subdepartment_id: String(taskToEdit.job_level?.subdepartment_id || ''),
+                class_id: String(taskToEdit.job_level?.class_id || ''),
+                enquiry_date: taskToEdit.date_initiated ? taskToEdit.date_initiated.split('T')[0] : new Date().toISOString().split('T')[0],
+                // Participants extracted below
+                officer_id: taskToEdit.participants_details?.find(p => p.role?.includes('officer'))?.id?.toString() || '',
+                task_manager_id: taskToEdit.participants_details?.find(p => p.role?.includes('task_manager'))?.id?.toString() || '',
+                task_assistant_id: taskToEdit.participants_details?.find(p => p.role?.includes('task_assistant'))?.id?.toString() || '',
+            });
+
+            // 2. Job Specific Answers
+            setJobAnswers(taskToEdit.job_specific_answers || {});
+
+            // 3. Resolve Applicant Type
+            setApplicantType(taskToEdit.applicant_details?.role || 'principal');
+
+            // 4. Load the individual and trigger related data (Companies/Understudies)
+            if (taskToEdit.individual_id) {
+                supabase.from('registry_individuals')
+                    .select('*')
+                    .eq('id', taskToEdit.individual_id)
+                    .single()
+                    .then(({ data }) => {
+                        if (data) {
+                            handleIndividualSelect(data); // This triggers company/understudy fetch
+                            if (taskToEdit.company_id) {
+                                setSelectedCompany(String(taskToEdit.company_id));
+                                fetchUnderstudies(String(taskToEdit.company_id)).then(() => {
+                                    const understudyPart = taskToEdit.participants_details?.find(p => p.role?.includes('understudy'));
+                                    if (understudyPart) setSelectedUnderstudy(String(understudyPart.id));
+                                });
+                            }
+                        }
+                    });
+            }
+
+            // 5. Handle Sponsor if applicable
+            const sponsorPart = taskToEdit.participants_details?.find(p => p.role?.includes('sponsor'));
+            if (sponsorPart) {
+                setSelectedSponsor({ id: sponsorPart.id, full_name: sponsorPart.name });
+            }
+        } else if (open && !taskToEdit) {
+            // Reset to clean state for new enquiry
+            resetForm();
         }
-    }, [open])
+    }, [open, taskToEdit]);
 
   const checkVisibility = useCallback((q: JobQuestion) => {
         if (!q.depends_on || !q.depends_on.id) return true;
@@ -404,7 +430,7 @@ export function EnquiryDialog({
         fetchUnderstudies(value)
     }
 
-    const handleSubmit = async (e: React.FormEvent) => {
+   const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!selectedIndividual || !formData.department_id) return
 
@@ -412,66 +438,28 @@ export function EnquiryDialog({
         try {
             const participants: any[] = []
 
+            // Extract Participant Details
             if (selectedCompany) {
                 const c = companies.find(x => x.id.toString() === selectedCompany)
                 if (c) participants.push({ id: c.id, name: c.company_name, role: ['company'], type: "company" })
             }
-
-            // Only include understudy if the specific class is selected
             if (selectedUnderstudy && formData.class_id === CLASS_D_ID) {
                 const u = understudies.find(x => x.id.toString() === selectedUnderstudy)
                 if (u) participants.push({ id: u.id, name: u.full_name, role: ['understudy'], type: "individual" })
             }
-
-            // Add assigned staff
             if (formData.officer_id) {
                 const officer = availableOfficers.find(o => o.id.toString() === formData.officer_id);
-                if (officer) {
-                    participants.push({
-                        id: officer.id,
-                        name: officer.full_name || officer.name,
-                        role: ['officer'],
-                        type: "individual"
-                    });
-                }
+                if (officer) participants.push({ id: officer.id, name: officer.full_name || officer.name, role: ['officer'], type: "individual" });
             }
-
             if (formData.task_manager_id) {
                 const manager = availableManagers.find(m => m.id.toString() === formData.task_manager_id);
-                if (manager) {
-                    participants.push({
-                        id: manager.id,
-                        name: manager.full_name || manager.name,
-                        role: ['task_manager'],
-                        type: "individual"
-                    });
-                }
+                if (manager) participants.push({ id: manager.id, name: manager.full_name || manager.name, role: ['task_manager'], type: "individual" });
             }
-
-            if (formData.task_assistant_id) {
-                const assistant = availableAssistants.find(a => a.id.toString() === formData.task_assistant_id);
-                if (assistant) {
-                    participants.push({
-                        id: assistant.id,
-                        name: assistant.full_name || assistant.name,
-                        role: ['task_assistant'],
-                        type: "individual"
-                    });
-                }
-            }
-
             if (formData.subdepartment_id === SPONSOR_SUBDEPT_ID && selectedSponsor) {
-                participants.push({
-                    id: selectedSponsor.id,
-                    name: selectedSponsor.full_name,
-                    role: ['sponsor'],
-                    type: "individual"
-                })
+                participants.push({ id: selectedSponsor.id, name: selectedSponsor.full_name, role: ['sponsor'], type: "individual" })
             }
 
             const payload = {
-                status: 'enquiry',
-                date_initiated: new Date(formData.enquiry_date).toISOString(),
                 job_description: formData.job_description,
                 individual_id: selectedIndividual.id,
                 company_id: selectedCompany ? Number(selectedCompany) : null,
@@ -489,23 +477,47 @@ export function EnquiryDialog({
                 },
                 job_specific_answers: jobAnswers,
                 participants_details: participants,
-                applied_by: "11", // User ID
-                stages: { '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa': { status: "completed", date: format(new Date(), 'dd/MM/yyyy') } }
+                // Do not overwrite date_initiated on edit if you want to keep history, 
+                // or update it if it represents "last modified"
             }
 
-            const { data, error } = await supabase.from('tm_tasks').insert([payload]).select().single()
-            if (error) throw error
+            let result;
+            if (taskToEdit) {
+                // UPDATE
+                const { data, error } = await supabase.from('tm_tasks')
+                    .update(payload)
+                    .eq('id', taskToEdit.id)
+                    .select()
+                    .single();
+                if (error) throw error;
+                result = data;
+                toast({ title: "Success", description: "Enquiry updated successfully." });
+            } else {
+                // INSERT
+                const insertPayload = {
+                    ...payload,
+                    status: 'enquiry',
+                    date_initiated: new Date(formData.enquiry_date).toISOString(),
+                    applied_by: "11",
+                    stages: { '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa': { status: "completed", date: format(new Date(), 'dd/MM/yyyy') } }
+                };
+                const { data, error } = await supabase.from('tm_tasks').insert([insertPayload]).select().single();
+                if (error) throw error;
+                result = data;
+                toast({ title: "Success", description: "Enquiry created successfully." });
+            }
 
-            onEnquiryCreated(data) // This updates state in TasksPage
+            onEnquiryCreated(result) 
             onOpenChange(false)
         } catch (error) {
             console.error(error)
-            toast({ title: "Error", description: "Failed to save enquiry.", variant: "destructive" })
+            toast({ title: "Error", description: "Failed to save data.", variant: "destructive" })
         } finally {
             setLoading(false)
         }
     }
 
+        const dialogTitle = taskToEdit ? "Edit Enquiry" : "New Client Enquiry";
    return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-w-[1250px] max-h-[95vh] p-0 flex flex-col border-none shadow-2xl overflow-hidden bg-white">
@@ -515,7 +527,7 @@ export function EnquiryDialog({
                         <div className="flex items-center gap-4">
                             <div className="bg-white/20 p-2.5 rounded-xl"><ListTodo className="h-6 w-6" /></div>
                             <div>
-                                <DialogTitle className="text-2xl font-bold tracking-tight">New Client Enquiry</DialogTitle>
+                                <DialogTitle className="text-2xl font-bold tracking-tight">{dialogTitle}</DialogTitle>
                                 <DialogDescription className="text-blue-100 font-medium">Logical requirement engine active</DialogDescription>
                             </div>
                         </div>

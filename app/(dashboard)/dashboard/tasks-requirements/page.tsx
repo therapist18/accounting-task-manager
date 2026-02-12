@@ -58,7 +58,8 @@ export default function TasksPage() {
   const [selectedTaskForDocuments, setSelectedTaskForDocuments] = useState<UtilTask | null>(null);
   const [isDocumentsDialogOpen, setIsDocumentsDialogOpen] = useState(false);
   const [companyInquiryDialogOpen, setCompanyInquiryDialogOpen] = useState(false);
-const [internalStaff, setInternalStaff] = useState({ users: [], officers: [] });
+  const [internalStaff, setInternalStaff] = useState({ users: [], officers: [] });
+  const [taskToEdit, setTaskToEdit] = useState<UtilTask | null>(null);
   // --- Data Fetching Callbacks ---
   const loadTasksAndStages = useCallback(async (departmentId: string, subdepartmentId?: string) => {
     if (!departmentId || departments.length === 0) return;
@@ -99,37 +100,37 @@ const [internalStaff, setInternalStaff] = useState({ users: [], officers: [] });
 
   useEffect(() => {
     const fetchStaff = async () => {
-        console.group('🔹 [Parent Component] Fetching Staff Data');
-        try {
-            console.log('🔹 [Parent] Attempting to fetch from registry_users table...');
-            const { data: staff, error } = await supabase.from('registry_users').select('id, full_name').order('full_name');
-            
-            console.log('🔹 [Parent] Staff fetch result:', {
-                data: staff,
-                error,
-                dataLength: staff?.length || 0
-            });
-            
-            if (error) {
-                console.error('🔹 [Parent] Error fetching staff:', error);
-            }
-            
-            // If your schema differentiates officers, filter here or fetch separately
-            const staffData = {
-                users: staff || [],
-                officers: staff || [] // Assuming same table for this example
-            };
-            
-            console.log('🔹 [Parent] Setting internal staff state:', staffData);
-            setInternalStaff(staffData);
-        } catch (err) {
-            console.error('🔹 [Parent] Unexpected error fetching staff:', err);
-            setInternalStaff({ users: [], officers: [] });
+      console.group('🔹 [Parent Component] Fetching Staff Data');
+      try {
+        console.log('🔹 [Parent] Attempting to fetch from registry_users table...');
+        const { data: staff, error } = await supabase.from('registry_users').select('id, full_name').order('full_name');
+
+        console.log('🔹 [Parent] Staff fetch result:', {
+          data: staff,
+          error,
+          dataLength: staff?.length || 0
+        });
+
+        if (error) {
+          console.error('🔹 [Parent] Error fetching staff:', error);
         }
-        console.groupEnd();
+
+        // If your schema differentiates officers, filter here or fetch separately
+        const staffData = {
+          users: staff || [],
+          officers: staff || [] // Assuming same table for this example
+        };
+
+        console.log('🔹 [Parent] Setting internal staff state:', staffData);
+        setInternalStaff(staffData);
+      } catch (err) {
+        console.error('🔹 [Parent] Unexpected error fetching staff:', err);
+        setInternalStaff({ users: [], officers: [] });
+      }
+      console.groupEnd();
     };
     fetchStaff();
-}, []);
+  }, []);
 
   // --- Filtering and Memoization ---
   const getFilteredTasks = useCallback((status?: string | string[]) => {
@@ -209,7 +210,21 @@ const [internalStaff, setInternalStaff] = useState({ users: [], officers: [] });
     if (action === 'delete') {
       setTaskToDelete(task);
       setDeleteDialogOpen(true);
+    } else if (action === 'edit') {
+      setTaskToEdit(task);
+      // Determine which dialog to open based on department specification
+      const currentDept = departments.find(d => String(d.id) === String(task.job_level?.department_id));
+      if (currentDept?.specification?.toLowerCase() === 'company') {
+        setCompanyInquiryDialogOpen(true);
+      } else {
+        setEnquiryDialogOpen(true);
+      }
     }
+  };
+
+  const handleEnquiryDialogOpenChange = (isOpen: boolean) => {
+    setEnquiryDialogOpen(isOpen);
+    if (!isOpen) setTaskToEdit(null);
   };
 
   const handleDeleteConfirm = async () => {
@@ -273,10 +288,10 @@ const [internalStaff, setInternalStaff] = useState({ users: [], officers: [] });
 
         if (storageError) {
           console.error('Storage delete error:', storageError);
-          toast({ 
-            title: 'Warning', 
-            description: 'Document deleted from database but failed to delete from storage', 
-            variant: 'destructive' 
+          toast({
+            title: 'Warning',
+            description: 'Document deleted from database but failed to delete from storage',
+            variant: 'destructive'
           });
         }
       }
@@ -289,25 +304,25 @@ const [internalStaff, setInternalStaff] = useState({ users: [], officers: [] });
 
       if (error) {
         console.error('Delete error:', error);
-        toast({ 
-          title: 'Error deleting document', 
-          description: error.message || 'Failed to delete document', 
-          variant: 'destructive' 
+        toast({
+          title: 'Error deleting document',
+          description: error.message || 'Failed to delete document',
+          variant: 'destructive'
         });
         return;
       }
 
       toast({ title: 'Success', description: 'Document deleted successfully' });
-      
+
       // Refresh tasks and stages to update the UI
       await loadTasksAndStages(selectedDepartment, selectedSubdepartment);
-      
+
     } catch (error) {
       console.error('Unexpected error during deletion:', error);
-      toast({ 
-        title: 'Error', 
-        description: 'An unexpected error occurred while deleting the document', 
-        variant: 'destructive' 
+      toast({
+        title: 'Error',
+        description: 'An unexpected error occurred while deleting the document',
+        variant: 'destructive'
       });
     }
   };
@@ -434,13 +449,31 @@ const [internalStaff, setInternalStaff] = useState({ users: [], officers: [] });
               </TabsList>
 
               <TabsContent value="enquiries">
-                <RequirementsTable tasks={enquiryTasks} loading={false} error={null} handleDeleteDocument={handleDeleteDocument} />
+                <RequirementsTable
+                  tasks={enquiryTasks}
+                  loading={false}
+                  error={null}
+                  handleDeleteDocument={handleDeleteDocument}
+                  onTaskAction={handleTaskAction} // ADD THIS
+                />
               </TabsContent>
               <TabsContent value="wip">
-                <RequirementsTable tasks={wipTasks} loading={false} error={null} handleDeleteDocument={handleDeleteDocument} />
+                <RequirementsTable
+                  tasks={wipTasks}
+                  loading={false}
+                  error={null}
+                  handleDeleteDocument={handleDeleteDocument}
+                  onTaskAction={handleTaskAction} // ADD THIS
+                />
               </TabsContent>
               <TabsContent value="completed">
-                <RequirementsTable tasks={completedTasks} loading={false} error={null} handleDeleteDocument={handleDeleteDocument} />
+                <RequirementsTable
+                  tasks={completedTasks}
+                  loading={false}
+                  error={null}
+                  handleDeleteDocument={handleDeleteDocument}
+                  onTaskAction={handleTaskAction} // ADD THIS
+                />
               </TabsContent>
             </Tabs>
           ) : (
@@ -482,37 +515,42 @@ const [internalStaff, setInternalStaff] = useState({ users: [], officers: [] });
             key={`company-dialog-${selectedDepartment}-${selectedSubdepartment}-${selectedClass}`} // Force re-render when any selection changes
           />
 
-      <EnquiryDialog
-    open={enquiryDialogOpen}
-    onOpenChange={setEnquiryDialogOpen}
-    onEnquiryCreated={(newTasks) => {
-        handleEnquiryCreated(newTasks);
-        // Small delay to ensure server has processed the new task, then refresh data
-        setTimeout(() => {
-            loadTasksAndStages(selectedDepartment, selectedSubdepartment); 
-        }, 500);
-    }}
-    departments={departments}
-    users={internalStaff.users}       // Pass real data
-    officers={internalStaff.officers} // Pass real data
-    selectedDepartment={selectedDepartment}
-    selectedSubdepartment={selectedSubdepartment}
-    selectedClass={selectedClass}
-    selectedSubclass={selectedSubclass}
-    key={`enquiry-dialog-${selectedDepartment}-${selectedSubdepartment}-${selectedClass}`}
-/>
-      
-      {/* Debug logging for props being passed */}
-      {(() => {
-          console.log('🔹 [Parent Component] EnquiryDialog Props:', {
+          <EnquiryDialog
+            open={enquiryDialogOpen}
+            onOpenChange={setEnquiryDialogOpen}
+            taskToEdit={taskToEdit} // PASS STATE HERE
+            onEnquiryCreated={(updatedTask) => {
+              // Refresh local tasks state
+              setTasks(prev => {
+                const exists = prev.find(t => t.id === updatedTask.id);
+                if (exists) {
+                  return prev.map(t => t.id === updatedTask.id ? updatedTask : t);
+                }
+                return [updatedTask, ...prev];
+              });
+              toast({ title: "Success", description: taskToEdit ? "Task updated." : "Task created." });
+            }}
+            departments={departments}
+            users={internalStaff.users}       // Pass real data
+            officers={internalStaff.officers} // Pass real data
+            selectedDepartment={selectedDepartment}
+            selectedSubdepartment={selectedSubdepartment}
+            selectedClass={selectedClass}
+            selectedSubclass={selectedSubclass}
+            key={`enquiry-dialog-${selectedDepartment}-${selectedSubdepartment}-${selectedClass}`}
+          />
+
+          {/* Debug logging for props being passed */}
+          {(() => {
+            console.log('🔹 [Parent Component] EnquiryDialog Props:', {
               open: enquiryDialogOpen,
               departmentsLength: departments?.length,
               usersLength: internalStaff.users?.length,
               officersLength: internalStaff.officers?.length,
               internalStaffState: internalStaff
-          });
-          return null;
-      })()}
+            });
+            return null;
+          })()}
         </div>
       </main>
     </div>
