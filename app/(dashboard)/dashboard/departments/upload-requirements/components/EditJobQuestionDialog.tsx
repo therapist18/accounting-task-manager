@@ -74,7 +74,7 @@ export function EditJobQuestionDialog({
         depends_on_operator: question.depends_on?.operator || 'equals',
         depends_on_value: question.depends_on?.value || ''
       })
-      setManualOptions("") 
+      setManualOptions(question.options ? question.options.join(', ') : "")
     }
   }, [isOpen, question])
 

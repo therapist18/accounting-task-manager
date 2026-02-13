@@ -1487,13 +1487,26 @@ export const AutomationMappingDialog = ({
                       <TableCell className="px-4 py-2">
                         <div className="flex flex-col gap-1">
                           <div className="flex items-center gap-1.5">
-                            <Badge variant="outline" className={cn("text-[9px] uppercase", field.sourceLogic === 'all' ? "border-blue-200 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-600")}>
-                              {field.sourceLogic === 'all' ? 'Merged' : 'Priority'}
-                            </Badge>
-                            <span className="text-[10px] font-bold text-slate-400">{mIds.length + qIds.length} Src</span>
+                            {field.customFieldSource || 'System'}
+                            <div className="flex flex-col gap-1">
+                              {field.linkedMasterFields?.length > 0 && (
+                                <Badge variant="outline" className="text-[8px] h-5 border-blue-200 text-blue-700 bg-blue-50">
+                                  Master Field
+                                </Badge>
+                              )}
+                              {field.linkedJobQuestionIds?.length > 0 && (
+                                <Badge variant="outline" className="text-[8px] h-5 border-purple-200 text-purple-700 bg-purple-50">
+                                  Job Question
+                                </Badge>
+                              )}
+                              {(!field.linkedMasterFields?.length && !field.linkedJobQuestionIds?.length) && (
+                                <Badge variant="outline" className="text-[8px] h-5 border-slate-200 text-slate-600">
+                                  Requirement
+                                </Badge>
+                              )}
+                            </div>
                           </div>
-                          {field.fieldType === 'computed' && <span className="text-[9px] text-purple-600 font-medium">Function: {field.computedFunction}</span>}
-                        </div>
+                               </div>
                       </TableCell>
 
                       <TableCell className="px-4 py-1 border-r h-full">

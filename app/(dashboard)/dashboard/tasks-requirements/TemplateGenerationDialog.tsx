@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp, Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles, View, MousePointer2, Layout, Code, ChevronDown, Database } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp, Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles, View, MousePointer2, Layout, Code, ChevronDown, Database, Layers, Edit3 } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -616,7 +616,7 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
     if (placeholder.master_field_ids?.length > 0 && targetEntity) {
         for (const mid of placeholder.master_field_ids) {
             let result = { value: '', source: null };
-            
+
             // Specialized resolution based on type
             if (placeholder.type === 'ordinal') {
                 result = processOrdinalField(placeholder, arrayIndex);
@@ -641,7 +641,7 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
     if (qIds.length > 0) {
         const taskRecord = (combinedCache?.['tm_tasks'] && Object.values(combinedCache['tm_tasks'])[0]) || task;
         const answers = taskRecord?.job_specific_answers || {};
-        
+
         for (const qId of qIds) {
             const answer = answers[String(qId)] ?? answers[Number(qId)];
             if (isValidValue(answer)) {
@@ -924,14 +924,16 @@ const getDisplayLabel = (value, options) => {
 };
 
 const PlaceholderInput = ({
-    placeholder, value, originalValue, onChange, onSaveToDb, isSaving, onFileChange, imageStyles, onImageStyleChange,
-    autoPopulated, isArrayItem = false, arrayIndex = null, blockName = null, onAIRefine, isAIRefining, resolvedOptions = [],
-    masterFields, // Ensure this is received
-    showLabel = true
+    resolveSourceValue, placeholder, value, originalValue, onChange, onSaveToDb, isSaving, onFileChange, imageStyles, onImageStyleChange, autoPopulated, isArrayItem = false, arrayIndex = null, blockName = null, onAIRefine, isAIRefining, resolvedOptions = [], masterFields, showLabel = true
 }) => {
     const fieldKey = isArrayItem ? `${blockName}_${arrayIndex}_${placeholder.name}` : placeholder.name;
-    const hasChanged = JSON.stringify(value) !== JSON.stringify(originalValue);
-    const canSave = placeholder.master_field_ids?.length > 0;
+    
+    // tracks which specific source (Table/ID) is being edited inline
+    const [editingSource, setEditingSource] = useState(null); 
+    const [editValue, setEditValue] = useState("");
+    const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+   const hasChanged = JSON.stringify(value) !== JSON.stringify(originalValue);
+   const canSave = (placeholder.master_field_ids?.length > 0) || (placeholder.linked_job_question_ids?.length > 0);
 
     const mIds = placeholder.master_field_ids || [];
     const qIds = placeholder.linked_job_question_ids || (placeholder.linked_job_question_id ? [placeholder.linked_job_question_id] : []);
@@ -941,19 +943,68 @@ const PlaceholderInput = ({
         ? resolvedOptions
         : (placeholder.options || []).map(o => typeof o === 'string' ? { label: o, value: o } : o);
 
-    // --- MULTI-SOURCE PRIORITY UI ---
+    const handleStartEdit = (val, type, id, label) => {
+        setEditValue(val || '');
+        setEditingSource({ type, id, label });
+        setIsPopoverOpen(false);
+    };
+
+    const handleCancelEdit = () => {
+        setEditingSource(null);
+        setEditValue("");
+    };
+
+    const handleSaveEdit = async () => {
+        await onSaveToDb(placeholder, editValue, editingSource, arrayIndex);
+        setEditingSource(null);
+    };
+ const inputRef = useRef(null);
+
+    // --- STATE A: INLINE EDITING MODE (Triggered by Pencil) ---
+    if (editingSource) {
+        return (
+            <div className="space-y-1 animate-in fade-in zoom-in-95 duration-200">
+                {showLabel && (
+                    <Label className="text-[10px] font-bold text-blue-600 uppercase tracking-tight flex items-center gap-1">
+                        <Edit3 className="h-2.5 w-2.5" /> Editing {editingSource.label}
+                    </Label>
+                )}
+                <div className="flex items-center gap-2">
+                    <Input 
+                        autoFocus
+                        value={editValue} 
+                        onChange={(e) => setEditValue(e.target.value)} 
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveEdit();
+                            if (e.key === 'Escape') handleCancelEdit();
+                        }}
+                        className="h-8 text-xs border-blue-400 ring-2 ring-blue-50" 
+                    />
+                    <Button size="icon" onClick={handleSaveEdit} className="h-8 w-8 bg-green-600 hover:bg-green-700 shrink-0">
+                        <CheckCircle2 className="h-4 w-4" />
+                    </Button>
+                    <Button size="icon" variant="ghost" onClick={handleCancelEdit} className="h-8 w-8 text-red-500 shrink-0">
+                        <X className="h-4 w-4" />
+                    </Button>
+                </div>
+            </div>
+        );
+    }
+
+    // --- STATE B: MULTI-SOURCE VIEW (Popover) ---
     if (totalSources > 1 && placeholder.type !== 'image' && placeholder.type !== 'boolean') {
         return (
             <div className="space-y-1">
-                <Popover>
+                {showLabel && <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">{placeholder.name.replace(/_/g, ' ')}</Label>}
+                <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
                     <PopoverTrigger asChild>
                         <div className={cn(
-                            "text-xs h-8 flex items-center px-2 rounded cursor-pointer border border-dashed border-blue-300 bg-blue-50/30 hover:bg-blue-50 transition-colors",
+                            "text-xs h-8 flex items-center px-2 rounded cursor-pointer border border-dashed border-blue-200 bg-blue-50/20 hover:bg-blue-50 transition-colors",
                             !isValidValue(value) ? "text-red-500 italic" : "text-slate-900 font-medium"
                         )}>
                             <span className="truncate flex-1">{isValidValue(value) ? value : 'Missing'}</span>
                             <div className="flex items-center gap-1.5 ml-2">
-                                <Badge variant="outline" className="text-[8px] h-4 px-1 uppercase bg-white">
+                                <Badge variant="outline" className="text-[8px] h-4 px-1 uppercase bg-white border-blue-200 text-blue-600 font-bold">
                                     {placeholder.source_logic || 'priority'}
                                 </Badge>
                                 <ChevronDown className="h-3 w-3 text-blue-400 shrink-0" />
@@ -962,41 +1013,55 @@ const PlaceholderInput = ({
                     </PopoverTrigger>
                     <PopoverContent className="w-80 p-0 shadow-xl border-blue-100" align="end">
                         <div className="p-2 bg-slate-50 border-b flex justify-between items-center">
-                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Linked Sources</span>
-                            <Badge className="text-[9px] bg-blue-100 text-blue-700">{totalSources} Total</Badge>
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">Select Source to Edit</span>
+                            <Layers className="h-3 w-3 text-slate-400" />
                         </div>
-                        <div className="p-1 space-y-1 max-h-[300px] overflow-y-auto">
-                            {/* DB Fields */}
+                        
+                        <div className="p-1 space-y-1 max-h-[300px] overflow-y-auto bg-white">
                             {mIds.map((mid, idx) => {
                                 const mf = masterFields?.get ? masterFields.get(parseInt(mid)) : null;
+                                const sourceValue = resolveSourceValue ? resolveSourceValue('db', mid, placeholder, arrayIndex) : '';
                                 return (
-                                    <div key={`m-${mid}`} className="p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-100 group flex items-center justify-between">
-                                        <div className="min-w-0 flex-1">
-                                            <div className="text-[9px] font-bold text-blue-600 uppercase flex items-center gap-1">
-                                                <Database className="h-2.5 w-2.5" /> Source {idx + 1}
-                                            </div>
-                                            <div className="text-xs font-semibold truncate">{mf?.label || `Field #${mid}`}</div>
+                                    <div key={`m-${mid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-200 group transition-all">
+                                        <div className="flex flex-col min-w-0 pr-2">
+                                            <span className="text-[9px] font-bold text-blue-600 flex items-center gap-1 uppercase">
+                                                <Database className="h-2.5 w-2.5" /> DB FIELD {idx + 1}
+                                            </span>
+                                            <span className="text-xs font-medium truncate text-slate-700 mt-0.5">{mf?.label || `Field #${mid}`}</span>
+                                            <span className="text-[10px] text-slate-400 italic truncate">{isValidValue(sourceValue) ? sourceValue : 'Empty'}</span>
                                         </div>
-                                        <Button size="icon" variant="ghost" className="h-7 w-7 opacity-0 group-hover:opacity-100" onClick={() => onSaveToDb(placeholder, value, { type: 'db', id: mid })}>
-                                            <Save className="h-3.5 w-3.5 text-blue-500" />
+                                        <Button 
+                                            size="sm" variant="ghost" 
+                                            className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity" 
+                                            onClick={() => handleStartEdit(sourceValue, 'db', mid, mf?.label || `Field #${mid}`)}
+                                        >
+                                            <Edit3 className="h-4 w-4 text-blue-500" />
                                         </Button>
                                     </div>
                                 );
                             })}
-                            {/* Job Questions */}
-                            {qIds.map((qid, idx) => (
-                                <div key={`q-${qid}`} className="p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-100 group flex items-center justify-between">
-                                    <div className="min-w-0 flex-1">
-                                        <div className="text-[9px] font-bold text-purple-600 uppercase flex items-center gap-1">
-                                            <HelpCircle className="h-2.5 w-2.5" /> Job Question
+                            
+                            {qIds.map((qid, idx) => {
+                                const sourceValue = resolveSourceValue ? resolveSourceValue('job', qid, placeholder, arrayIndex) : '';
+                                return (
+                                    <div key={`q-${qid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-200 group transition-all">
+                                        <div className="flex flex-col min-w-0 pr-2">
+                                            <span className="text-[9px] font-bold text-purple-600 flex items-center gap-1 uppercase">
+                                                <HelpCircle className="h-2.5 w-2.5" /> QUESTION
+                                            </span>
+                                            <span className="text-xs font-medium truncate text-slate-700 mt-0.5">ID: {qid}</span>
+                                            <span className="text-[10px] text-slate-400 italic truncate">{isValidValue(sourceValue) ? sourceValue : 'Empty'}</span>
                                         </div>
-                                        <div className="text-xs font-semibold truncate">{qid}</div>
+                                        <Button 
+                                            size="sm" variant="ghost" 
+                                            className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity" 
+                                            onClick={() => handleStartEdit(sourceValue, 'job', qid, `Question ${qid}`)}
+                                        >
+                                            <Edit3 className="h-4 w-4 text-purple-500" />
+                                        </Button>
                                     </div>
-                                    <Button size="icon" variant="ghost" className="h-7 w-7 opacity-0 group-hover:opacity-100" onClick={() => onSaveToDb(placeholder, value, { type: 'job', id: qid })}>
-                                        <Save className="h-3.5 w-3.5 text-purple-500" />
-                                    </Button>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </PopoverContent>
                 </Popover>
@@ -1004,6 +1069,7 @@ const PlaceholderInput = ({
         );
     }
 
+    // --- STATE C: SINGLE SOURCE VIEW (Direct Input) ---
     const FieldHeader = () => {
         const hasDefault = placeholder.default_value && placeholder.default_value.trim() !== '';
         return (
@@ -1011,36 +1077,24 @@ const PlaceholderInput = ({
                 {showLabel && (
                     <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">
                         {placeholder.name.replace(/_/g, ' ')}
-                        {hasDefault && <span className="ml-1 text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded">DEFAULT</span>}
                     </Label>
                 )}
                 <div className="flex items-center gap-2 ml-auto">
-                    {hasDefault && <span className="text-xs text-blue-500">Has default value</span>}
                     {canSave && hasChanged && (
-                        <Button size="sm" variant="ghost" className="h-6 px-2 text-green-600 hover:text-green-700 hover:bg-green-50 border border-green-200" onClick={() => onSaveToDb(placeholder, value)} disabled={isSaving}>
+                        <Button 
+                            size="sm" variant="ghost" 
+                            className="h-6 px-2 text-green-600 hover:text-green-700 hover:bg-green-50 border border-green-200" 
+                            onClick={() => onSaveToDb(placeholder, value, null, arrayIndex)} 
+                            disabled={isSaving}
+                        >
                             <Save className="h-3 w-3 mr-1" />
                             <span className="text-[9px] font-bold">SAVE TO PROFILE</span>
-                        </Button>
-                    )}
-                    {placeholder.is_ai_generated && !isArrayItem && (
-                        <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-purple-600 hover:text-purple-700 hover:bg-purple-50" onClick={(e) => { e.preventDefault(); onAIRefine(placeholder); }} disabled={isAIRefining}>
-                            {isAIRefining ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
-                            <span className="text-[9px]">Refine</span>
                         </Button>
                     )}
                 </div>
             </div>
         );
     };
-
-    if (placeholder.type === 'document_checklist') {
-        return (
-            <div className="">
-                <FieldHeader />
-                <div className="p-3 bg-slate-50 rounded border text-xs whitespace-pre-line font-mono">{value || 'No checklist data available'}</div>
-            </div>
-        );
-    }
 
     if (placeholder.is_digit_split) {
         const chars = processDigitSplit(value || '', placeholder.digit_count || 8);
@@ -1132,7 +1186,12 @@ const PlaceholderInput = ({
         <div className="">
             <FieldHeader />
             <div className="relative">
-                <Input value={value || ''} onChange={(e) => onChange(e.target.value)} className={cn("bg-white h-8 text-xs transition-all pr-8", hasChanged && canSave ? "border-amber-400 ring-2 ring-amber-50" : "focus:border-blue-400")} />
+                <Input 
+                    ref={inputRef}
+                    value={value || ''} 
+                    onChange={(e) => onChange(e.target.value)} 
+                    className={cn("bg-white h-8 text-xs transition-all pr-8", hasChanged && canSave ? "border-amber-400 ring-2 ring-amber-50" : "focus:border-blue-400")} 
+                />
                 {hasChanged && canSave && <div className="absolute right-2.5 top-1/2 -translate-y-1/2 h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />}
             </div>
         </div>
@@ -1145,7 +1204,7 @@ export default function TemplateGenerationDialog({
     extractedData = {}, personData = {}, companyData = {},
     relationshipData = { directors: [], dependants: [], company: {}, principal: null, understudy: null },
     onDraftDiscarded, jobLevel,
-    activeEntityType, // Added
+    activeEntityType,
     activeEntityId, refreshDocuments
 }) {
     const [panelsVisible, setPanelsVisible] = useState({ form: true, preview: true, source: true });
@@ -1191,6 +1250,112 @@ export default function TemplateGenerationDialog({
     const [dataConflicts, setDataConflicts] = useState([]);
     const [showConflictBanner, setShowConflictBanner] = useState(false);
     const togglePanel = (panel) => setPanelsVisible(prev => ({ ...prev, [panel]: !prev[panel] }));
+    const [requirementJobQuestions, setRequirementJobQuestions] = useState<any[]>([]);
+
+    useEffect(() => {
+    const fetchJobQuestions = async () => {
+        if (!task?.job_level) return;
+        
+        const jl = task.job_level;
+        let query = supabase
+            .from('tm_class_requirements')
+            .select('*')
+            .eq('job_level->>department_id', String(jl.department_id))
+            .eq('job_level->>subdepartment_id', String(jl.subdepartment_id));
+        
+        if (jl.class_id) {
+            query = query.eq('job_level->>class_id', String(jl.class_id));
+        } else {
+            query = query.is('job_level->>class_id', null);
+        }
+        
+        if (jl.subclass_id) {
+            query = query.eq('job_level->>subclass_id', String(jl.subclass_id));
+        } else {
+            query = query.is('job_level->>subclass_id', null);
+        }
+        
+        const { data: requirement } = await query.maybeSingle();
+        if (requirement) {
+            setRequirementJobQuestions(requirement.job_specific_questions || []);
+        }
+    };
+    
+    fetchJobQuestions();
+}, [task?.job_level, isOpen]);
+
+   const groupedPlaceholders = useMemo(() => {
+        if (!selectedTemplate?.placeholders) return { topLevel: [], blocks: {} };
+        const topLevel = [];
+        const blocks = {};
+        selectedTemplate.placeholders.forEach(p => {
+            if (p.is_block_start) {
+                blocks[p.name] = { config: p, children: [] };
+            } else if (p.parent_name && blocks[p.parent_name]) {
+                blocks[p.parent_name].children.push(p);
+            } else if (!p.parent_name) {
+                topLevel.push(p);
+            }
+        });
+        return { topLevel, blocks };
+    }, [selectedTemplate, masterFields]);
+
+    const resolveSpecificSourceValue = useCallback((type, id, placeholder, arrayIndex = null) => {
+        if (!isOpen) return '';
+
+        // 1. Resolve Target Entity Logic
+        let sourceArray = null;
+        if (arrayIndex !== null && placeholder.parent_name) {
+             const blockName = placeholder.parent_name;
+             const blockPlaceholder = selectedTemplate?.placeholders?.find(p => p.name === blockName && p.is_block_start);
+             if (blockPlaceholder) {
+                 const entityType = Array.isArray(blockPlaceholder.entity_type) ? blockPlaceholder.entity_type[0] : (blockPlaceholder.entity_type || 'director');
+                 const normType = entityType.toLowerCase().trim();
+                 
+                 if (normType === 'director') {
+                     sourceArray = relationshipData.directors || [];
+                     if (blockPlaceholder.director_type === 'primary' && sourceArray.length > 0) {
+                         const primary = sourceArray.find(d => d.is_primary) || sourceArray[0];
+                         sourceArray = primary ? [primary] : [];
+                     }
+                 } else if (['dependant', 'dependant', 'spouse', 'child', 'father', 'mother', 'son', 'daughter'].includes(normType)) {
+                     sourceArray = relationshipData.dependants || [];
+                     if (blockPlaceholder.dependant_relationship?.length > 0) {
+                        const targetRels = blockPlaceholder.dependant_relationship.map(rel => rel.toLowerCase());
+                        sourceArray = sourceArray.filter(d => targetRels.includes(d.relationship?.toLowerCase()));
+                     } else if (['spouse', 'child', 'father', 'mother', 'son', 'daughter'].includes(normType)) {
+                        sourceArray = sourceArray.filter(d => d.relationship?.toLowerCase() === normType);
+                     }
+                 }
+             }
+        }
+
+        // Reusing the getTargetEntity logic we defined outside (make sure getTargetEntity is imported or available)
+        // If getTargetEntity is defined outside component, we pass args. If inside, we use it directly.
+        // Assuming getTargetEntity is defined at module level (top of file):
+        const combinedCacheWithAdditional = { ...sourceDataCache, ...additionalCache };
+        const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCacheWithAdditional, extractedData, companyData);
+        
+        if (type === 'job') {
+            const taskRecord = (combinedCacheWithAdditional['tm_tasks'] && Object.values(combinedCacheWithAdditional['tm_tasks'])[0]) || task;
+            const answers = taskRecord?.job_specific_answers || {};
+            const val = answers[String(id)] ?? answers[Number(id)];
+            return isValidValue(val) ? String(val) : '';
+        }
+
+        if (type === 'db' && targetEntity) {
+            const mf = masterFields.get(parseInt(id));
+            if (!mf) return '';
+            
+            // Construct a temp placeholder to use the existing resolver logic for a single field
+            const tempPlaceholder = { ...placeholder, master_field_ids: [id] };
+            const result = processTextField(tempPlaceholder, targetEntity, combinedCacheWithAdditional, masterFields);
+            return result.value || '';
+        }
+
+        return '';
+    }, [isOpen, selectedTemplate, relationshipData, entityIdMap, sourceDataCache, additionalCache, extractedData, companyData, task, masterFields]);
+
     const panelClasses = useMemo(() => {
         const { form, preview, source } = panelsVisible;
         const count = [form, preview, source].filter(Boolean).length;
@@ -1309,31 +1474,7 @@ export default function TemplateGenerationDialog({
         }
     }, [loadedDraft, getTargetConfig, refreshDocuments, onDraftDiscarded]);
 
-    const groupedPlaceholders = useMemo(() => {
-        if (!selectedTemplate?.placeholders) return { topLevel: [], blocks: {} };
-        const topLevel = [];
-        const blocks = {};
-        selectedTemplate.placeholders.forEach(p => {
-            if (p.master_field_ids && p.master_field_ids.length > 0) {
-                p.master_field_ids.forEach((fieldId, index) => {
-                    const masterField = masterFields.get(parseInt(fieldId));
-                    if (masterField) {
-                    }
-                });
-            }
-
-            if (p.is_block_start) {
-                blocks[p.name] = { config: p, children: [] };
-            } else if (p.parent_name && blocks[p.parent_name]) {
-                blocks[p.parent_name].children.push(p);
-            } else if (!p.parent_name) {
-                topLevel.push(p);
-            }
-        });
-        return { topLevel, blocks };
-    }, [selectedTemplate, masterFields]);
-
-    const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) => {
+      const detectDataConflicts = useCallback((draftFormData: any, liveFormData: any) => {
         const conflicts: Array<{
             field: string;
             draftValue: any;
@@ -1672,7 +1813,7 @@ export default function TemplateGenerationDialog({
 
             if (Object.keys(newCacheEntries).length > 0) {
                 setAdditionalCache(prev => ({ ...prev, ...newCacheEntries }));
-                
+
                 if (successfulTables.length > 0) {
                     toast({
                         title: "Data Loaded",
@@ -2041,7 +2182,7 @@ export default function TemplateGenerationDialog({
         return result.value;
     };
 
-    const renderArrayInputs = (blockName, blockData) => {
+ const renderArrayInputs = (blockName, blockData) => {
         const rows = Array.isArray(formData[blockName]) ? formData[blockName] : [];
         const isHorizontal = blockData?.config?.array_direction === 'horizontal';
 
@@ -2087,12 +2228,16 @@ export default function TemplateGenerationDialog({
                                                     r.readAsDataURL(file);
                                                 }
                                             }}
-                                            masterFields={masterFields} 
+                                            masterFields={masterFields}
                                             imageStyles={imageStyles}
                                             onImageStyleChange={handleImageStyleChange}
                                             isArrayItem={true}
                                             arrayIndex={idx}
+                                            requirementJobQuestions={requirementJobQuestions}
+                                            task={task}
+                                            formData={formData}
                                             blockName={blockName}
+                                            resolveSourceValue={resolveSpecificSourceValue} // <--- Passed Here
                                         />
                                     );
                                 })}
@@ -2104,32 +2249,36 @@ export default function TemplateGenerationDialog({
         );
     };
 
-    const populateHtmlContent = useCallback((data, placeholders, styles) => {
-        if (!selectedTemplate?.content) return '[NO TEMPLATE CONTENT]';
 
-        let content = selectedTemplate.content;
-        let processedHeader = headerContent || '';
-        let processedFooter = footerContent || '';
+ const populateHtmlContent = useCallback((data, placeholders, styles) => {
+    if (!selectedTemplate?.content) return '[NO TEMPLATE CONTENT]';
 
-        // Helper to perform replacement across all sections
-        const universalReplace = (regex, replacement) => {
-            content = content.replace(regex, replacement);
-            processedHeader = processedHeader.replace(regex, replacement);
-            processedFooter = processedFooter.replace(regex, replacement);
-        };
+    let content = selectedTemplate.content;
+    let processedHeader = headerContent || '';
+    let processedFooter = footerContent || '';
 
-        Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
-            const block = groupedPlaceholders.blocks[blockName];
-            const blockConfig = block.config || {};
-            const isHorizontal = blockConfig.array_direction === 'horizontal';
+    // Helper to perform replacement across all sections (Main body, Header, Footer)
+    const universalReplace = (regex, replacement) => {
+        content = content.replace(regex, replacement);
+        processedHeader = processedHeader.replace(regex, replacement);
+        processedFooter = processedFooter.replace(regex, replacement);
+    };
 
-            const blockRegex = new RegExp(`\\{#${blockName}\\}([\\s\\S]*?)\\{/${blockName}\\}`, 'g');
-            const rows = Array.isArray(data[blockName]) ? data[blockName] : [];
+    // 1. PROCESS REPEATING BLOCKS/TABLES
+    Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
+        const block = groupedPlaceholders.blocks[blockName];
+        const blockConfig = block.config || {};
+        const isHorizontal = blockConfig.array_direction === 'horizontal';
 
-            content = content.replace(blockRegex, (_, innerTemplate) => {
+        const blockRegex = new RegExp(`\\{#${blockName}\\}([\\s\\S]*?)\\{/${blockName}\\}`, 'g');
+        const rows = Array.isArray(data[blockName]) ? data[blockName] : [];
+
+        // Handle the block replacement in content, header, and footer
+        const processBlockInText = (text) => {
+            return text.replace(blockRegex, (_, innerTemplate) => {
                 if (rows.length === 0) return '';
 
-                // Handle Horizontal (Digit Split style)
+                // Handle Horizontal Logic (often used for digit-splitting styles)
                 if (isHorizontal) {
                     const childName = block.children[0]?.name || 'd';
                     const cells = rows.map(row => {
@@ -2139,71 +2288,128 @@ export default function TemplateGenerationDialog({
                     return `<div style="display:flex;align-items:center;margin:5px 0;">${cells}</div>`;
                 }
 
-                // Handle Standard Vertical Blocks
+                // Handle Standard Vertical Rows
                 return rows.map((row, rowIndex) => {
                     let rowHtml = innerTemplate;
                     block.children.forEach(child => {
                         const rawValue = row?.[child.name];
-                        let value = extractDisplayValue(rawValue);
                         const childRegex = new RegExp(`\\{+\\s*${child.name}\\s*\\}+`, 'g');
 
-                        if (child.type === 'image' && value && (value.startsWith('http') || value.startsWith('data:image'))) {
-                            const styleKey = `${blockName}_${rowIndex}_${child.name}`;
-                            const style = styles[styleKey] || styles[child.name] || {};
-                            const imgWidth = style.imageWidth ? `${style.imageWidth}px` : "120px";
-                            const textAlign = style.textAlign || 'center';
-                            value = `<div style="text-align:${textAlign};"><img src="${value}" style="width:${imgWidth}; height:auto; display:block; margin:${textAlign === 'center' ? '0 auto' : '0'};" /></div>`;
+                        if (child.type === 'image') {
+                            const value = extractDisplayValue(rawValue);
+                            console.log(`[HTML IMAGE DEBUG] Block: ${blockName}, Row: ${rowIndex}, Child: ${child.name}`);
+                            console.log(`[HTML IMAGE DEBUG] Raw value:`, rawValue);
+                            console.log(`[HTML IMAGE DEBUG] Extracted value:`, value);
+                            console.log(`[HTML IMAGE DEBUG] Value type:`, typeof value);
+                            console.log(`[HTML IMAGE DEBUG] Is HTTP/Data URL:`, value && (value.startsWith('http') || value.startsWith('data:image')));
+                            
+                            if (value && (value.startsWith('http') || value.startsWith('data:image'))) {
+                                const styleKey = `${blockName}_${rowIndex}_${child.name}`;
+                                const style = styles[styleKey] || styles[child.name] || {};
+                                const imgWidth = style.imageWidth ? `${style.imageWidth}px` : "120px";
+                                const textAlign = style.textAlign || 'center';
+                                
+                                const imageHtml = `<div style="text-align:${textAlign}; margin:5px 0;">
+                                    <img src="${value}" style="width:${imgWidth}; height:auto; display:block; margin:${textAlign === 'center' ? '0 auto' : '0'}; border-radius: 2px;" 
+                                         onerror="console.error('[HTML IMAGE DEBUG] Failed to load image:', '${value}'); this.style.display='none'; this.nextElementSibling.style.display='block';"
+                                         onload="console.log('[HTML IMAGE DEBUG] Successfully loaded image:', '${value}');" />
+                                    <div style="display:none; color:red; font-size:10px; border:1px solid red; padding:5px; margin:5px 0;">
+                                        ❌ Failed to load: ${value.substring(0, 50)}...
+                                    </div>
+                                </div>`;
+                                console.log(`[HTML IMAGE DEBUG] Generated image HTML:`, imageHtml);
+                                rowHtml = rowHtml.replace(childRegex, imageHtml);
+                            } else {
+                                console.log(`[HTML IMAGE DEBUG] No valid image value, showing placeholder`);
+                                rowHtml = rowHtml.replace(childRegex, `<span style="color:#ccc; font-size: 8px;">[Empty Image: ${child.name}]</span>`);
+                            }
+                        } else {
+                            // Standard text inside block
+                            const value = extractDisplayValue(rawValue);
+                            rowHtml = rowHtml.replace(childRegex, String(value || ''));
                         }
-                        rowHtml = rowHtml.replace(childRegex, value || '');
                     });
                     return rowHtml;
                 }).join('');
             });
-        });
+        };
 
-        // Handle Top Level Placeholders
-        (placeholders || []).forEach(placeholder => {
-            if (placeholder.parent_name) return; // Skip children of blocks
+        content = processBlockInText(content);
+        processedHeader = processBlockInText(processedHeader);
+        processedFooter = processBlockInText(processedFooter);
+    });
 
-            const rawValue = data[placeholder.name];
-            const cleanName = placeholder.name.replace(/[{}]/g, '').trim();
-            const regex = new RegExp(`\\{+\\s*${cleanName}\\s*\\}+`, 'gi');
+    // 2. PROCESS TOP LEVEL PLACEHOLDERS
+    (placeholders || []).forEach(placeholder => {
+        if (placeholder.parent_name) return; // Skip child fields handled in blocks above
 
-            if (placeholder.is_digit_split) {
-                const chars = processDigitSplit(rawValue, placeholder.digit_count || 8);
-                for (let i = 1; i <= (placeholder.digit_count || 8); i++) {
-                    const seqRegex = new RegExp(`\\{+\\s*${cleanName}_${i}\\s*\\}+`, 'gi');
-                    universalReplace(seqRegex, chars[i - 1] || '&nbsp;');
-                }
-                universalReplace(regex, extractDisplayValue(rawValue) || '');
+        const rawValue = data[placeholder.name];
+        const cleanName = placeholder.name.replace(/[{}]/g, '').trim();
+        const regex = new RegExp(`\\{+\\s*${cleanName}\\s*\\}+`, 'gi');
+
+        // Handle Digit Splitting (Sequences like {passport_1}, {passport_2})
+        if (placeholder.is_digit_split) {
+            const chars = processDigitSplit(rawValue, placeholder.digit_count || 8);
+            for (let i = 1; i <= (placeholder.digit_count || 8); i++) {
+                const seqRegex = new RegExp(`\\{+\\s*${cleanName}_${i}\\s*\\}+`, 'gi');
+                universalReplace(seqRegex, chars[i - 1] || '&nbsp;');
             }
-            else if (placeholder.type === 'image') {
-                const value = extractDisplayValue(rawValue);
-                if (value && (value.startsWith('http') || value.startsWith('data:image'))) {
-                    const style = styles[placeholder.name] || {};
-                    const imgWidth = style.imageWidth ? `${style.imageWidth}px` : "200px";
-                    const textAlign = style.textAlign || 'center';
-                    const imageHtml = `<div style="text-align:${textAlign}; margin:10px 0;">
-                    <img src="${value}" style="width:${imgWidth}; height:auto; max-width:100%; display:inline-block;" />
+            universalReplace(regex, extractDisplayValue(rawValue) || '');
+        }
+        
+        // Handle Images
+        else if (placeholder.type === 'image') {
+            const value = extractDisplayValue(rawValue);
+            console.log(`[HTML IMAGE DEBUG] Top Level - Placeholder: ${placeholder.name}`);
+            console.log(`[HTML IMAGE DEBUG] Top Level - Raw value:`, rawValue);
+            console.log(`[HTML IMAGE DEBUG] Top Level - Extracted value:`, value);
+            console.log(`[HTML IMAGE DEBUG] Top Level - Value type:`, typeof value);
+            console.log(`[HTML IMAGE DEBUG] Top Level - Is HTTP/Data URL:`, value && (value.startsWith('http') || value.startsWith('data:image')));
+            
+            if (value && (value.startsWith('http') || value.startsWith('data:image'))) {
+                const style = styles[placeholder.name] || {};
+                const imgWidth = style.imageWidth ? `${style.imageWidth}px` : "200px";
+                const textAlign = style.textAlign || 'center';
+                
+                const imageHtml = `<div style="text-align:${textAlign}; margin:15px 0;">
+                    <img src="${value}" style="width:${imgWidth}; height:auto; max-width:100%; display:inline-block; border-radius: 4px;" 
+                         onerror="console.error('[HTML IMAGE DEBUG] Failed to load image:', '${value}'); this.style.display='none'; this.nextElementSibling.style.display='block';"
+                         onload="console.log('[HTML IMAGE DEBUG] Successfully loaded image:', '${value}');" />
+                    <div style="display:none; color:red; font-size:10px; border:1px solid red; padding:5px; margin:5px 0;">
+                        ❌ Failed to load: ${value.substring(0, 50)}...
+                    </div>
                 </div>`;
-                    universalReplace(regex, imageHtml);
-                } else {
-                    universalReplace(regex, `<span style="color:#999;">[Upload ${placeholder.name}]</span>`);
-                }
+                console.log(`[HTML IMAGE DEBUG] Top Level - Generated image HTML:`, imageHtml);
+                universalReplace(regex, imageHtml);
+            } else {
+                console.log(`[HTML IMAGE DEBUG] Top Level - No valid image value, showing placeholder`);
+                universalReplace(regex, `<div style="border:1px dashed #cbd5e1; padding:10px; text-align:center; color:#94a3b8; font-size:10px; border-radius:4px;">[Upload Image: ${placeholder.name}]</div>`);
             }
-            else {
-                const value = extractDisplayValue(rawValue);
-                const formattedValue = String(value || '').replace(/\n/g, '<br />');
-                universalReplace(regex, formattedValue || `<span style="background:#fef08a;">[${placeholder.name}]</span>`);
-            }
-        });
+        }
+        
+        // Handle Standard Text/Select/Date
+        else {
+            const value = extractDisplayValue(rawValue);
+            const formattedValue = String(value || '').replace(/\n/g, '<br />');
+            
+            // If value is empty, show a subtle highlighted placeholder in the preview
+            const replacement = formattedValue || `<span style="background-color: #fef9c3; color: #854d0e; padding: 0 2px; border-radius: 2px;">[${placeholder.name}]</span>`;
+            universalReplace(regex, replacement);
+        }
+    });
 
-        return `
-        ${processedHeader ? `<div style="margin-bottom:20px;">${processedHeader}</div>` : ''}
-        <div style="min-height:800px;">${content}</div>
-        ${processedFooter ? `<div style="margin-top:20px; border-top:1px solid #eee;">${processedFooter}</div>` : ''}
+    // 3. ASSEMBLE FINAL HTML DOCUMENT
+    return `
+        <div class="generated-document-container" style="font-family: 'Times New Roman', Times, serif; line-height: 1.5; color: #000;">
+            ${processedHeader ? `<div class="doc-header" style="margin-bottom:30px;">${processedHeader}</div>` : ''}
+            <div class="doc-body" style="min-height:800px; position: relative;">
+                ${content}
+            </div>
+            ${processedFooter ? `<div class="doc-footer" style="margin-top:40px; padding-top:10px; border-top:0.5px solid #e2e8f0; font-size: 10px;">${processedFooter}</div>` : ''}
+        </div>
     `;
-    }, [selectedTemplate, groupedPlaceholders, headerContent, footerContent]);
+}, [selectedTemplate, groupedPlaceholders, headerContent, footerContent]);
+
     const prepareRenderData = useCallback(async (data) => {
         const renderData = {};
         const imagePromises = [];
@@ -2646,65 +2852,140 @@ export default function TemplateGenerationDialog({
         return obj;
     };
 
-const saveFieldToDatabase = async (placeholder, newValue, specificSource = null) => {
+const saveFieldToDatabase = async (placeholder, newValue, specificSource = null, arrayIndex = null) => {
     setIsSavingProfile(true);
     try {
-        let table, path, linkVar, entId;
+        let table, path, linkVar, entId, sourceLabel = "Profile";
 
-        // Determine TARGET based on which specific source button was clicked
+        // 1. Resolve Target Entity
+        let sourceArray = null;
+        if (arrayIndex !== null && placeholder.parent_name) {
+            const blockName = placeholder.parent_name;
+            const blockPlaceholder = selectedTemplate?.placeholders?.find(p => p.name === blockName && p.is_block_start);
+            if (blockPlaceholder) {
+                const entityType = Array.isArray(blockPlaceholder.entity_type) ? blockPlaceholder.entity_type[0] : (blockPlaceholder.entity_type || 'director');
+                if (entityType === 'director') sourceArray = relationshipData.directors;
+                else if (entityType === 'dependant') sourceArray = relationshipData.dependants;
+            }
+        }
+
+        const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData);
+
+        // 2. Determine target metadata
         if (specificSource?.type === 'db') {
             const mf = masterFields.get(parseInt(specificSource.id));
             const pEnt = Array.isArray(placeholder.entity_type) ? placeholder.entity_type[0] : (placeholder.entity_type || 'company');
             const src = mf?.sources?.find(s => s.source_type === (pEnt === 'company' ? 'company' : 'individual')) || mf?.sources?.[0];
-            
+
             table = src.table;
             path = src.path;
             linkVar = src.linking_variable || 'id';
-            entId = entityIdMap[pEnt] || entityIdMap.director || entityIdMap.principal;
-        } else if (specificSource?.type === 'job') {
+            entId = targetEntity?.id || targetEntity?.individual_id || targetEntity?.director_id;
+            sourceLabel = `Master Field: ${mf?.label || specificSource.id}`;
+        } 
+        else if (specificSource?.type === 'job') {
             table = 'tm_tasks';
             path = `job_specific_answers->>'${specificSource.id}'`;
             linkVar = 'id';
             entId = task?.id;
-        } else {
-            // Default logic if clicked from a standard field save button
+            sourceLabel = `Job Question: ${specificSource.id}`;
+        } 
+        else {
             const mfId = placeholder.master_field_ids?.[0];
-            if (!mfId) return;
             const mf = masterFields.get(parseInt(mfId));
             const src = mf?.sources?.[0];
             table = src.table;
             path = src.path;
             linkVar = src.linking_variable || 'id';
-            entId = entityIdMap[placeholder.entity_type?.[0] || 'company'];
+            entId = targetEntity?.id || targetEntity?.individual_id || targetEntity?.director_id;
         }
 
         if (!entId || !table) throw new Error("Could not resolve database target");
 
-        // Perform the deep update
+        // 3. Perform the Update
         const { data: existing } = await supabase.from(table).select('*').eq(linkVar, entId).maybeSingle();
-        let payload = {};
+        let updatePayload = {};
 
         if (path && (path.includes('->') || path.includes('.'))) {
             const pathParts = path.split(/->>|->|\./).map(p => p.trim().replace(/['"]/g, '')).filter(Boolean);
             const column = pathParts[0];
             const nestedPath = pathParts.slice(1);
             const existingJson = { ...(existing?.[column] || {}) };
-            payload[column] = setDeepValue(existingJson, nestedPath, newValue);
+            updatePayload[column] = setDeepValue(existingJson, nestedPath, newValue);
         } else {
-            payload = { [path || placeholder.name]: newValue };
+            updatePayload = { [path || placeholder.name]: newValue };
         }
 
-        const { error } = await supabase.from(table).update({ ...payload, updated_at: new Date().toISOString() }).eq(linkVar, entId);
-        if (error) throw error;
+        const { error: updateError } = await supabase
+            .from(table)
+            .update({ ...updatePayload, updated_at: new Date().toISOString() })
+            .eq(linkVar, entId);
+        
+        if (updateError) throw updateError;
 
-        toast({ title: "Updated", description: "Successfully saved to the specific source record." });
+        // --- NEW: FETCH UPDATED DETAILS ---
+        const { data: refreshedRecord, error: fetchError } = await supabase
+            .from(table)
+            .select('*')
+            .eq(linkVar, entId)
+            .single();
+
+        if (fetchError) throw fetchError;
+
+        // 4. Update the Cache so resolvers see the new data
+        setAdditionalCache(prev => ({
+            ...prev,
+            [table]: {
+                ...(prev[table] || {}),
+                [entId]: refreshedRecord
+            }
+        }));
+
+        const updatedCombinedCache = { ...combinedCache, [table]: { ...(combinedCache[table] || {}), [entId]: refreshedRecord } };
+        const match = processPlaceholderValue(
+            placeholder, 
+            relationshipData, 
+            updatedCombinedCache, // Use the new data
+            masterFields, 
+            entityIdMap, 
+            extractedData, 
+            companyData, 
+            arrayIndex, 
+            sourceArray, 
+            task
+        );
+
+        const finalResolvedValue = placeholder.type === 'boolean' ? match.value : extractDisplayValue(match.value);
+
+        // 6. Sync UI state
+        if (arrayIndex !== null && placeholder.parent_name) {
+            handleArrayInputChange(placeholder.parent_name, arrayIndex, placeholder.name, finalResolvedValue);
+        } else {
+            handleInputChange(placeholder.name, finalResolvedValue);
+        }
+
+        // Sync originalFormData so "Save" buttons hide
+        setOriginalFormData(prev => {
+            const updated = JSON.parse(JSON.stringify(prev));
+            if (arrayIndex !== null && placeholder.parent_name) {
+                if (!updated[placeholder.parent_name]) updated[placeholder.parent_name] = [];
+                if (!updated[placeholder.parent_name][arrayIndex]) updated[placeholder.parent_name][arrayIndex] = {};
+                updated[placeholder.parent_name][arrayIndex][placeholder.name] = finalResolvedValue;
+            } else {
+                updated[placeholder.name] = finalResolvedValue;
+            }
+            return updated;
+        });
+
+        toast({ title: "Field Updated", description: `Synced with ${sourceLabel}` });
+
     } catch (e) {
+        console.error('Save Error:', e);
         toast({ title: "Save Error", description: e.message, variant: "destructive" });
     } finally {
         setIsSavingProfile(false);
     }
 };
-
     const refineFieldWithAI = async (placeholder, allFormData) => {
         if (!placeholder.ai_prompt) return null;
         const regex = /\{([^}]+)\}/g;
@@ -3094,13 +3375,9 @@ const saveFieldToDatabase = async (placeholder, newValue, specificSource = null)
                     saveAs(blob, `${fileName}.docx`);
                     toast({ title: "Success", description: `Document downloaded as ${fileName}.docx` });
                 } else {
-                    // PDF requested for a Word template
-                    // We convert the rendered Word buffer to HTML first to ensure PDF content matches Word content
                     const result = await mammoth.convertToHtml({ arrayBuffer: docxBuffer });
                     const html2pdf = (await import('html2pdf.js')).default;
                     const element = document.createElement('div');
-
-                    // Use the same styles as the editor preview
                     element.className = EDITOR_PREVIEW_STYLES + ' p-10 bg-white';
                     element.style.width = '800px';
                     element.innerHTML = result.value;
@@ -3123,8 +3400,6 @@ const saveFieldToDatabase = async (placeholder, newValue, specificSource = null)
                 const html2pdf = (await import('html2pdf.js')).default;
                 const element = document.createElement('div');
 
-                // IMPORTANT: Use renderData (Base64 images) instead of formData (URLs)
-                // to populate the HTML for the PDF engine.
                 const pdfHtmlContent = populateHtmlContent(
                     renderData,
                     selectedTemplate?.placeholders || [],
@@ -3400,17 +3675,21 @@ const saveFieldToDatabase = async (placeholder, newValue, specificSource = null)
                                                             value={formData[p.name]}
                                                             onChange={(val) => handleInputChange(p.name, val)}
                                                             onSaveToDb={saveFieldToDatabase}
-                                                              masterFields={masterFields}
+                                                            masterFields={masterFields}
                                                             resolvedOptions={resolvedOptions}
                                                             onFileChange={(e) => handleFileChange(p.name, e)}
                                                             imageStyles={imageStyles}
                                                             onImageStyleChange={handleImageStyleChange}
                                                             autoPopulated={autoPopulatedFields.get(p.name)}
                                                             originalValue={originalFormData[p.name]}
+                                                           requirementJobQuestions={requirementJobQuestions}  // NEW
+    task={task}                                         // NEW
+    formData={formData}       
                                                             isArrayItem={false}
                                                             onAIRefine={handleSingleFieldAIRefine}
                                                             isAIRefining={refiningFields.has(p.name)}
                                                             showLabel={false} // Hides the internal vertical label
+                                                            resolveSourceValue={resolveSpecificSourceValue}
                                                         />
                                                     </div>
                                                 </div>
