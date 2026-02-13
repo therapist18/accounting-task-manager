@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp, Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles, View, MousePointer2, Layout, Code } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp, Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles, View, MousePointer2, Layout, Code, ChevronDown, Database } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -23,6 +23,7 @@ import * as mammoth from "mammoth";
 import { Checkbox } from '@/components/ui/checkbox';
 import { EntityType, ENTITY_TYPES, DEPENDANT_RELATIONSHIPS } from "@/lib/constants/entity-types";
 import { cn } from '@/lib/utils';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 const EDITOR_PREVIEW_STYLES = `
   prose prose-sm sm:prose-base dark:prose-invert max-w-full focus:outline-none 
@@ -596,94 +597,91 @@ const processTextField = (placeholder, targetEntity, combinedCache, masterFields
     return { value: '', source: null };
 };
 
+const isValidValue = (val: any): boolean => {
+    if (val === null || val === undefined || val === '') return false;
+    const errorStrings = ['Missing', 'Missing Config', 'No Source', 'Computing...', 'Document Not Found', 'Field Not Found'];
+    return !errorStrings.includes(String(val));
+};
+
 const processPlaceholderValue = (placeholder, relationshipData, combinedCache, masterFields, entityIdMap = null, extractedData, companyData, arrayIndex = null, sourceArray = null, task = null) => {
-    if (placeholder.linked_job_question_id) {
-        let taskRecord = null;
+    const logic = placeholder.source_logic || 'priority';
+    const collectedValues: string[] = [];
+    const sourceMetadata: string[] = [];
 
-        if (combinedCache && combinedCache['tm_tasks']) {
-            const taskIds = Object.keys(combinedCache['tm_tasks']);
-            if (taskIds.length > 0) {
-                taskRecord = combinedCache['tm_tasks'][taskIds[0]];
-            }
-        }
-
-        if (!taskRecord && task) {
-            taskRecord = task;
-        }
-
-        if (taskRecord && taskRecord.job_specific_answers) {
-            const questionId = placeholder.linked_job_question_id;
-            const answer = taskRecord.job_specific_answers[questionId];
-
-            if (answer !== undefined && answer !== null) {
-                return {
-                    value: String(answer),
-                    source: 'Job Question'
-                };
-            }
-        }
-        return { value: '', source: 'Job Question (Missing)' };
-    }
-
-    if (placeholder.master_field_ids?.length) {
-        const dateResult = processCurrentDateField(placeholder, masterFields);
-        if (dateResult.value) {
-            return dateResult;
-        }
-    }
-
+    // 1. Resolve Target Entity for this placeholder context
     const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData);
+    const targetId = targetEntity ? String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id) : null;
 
-    if (!targetEntity) {
-        return { value: '', source: null };
-    }
-    let result = { value: '', source: null };
-
-    switch (placeholder.type) {
-        case 'document_checklist': {
-            const availableDocuments = window.__availableDocuments || [];
-
-            const entityId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id);
-            const entityType = Array.isArray(placeholder.entity_type)
-                ? placeholder.entity_type[0]
-                : placeholder.entity_type || 'company';
-
-            result = {
-                value: generateDocumentChecklist(
-                    placeholder,
-                    entityId,
-                    entityType,
-                    combinedCache,
-                    availableDocuments
-                ),
-                source: 'Document Checklist'
-            };
-            break;
-        }
-
-        case 'ordinal':
-            if (arrayIndex !== null) {
+    // --- STEP 1: DATABASE FIELDS (master_field_ids) ---
+    if (placeholder.master_field_ids?.length > 0 && targetEntity) {
+        for (const mid of placeholder.master_field_ids) {
+            let result = { value: '', source: null };
+            
+            // Specialized resolution based on type
+            if (placeholder.type === 'ordinal') {
                 result = processOrdinalField(placeholder, arrayIndex);
+            } else if (placeholder.type === 'image') {
+                result = processImageField({ ...placeholder, master_field_ids: [mid] }, targetEntity, combinedCache, masterFields);
+            } else if (placeholder.type === 'boolean') {
+                result = processBooleanField({ ...placeholder, master_field_ids: [mid] }, targetEntity, combinedCache, masterFields);
+            } else {
+                result = processTextField({ ...placeholder, master_field_ids: [mid] }, targetEntity, combinedCache, masterFields);
             }
-            break;
 
-        case 'conditional':
-            result = processConditionalField(placeholder, targetEntity, combinedCache, masterFields);
-            break;
-
-        case 'boolean':
-            result = processBooleanField(placeholder, targetEntity, combinedCache, masterFields);
-            break;
-
-        case 'image':
-            result = processImageField(placeholder, targetEntity, combinedCache, masterFields);
-            break;
-
-        default:
-            result = processTextField(placeholder, targetEntity, combinedCache, masterFields);
+            if (isValidValue(result.value)) {
+                if (logic === 'priority') return result;
+                collectedValues.push(String(result.value));
+                sourceMetadata.push(result.source || 'DB');
+            }
+        }
     }
-    // console.groupEnd();
-    return result;
+
+    // --- STEP 2: JOB QUESTIONS (linked_job_question_ids) ---
+    const qIds = placeholder.linked_job_question_ids || (placeholder.linked_job_question_id ? [placeholder.linked_job_question_id] : []);
+    if (qIds.length > 0) {
+        const taskRecord = (combinedCache?.['tm_tasks'] && Object.values(combinedCache['tm_tasks'])[0]) || task;
+        const answers = taskRecord?.job_specific_answers || {};
+        
+        for (const qId of qIds) {
+            const answer = answers[String(qId)] ?? answers[Number(qId)];
+            if (isValidValue(answer)) {
+                if (logic === 'priority') return { value: String(answer), source: 'Job Question' };
+                collectedValues.push(String(answer));
+                sourceMetadata.push('Job Question');
+            }
+        }
+    }
+
+    // --- STEP 3: REQUIREMENTS (linked_requirement_ids) ---
+    const reqIds = placeholder.linked_requirement_ids || [];
+    if (reqIds.length > 0 && targetId) {
+        // Requirements usually check for document presence or specific extracted flags
+        for (const rId of reqIds) {
+            // Check if document exists for this entity
+            const isFound = checkDocumentStatus(rId, targetId, placeholder.entity_type?.[0] || 'company', combinedCache);
+            if (isFound) {
+                const val = "✓ Submitted";
+                if (logic === 'priority') return { value: val, source: 'Requirement' };
+                collectedValues.push(val);
+                sourceMetadata.push('Requirement');
+            }
+        }
+    }
+
+    // --- FINALIZE LOGIC ---
+    if (logic === 'all' && collectedValues.length > 0) {
+        return {
+            value: collectedValues.join(' '),
+            source: `Merged (${sourceMetadata[0]})`
+        };
+    }
+
+    // Fallback to default_value
+    if (placeholder.default_value) {
+        return { value: placeholder.default_value, source: 'Default' };
+    }
+
+    return { value: '', source: null };
 };
 
 const extractDisplayValue = (value) => {
@@ -928,15 +926,83 @@ const getDisplayLabel = (value, options) => {
 const PlaceholderInput = ({
     placeholder, value, originalValue, onChange, onSaveToDb, isSaving, onFileChange, imageStyles, onImageStyleChange,
     autoPopulated, isArrayItem = false, arrayIndex = null, blockName = null, onAIRefine, isAIRefining, resolvedOptions = [],
-    showLabel = true // Add this prop
+    masterFields, // Ensure this is received
+    showLabel = true
 }) => {
     const fieldKey = isArrayItem ? `${blockName}_${arrayIndex}_${placeholder.name}` : placeholder.name;
     const hasChanged = JSON.stringify(value) !== JSON.stringify(originalValue);
     const canSave = placeholder.master_field_ids?.length > 0;
 
+    const mIds = placeholder.master_field_ids || [];
+    const qIds = placeholder.linked_job_question_ids || (placeholder.linked_job_question_id ? [placeholder.linked_job_question_id] : []);
+    const totalSources = mIds.length + qIds.length;
+
     const options = resolvedOptions.length > 0
         ? resolvedOptions
         : (placeholder.options || []).map(o => typeof o === 'string' ? { label: o, value: o } : o);
+
+    // --- MULTI-SOURCE PRIORITY UI ---
+    if (totalSources > 1 && placeholder.type !== 'image' && placeholder.type !== 'boolean') {
+        return (
+            <div className="space-y-1">
+                <Popover>
+                    <PopoverTrigger asChild>
+                        <div className={cn(
+                            "text-xs h-8 flex items-center px-2 rounded cursor-pointer border border-dashed border-blue-300 bg-blue-50/30 hover:bg-blue-50 transition-colors",
+                            !isValidValue(value) ? "text-red-500 italic" : "text-slate-900 font-medium"
+                        )}>
+                            <span className="truncate flex-1">{isValidValue(value) ? value : 'Missing'}</span>
+                            <div className="flex items-center gap-1.5 ml-2">
+                                <Badge variant="outline" className="text-[8px] h-4 px-1 uppercase bg-white">
+                                    {placeholder.source_logic || 'priority'}
+                                </Badge>
+                                <ChevronDown className="h-3 w-3 text-blue-400 shrink-0" />
+                            </div>
+                        </div>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-80 p-0 shadow-xl border-blue-100" align="end">
+                        <div className="p-2 bg-slate-50 border-b flex justify-between items-center">
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Linked Sources</span>
+                            <Badge className="text-[9px] bg-blue-100 text-blue-700">{totalSources} Total</Badge>
+                        </div>
+                        <div className="p-1 space-y-1 max-h-[300px] overflow-y-auto">
+                            {/* DB Fields */}
+                            {mIds.map((mid, idx) => {
+                                const mf = masterFields?.get ? masterFields.get(parseInt(mid)) : null;
+                                return (
+                                    <div key={`m-${mid}`} className="p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-100 group flex items-center justify-between">
+                                        <div className="min-w-0 flex-1">
+                                            <div className="text-[9px] font-bold text-blue-600 uppercase flex items-center gap-1">
+                                                <Database className="h-2.5 w-2.5" /> Source {idx + 1}
+                                            </div>
+                                            <div className="text-xs font-semibold truncate">{mf?.label || `Field #${mid}`}</div>
+                                        </div>
+                                        <Button size="icon" variant="ghost" className="h-7 w-7 opacity-0 group-hover:opacity-100" onClick={() => onSaveToDb(placeholder, value, { type: 'db', id: mid })}>
+                                            <Save className="h-3.5 w-3.5 text-blue-500" />
+                                        </Button>
+                                    </div>
+                                );
+                            })}
+                            {/* Job Questions */}
+                            {qIds.map((qid, idx) => (
+                                <div key={`q-${qid}`} className="p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-100 group flex items-center justify-between">
+                                    <div className="min-w-0 flex-1">
+                                        <div className="text-[9px] font-bold text-purple-600 uppercase flex items-center gap-1">
+                                            <HelpCircle className="h-2.5 w-2.5" /> Job Question
+                                        </div>
+                                        <div className="text-xs font-semibold truncate">{qid}</div>
+                                    </div>
+                                    <Button size="icon" variant="ghost" className="h-7 w-7 opacity-0 group-hover:opacity-100" onClick={() => onSaveToDb(placeholder, value, { type: 'job', id: qid })}>
+                                        <Save className="h-3.5 w-3.5 text-purple-500" />
+                                    </Button>
+                                </div>
+                            ))}
+                        </div>
+                    </PopoverContent>
+                </Popover>
+            </div>
+        );
+    }
 
     const FieldHeader = () => {
         const hasDefault = placeholder.default_value && placeholder.default_value.trim() !== '';
@@ -2021,6 +2087,7 @@ export default function TemplateGenerationDialog({
                                                     r.readAsDataURL(file);
                                                 }
                                             }}
+                                            masterFields={masterFields} 
                                             imageStyles={imageStyles}
                                             onImageStyleChange={handleImageStyleChange}
                                             isArrayItem={true}
@@ -2579,67 +2646,64 @@ export default function TemplateGenerationDialog({
         return obj;
     };
 
-    const saveFieldToDatabase = async (placeholder, newValue) => {
-        const mfId = placeholder.master_field_ids?.[0];
-        if (!mfId) return;
-        const mf = masterFields.get(parseInt(mfId));
-        const pEnt = Array.isArray(placeholder.entity_type) ? placeholder.entity_type[0] : (placeholder.entity_type || 'company');
-        const targetSrc = (pEnt === 'company') ? 'company' : 'individual';
-        const src = mf?.sources?.find(s => s.source_type === targetSrc) || mf?.sources?.[0];
-        if (!src) return;
+const saveFieldToDatabase = async (placeholder, newValue, specificSource = null) => {
+    setIsSavingProfile(true);
+    try {
+        let table, path, linkVar, entId;
 
-        let entId = entityIdMap[pEnt] || entityIdMap.director || entityIdMap.principal;
-        if (placeholder.director_type === 'primary') {
-            const primary = findPrimaryDirector({ ...sourceDataCache, ...additionalCache });
-            entId = primary?.id || primary?.director_id || primary?.individual_id;
+        // Determine TARGET based on which specific source button was clicked
+        if (specificSource?.type === 'db') {
+            const mf = masterFields.get(parseInt(specificSource.id));
+            const pEnt = Array.isArray(placeholder.entity_type) ? placeholder.entity_type[0] : (placeholder.entity_type || 'company');
+            const src = mf?.sources?.find(s => s.source_type === (pEnt === 'company' ? 'company' : 'individual')) || mf?.sources?.[0];
+            
+            table = src.table;
+            path = src.path;
+            linkVar = src.linking_variable || 'id';
+            entId = entityIdMap[pEnt] || entityIdMap.director || entityIdMap.principal;
+        } else if (specificSource?.type === 'job') {
+            table = 'tm_tasks';
+            path = `job_specific_answers->>'${specificSource.id}'`;
+            linkVar = 'id';
+            entId = task?.id;
+        } else {
+            // Default logic if clicked from a standard field save button
+            const mfId = placeholder.master_field_ids?.[0];
+            if (!mfId) return;
+            const mf = masterFields.get(parseInt(mfId));
+            const src = mf?.sources?.[0];
+            table = src.table;
+            path = src.path;
+            linkVar = src.linking_variable || 'id';
+            entId = entityIdMap[placeholder.entity_type?.[0] || 'company'];
         }
-        if (!entId) return;
 
-        try {
-            const { table, path, linking_variable } = src;
-            const linkVar = linking_variable || 'id';
+        if (!entId || !table) throw new Error("Could not resolve database target");
 
-            // 1. Get current record first
-            const { data: existing } = await supabase
-                .from(table)
-                .select('*')
-                .eq(linkVar, entId)
-                .maybeSingle();
+        // Perform the deep update
+        const { data: existing } = await supabase.from(table).select('*').eq(linkVar, entId).maybeSingle();
+        let payload = {};
 
-            let payload = {};
-
-            if (path && (path.includes('->') || path.includes('.'))) {
-                const pathParts = path
-                    .split(/->>|->|\./)
-                    .map(p => p.trim().replace(/['"]/g, ''))
-                    .filter(Boolean);
-
-                const column = pathParts[0];
-                const nestedPath = pathParts.slice(1);
-
-                if (nestedPath.length > 0) {
-                    const existingJson = { ...(existing?.[column] || {}) };
-                    payload[column] = setDeepValue(existingJson, nestedPath, newValue);
-                } else {
-                    payload[column] = newValue;
-                }
-            } else {
-                payload = { [path || placeholder.name]: newValue };
-            }
-
-            const { error } = await supabase
-                .from(table)
-                .update({ ...payload, updated_at: new Date().toISOString() })
-                .eq(linkVar, entId);
-
-            if (error) throw error;
-
-            setOriginalFormData(prev => ({ ...prev, [placeholder.name]: newValue }));
-            toast({ title: "Saved to Profile", description: `${placeholder.name} updated.` });
-        } catch (e) {
-            toast({ title: "Save Failed", description: e.message, variant: "destructive" });
+        if (path && (path.includes('->') || path.includes('.'))) {
+            const pathParts = path.split(/->>|->|\./).map(p => p.trim().replace(/['"]/g, '')).filter(Boolean);
+            const column = pathParts[0];
+            const nestedPath = pathParts.slice(1);
+            const existingJson = { ...(existing?.[column] || {}) };
+            payload[column] = setDeepValue(existingJson, nestedPath, newValue);
+        } else {
+            payload = { [path || placeholder.name]: newValue };
         }
-    };
+
+        const { error } = await supabase.from(table).update({ ...payload, updated_at: new Date().toISOString() }).eq(linkVar, entId);
+        if (error) throw error;
+
+        toast({ title: "Updated", description: "Successfully saved to the specific source record." });
+    } catch (e) {
+        toast({ title: "Save Error", description: e.message, variant: "destructive" });
+    } finally {
+        setIsSavingProfile(false);
+    }
+};
 
     const refineFieldWithAI = async (placeholder, allFormData) => {
         if (!placeholder.ai_prompt) return null;
@@ -3336,6 +3400,7 @@ export default function TemplateGenerationDialog({
                                                             value={formData[p.name]}
                                                             onChange={(val) => handleInputChange(p.name, val)}
                                                             onSaveToDb={saveFieldToDatabase}
+                                                              masterFields={masterFields}
                                                             resolvedOptions={resolvedOptions}
                                                             onFileChange={(e) => handleFileChange(p.name, e)}
                                                             imageStyles={imageStyles}

@@ -114,6 +114,7 @@ interface WebDataGroup {
     linkedMasterFieldId?: number;
     linkedMasterFields?: number[];
     linkedKycDocuments?: string[];
+    sourceLogic?: 'all' | 'priority';
     linkedJobQuestionId?: string;
     linkedJobQuestionIds?: string[];
     documentLogic?: 'merge' | 'fallback';
@@ -126,6 +127,7 @@ interface WebDataGroup {
   linkedMasterFields: number[];
   linkedJobQuestionId?: string;
   linkedJobQuestionIds?: string[];
+  sourceLogic?: 'all' | 'priority';
   kycDocumentId?: string; // Legacy support
   linkedKycDocuments?: string[]; // Array of IDs
   documentLogic?: 'merge' | 'fallback';
@@ -424,6 +426,35 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, jobQuestions, on
     onUpdate(newItems);
   };
 
+  // Helper handlers for the SourcePriorityManager within an array item
+  const moveArrayItemSource = (itemIdx: number, listKey: 'linkedMasterFields' | 'linkedJobQuestionIds', sourceIdx: number, direction: 'up' | 'down') => {
+    const newItems = [...items];
+    const newList = [...(newItems[itemIdx][listKey] || [])] as any[];
+    const targetIndex = direction === 'up' ? sourceIdx - 1 : sourceIdx + 1;
+    if (targetIndex < 0 || targetIndex >= newList.length) return;
+    [newList[sourceIdx], newList[targetIndex]] = [newList[targetIndex], newList[sourceIdx]];
+    newItems[itemIdx] = { ...newItems[itemIdx], [listKey]: newList };
+    onUpdate(newItems);
+  };
+
+  const unlinkArrayItemMaster = (itemIdx: number, fieldId: number) => {
+    const newItems = [...items];
+    newItems[itemIdx] = {
+      ...newItems[itemIdx],
+      linkedMasterFields: (newItems[itemIdx].linkedMasterFields || []).filter(id => id !== fieldId)
+    };
+    onUpdate(newItems);
+  };
+
+  const unlinkArrayItemQuestion = (itemIdx: number, qId: string) => {
+    const newItems = [...items];
+    newItems[itemIdx] = {
+      ...newItems[itemIdx],
+      linkedJobQuestionIds: (newItems[itemIdx].linkedJobQuestionIds || []).filter(id => id !== qId)
+    };
+    onUpdate(newItems);
+  };
+
   const addItem = () => {
     const newItem = {
       name: '',
@@ -435,18 +466,14 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, jobQuestions, on
       directorType: undefined,
       linkedMasterFields: [],
       linkedKycDocuments: [],
-      linkedJobQuestionIds: [] // Initialize empty array
+      linkedJobQuestionIds: [],
+      sourceLogic: 'priority'
     };
     onUpdate([...items, newItem]);
   };
 
   const [itemToDeleteIndex, setItemToDeleteIndex] = useState<number | null>(null);
   const [deleteItemDialogOpen, setDeleteItemDialogOpen] = useState(false);
-
-  const removeItem = (idx: number) => {
-    setItemToDeleteIndex(idx);
-    setDeleteItemDialogOpen(true);
-  };
 
   const requestDeleteItem = (idx: number) => {
     setItemToDeleteIndex(idx);
@@ -464,20 +491,23 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, jobQuestions, on
 
   const linkMasterField = (idx: number, field: JobField) => {
     const newItems = [...items];
-    const currentLinkedFields = newItems[idx].linkedMasterFields || [];
-    if (!currentLinkedFields.includes(field.id)) {
-      newItems[idx] = { ...newItems[idx], linkedMasterFields: [...currentLinkedFields, field.id] };
+    const current = newItems[idx].linkedMasterFields || [];
+    if (!current.includes(field.id)) {
+      newItems[idx] = { ...newItems[idx], linkedMasterFields: [...current, field.id] };
       onUpdate(newItems);
     }
   };
 
-  const unlinkMasterField = (idx: number, fieldId: number) => {
+  const linkJobQuestion = (idx: number, questionId: string) => {
     const newItems = [...items];
-    const currentLinkedFields = newItems[idx].linkedMasterFields || [];
-    newItems[idx] = { ...newItems[idx], linkedMasterFields: currentLinkedFields.filter(id => id !== fieldId) };
-    onUpdate(newItems);
+    const current = newItems[idx].linkedJobQuestionIds || [];
+    if (!current.includes(questionId)) {
+      newItems[idx] = { ...newItems[idx], linkedJobQuestionIds: [...current, questionId] };
+      onUpdate(newItems);
+    }
   };
 
+  // ... (linkDocument/unlinkDocument functions remain unchanged)
   const linkDocument = (idx: number, docId: string) => {
     const newItems = [...items];
     const currentLinkedDocs = newItems[idx].linkedKycDocuments || [];
@@ -494,22 +524,6 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, jobQuestions, on
     onUpdate(newItems);
   };
 
-  const linkJobQuestion = (idx: number, questionId: string) => {
-    const newItems = [...items];
-    const current = newItems[idx].linkedJobQuestionIds || (newItems[idx].linkedJobQuestionId ? [newItems[idx].linkedJobQuestionId] : []) || [];
-    if (!current.includes(questionId)) {
-      newItems[idx] = { ...newItems[idx], linkedJobQuestionIds: [...current, questionId] };
-      onUpdate(newItems);
-    }
-  };
-
-  const unlinkJobQuestion = (idx: number, questionId: string) => {
-    const newItems = [...items];
-    const current = newItems[idx].linkedJobQuestionIds || (newItems[idx].linkedJobQuestionId ? [newItems[idx].linkedJobQuestionId] : []) || [];
-    newItems[idx] = { ...newItems[idx], linkedJobQuestionIds: current.filter(id => id !== questionId) };
-    onUpdate(newItems);
-  };
-
   const [open, setOpen] = useState(false);
 
   return (
@@ -517,179 +531,371 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, jobQuestions, on
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogTrigger asChild>
           <Button variant="outline" size="sm" className={cn(
-            "w-full justify-between px-3 text-sm bg-white border-slate-200",
-            items.length > 0 ? "text-blue-700 border-blue-200 bg-blue-50" : "text-slate-500"
+            "w-full justify-between px-3 text-sm bg-white border-slate-200 hover:bg-slate-50 transition-colors",
+            items.length > 0 ? "text-blue-700 border-blue-200 bg-blue-50 hover:bg-blue-100" : "text-slate-500"
           )}>
             <span className="flex items-center gap-2">
               <TableIcon className="h-3.5 w-3.5" />
-              {items.length > 0 ? `${items.length} columns defined` : "Configure Array"}
+              {items.length > 0 ? `${items.length} column${items.length !== 1 ? 's' : ''} defined` : "Configure Array Columns"}
             </span>
             <ChevronRight className="h-3 w-3 opacity-50" />
           </Button>
         </DialogTrigger>
-        <DialogContent className="max-w-7xl max-h-[85vh] p-0">
-          <DialogHeader className="px-6 py-4 border-b bg-slate-50">
-            <DialogTitle className="flex items-center gap-2 text-slate-800">
-              <TableIcon className="h-4 w-4 text-blue-600" />
-              Array Column Mapping
-            </DialogTitle>
-            <DialogDescription>
-              Define the schema for rows within the <strong>{group.variableName}</strong> array.
-            </DialogDescription>
-            <Button size="sm" onClick={addItem} className="h-7 text-sm bg-blue-600 hover:bg-blue-700 text-white shadow-sm absolute right-6 top-4">
-              <Plus className="h-3 w-3 mr-1" /> Add Column
-            </Button>
+        <DialogContent className="max-w-7xl max-h-[90vh] p-0 flex flex-col border-none shadow-2xl">
+          <DialogHeader className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50 shrink-0">
+            <div className="flex items-center justify-between">
+              <div>
+                <DialogTitle className="flex items-center gap-2 text-slate-900 text-xl font-bold">
+                  <div className="h-8 w-8 rounded-lg bg-blue-600 flex items-center justify-center">
+                    <TableIcon className="h-4 w-4 text-white" />
+                  </div>
+                  Array Column Mapping
+                </DialogTitle>
+                <DialogDescription className="mt-1 text-slate-600">
+                  Define the schema for rows within the <strong className="text-blue-700">{group.variableName}</strong> array.
+                </DialogDescription>
+              </div>
+              <Button size="sm" onClick={addItem} className="h-9 px-4 text-sm bg-blue-600 hover:bg-blue-700 text-white font-semibold">
+                <Plus className="h-4 w-4 mr-1.5" /> Add Column
+              </Button>
+            </div>
           </DialogHeader>
 
-          <ScrollArea className="max-h-[600px]">
-            <div className="w-full">
-              <Table>
-                <TableHeader className="bg-slate-100/50 border-b border-slate-200 sticky top-0 z-10">
-                  <TableRow>
-                    <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase">Display Name</TableHead>
-                    <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase">Web Key</TableHead>
-                    <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase">Type</TableHead>
-                    <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase">Scope</TableHead>
-                    <TableHead className="w-[30%] text-[10px] font-bold text-slate-500 uppercase">Source Mapping</TableHead>
-                    <TableHead className="w-[12%] text-[10px] font-bold text-slate-500 uppercase">Mode</TableHead>
-                    <TableHead className="w-[10%] text-center text-[10px] font-bold text-slate-500 uppercase">Action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {items.length === 0 ? (
-                    <TableRow><TableCell colSpan={7} className="py-12 text-center text-slate-400">No columns defined.</TableCell></TableRow>
-                  ) : (
-                    items.map((item, i) => (
-                      <TableRow key={i} className="hover:bg-slate-50 transition-colors">
-                        <TableCell className="p-2">
-                          <Input value={item.displayName || ''} onChange={e => handleItemChange(i, 'displayName', e.target.value)} className="h-8 text-sm" />
-                        </TableCell>
-                        <TableCell className="p-2">
-                          <Input value={item.variableName} onChange={e => handleItemChange(i, 'variableName', e.target.value)} className="h-8 text-sm" />
-                        </TableCell>
-                        <TableCell className="p-2">
-                          <div className="flex flex-col gap-1">
-                            <Select value={item.type} onValueChange={(val) => handleItemChange(i, 'type', val)}>
-                              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="text">Text</SelectItem>
-                                <SelectItem value="number">Number</SelectItem>
-                                <SelectItem value="date">Date</SelectItem>
-                                <SelectItem value="boolean">Boolean</SelectItem>
-                                <SelectItem value="document">Document</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            {item.type === 'date' && (
-                              <Select value={item.dateFormat || 'iso'} onValueChange={(val) => handleItemChange(i, 'dateFormat', val)}>
-                                <SelectTrigger className="h-7 text-[10px] bg-blue-50"><SelectValue /></SelectTrigger>
+          <ScrollArea className="flex-1 overflow-auto">
+            <div className="w-full p-4 bg-slate-50/50">
+              <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
+                <Table>
+                  <TableHeader className="bg-slate-100 border-b-2 border-slate-200 sticky top-0 z-10">
+                    <TableRow>
+                      <TableHead className="w-[12%] text-[10px] font-black text-slate-700 uppercase">Display Name</TableHead>
+                      <TableHead className="w-[12%] text-[10px] font-black text-slate-700 uppercase">Web Key</TableHead>
+                      <TableHead className="w-[10%] text-[10px] font-black text-slate-700 uppercase">Type</TableHead>
+                      <TableHead className="w-[12%] text-[10px] font-black text-slate-700 uppercase">Scope</TableHead>
+                      <TableHead className="w-[34%] text-[10px] font-black text-slate-700 uppercase">Source Mapping</TableHead>
+                      <TableHead className="w-[10%] text-[10px] font-black text-slate-700 uppercase">Mode</TableHead>
+                      <TableHead className="w-[10%] text-center text-[10px] font-black text-slate-700 uppercase">Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {items.map((item, i) => {
+                      const totalSources = (item.linkedMasterFields?.length || 0) + (item.linkedJobQuestionIds?.length || 0);
+                      
+                      return (
+                        <TableRow key={i} className="hover:bg-slate-50 border-b border-slate-100">
+                          <TableCell className="p-3">
+                            <Input value={item.displayName || ''} onChange={e => handleItemChange(i, 'displayName', e.target.value)} className="h-9 text-sm" placeholder="Label" />
+                          </TableCell>
+                          <TableCell className="p-3">
+                            <Input value={item.variableName} onChange={e => handleItemChange(i, 'variableName', e.target.value)} className="h-9 text-sm font-mono" placeholder="key" />
+                          </TableCell>
+                          <TableCell className="p-3">
+                            <div className="flex flex-col gap-1.5">
+                              <Select value={item.type} onValueChange={(val) => handleItemChange(i, 'type', val)}>
+                                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="iso">YYYY-MM-DD</SelectItem>
-                                  <SelectItem value="object_split">Object</SelectItem>
-                                  <SelectItem value="dd_mm_yyyy">DD/MM/YYYY</SelectItem>
+                                  <SelectItem value="text">Text</SelectItem>
+                                  <SelectItem value="number">Number</SelectItem>
+                                  <SelectItem value="date">Date</SelectItem>
+                                  <SelectItem value="document">Document</SelectItem>
                                 </SelectContent>
                               </Select>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="p-2">
-                          <EntityConfigurator
-                            group={{ ...item, id: `item-${i}`, fieldType: item.type } as any}
-                            onUpdate={(updates) => handleItemChange(i, 'entityTypes', updates.entityTypes)}
-                          />
-                        </TableCell>
-                        <TableCell className="p-2">
-                          <div className="space-y-3">
+                            </div>
+                          </TableCell>
+                          <TableCell className="p-3">
+                            <EntityConfigurator
+                              group={{ ...item, id: `item-${i}`, fieldType: item.type } as any}
+                              onUpdate={(updates) => handleItemChange(i, 'entityTypes', updates.entityTypes)}
+                            />
+                          </TableCell>
+                          <TableCell className="p-3">
                             {item.type === 'document' ? (
-                              <div className="space-y-1">
-                                <div className="text-[9px] font-bold text-amber-600 uppercase">KYC Documents</div>
-                                <div className="flex flex-wrap gap-1 mb-1">
-                                  {item.linkedKycDocuments?.map(docId => (
-                                    <Badge key={docId} variant="secondary" className="bg-amber-50 text-amber-700 h-6">
-                                      {kycDocuments.find(d => d.id === docId)?.display_name || docId}
-                                      <X className="h-3 w-3 ml-1 cursor-pointer" onClick={() => unlinkDocument(i, docId)} />
-                                    </Badge>
-                                  ))}
-                                </div>
-                                <MultiDocumentPicker
-                                  availableDocuments={kycDocuments}
-                                  linkedDocumentIds={item.linkedKycDocuments || []}
-                                  onSelect={(doc) => linkDocument(i, doc.id)}
-                                />
-                              </div>
-                            ) : (
-                              <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-1">
-                                  <div className="text-[9px] font-bold text-blue-600 uppercase">DB Fields</div>
-                                  <div className="flex flex-wrap gap-1 mb-1">
-                                    {item.linkedMasterFields?.map(fieldId => (
-                                      <Badge key={fieldId} variant="secondary" className="bg-blue-50 text-blue-700 h-6">
-                                        {masterFields.find(f => f.id === fieldId)?.label || fieldId}
-                                        <X className="h-3 w-3 ml-1 cursor-pointer" onClick={() => unlinkMasterField(i, fieldId)} />
+                               <div className="space-y-2">
+                                  <div className="flex flex-wrap gap-1.5 mb-1">
+                                    {item.linkedKycDocuments?.map(docId => (
+                                      <Badge key={docId} variant="secondary" className="bg-amber-50 text-amber-700 h-6 border-amber-200">
+                                        {kycDocuments.find(d => d.id === docId)?.display_name || docId}
+                                        <X className="h-3 w-3 ml-1.5 cursor-pointer" onClick={() => unlinkDocument(i, docId)} />
                                       </Badge>
                                     ))}
                                   </div>
+                                  <MultiDocumentPicker
+                                    availableDocuments={kycDocuments}
+                                    linkedDocumentIds={item.linkedKycDocuments || []}
+                                    onSelect={(doc) => linkDocument(i, doc.id)}
+                                  />
+                               </div>
+                            ) : (
+                              <div className="space-y-2">
+                                <div className="flex items-center justify-between p-2 bg-slate-100/50 rounded-lg border border-slate-200 min-h-[44px]">
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {item.linkedMasterFields?.length > 0 && (
+                                      <Badge className="bg-blue-50 text-blue-700 h-6 text-[10px] border-blue-200 font-bold">
+                                        {item.linkedMasterFields.length} DB
+                                      </Badge>
+                                    )}
+                                    {item.linkedJobQuestionIds?.length > 0 && (
+                                      <Badge className="bg-purple-50 text-purple-700 h-6 text-[10px] border-purple-200 font-bold">
+                                        {item.linkedJobQuestionIds.length} Job
+                                      </Badge>
+                                    )}
+                                    {totalSources === 0 && <span className="text-[10px] text-slate-400 italic">No sources</span>}
+                                  </div>
+
+                                  {totalSources > 1 && (
+                                    <Popover>
+                                      <PopoverTrigger asChild>
+                                        <Button variant="outline" size="sm" className="h-7 px-2 text-[10px] border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100">
+                                          <ArrowUpDown className="h-3 w-3 mr-1" /> Logic: {item.sourceLogic === 'all' ? 'All' : 'Priority'}
+                                        </Button>
+                                      </PopoverTrigger>
+                                      <PopoverContent className="w-[350px] p-4 shadow-2xl border-slate-200" align="end">
+                                        <div className="space-y-4">
+                                          <div className="flex items-center justify-between border-b pb-2">
+                                            <Label className="text-xs font-bold uppercase text-slate-500 tracking-wider">Multi-Source Logic</Label>
+                                            <Select 
+                                              value={item.sourceLogic || 'priority'} 
+                                              onValueChange={(v) => handleItemChange(i, 'sourceLogic', v)}
+                                            >
+                                              <SelectTrigger className="h-7 w-[140px] text-[10px] bg-white">
+                                                <SelectValue />
+                                              </SelectTrigger>
+                                              <SelectContent>
+                                                <SelectItem value="priority">Check Priority</SelectItem>
+                                                <SelectItem value="all">Return All (Array)</SelectItem>
+                                              </SelectContent>
+                                            </Select>
+                                          </div>
+                                          
+                                          <SourcePriorityManager
+                                            linkedMasterFields={item.linkedMasterFields || []}
+                                            linkedJobQuestionIds={item.linkedJobQuestionIds || []}
+                                            sourceLogic={item.sourceLogic || 'priority'}
+                                            masterFields={masterFields}
+                                            jobQuestions={jobQuestions}
+                                            onUpdate={(key, value) => handleItemChange(i, key, value)}
+                                            onMoveItem={(key, sIdx, dir) => moveArrayItemSource(i, key, sIdx, dir)}
+                                            onUnlinkMaster={(id) => unlinkArrayItemMaster(i, id)}
+                                            onUnlinkQuestion={(id) => unlinkArrayItemQuestion(i, id)}
+                                          />
+                                        </div>
+                                      </PopoverContent>
+                                    </Popover>
+                                  )}
+                                </div>
+                                <div className="flex gap-2">
                                   <MultiMasterFieldPicker
                                     availableFields={masterFields}
                                     linkedFieldIds={item.linkedMasterFields || []}
                                     onSelect={(f) => linkMasterField(i, f)}
                                   />
-                                </div>
-                                <div className="space-y-1">
-                                  <div className="text-[9px] font-bold text-purple-600 uppercase">Job Questions</div>
-                                  <div className="flex flex-wrap gap-1 mb-1">
-                                    {(item.linkedJobQuestionIds || (item.linkedJobQuestionId ? [item.linkedJobQuestionId] : [])).map(qid => (
-                                      <Badge key={qid} variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 h-6">
-                                        <span className="truncate max-w-[80px]">{jobQuestions.find(q => q.id === qid)?.label || qid}</span>
-                                        <X className="h-3 w-3 ml-1 cursor-pointer" onClick={() => unlinkJobQuestion(i, qid)} />
-                                      </Badge>
-                                    ))}
-                                  </div>
                                   <MultiJobQuestionPicker
                                     availableQuestions={jobQuestions}
-                                    linkedQuestionIds={item.linkedJobQuestionIds || (item.linkedJobQuestionId ? [item.linkedJobQuestionId] : [])}
+                                    linkedQuestionIds={item.linkedJobQuestionIds || []}
                                     onSelect={(qid) => linkJobQuestion(i, qid)}
                                   />
                                 </div>
                               </div>
                             )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="p-2">
-                          <Select value={item.extractionMode || 'latest'} onValueChange={(val) => handleItemChange(i, 'extractionMode', val)}>
-                            <SelectTrigger className="h-7 text-[10px]"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="latest">Latest</SelectItem>
-                              <SelectItem value="all">All</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell className="p-2 text-center">
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400" onClick={() => requestDeleteItem(i)}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
+                          </TableCell>
+                          <TableCell className="p-3">
+                            <Select value={item.extractionMode || 'latest'} onValueChange={(val) => handleItemChange(i, 'extractionMode', val)}>
+                              <SelectTrigger className="h-8 text-[10px] bg-white"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="latest">Latest</SelectItem>
+                                <SelectItem value="all">All Entries</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell className="p-3 text-center">
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-red-600 hover:bg-red-50" onClick={() => requestDeleteItem(i)}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           </ScrollArea>
+
+          <div className="px-6 py-4 bg-white border-t flex justify-end shrink-0">
+            <Button onClick={() => setOpen(false)} className="px-8 bg-blue-600 hover:bg-blue-700 h-10 text-white font-semibold uppercase text-xs tracking-wide">
+              Close Column Editor
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
+      
+      {/* Delete Confirmation Alert Stays same as provided */}
       <AlertDialog open={deleteItemDialogOpen} onOpenChange={setDeleteItemDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Array Column</AlertDialogTitle>
-            <AlertDialogDescription>Are you sure you want to remove this column from the array definition?</AlertDialogDescription>
+            <AlertDialogDescription>Are you sure you want to remove this column from the array definition? This action cannot be undone.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmRemoveItem} className="bg-red-600 hover:bg-red-700">Delete</AlertDialogAction>
+            <AlertDialogAction onClick={confirmRemoveItem} className="bg-red-600 hover:bg-red-700">Delete Column</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+function SourcePriorityManager({
+  linkedMasterFields = [],
+  linkedJobQuestionIds = [],
+  sourceLogic = 'priority',
+  masterFields,
+  jobQuestions,
+  onUpdate,
+  onMoveItem,
+  onUnlinkMaster,
+  onUnlinkQuestion
+}: {
+  linkedMasterFields: number[];
+  linkedJobQuestionIds: string[];
+  sourceLogic: 'all' | 'priority';
+  masterFields: JobField[];
+  jobQuestions: any[];
+  onUpdate: (key: string, value: any) => void;
+  onMoveItem: (listKey: 'linkedMasterFields' | 'linkedJobQuestionIds', index: number, direction: 'up' | 'down') => void;
+  onUnlinkMaster: (id: number) => void;
+  onUnlinkQuestion: (id: string) => void;
+}) {
+  const hasSources = linkedMasterFields.length > 0 || linkedJobQuestionIds.length > 0;
+
+  if (!hasSources) {
+    return (
+      <div className="flex flex-col items-center justify-center py-10 border-2 border-dashed rounded-lg bg-slate-50 text-slate-400">
+        <Database className="h-10 w-10 mb-3 opacity-20" />
+        <p className="text-sm font-semibold">No sources linked yet</p>
+        <p className="text-xs mt-1 text-center max-w-[200px]">Add a database field or job question below to begin mapping data</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Database Fields Section */}
+      {linkedMasterFields.length > 0 && (
+        <div className="space-y-2">
+          <Label className="text-xs font-black text-blue-700 uppercase tracking-wide flex items-center gap-1.5">
+            <Database className="h-3.5 w-3.5" /> Database Fields
+            {sourceLogic === 'priority' && (
+              <span className="text-[10px] font-normal text-slate-400 lowercase ml-auto">(Priority Order)</span>
+            )}
+          </Label>
+          <div className="flex flex-col gap-2">
+            {linkedMasterFields.map((id, idx) => {
+              const field = masterFields.find(f => f.id === id);
+              return (
+                <div 
+                  key={`db-${id}`} 
+                  className="flex items-center gap-2 bg-white p-3 rounded-lg border border-slate-200 shadow-sm hover:shadow-md transition-shadow group"
+                >
+                  {sourceLogic === 'priority' && (
+                    <div className="flex flex-col gap-0.5 border-r pr-2 mr-1">
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-5 w-5 hover:text-blue-600 hover:bg-blue-50" 
+                        onClick={() => onMoveItem('linkedMasterFields', idx, 'up')} 
+                        disabled={idx === 0}
+                      >
+                        <ArrowUp className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-5 w-5 hover:text-blue-600 hover:bg-blue-50" 
+                        onClick={() => onMoveItem('linkedMasterFields', idx, 'down')} 
+                        disabled={idx === linkedMasterFields.length - 1}
+                      >
+                        <ArrowDown className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-slate-800 truncate">{field?.label || `Field #${id}`}</div>
+                    <div className="text-[10px] text-slate-400 font-mono">ID: {id}</div>
+                  </div>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-7 w-7 text-slate-300 hover:text-red-600 hover:bg-red-50" 
+                    onClick={() => onUnlinkMaster(id)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Job Questions Section */}
+      {linkedJobQuestionIds.length > 0 && (
+        <div className="space-y-2">
+          <Label className="text-xs font-black text-purple-700 uppercase tracking-wide flex items-center gap-1.5">
+            <HelpCircle className="h-3.5 w-3.5" /> Job Questions
+            {sourceLogic === 'priority' && linkedMasterFields.length > 0 && (
+              <span className="text-[10px] font-normal text-slate-400 lowercase ml-auto">(Fallback)</span>
+            )}
+          </Label>
+          <div className="flex flex-col gap-2">
+            {linkedJobQuestionIds.map((id, idx) => {
+              const q = jobQuestions.find(q => q.id === id);
+              return (
+                <div 
+                  key={`job-${id}`} 
+                  className="flex items-center gap-2 bg-white p-3 rounded-lg border border-slate-200 shadow-sm hover:shadow-md transition-shadow group"
+                >
+                  {sourceLogic === 'priority' && (
+                    <div className="flex flex-col gap-0.5 border-r pr-2 mr-1">
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-5 w-5 hover:text-purple-600 hover:bg-purple-50" 
+                        onClick={() => onMoveItem('linkedJobQuestionIds', idx, 'up')} 
+                        disabled={idx === 0}
+                      >
+                        <ArrowUp className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-5 w-5 hover:text-purple-600 hover:bg-purple-50" 
+                        onClick={() => onMoveItem('linkedJobQuestionIds', idx, 'down')} 
+                        disabled={idx === linkedJobQuestionIds.length - 1}
+                      >
+                        <ArrowDown className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-slate-800 truncate">{q?.label || `Question ${id}`}</div>
+                    <div className="text-[10px] text-slate-400 font-mono">{id}</div>
+                  </div>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-7 w-7 text-slate-300 hover:text-red-600 hover:bg-red-50" 
+                    onClick={() => onUnlinkQuestion(id)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -780,7 +986,8 @@ function WebDataGroupEditDialog({
         ...group,
         linkedKycDocuments: initialDocuments,
         documentLogic: group.documentLogic || 'merge',
-        linkedJobQuestionId: group.linkedJobQuestionId || undefined
+        linkedJobQuestionIds: group.linkedJobQuestionIds || (group.linkedJobQuestionId ? [group.linkedJobQuestionId] : []),
+        sourceLogic: group.sourceLogic || 'priority'
       });
     }
   }, [group, open]);
@@ -792,130 +999,106 @@ function WebDataGroupEditDialog({
   };
 
   const linkMasterField = (field: JobField) => {
-    setEditingGroup(prev => prev ? {
-      ...prev,
-      linkedMasterFields: [...(prev.linkedMasterFields || []), field.id]
-    } : null);
+    if (editingGroup.linkedMasterFields?.includes(field.id)) return;
+    updateField('linkedMasterFields', [...(editingGroup.linkedMasterFields || []), field.id]);
   };
 
   const unlinkMasterField = (fieldId: number) => {
-    setEditingGroup(prev => prev ? {
-      ...prev,
-      linkedMasterFields: (prev.linkedMasterFields || []).filter(id => id !== fieldId)
-    } : null);
+    updateField('linkedMasterFields', (editingGroup.linkedMasterFields || []).filter(id => id !== fieldId));
   };
 
   const linkJobQuestion = (questionId: string) => {
-    setEditingGroup(prev => {
-      if (!prev) return null;
-      const current = prev.linkedJobQuestionIds || (prev.linkedJobQuestionId ? [prev.linkedJobQuestionId] : []) || [];
-      if (current.includes(questionId)) return prev;
-      return { ...prev, linkedJobQuestionIds: [...current, questionId] };
-    });
+    const current = editingGroup.linkedJobQuestionIds || [];
+    if (current.includes(questionId)) return;
+    updateField('linkedJobQuestionIds', [...current, questionId]);
   };
 
   const unlinkJobQuestion = (questionId: string) => {
-    setEditingGroup(prev => {
-      if (!prev) return null;
-      const current = prev.linkedJobQuestionIds || (prev.linkedJobQuestionId ? [prev.linkedJobQuestionId] : []) || [];
-      return { ...prev, linkedJobQuestionIds: current.filter(id => id !== questionId) };
-    });
+    const current = editingGroup.linkedJobQuestionIds || [];
+    updateField('linkedJobQuestionIds', current.filter(id => id !== questionId));
   };
 
-  const addDocument = (docId: string) => {
-    setEditingGroup(prev => {
-      if (!prev) return null;
-      const current = prev.linkedKycDocuments || [];
-      if (current.includes(docId)) return prev;
-      return { ...prev, linkedKycDocuments: [...current, docId] };
-    });
-    setAddDocOpen(false);
-  }
-
-  const removeDocument = (docId: string) => {
-    setEditingGroup(prev => {
-      if (!prev) return null;
-      return { ...prev, linkedKycDocuments: (prev.linkedKycDocuments || []).filter(id => id !== docId) };
-    });
-  }
-
-  const moveDocument = (index: number, dir: 'up' | 'down') => {
-    setEditingGroup(prev => {
-      if (!prev || !prev.linkedKycDocuments) return prev;
-      const newDocs = [...prev.linkedKycDocuments];
-      const targetIndex = dir === 'up' ? index - 1 : index + 1;
-      if (targetIndex < 0 || targetIndex >= newDocs.length) return prev;
-      [newDocs[index], newDocs[targetIndex]] = [newDocs[targetIndex], newDocs[index]];
-      return { ...prev, linkedKycDocuments: newDocs };
-    });
-  }
+  const moveItem = (listKey: 'linkedMasterFields' | 'linkedJobQuestionIds', index: number, direction: 'up' | 'down') => {
+    const newList = [...(editingGroup[listKey] || [])] as any[];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= newList.length) return;
+    [newList[index], newList[targetIndex]] = [newList[targetIndex], newList[index]];
+    updateField(listKey, newList);
+  };
 
   const isDocument = editingGroup.fieldType === 'document';
   const isComputed = editingGroup.fieldType === 'computed';
+  const totalSources = (editingGroup.linkedMasterFields?.length || 0) + (editingGroup.linkedJobQuestionIds?.length || 0);
 
-  // Show extraction mode if it's a job question, computed field, or any field with linked master fields
-  const showExtractionMode = editingGroup.linkedJobQuestionId || isComputed ||
-    (editingGroup.linkedMasterFields && editingGroup.linkedMasterFields.length > 0) ||
-    (editingGroup.fieldType === 'array' && editingGroup.arrayItems && editingGroup.arrayItems.length > 0);
+  const showExtractionMode = totalSources > 0 || isComputed || (editingGroup.fieldType === 'array' && (editingGroup.arrayItems?.length || 0) > 0);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-        <DialogHeader>
-          <DialogTitle>Edit Data Field</DialogTitle>
-          <DialogDescription>Configure how this field maps to the web automation.</DialogDescription>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col p-0 gap-0 border-none shadow-2xl">
+        <DialogHeader className="px-6 py-4 bg-white border-b sticky top-0 z-10">
+          <DialogTitle className="text-xl font-bold text-slate-900">Configure Field Mapping</DialogTitle>
+          <DialogDescription>Define how system data maps to the automation variable.</DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 pr-4">
-          <div className="grid gap-6 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Variable Key (JSON Property)</Label>
-                <Input
-                  value={editingGroup.variableName}
-                  onChange={(e) => updateField('variableName', e.target.value)}
-                  className=" text-sm"
-                  placeholder="e.g. first_name"
-                />
+        <ScrollArea className="flex-1 bg-slate-50/30">
+          <div className="p-6 space-y-8">
+            {/* --- Section 1: Basic Identity --- */}
+            <div className="grid grid-cols-2 gap-6 bg-white p-4 rounded-xl border shadow-sm">
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">JSON Variable Key</Label>
+                <div className="relative">
+                  <Key className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  <Input
+                    value={editingGroup.variableName}
+                    onChange={(e) => updateField('variableName', e.target.value)}
+                    className="pl-9 font-mono text-sm bg-slate-50 border-slate-200"
+                    placeholder="e.g. passport_number"
+                  />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>Display Label</Label>
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">UI Display Label</Label>
                 <Input
                   value={editingGroup.efnsDisplayName}
                   onChange={(e) => updateField('efnsDisplayName', e.target.value)}
-                  placeholder="e.g. First Name"
+                  placeholder="e.g. Passport Number"
+                  className="text-sm font-medium"
                 />
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Data Type</Label>
+            {/* --- Section 2: Type & Scope --- */}
+            <div className="grid grid-cols-2 gap-6 items-end">
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">Data Type</Label>
                 <Select value={editingGroup.fieldType} onValueChange={(v) => updateField('fieldType', v)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="text">Text</SelectItem>
+                    <SelectItem value="text">Text (String)</SelectItem>
                     <SelectItem value="number">Number</SelectItem>
                     <SelectItem value="date">Date</SelectItem>
-                    <SelectItem value="array">Array</SelectItem>
-                    <SelectItem value="document">Document</SelectItem>
-                    <SelectItem value="computed">Computed</SelectItem>
+                    <SelectItem value="array">Array (List)</SelectItem>
+                    <SelectItem value="document">Document (File)</SelectItem>
+                    <SelectItem value="computed">Computed (Script)</SelectItem>
                   </SelectContent>
                 </Select>
 
                 {editingGroup.fieldType === 'date' && (
-                  <Select value={editingGroup.dateFormat || 'iso'} onValueChange={(v) => updateField('dateFormat', v)}>
-                    <SelectTrigger className="mt-2 text-sm h-8"><SelectValue placeholder="Format..." /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="iso">YYYY-MM-DD</SelectItem>
-                      <SelectItem value="object_split">Object &#123;d,m,y&#125;</SelectItem>
-                      <SelectItem value="dd_mm_yyyy">DD/MM/YYYY</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <div className="flex items-center gap-2 mt-2 bg-blue-50/50 p-2 rounded border border-blue-100 animate-in slide-in-from-top-1">
+                    <Label className="text-[10px] font-bold text-blue-700">Format:</Label>
+                    <Select value={editingGroup.dateFormat || 'iso'} onValueChange={(v) => updateField('dateFormat', v)}>
+                      <SelectTrigger className="h-7 text-[10px] border-none bg-transparent focus:ring-0 w-full"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="iso">YYYY-MM-DD</SelectItem>
+                        <SelectItem value="object_split">Object &#123;d,m,y&#125;</SelectItem>
+                        <SelectItem value="dd_mm_yyyy">DD/MM/YYYY</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 )}
               </div>
-              <div className="space-y-2">
-                <Label>Entity Scope</Label>
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">Entity Application</Label>
                 <EntityConfigurator
                   group={editingGroup}
                   onUpdate={(updates) => Object.entries(updates).forEach(([k, v]) => updateField(k as any, v))}
@@ -923,218 +1106,206 @@ function WebDataGroupEditDialog({
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label>Custom Field Source (Optional)</Label>
-              <Input
-                value={editingGroup.customFieldSource || ''}
-                onChange={(e) => updateField('customFieldSource', e.target.value)}
-                placeholder="e.g. Passport (Used for grouping fields in UI)"
-              />
-            </div>
+            {/* --- Section 3: Source Mapping (The Core) --- */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm font-bold text-slate-800 uppercase tracking-wider">Source Configuration</Label>
+                  <Badge variant="outline" className="text-[10px] bg-slate-100">{totalSources} Linked</Badge>
+                </div>
 
-            <div className="space-y-2">
-              <Label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
-                <HelpCircle className="h-3 w-3" /> Linked Job Questions
-              </Label>
-              <div className="flex flex-wrap gap-2 p-2 bg-white border rounded min-h-[40px]">
-                {(editingGroup.linkedJobQuestionIds || (editingGroup.linkedJobQuestionId ? [editingGroup.linkedJobQuestionId] : [])).map(qid => (
-                  <Badge key={qid} variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 h-7 pl-2 pr-1 flex items-center gap-1">
-                    <span className="truncate max-w-[150px]">{jobQuestions.find(q => q.id === qid)?.label || qid}</span>
-                    <Button variant="ghost" size="icon" className="h-4 w-4 rounded-full hover:bg-purple-100" onClick={() => unlinkJobQuestion(qid)}>
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </Badge>
-                ))}
-                <MultiJobQuestionPicker
-                  availableQuestions={jobQuestions}
-                  linkedQuestionIds={editingGroup.linkedJobQuestionIds || (editingGroup.linkedJobQuestionId ? [editingGroup.linkedJobQuestionId] : [])}
-                  onSelect={linkJobQuestion}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-4 border rounded-lg p-4 bg-slate-50">
-              <Label className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-2 block">
-                Source Configuration
-              </Label>
-
-              {isDocument ? (
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center">
-                    <Label className="text-xs text-slate-600">Document Logic Condition:</Label>
+                {totalSources > 1 && (
+                  <div className="flex items-center gap-2 bg-white px-2 py-1 rounded-lg border shadow-sm animate-in fade-in zoom-in-95">
+                    <Label className="text-[10px] font-bold text-slate-400 uppercase">Logic:</Label>
                     <Select
-                      value={editingGroup.documentLogic || 'merge'}
-                      onValueChange={(v) => updateField('documentLogic', v)}
+                      value={editingGroup.sourceLogic || 'priority'}
+                      onValueChange={(v) => updateField('sourceLogic', v)}
                     >
-                      <SelectTrigger className="w-[200px] h-8 text-xs bg-white">
+                      <SelectTrigger className="h-7 w-[160px] text-xs border-none shadow-none focus:ring-0">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="merge">Merge (Use All)</SelectItem>
-                        <SelectItem value="fallback">Fallback (Use First Found)</SelectItem>
+                        <SelectItem value="priority">Fallback (Check Priority)</SelectItem>
+                        <SelectItem value="all">Return All (Array)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
+                )}
+              </div>
 
-                  <div className="flex justify-between items-center">
-                    <Label className="text-xs text-slate-600">Number of Documents Required:</Label>
-                    <Input
-                      type="number"
-                      min="1"
-                      max="99"
-                      placeholder="Optional"
-                      value={editingGroup.documentCount || ''}
-                      onChange={(e) => updateField('documentCount', e.target.value ? parseInt(e.target.value) : undefined)}
-                      className="w-[100px] h-8 text-xs bg-white"
-                    />
-                  </div>
-
-                  <div className="border rounded-md bg-white p-2 space-y-2 overflow-auto max-h-[300px]">
-                    {editingGroup.linkedKycDocuments?.map((docId, index) => {
-                      const doc = kycDocuments.find(d => d.id === docId);
-                      return (
-                        <div key={docId} className="flex items-center gap-2 p-2 rounded border border-slate-100 bg-slate-50 group">
-                          <div className="flex flex-col gap-0.5">
-                            <Button variant="ghost" size="icon" className="h-4 w-4 rounded-none" onClick={() => moveDocument(index, 'up')} disabled={index === 0}>
-                              <ArrowUp className="h-2 w-2 text-slate-500" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="h-4 w-4 rounded-none" onClick={() => moveDocument(index, 'down')} disabled={index === (editingGroup.linkedKycDocuments?.length || 0) - 1}>
-                              <ArrowDown className="h-2 w-2 text-slate-500" />
-                            </Button>
+              <div className="bg-slate-100/50 border rounded-xl p-4 shadow-inner min-h-[120px]">
+                {isDocument ? (
+                  /* --- Document Specific Logic --- */
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <Label className="text-[10px] font-bold text-slate-500 uppercase">File Condition</Label>
+                        <Select value={editingGroup.documentLogic || 'merge'} onValueChange={(v) => updateField('documentLogic', v)}>
+                          <SelectTrigger className="h-9 bg-white"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="merge">Merge (All types)</SelectItem>
+                            <SelectItem value="fallback">Fallback (First available)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-[10px] font-bold text-slate-500 uppercase">Count Required</Label>
+                        <Input
+                          type="number"
+                          placeholder="Optional"
+                          value={editingGroup.documentCount || ''}
+                          onChange={(e) => updateField('documentCount', e.target.value ? parseInt(e.target.value) : undefined)}
+                          className="h-9 bg-white"
+                        />
+                      </div>
+                    </div>
+                    {/* Document list handled here */}
+                    <div className="space-y-2">
+                      <Label className="text-[10px] font-bold text-slate-500 uppercase">Linked KYC Documents</Label>
+                      <div className="bg-white rounded-lg border p-2 space-y-1.5">
+                        {editingGroup.linkedKycDocuments?.map((docId, index) => (
+                          <div key={docId} className="flex items-center gap-2 p-1.5 rounded bg-slate-50 border text-sm">
+                             <div className="flex flex-col">
+                                <Button variant="ghost" size="icon" className="h-3 w-3" onClick={() => moveDocument(index, 'up')} disabled={index === 0}><ArrowUp className="h-2 w-2"/></Button>
+                                <Button variant="ghost" size="icon" className="h-3 w-3" onClick={() => moveDocument(index, 'down')} disabled={index === editingGroup.linkedKycDocuments.length -1}><ArrowDown className="h-2 w-2"/></Button>
+                             </div>
+                             <FileText className="h-3.5 w-3.5 text-amber-500" />
+                             <span className="flex-1 truncate">{kycDocuments.find(d => d.id === docId)?.display_name || docId}</span>
+                             <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400" onClick={() => removeDocument(docId)}><X className="h-3.5 w-3.5" /></Button>
                           </div>
-                          <FileText className="h-4 w-4 text-amber-500" />
-                          <span className="text-sm font-medium flex-1 truncate">{doc?.display_name || "Unknown Doc"}</span>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400 hover:text-red-600 hover:bg-red-50" onClick={() => removeDocument(docId)}>
-                            <X className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      )
-                    })}
-                    <Popover open={addDocOpen} onOpenChange={setAddDocOpen}>
-                      <PopoverTrigger asChild>
-                        <Button variant="outline" size="sm" className="w-full border-dashed text-slate-500 hover:text-blue-600">
-                          <Plus className="h-3 w-3 mr-2" /> Link Document Type
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-[300px] p-0" align="start">
-                        <Command>
-                          <CommandInput placeholder="Search documents..." />
-                          <CommandList>
-                            <CommandEmpty>No document found.</CommandEmpty>
-                            <CommandGroup>
-                              <ScrollArea className="h-[200px]">
+                        ))}
+                        <Popover open={addDocOpen} onOpenChange={setAddDocOpen}>
+                          <PopoverTrigger asChild>
+                            <Button variant="outline" size="sm" className="w-full border-dashed text-xs h-8 text-slate-500 hover:text-blue-600">
+                              <Plus className="h-3 w-3 mr-1" /> Add Doc Type
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[300px] p-0" align="start">
+                            <Command>
+                              <CommandInput placeholder="Search documents..." />
+                              <CommandList className="max-h-[200px]">
                                 {kycDocuments.map(doc => (
                                   <CommandItem key={doc.id} onSelect={() => addDocument(doc.id)} disabled={editingGroup.linkedKycDocuments?.includes(doc.id)}>
-                                    <div className="flex items-center gap-2">
-                                      <Check className={cn("h-3 w-3", editingGroup.linkedKycDocuments?.includes(doc.id) ? "opacity-100" : "opacity-0")} />
-                                      {doc.display_name}
-                                    </div>
+                                    <FileText className="h-3.5 w-3.5 mr-2" /> {doc.display_name}
                                   </CommandItem>
                                 ))}
-                              </ScrollArea>
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ) : isComputed ? (
-                <div className="space-y-4">
+                ) : isComputed ? (
                   <ComputedFieldConfig
                     group={editingGroup}
                     kycDocuments={kycDocuments}
                     onUpdate={(updates) => Object.entries(updates).forEach(([k, v]) => updateField(k as any, v))}
                   />
-                </div>
-              ) : editingGroup.fieldType === 'array' ? (
-                <ArrayConfigurator
-                  group={editingGroup}
-                  masterFields={masterFields}
-                  kycDocuments={kycDocuments}
-                  jobQuestions={jobQuestions}
-                  onUpdate={(items) => updateField('arrayItems', items)}
-                />
-              ) : (
-                <div className="space-y-4">
-                  {/* Database Fields Mapping */}
-                  <div className="space-y-2">
-                    <Label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
-                      <Database className="h-3 w-3" /> Linked Database Fields
-                    </Label>
-                    <div className="flex flex-wrap gap-2 p-2 bg-white border rounded min-h-[40px]">
-                      {(editingGroup.linkedMasterFields || []).map(fieldId => {
-                        const field = masterFields.find(f => f.id === fieldId);
-                        return (
-                          <Badge key={fieldId} variant="secondary" className="pl-2 pr-1 h-7 flex items-center gap-1">
-                            {field?.label || fieldId}
-                            <Button variant="ghost" size="icon" className="h-4 w-4 rounded-full" onClick={() => unlinkMasterField(fieldId)}>
-                              <X className="h-3 w-3" />
-                            </Button>
-                          </Badge>
-                        );
-                      })}
-                      <MasterFieldPicker availableFields={masterFields} onSelect={linkMasterField} />
+                ) : editingGroup.fieldType === 'array' ? (
+                  <ArrayConfigurator
+                    group={editingGroup}
+                    masterFields={masterFields}
+                    kycDocuments={kycDocuments}
+                    jobQuestions={jobQuestions}
+                    onUpdate={(items) => updateField('arrayItems', items)}
+                  />
+                ) : (
+                  /* --- Standard Logic: Fields & Questions --- */
+                  <div className="space-y-6">
+                    <SourcePriorityManager
+                      linkedMasterFields={editingGroup.linkedMasterFields}
+                      linkedJobQuestionIds={editingGroup.linkedJobQuestionIds}
+                      sourceLogic={editingGroup.sourceLogic || 'priority'}
+                      masterFields={masterFields}
+                      jobQuestions={jobQuestions}
+                      onUpdate={updateField}
+                      onMoveItem={moveItem}
+                      onUnlinkMaster={unlinkMasterField}
+                      onUnlinkQuestion={unlinkJobQuestion}
+                    />
+
+                    <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-200">
+                      <div className="space-y-2">
+                        <Label className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
+                           <Database className="h-3 w-3" /> Add DB Field
+                        </Label>
+                        <MasterFieldPicker availableFields={masterFields} onSelect={linkMasterField} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
+                           <HelpCircle className="h-3 w-3" /> Add Question
+                        </Label>
+                        <MultiJobQuestionPicker
+                          availableQuestions={jobQuestions}
+                          linkedQuestionIds={editingGroup.linkedJobQuestionIds || []}
+                          onSelect={linkJobQuestion}
+                        />
+                      </div>
                     </div>
                   </div>
+                )}
+              </div>
 
-                  {/* Job Question Mapping */}
-                  <div className="space-y-2">
-                    <Label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
-                      <HelpCircle className="h-3 w-3" /> Linked Job Question
-                    </Label>
-                    <div>
-                      {editingGroup.linkedJobQuestionId ? (
-                        <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 h-8 pl-3 pr-1 flex items-center gap-2">
-                          <HelpCircle className="h-3.5 w-3.5" />
-                          <span className="font-medium">{editingGroup.linkedJobQuestionId}</span>
-                          <Button variant="ghost" size="icon" className="h-5 w-5 rounded-full hover:bg-purple-100" onClick={unlinkJobQuestion}>
-                            <X className="h-3 w-3" />
-                          </Button>
-                        </Badge>
-                      ) : (
-                        <JobQuestionPicker
-                          availableQuestions={jobQuestions}
-                          onSelect={(q) => updateField('linkedJobQuestionId', q.id)}
-                        />
-                      )}
-                    </div>
+              {/* Warnings and Info */}
+              {totalSources > 1 && (
+                <div className="p-3 bg-blue-50/80 border border-blue-100 rounded-lg flex gap-3 text-blue-700 animate-in slide-in-from-bottom-2">
+                  <Info className="h-4 w-4 shrink-0 mt-0.5" />
+                  <div className="text-[11px] leading-relaxed">
+                    <strong>Note:</strong> {editingGroup.sourceLogic === 'all'
+                      ? `This variable will be populated with an array of values from all ${totalSources} sources.`
+                      : `The automation will attempt to find a value from these sources in order. If the highest priority source is empty, it falls back to the next.`
+                    }
                   </div>
                 </div>
               )}
+            </div>
 
-              {/* Extraction Mode Select */}
+            {/* --- Section 4: Extraction Options --- */}
+            <div className="space-y-4 pt-2">
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">Grouping Label (UI Helper)</Label>
+                <Input
+                  value={editingGroup.customFieldSource || ''}
+                  onChange={(e) => updateField('customFieldSource', e.target.value)}
+                  placeholder="e.g. Identity Documents"
+                  className="bg-white"
+                />
+              </div>
+
               {showExtractionMode && !isDocument && (
-                <div className="flex items-center gap-2 pt-4 border-t mt-4">
-                  <Label className="text-xs font-semibold text-slate-600">Extraction Mode:</Label>
+                <div className="flex items-center justify-between p-3 bg-slate-100 rounded-lg border">
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-bold text-slate-700">Extraction Mode</Label>
+                    <p className="text-[10px] text-slate-500 leading-tight">Does the automation receive one value or an array?</p>
+                  </div>
                   <Select
                     value={editingGroup.extractionMode || 'latest'}
                     onValueChange={(v) => updateField('extractionMode', v)}
                   >
-                    <SelectTrigger className="w-[120px] h-8 text-xs bg-white">
+                    <SelectTrigger className="w-[140px] h-9 bg-white">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="latest">Latest</SelectItem>
-                      <SelectItem value="all">All Entries</SelectItem>
+                      <SelectItem value="latest">Single (Latest)</SelectItem>
+                      <SelectItem value="all">Multiple (All)</SelectItem>
                     </SelectContent>
                   </Select>
-                  <p className="text-[10px] text-slate-400 italic">
-                    * Determines if the automation receives one value or an array of values per applicant.
-                  </p>
                 </div>
               )}
             </div>
           </div>
         </ScrollArea>
 
-        <DialogFooter className="px-6 py-4 border-t bg-white">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={() => onSave(editingGroup)}>Save Changes</Button>
+        <DialogFooter className="px-6 py-4 bg-white border-t flex justify-end gap-3 sticky bottom-0 z-10">
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>Discard Changes</Button>
+          <Button onClick={() => onSave(editingGroup)} className="bg-blue-600 hover:bg-blue-700 px-8 shadow-lg shadow-blue-100">
+            Apply Configuration
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  );
 }
 
 function ComputedFieldConfig({

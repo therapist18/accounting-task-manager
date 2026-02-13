@@ -33,6 +33,7 @@ import { processComputedFields, executeComputedField } from '../utils/automation
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { ENTITY_TYPES, type EntityType } from "@/lib/constants/entity-types";
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 interface AutomationMappingDialogProps {
   isOpen: boolean;
@@ -233,6 +234,16 @@ const cleanFieldValueForDisplay = (value: any): string => {
     }
   }
   return String(value);
+};
+
+const isValidValue = (val: any): boolean => {
+  if (val === null || val === undefined || val === '') return false;
+  const errorStrings = [
+    'Missing', 'Missing Config', 'No Source', 'Computing...',
+    'Document Not Found', 'Field Not Found', 'Missing Document',
+    'No Document Specified', 'Missing Task Data', '[object Object]'
+  ];
+  return !errorStrings.includes(String(val));
 };
 
 export const AutomationMappingDialog = ({
@@ -559,68 +570,69 @@ export const AutomationMappingDialog = ({
   const toggleArrayFieldExpansion = (fieldVariableName: string) => setExpandedArrayFields(prev => { const newSet = new Set(prev); if (newSet.has(fieldVariableName)) newSet.delete(fieldVariableName); else newSet.add(fieldVariableName); return newSet; });
   const toggleSourceFieldExpansion = (fieldId: string) => setExpandedSourceFields(prev => { const newSet = new Set(prev); if (newSet.has(fieldId)) newSet.delete(fieldId); else newSet.add(fieldId); return newSet; });
 
+  const resolveVariableValue = useCallback((fieldDef: any, targetEntityId: string) => {
+    const logic = fieldDef.sourceLogic || 'priority';
+    const masterIds = fieldDef.linkedMasterFields || [];
+    const questionIds = fieldDef.linkedJobQuestionIds || (fieldDef.linkedJobQuestionId ? [fieldDef.linkedJobQuestionId] : []);
+    const extractionMode = fieldDef.extractionMode || 'latest';
+
+    const collectedValues: string[] = [];
+
+    // 1. Process Master Fields in priority order
+    for (const mid of masterIds) {
+      const val = getFieldValue(String(mid), String(targetEntityId), 0, extractionMode);
+      if (isValidValue(val)) {
+        if (logic === 'priority') return val; // Found first priority, exit
+        collectedValues.push(val);
+      }
+    }
+
+    // 2. Process Job Questions in priority order
+    const taskRecord = sourceData['tm_tasks']?.[String(taskId)];
+    const answers = taskRecord?.job_specific_answers || {};
+
+    for (const qId of questionIds) {
+      const answer = answers[String(qId)] ?? answers[Number(qId)];
+      if (isValidValue(answer)) {
+        const cleanAnswer = cleanFieldValue(answer);
+        if (logic === 'priority') return cleanAnswer;
+        collectedValues.push(cleanAnswer);
+      }
+    }
+
+    // 3. Handle "All" logic vs "Missing"
+    if (logic === 'all' && collectedValues.length > 0) {
+      return collectedValues.join(', ');
+    }
+
+    // 4. Default Fallback
+    if (fieldDef.default_value && fieldDef.default_value !== 'Missing') return fieldDef.default_value;
+
+    return "Missing";
+  }, [sourceData, jobFields, masterFieldComputedValues, taskId]);
+
+  // --- UPDATED ARRAY DATA RESOLVER ---
   const getArrayFieldData = (field: any) => {
     const entityIds = resolveEntityIdsForArray(field, relationshipData);
     const arrayData = [];
 
     entityIds.forEach((entityId, index) => {
-      const columnValues: any = {};
-      field.arrayItems?.forEach((item: any) => {
-        const qIds = item.linkedJobQuestionIds || (item.linkedJobQuestionId ? [item.linkedJobQuestionId] : []);
-        const fieldIds = item.linkedMasterFields || (item.linkedMasterFieldId ? [item.linkedMasterFieldId] : []);
+      const rowValues: any = {};
 
-        if (qIds.length > 0) {
-          const taskRecord = sourceData['tm_tasks']?.[String(taskId)];
-          const answers = taskRecord?.job_specific_answers || {};
-          for (const qId of qIds) {
-            const a = answers[String(qId)] ?? answers[Number(qId)];
-            if (a !== undefined && a !== null && String(a).trim() !== "") {
-              columnValues[item.variableName] = cleanFieldValue(a);
-              break;
-            }
-          }
-        } else if (fieldIds.length > 0) {
-          const values = [];
-          for (const fieldId of fieldIds) {
-            const fieldIdStr = String(fieldId);
-            const masterFieldDef = jobFields[fieldIdStr];
+      field.arrayItems?.forEach((col: any) => {
+        // Use the same resolution logic for array columns
+        const val = resolveVariableValue(col, String(entityId));
 
-            if (masterFieldDef?.is_computed || masterFieldDef?.computed_config?.is_computed) {
-              const itemExtractionMode = item.extractionMode || 'latest';
-              const key = `${fieldIdStr}_${entityId}_${itemExtractionMode}`;
-              const val = masterFieldComputedValues[key];
-              if (val && val !== 'Missing' && val !== 'Computing...') {
-                values.push(cleanFieldValue(val));
-              }
-            } else if (masterFieldDef?.sources?.[0]) {
-              const val = getFieldValue(fieldIdStr, String(entityId), 0, item.extractionMode || 'latest');
-              if (val && val !== 'Missing' && val !== 'Missing Config' && val !== 'No Source') {
-                values.push(cleanFieldValue(val));
-              }
-            }
-          }
-          if (values.length > 0) {
-            columnValues[item.variableName] = item.type === 'text'
-              ? values.join(' ')
-              : values.join(', ');
-          }
+        let finalVal = val;
+        if (col.type === 'date' && isValidValue(val)) {
+          finalVal = formatDateValue(val, col.dateFormat);
         }
-        if (item.type === 'date' && columnValues[item.variableName]) {
-          const originalValue = columnValues[item.variableName];
-          columnValues[item.variableName] = formatDateValue(
-            columnValues[item.variableName],
-            item.dateFormat
-          );
-        }
+
+        rowValues[col.variableName] = cleanFieldValue(finalVal);
       });
 
-      if (Object.keys(columnValues).length > 0) {
-        const arrayItem = {
-          ...columnValues,
-          entityId,
-          index
-        }
-        arrayData.push(arrayItem);
+      if (Object.keys(rowValues).length > 0) {
+        arrayData.push({ ...rowValues, entityId, index });
       }
     });
     return arrayData;
@@ -948,95 +960,24 @@ export const AutomationMappingDialog = ({
       if (!mapping?.automation) throw new Error("Automation configuration not found");
       const automation = mapping.automation;
       const automationLogin = automation.login || {};
-      const formData: Record<string, any> = {};
       const activeWeb = webData.find(w => w.automationId === selectedAutomationId);
+      const formData: Record<string, any> = {};
+
       activeWeb?.fields?.forEach((f: any) => {
-        const jobQuestionIds = f.linkedJobQuestionIds || (f.linkedJobQuestionId ? [f.linkedJobQuestionId] : []);
-
-        if (jobQuestionIds.length > 0) {
-          const val = getFieldValue(f.variableName, "");
-          formData[f.variableName] = (val === 'Missing' || val === 'Missing Task Data') ? null : cleanFieldValue(val);
-          return;
-        }
-        if (f.fieldType === 'document') { const targetId = resolveTargetEntityId(f); const doc = documentFiles.find(d => f.linkedKycDocuments?.includes(d.document_id) && String(d.owner_id) === String(targetId)); if (doc) formData[f.variableName] = buildFileUrl(doc); return; }
-        if (f.fieldType === 'computed') return;
-        if (f.fieldType === 'array') {
-          const entityIds = resolveEntityIdsForArray(f, relationshipData);
-          const finalArrayData: any[] = [];
-          entityIds.forEach((id: string) => {
-            const columnsData = (f.arrayItems || []).map((col: any) => {
-              let val: any = '';
-
-              // Handle Multi-link Job Questions within Array Items
-              const colQIds = col.linkedJobQuestionIds || (col.linkedJobQuestionId ? [col.linkedJobQuestionId] : []);
-              if (colQIds.length > 0) {
-                const taskRecord = sourceData['tm_tasks']?.[String(taskId)];
-                const answers = taskRecord?.job_specific_answers || {};
-                for (const qId of colQIds) {
-                  const a = answers[String(qId)] ?? answers[Number(qId)];
-                  if (a !== undefined && a !== null && String(a).trim() !== "") {
-                    val = a;
-                    break;
-                  }
-                }
-                return { ...col, value: cleanFieldValue(val), fieldId: 'job_question' };
-              }
-              const fieldIds = col.linkedMasterFields || (col.linkedMasterFieldId ? [col.linkedMasterFieldId] : []);
-              if (fieldIds.length > 0) {
-                const values = [];
-                for (const fieldId of fieldIds) {
-                  const fieldIdStr = String(fieldId);
-                  const field = jobFields[fieldIdStr];
-                  if (field?.is_computed || field?.computed_config?.is_computed) {
-                    const itemExtractionMode = col.extractionMode || 'latest';
-                    const key = `${field.id}_${id}_${itemExtractionMode}`;
-                    const val = masterFieldComputedValues[key];
-                    if (val && val !== 'Missing' && val !== 'Computing...') {
-                      values.push(cleanFieldValue(val));
-                    }
-                  } else if (field?.sources?.[0]) {
-                    const val = getFieldValue(fieldIdStr, String(id), 0, col.extractionMode || 'latest');
-                    if (val && val !== 'Missing' && val !== 'Missing Config' && val !== 'No Source') {
-                      values.push(cleanFieldValue(val));
-                    }
-                  }
-                }
-
-                // Join multiple values with a space or comma based on field type (matching UI logic)
-                if (values.length > 0) {
-                  val = col.type === 'text'
-                    ? values.join(' ')
-                    : values.join(', ');
-                }
-              }
-              return { ...col, value: cleanFieldValue(val), fieldId: fieldIds[0] || 'master_field' };
-            });
-            const maxRows = Math.max(1, ...columnsData.map((c: any) => Array.isArray(c.value) ? c.value.length : 1));
-            for (let i = 0; i < maxRows; i++) {
-              const rowObj: Record<string, any> = {};
-              columnsData.forEach((col: any) => {
-                let v = col.value;
-                if (Array.isArray(v)) { v = v[i] !== undefined ? v[i] : ""; }
-                else { v = v !== undefined && v !== 'Computing...' ? v : ""; }
-                if (col.type === 'date' && v) { v = formatDateValue(v, col.dateFormat); }
-                rowObj[col.variableName] = cleanFieldValue(v);
-              });
-              finalArrayData.push(rowObj);
-            }
-          });
-          formData[f.variableName] = finalArrayData;
-          return;
-        }
         const targetId = resolveTargetEntityId(f);
-        const masterIds = f.linkedMasterFields || f.masterFieldIds || [];
-        const values = masterIds.map((mid: string | number) => {
-          let val = getFieldValue(String(mid), String(targetId), 0, f.extractionMode || 'latest');
-          if (typeof val === 'object' && val !== null) { if (val.day && val.month && val.year) return val; return val.name || val.label || val.value || JSON.stringify(val); }
-          if (Array.isArray(val)) { val = val.join(', '); }
-          if (f.fieldType === 'date' && val && val !== 'Missing' && val !== 'Computing...') { return formatDateValue(val, f.dateFormat); }
-          return (val === 'Missing' || val === 'Computing...' || val === 'Missing Config' || val === 'No Source') ? null : cleanFieldValue(val);
-        }).filter(Boolean);
-        if (values.length > 0) { formData[f.variableName] = values.length === 1 ? cleanFieldValue(values[0]) : values.join(' '); }
+
+        if (f.fieldType === 'array') {
+          formData[f.variableName] = getArrayFieldData(f);
+        } else if (f.fieldType === 'document') {
+          const doc = documentFiles.find(d => f.linkedKycDocuments?.includes(d.document_id) && String(d.owner_id) === String(targetId));
+          formData[f.variableName] = buildFileUrl(doc);
+        } else if (f.fieldType === 'computed') {
+          formData[f.variableName] = computedFieldsPreview[f.variableName];
+        } else {
+          // Use the priority/all resolution logic
+          const val = resolveVariableValue(f, String(targetId));
+          formData[f.variableName] = val === "Missing" ? null : cleanFieldValue(val);
+        }
       });
       const computedFields = activeWeb?.fields?.filter((f: any) => f.fieldType === 'computed')?.map((f: any) => ({ variableName: f.variableName, computedFunction: f.computedFunction, computedDocuments: f.computedDocuments || [], entityContext: f.entityTypes?.[0], computed_config: f.computed_config })) || [];
       if (computedFields.length > 0) {
@@ -1230,40 +1171,43 @@ export const AutomationMappingDialog = ({
       return <div className="p-12 text-center text-slate-400 text-sm">No fields configured for this automation.</div>;
     }
 
-    // Sort fields logic
-    const processedFields = activeWebEntry.fields.map((field, index) => {
-      let isMissing = false;
+    // --- 1. PRE-PROCESS FIELDS (Calculate values and status) ---
+    const processedFields = activeWebEntry.fields.map((field) => {
       const targetId = resolveTargetEntityId(field);
-      const jobQuestionIds = field.linkedJobQuestionIds || (field.linkedJobQuestionId ? [field.linkedJobQuestionId] : []);
+      let value = "";
+
       if (field.fieldType === 'array') {
-        const entityIds = resolveEntityIdsForArray(field, relationshipData);
-        if (entityIds.length === 0) isMissing = true;
+        const data = getArrayFieldData(field);
+        value = data.length > 0 ? `${data.length} Items Found` : "Missing";
       } else if (field.fieldType === 'document') {
-        const foundDoc = documentFiles.find(d => field.linkedKycDocuments?.includes(d.document_id) && String(d.owner_id) === String(targetId));
-        if (!foundDoc) isMissing = true;
+        const foundDoc = documentFiles.find(d =>
+          field.linkedKycDocuments?.includes(d.document_id) &&
+          String(d.owner_id) === String(targetId)
+        );
+        value = foundDoc ? "Available" : "Missing";
       } else if (field.fieldType === 'computed') {
-        const val = computedFieldsPreview[field.variableName];
-        if (!val || val === 'Pending...' || val === 'Missing' || val === '') isMissing = true;
-      } else if (jobQuestionIds.length > 0) {
-        const val = getFieldValue(field.variableName, "");
-        if (!val || val === 'Missing' || val === 'Missing Task Data') isMissing = true;
+        value = computedFieldsPreview[field.variableName] || "Missing";
       } else {
-        const masterIds = field.linkedMasterFields || field.masterFieldIds || [];
-        const mergedValue = masterIds.map((mid: string | number) => {
-          const v = getFieldValue(String(mid), String(targetId), 0, field.extractionMode || 'latest');
-          return Array.isArray(v) ? v.join(', ') : v;
-        }).join(' ').trim();
-        if (!mergedValue || mergedValue === 'Missing' || mergedValue === 'Missing Config' || mergedValue === 'Missing') isMissing = true;
+        // Use the unified resolver that respects priority/all logic
+        value = resolveVariableValue(field, String(targetId));
       }
-      return { ...field, isMissing };
+
+      return {
+        ...field,
+        resolvedValue: value,
+        isMissing: !isValidValue(value),
+        targetId: String(targetId)
+      };
     });
 
+    // Sort logic
     const sortedFields = sortMissingFirst
       ? [...processedFields].sort((a, b) => (a.isMissing === b.isMissing ? 0 : a.isMissing ? -1 : 1))
       : processedFields;
 
     return (
       <div className="flex flex-col h-full">
+        {/* --- TABLE HEADER / ACTIONS --- */}
         <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-slate-200">
           <div className="flex items-center gap-3">
             <span className="text-sm font-semibold text-slate-600">{processedFields.length} Fields Total</span>
@@ -1273,7 +1217,12 @@ export const AutomationMappingDialog = ({
               </Badge>
             )}
           </div>
-          <Button variant={sortMissingFirst ? "default" : "outline"} size="sm" onClick={() => setSortMissingFirst(!sortMissingFirst)} className="h-8 text-xs">
+          <Button
+            variant={sortMissingFirst ? "default" : "outline"}
+            size="sm"
+            onClick={() => setSortMissingFirst(!sortMissingFirst)}
+            className="h-8 text-xs"
+          >
             <Filter className="h-3 w-3 mr-2" />
             {sortMissingFirst ? "Show All" : "Show Missing First"}
           </Button>
@@ -1285,8 +1234,8 @@ export const AutomationMappingDialog = ({
               <TableHeader className="sticky top-0 z-10 bg-slate-100 border-b-2 border-slate-300">
                 <TableRow>
                   <TableHead className="w-12 px-2 py-3 text-center text-xs font-bold text-slate-600 border-r border-slate-200">#</TableHead>
-                  <TableHead className="w-80 px-4 py-3 text-left text-xs font-bold text-slate-700 border-r border-slate-200">FIELD NAME</TableHead>
-                  <TableHead className="px-4 py-3 text-left text-xs font-bold text-slate-700">SOURCE</TableHead>
+                  <TableHead className="w-80 px-4 py-3 text-left text-xs font-bold text-slate-700 border-r border-slate-200">TARGET VARIABLE</TableHead>
+                  <TableHead className="px-4 py-3 text-left text-xs font-bold text-slate-700">SOURCE LOGIC</TableHead>
                   <TableHead className="px-4 py-3 text-left text-xs font-bold text-slate-700 border-r border-slate-200">CURRENT VALUE</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1294,17 +1243,17 @@ export const AutomationMappingDialog = ({
               <TableBody>
                 {sortedFields.map((field, fIdx) => {
                   const isEditing = editingCell?.fieldId === field.variableName;
-                  const isJobQuestion = !!field.linkedJobQuestionId;
-                  const targetId = resolveTargetEntityId(field);
                   const entityCategory = field.entityTypes?.includes('company') ? 'company' : 'individual';
-                  const targetCompanyId = String(relationshipData?.company?.id || task?.company_id);
+
+                  // =========================================================
+                  // CASE: ARRAY FIELDS (Nested Logic)
+                  // =========================================================
                   if (field.fieldType === 'array') {
-                    const entityIds = resolveEntityIdsForArray(field, relationshipData);
                     const arrayData = getArrayFieldData(field);
                     const isExpanded = expandedArrayFields.has(field.variableName);
 
                     return (
-                      <React.Fragment key={fIdx}>
+                      <React.Fragment key={`field-${fIdx}`}>
                         <TableRow
                           className="bg-blue-50/80 border-b border-blue-200 hover:bg-blue-100 cursor-pointer transition-colors"
                           onClick={() => toggleArrayFieldExpansion(field.variableName)}
@@ -1314,294 +1263,161 @@ export const AutomationMappingDialog = ({
                           </TableCell>
                           <TableCell colSpan={3} className="px-4 py-2">
                             <div className="flex items-center gap-3">
-                              <div className="bg-blue-100 p-1 rounded text-blue-600">
-                                <List className="h-4 w-4" />
-                              </div>
-                              <span className="text-sm font-bold text-slate-800">
-                                {field.displayName || field.efnsDisplayName || field.variableName}
-                              </span>
-                              <Badge className="bg-blue-600 hover:bg-blue-700 text-white h-5 text-[10px] px-2 ml-auto">
-                                {arrayData.length} Items found
-                              </Badge>
+                              <div className="bg-blue-100 p-1 rounded text-blue-600"><List className="h-4 w-4" /></div>
+                              <span className="text-sm font-bold text-slate-800">{field.efnsDisplayName || field.variableName}</span>
+                              <Badge className="bg-blue-600 text-white h-5 text-[10px] px-2 ml-auto">{arrayData.length} Items</Badge>
                             </div>
                           </TableCell>
                         </TableRow>
 
-                        {/* 2. FLATTENED ARRAY ITEMS */}
-                        {isExpanded && arrayData.map((row, rowIndex) => {
-                          return (field.arrayItems || []).map((colItem: any, colIndex: number) => {
-                            // --- Resolve Field Definition ---
-                            const fieldIds = colItem.linkedMasterFields || (colItem.linkedMasterFieldId ? [colItem.linkedMasterFieldId] : []);
-                            const isArrayItemJobQuestion = !!colItem.linkedJobQuestionId; // Check if item is job question
-                            let fieldId = '';
-                            let masterFieldDef = null;
-
-                            if (!isArrayItemJobQuestion) {
-                              const fieldIds = colItem.linkedMasterFields || (colItem.linkedMasterFieldId ? [colItem.linkedMasterFieldId] : []);
-                              fieldId = String(fieldIds[0] || '');
-                              masterFieldDef = jobFields[fieldId];
-                            }
-
-                            // --- Resolve Value ---
-                            const columnKey = colItem.variableName || fieldId;
-                            const rawValue = row[columnKey];
-
-                            // NEW: Unified Missing Logic for Array Items
-                            const isItemValueMissing = !rawValue ||
-                              rawValue === 'Missing' ||
-                              rawValue === 'Pending...' ||
-                              rawValue === 'Document Not Found' ||
-                              rawValue === 'Missing Config' ||
-                              rawValue === 'No Source' ||
-                              rawValue === 'Missing Task Data' ||
-                              rawValue === 'Computing...' ||
-                              rawValue === '[object Object]';
-
-                            let displayValue = isItemValueMissing ? "Missing" : rawValue;
-
-                            // --- Special handling for document fields ---
-                            if (colItem.type === 'document') {
-                              const targetId = resolveTargetEntityId(colItem);
-                              const foundDoc = documentFiles.find(d =>
-                                colItem.linkedKycDocuments?.includes(d.document_id) &&
-                                String(d.owner_id) === String(targetId)
-                              );
-                              displayValue = foundDoc ? "Available" : "Missing";
-                            }
-
-                            let arrayPersistenceSource = null;
-                            let specificPath = '';
-
-                            // Handle Job Question Persistence
-                            if (isArrayItemJobQuestion) {
-                              arrayPersistenceSource = {
-                                table: 'tm_tasks',
-                                path: `job_specific_answers->>'${colItem.linkedJobQuestionId}'`,
-                                linking_variable: 'id',
-                                entityIdOverride: taskId // Job questions use Task ID
-                              };
-                            } else if (masterFieldDef) {
-                              const baseSource = masterFieldDef.sources?.find((s: any) => s.source_type === entityCategory) || masterFieldDef.sources?.[0];
-                              if (baseSource) {
-                                if (baseSource.path && baseSource.path.includes('[]')) {
-                                  specificPath = baseSource.path.replace('[]', `.${rowIndex}`);
-                                } else {
-                                  specificPath = baseSource.path;
-                                }
-                                arrayPersistenceSource = {
-                                  ...baseSource,
-                                  path: specificPath,
-                                  entityIdOverride: row.entityId
-                                };
-                              }
-                            }
-
-                            const isItemEditable = !!arrayPersistenceSource;
+                        {isExpanded && arrayData.map((row, rowIndex) => (
+                          (field.arrayItems || []).map((colItem, colIndex) => {
                             const uniqueKey = `${field.variableName}-${rowIndex}-${colIndex}`;
                             const isItemEditing = editingCell?.fieldId === uniqueKey;
+                            const rawValue = row[colItem.variableName];
+                            const isItemMissing = !isValidValue(rawValue);
 
-                            // --- Resolve Dropdown Options (Including Dependencies) ---
-                            let isItemDropdown = false;
-                            let itemDropdownOptions: any[] = [];
+                            // Determine editing persistence for array items
+                            const firstMasterId = colItem.linkedMasterFields?.[0];
+                            const firstQId = colItem.linkedJobQuestionIds?.[0] || colItem.linkedJobQuestionId;
+                            let arrayPersist = null;
+                            let arrayEditId = row.entityId;
 
-                            if (masterFieldDef?.type === 'select') {
-                              isItemDropdown = true;
-                              const opts = masterFieldDef.options;
-
-                              if (opts?.isDependencyConfig) {
-                                // 1. Identify Parent Field
-                                const parentId = opts.dependencyConfig?.dependentFieldId;
-
-                                // 2. Find Parent Value (Look in current ROW first, then Global)
-                                let parentValue = null;
-                                if (parentId) {
-                                  parentValue = row[parentId] ||
-                                    Object.entries(row).find(([k]) => k === String(parentId))?.[1];
-
-                                  if (!parentValue) {
-                                    // Fallback to global
-                                    const globalVal = getFieldValue(String(parentId), String(targetId));
-                                    if (globalVal && globalVal !== 'Missing' && globalVal !== 'Computing...') {
-                                      parentValue = globalVal;
-                                    }
-                                  }
-
-                                  // 3. *** REVERSE LOOKUP FIX ***
-                                  const parentFieldDef = jobFields[parentId];
-                                  if (parentFieldDef && Array.isArray(parentFieldDef.options) && parentValue) {
-                                    const matchingParentOption = parentFieldDef.options.find((opt: any) => {
-                                      const optLabel = typeof opt === 'string' ? opt : opt.label;
-                                      return String(optLabel) === String(parentValue);
-                                    });
-                                    if (matchingParentOption && typeof matchingParentOption !== 'string') {
-                                      parentValue = matchingParentOption.value;
-                                    }
-                                  }
-                                }
-
-                                // 4. Get Options based on Resolved Parent Value
-                                if (parentValue && parentValue !== 'Missing') {
-                                  itemDropdownOptions = opts.manualMapping?.[parentValue] || [];
-                                } else {
-                                  itemDropdownOptions = [];
-                                }
-
-                              } else if (Array.isArray(opts)) {
-                                // Standard Options
-                                itemDropdownOptions = opts.map(o => typeof o === 'string' ? { label: o, value: o } : o);
-                              }
+                            if (firstMasterId) {
+                              const mDef = jobFields[String(firstMasterId)];
+                              arrayPersist = mDef?.sources?.find(s => s.source_type === entityCategory) || mDef?.sources?.[0];
+                            } else if (firstQId) {
+                              arrayPersist = { table: 'tm_tasks', path: `job_specific_answers->>'${firstQId}'`, linking_variable: 'id' };
+                              arrayEditId = taskId;
                             }
 
-                            // --- Helper for Display ---
-                            const getArrayItemDisplayValue = (val: string) => {
-                              if (!isItemDropdown) return cleanFieldValueForDisplay(val);
-                              const option = itemDropdownOptions.find(o => String(o.value) === String(val) || o.label === val);
-                              return option ? option.label : cleanFieldValueForDisplay(val);
-                            };
-
                             return (
-                              <TableRow key={uniqueKey} className={cn("group border-b border-slate-100 transition-colors", isItemEditing ? "bg-blue-50" : "hover:bg-slate-50")}>
-                                {/* Indentation + Index */}
-                                <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50/50">
-                                  <div className="flex justify-center items-center gap-1">
-                                    <span className="opacity-40">{fIdx + 1}.</span>
-                                    <span className="font-semibold text-blue-600">{rowIndex + 1}</span>
-                                  </div>
+                              <TableRow key={uniqueKey} className={cn("group border-b border-slate-100", isItemEditing ? "bg-blue-50" : "hover:bg-slate-50")}>
+                                <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r bg-slate-50/30">
+                                  {rowIndex + 1}.{colIndex + 1}
                                 </TableCell>
-
-                                {/* Field Label with Thread Line */}
-                                <TableCell className="px-4 py-2 border-r border-slate-100 relative">
+                                <TableCell className="px-4 py-2 border-r relative">
                                   <div className="flex items-center gap-2 pl-6 relative">
                                     <div className="absolute left-3 top-0 bottom-0 w-px bg-blue-100"></div>
                                     <div className="absolute left-3 top-1/2 w-3 h-px bg-blue-200"></div>
-
-                                    <span className="text-sm text-slate-700 font-medium">
-                                      {colItem.displayName || colItem.name || colItem.header || masterFieldDef?.label || "Unknown Column"}
-                                    </span>
-                                    {colItem.type === 'document' && <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700 bg-amber-50">Document</Badge>}
+                                    <span className="text-xs text-slate-700 font-medium">{colItem.displayName || colItem.variableName}</span>
                                   </div>
                                 </TableCell>
-
-                                {/* Source Info */}
-                                <TableCell className="px-4 py-2 text-xs text-slate-600">
-                                  {isArrayItemJobQuestion ? (
-                                    <div className="font-mono text-[10px] bg-purple-100 text-purple-700 p-1 rounded inline-flex items-center"><HelpCircle className="h-3 w-3 mr-1" /> Job Question</div>
-                                  ) : arrayPersistenceSource ? (
-                                    <TooltipProvider delayDuration={300}>
-                                      <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <div className="font-mono text-[10px] bg-slate-50 text-slate-500 p-1 rounded inline-flex items-center truncate max-w-[200px] cursor-help">
-                                            <Database className="h-3 w-3 mr-1 text-slate-400" />
-                                            {arrayPersistenceSource.table?.replace('acc_portal_', '').substring(0, 10)}...
-                                          </div>
-                                        </TooltipTrigger>
-                                        <TooltipContent className="text-xs">
-                                          <p>Table: {arrayPersistenceSource.table}</p>
-                                          <p>Path: {arrayPersistenceSource.path}</p>
-                                          <p>ID: {arrayPersistenceSource.entityIdOverride}</p>
-                                        </TooltipContent>
-                                      </Tooltip>
-                                    </TooltipProvider>
-                                  ) : (
-                                    <span className="text-slate-300 italic text-[10px]">Computed / No Map</span>
-                                  )}
+                                <TableCell className="px-4 py-2">
+                                  <Badge variant="outline" className="text-[8px] h-4 uppercase">{colItem.sourceLogic || 'priority'}</Badge>
                                 </TableCell>
-
-                                {/* Value / Edit Input */}
-                                <TableCell className="px-4 py-1 border-r border-slate-100 h-full">
-                                  {colItem.type === 'document' ? (
+                                <TableCell className="px-4 py-1">
+                                  {isItemEditing ? (
                                     <div className="flex items-center gap-2">
-                                      {displayValue === "Available" ? (
-                                        <>
-                                          <Badge className="bg-green-600 text-white h-6">Available</Badge>
-                                          <Button
-                                            size="sm"
-                                            variant="outline"
-                                            onClick={() => {
-                                              const targetId = resolveTargetEntityId(colItem);
-                                              const doc = documentFiles.find(d =>
-                                                colItem.linkedKycDocuments?.includes(d.document_id) &&
-                                                String(d.owner_id) === String(targetId)
-                                              );
-                                              if (doc) handlePreviewDocument(doc);
-                                            }}
-                                            className="h-6 px-2 text-xs"
-                                          >
-                                            <Eye className="h-3 w-3 mr-1" />
-                                            Preview
-                                          </Button>
-                                        </>
-                                      ) : (
-                                        <Badge variant="destructive" className="h-6">Missing</Badge>
-                                      )}
-                                    </div>
-                                  ) : isItemEditing ? (
-                                    <div className="flex items-center gap-2">
-                                      {isItemDropdown ? (
-                                        <Select value={editValue} onValueChange={setEditValue}>
-                                          <SelectTrigger className="h-8 text-sm border-blue-400 w-full min-w-[150px]"><SelectValue /></SelectTrigger>
-                                          <SelectContent>
-                                            {itemDropdownOptions.length > 0 ? (
-                                              itemDropdownOptions.map((opt, i) => (
-                                                <SelectItem key={`${opt.value}-${i}`} value={String(opt.value)}>{opt.label}</SelectItem>
-                                              ))
-                                            ) : (
-                                              <div className="p-2 text-xs text-slate-400">No options (Check parent field)</div>
-                                            )}
-                                          </SelectContent>
-                                        </Select>
-                                      ) : (
-                                        <Input
-                                          autoFocus
-                                          value={editValue}
-                                          onChange={e => setEditValue(e.target.value)}
-                                          onKeyDown={e => { if (e.key === 'Enter') saveEdit(isItemDropdown, itemDropdownOptions); if (e.key === 'Escape') cancelEditing(); }}
-                                          className="h-8 text-sm border-blue-400"
-                                        />
-                                      )}
-                                      <Button size="icon" onClick={() => saveEdit(isItemDropdown, itemDropdownOptions)} className="h-8 w-8 bg-green-600 hover:bg-green-700 shrink-0"><Check className="h-4 w-4" /></Button>
-                                      <Button size="icon" variant="ghost" onClick={cancelEditing} className="h-8 w-8 text-red-500 shrink-0"><X className="h-4 w-4" /></Button>
+                                      <Input
+                                        autoFocus
+                                        value={editValue}
+                                        onChange={e => setEditValue(e.target.value)}
+                                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEditing(); }}
+                                        className="h-7 text-xs border-blue-400"
+                                      />
+                                      <Button size="icon" onClick={() => saveEdit()} className="h-7 w-7 bg-green-600 shrink-0"><Check className="h-3 w-3" /></Button>
+                                      <Button size="icon" variant="ghost" onClick={cancelEditing} className="h-7 w-7 text-red-500 shrink-0"><X className="h-3 w-3" /></Button>
                                     </div>
                                   ) : (
-                                    <div
-                                      className={cn(
-                                        "text-sm h-7 flex items-center px-2 rounded -my-1 transition-colors relative",
-                                        isItemEditable ? "cursor-pointer border border-transparent hover:border-blue-400 hover:bg-blue-50" : "cursor-default",
-                                        isItemValueMissing ? "text-red-600 font-medium italic" : "text-slate-900" // UPDATED: Styles now match main table
-                                      )}
-                                      onClick={() => {
-                                        if (!isItemEditable || !arrayPersistenceSource) return;
-                                        startEditing(
-                                          uniqueKey,
-                                          0,
-                                          arrayPersistenceSource.table,
-                                          arrayPersistenceSource.path,
-                                          String(displayValue === 'Missing' ? '' : displayValue),
-                                          String(arrayPersistenceSource.entityIdOverride),
-                                          arrayPersistenceSource.linking_variable || 'id',
-                                          undefined,
-                                          undefined,
-                                          isArrayItemJobQuestion ? undefined : fieldId
+                                    (() => {
+                                      const mIds = colItem.linkedMasterFields || [];
+                                      const qIds = colItem.linkedJobQuestionIds || (colItem.linkedJobQuestionId ? [colItem.linkedJobQuestionId] : []);
+                                      const totalSources = mIds.length + qIds.length;
+
+                                      if (totalSources > 1) {
+                                        return (
+                                          <Popover>
+                                            <PopoverTrigger asChild>
+                                              <div className={cn(
+                                                "text-xs h-6 flex items-center px-2 rounded cursor-pointer border border-dashed border-blue-200 bg-blue-50/20 hover:bg-blue-50 transition-colors",
+                                                isItemMissing ? "text-red-500 italic" : "text-slate-900"
+                                              )}>
+                                                <span className="truncate flex-1">{isItemMissing ? 'Missing' : rawValue}</span>
+                                                <ChevronDown className="h-3 w-3 ml-2 text-blue-400 shrink-0" />
+                                              </div>
+                                            </PopoverTrigger>
+                                            <PopoverContent className="w-72 p-0 shadow-xl border-blue-100" align="end">
+                                              <div className="p-2 bg-slate-50 border-b flex justify-between items-center">
+                                                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-tight">Array Row Sources</span>
+                                                <Badge className="text-[8px] h-4 bg-blue-100 text-blue-700 border-blue-200 uppercase">{colItem.sourceLogic || 'priority'}</Badge>
+                                              </div>
+                                              <div className="p-1 space-y-1">
+                                                {mIds.map((mid, mIdx) => {
+                                                  const mDef = jobFields[String(mid)];
+                                                  const mSource = mDef?.sources?.find(s => s.source_type === entityCategory) || mDef?.sources?.[0];
+                                                  const val = getFieldValue(String(mid), String(row.entityId));
+
+                                                  return (
+                                                    <div key={`am-${mid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-200 group">
+                                                      <div className="flex flex-col min-w-0">
+                                                        <span className="text-[9px] font-bold text-blue-600 flex items-center gap-1">
+                                                          <Database className="h-2.5 w-2.5" /> Source {mIdx + 1}
+                                                        </span>
+                                                        <span className="text-[11px] font-medium truncate text-slate-700">{mDef?.label}</span>
+                                                        <span className="text-[10px] text-slate-400 italic truncate">{isValidValue(val) ? val : 'Empty'}</span>
+                                                      </div>
+                                                      <Button
+                                                        size="sm" variant="ghost" className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100"
+                                                        onClick={() => mSource && startEditing(uniqueKey, mIdx, mSource.table, mSource.path, isValidValue(val) ? val : '', row.entityId, mSource.linking_variable)}
+                                                      >
+                                                        <Edit3 className="h-3 w-3 text-blue-500" />
+                                                      </Button>
+                                                    </div>
+                                                  );
+                                                })}
+
+                                                {qIds.map((qid, qIdx) => {
+                                                  const qDef = requirementJobQuestions.find(q => String(q.id) === String(qid));
+                                                  const answers = sourceData['tm_tasks']?.[String(taskId)]?.job_specific_answers || {};
+                                                  const val = answers[String(qid)] ?? answers[Number(qid)];
+
+                                                  return (
+                                                    <div key={`aq-${qid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-200 group">
+                                                      <div className="flex flex-col min-w-0">
+                                                        <span className="text-[9px] font-bold text-purple-600 flex items-center gap-1">
+                                                          <HelpCircle className="h-2.5 w-2.5" /> Question
+                                                        </span>
+                                                        <span className="text-[11px] font-medium truncate text-slate-700">{qDef?.label || qid}</span>
+                                                        <span className="text-[10px] text-slate-400 italic truncate">{isValidValue(val) ? val : 'Empty'}</span>
+                                                      </div>
+                                                      <Button
+                                                        size="sm" variant="ghost" className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100"
+                                                        onClick={() => startEditing(uniqueKey, 99 + qIdx, 'tm_tasks', `job_specific_answers->>'${qid}'`, isValidValue(val) ? val : '', taskId, 'id')}
+                                                      >
+                                                        <Edit3 className="h-3 w-3 text-blue-500" />
+                                                      </Button>
+                                                    </div>
+                                                  );
+                                                })}
+                                              </div>
+                                            </PopoverContent>
+                                          </Popover>
                                         );
-                                      }}
-                                    >
-                                      {getArrayItemDisplayValue(displayValue)}
-                                      {isItemEditable && !isItemEditing && <Edit3 className="h-3 w-3 ml-auto text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2" />}
-                                    </div>
+                                      } else {
+                                        return (
+                                          <div
+                                            className={cn(
+                                              "text-xs h-6 flex items-center px-2 rounded cursor-pointer hover:bg-white border border-transparent hover:border-blue-200 transition-colors",
+                                              isItemMissing ? "text-red-500 italic" : "text-slate-900"
+                                            )}
+                                            onClick={() => {
+                                              if (!arrayPersist) return;
+                                              startEditing(uniqueKey, 0, arrayPersist.table, arrayPersist.path, isItemMissing ? '' : rawValue, String(arrayEditId), arrayPersist.linking_variable || 'id');
+                                            }}
+                                          >
+                                            <span className="truncate">{isItemMissing ? 'Missing' : rawValue}</span>
+                                            {arrayPersist && <Edit3 className="h-3 w-3 ml-auto text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />}
+                                          </div>
+                                        );
+                                      }
+                                    })()
                                   )}
                                 </TableCell>
                               </TableRow>
                             );
-                          });
-                        })}
-
-                        {isExpanded && (
-                          <TableRow className="bg-slate-50 border-b-2 border-slate-200">
-                            <TableCell colSpan={4} className="py-1">
-                              <div className="h-1 w-full bg-gradient-to-r from-blue-100 to-transparent"></div>
-                            </TableCell>
-                          </TableRow>
-                        )}
+                          })
+                        ))}
                       </React.Fragment>
                     );
                   }
@@ -1610,209 +1426,173 @@ export const AutomationMappingDialog = ({
                   // CASE: DOCUMENT FIELDS
                   // =========================================================
                   if (field.fieldType === 'document') {
-                    const targetId = resolveTargetEntityId(field);
+                    const targetId = field.targetId;
                     const foundDoc = documentFiles.find(d => field.linkedKycDocuments?.includes(d.document_id) && String(d.owner_id) === String(targetId));
 
                     return (
-                      <TableRow key={fIdx} className="group border-b border-slate-200">
-                        <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">{fIdx + 1}</TableCell>
-                        <TableCell className="px-4 py-2 border-r border-slate-100">
+                      <TableRow key={fIdx} className="group border-b border-slate-200 hover:bg-slate-50">
+                        <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r bg-slate-50">{fIdx + 1}</TableCell>
+                        <TableCell className="px-4 py-2 border-r">
                           <div className="flex items-center gap-2">
                             <Paperclip className="h-4 w-4 text-amber-600" />
                             <span className="text-sm font-semibold text-slate-900">{field.efnsDisplayName || field.variableName}</span>
-                            <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700 bg-amber-50">Document</Badge>
                           </div>
                         </TableCell>
                         <TableCell className="px-4 py-2">
-                          <span className="text-xs text-slate-500">KYC: {field.kycDocumentId?.substring(0, 12)}...</span>
+                          <Badge variant="outline" className="text-[9px] border-amber-200 text-amber-700 bg-amber-50 uppercase">Asset Mapping</Badge>
                         </TableCell>
-                        <TableCell className="px-4 py-2 border-r border-slate-100">
+                        <TableCell className="px-4 py-2 border-r">
                           {foundDoc ? (
-                            <>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handlePreviewDocument(foundDoc)}
-                                className="h-6 px-2 text-xs mr-2"
-                              >
-                                <Eye className="h-3 w-3 mr-1" />
-                                Preview
-                              </Button>
+                            <div className="flex items-center gap-2">
                               <Badge className="bg-green-600 text-white h-6">Available</Badge>
-                            </>
-                          ) : (
-                            <Badge variant="destructive" className="h-6">Missing</Badge>
-                          )}
+                              <Button size="sm" variant="outline" onClick={() => handlePreviewDocument(foundDoc)} className="h-6 px-2 text-[10px]">
+                                <Eye className="h-3 w-3 mr-1" /> Preview
+                              </Button>
+                            </div>
+                          ) : <Badge variant="destructive" className="h-6">Missing</Badge>}
                         </TableCell>
                       </TableRow>
                     );
                   }
 
+                  // =========================================================
+                  // CASE: STANDARD FIELDS (Text, Number, Date, Computed)
+                  // =========================================================
+                  const isValueMissing = field.isMissing;
+                  const mIds = field.linkedMasterFields || [];
+                  const qIds = field.linkedJobQuestionIds || (field.linkedJobQuestionId ? [field.linkedJobQuestionId] : []);
+
+                  // Logic for editing: We map the "Edit" action to the highest priority source
                   let persistenceSource = null;
-                  let mergedValue = "";
-                  let isDropdown = false;
-                  let dropdownOptions = [];
-                  let masterFieldDef = null;
+                  let editTargetId = field.targetId;
 
-                  if (field.fieldType === 'computed') {
-                    mergedValue = computedFieldsPreview[field.variableName] || "";
-                    isDropdown = false;
-
-                    // --- FALLBACK LOGIC START ---
-                    // Resolve Master Field to check for Fallback
-                    let mappingKey = null;
-                    if (field.computedFunction === 'extractCurrentJobTitle') mappingKey = 'job_title';
-                    else if (field.computedFunction === 'extractCurrentJobDescription') mappingKey = 'job_description';
-                    else mappingKey = field.variableName; // Try matching variable name to field_key
-
-                    // Look up master field definition
-                    masterFieldDef = Object.values(jobFields).find(jf => jf.field_key === mappingKey);
-
-                    // If computed value is missing/error, try fallback to Master Field sources
-                    const isComputedError = !mergedValue || mergedValue === 'Document Not Found' || mergedValue === 'Field Not Found' || mergedValue === 'Missing Document' || mergedValue === 'No Document Specified';
-
-                    if (isComputedError && masterFieldDef) {
-                      // This uses getFieldValue which iterates through ALL sources of the master field
-                      const fallbackVal = getFieldValue(String(masterFieldDef.id), String(targetId));
-                      // If fallback is valid (and not just the same error), use it
-                      if (fallbackVal && fallbackVal !== 'Missing' && fallbackVal !== 'No Source' && fallbackVal !== 'Computing...' && fallbackVal !== 'Document Not Found') {
-                        mergedValue = fallbackVal;
-                      }
-                    }
-
-                    // Set persistence source for editing if available
-                    if (masterFieldDef) {
-                      persistenceSource = masterFieldDef.sources?.find(s => s.source_type === entityCategory) || masterFieldDef.sources?.[0];
-                    }
-                    // --- FALLBACK LOGIC END ---
-
-                  } else if (isJobQuestion) {
-                    mergedValue = getFieldValue(field.variableName, String(targetId));
-                    persistenceSource = { table: 'tm_tasks', path: `job_specific_answers->>'${field.linkedJobQuestionId}'`, linking_variable: 'id' };
-                    const qDef = requirementJobQuestions.find(q => String(q.id) === String(field.linkedJobQuestionId));
-                    if (qDef?.type === 'select') {
-                      isDropdown = true;
-                      dropdownOptions = (qDef.options || []).map(opt => ({ label: opt, value: opt }));
-                    }
-                  } else {
-                    const masterIds = field.linkedMasterFields || field.masterFieldIds || [];
-                    masterFieldDef = jobFields[masterIds[0]];
-                    mergedValue = masterIds.map(mid => getFieldValue(String(mid), String(targetId), 0, field.extractionMode)).join(' ').trim();
-                    persistenceSource = masterFieldDef?.sources?.find(s => s.source_type === entityCategory) || masterFieldDef?.sources?.[0];
-
-                    if (masterFieldDef?.type === 'select') {
-                      isDropdown = true;
-                      const opts = masterFieldDef.options;
-                      if (opts?.isDependencyConfig) {
-                        dropdownOptions = getDependentDropdownOptions(field, masterFieldDef, String(targetId));
-                      } else if (Array.isArray(opts)) {
-                        dropdownOptions = opts.map(o => typeof o === 'string' ? { label: o, value: o } : o);
-                      }
-                    }
+                  if (mIds.length > 0) {
+                    const mDef = jobFields[String(mIds[0])];
+                    persistenceSource = mDef?.sources?.find(s => s.source_type === entityCategory) || mDef?.sources?.[0];
+                  } else if (qIds.length > 0) {
+                    persistenceSource = { table: 'tm_tasks', path: `job_specific_answers->>'${qIds[0]}'`, linking_variable: 'id' };
+                    editTargetId = taskId;
                   }
-
-                  const getDisplayValue = (val: string) => {
-                    if (!isDropdown) return cleanFieldValueForDisplay(val);
-                    const option = dropdownOptions.find(o => String(o.value) === String(val) || o.label === val);
-                    return option ? option.label : cleanFieldValueForDisplay(val);
-                  };
-
-                  const isEditable = !!persistenceSource;
-                  const isValueMissing = !mergedValue ||
-                    mergedValue === 'Missing' ||
-                    mergedValue === 'Pending...' ||
-                    mergedValue === 'Document Not Found' ||
-                    mergedValue === 'Missing Config' ||
-                    mergedValue === 'No Source' || // Added No Source
-                    mergedValue === 'Missing Task Data' ||
-                    mergedValue === 'Computing...' ||
-                    mergedValue === '[object Object]'; // Added object check
-
-                  const getFinalDisplayValue = (val: string) => {
-                    if (isValueMissing && val !== 'Computing...') return 'Missing';
-                    return getDisplayValue(val);
-                  };
 
                   return (
                     <TableRow key={fIdx} className={cn("group border-b border-slate-200 transition-colors", isEditing ? "bg-blue-50/50" : (field.fieldType === 'computed' ? "bg-purple-50/10" : "hover:bg-blue-50"))}>
-                      <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r border-slate-100 bg-slate-50">{fIdx + 1}</TableCell>
-                      <TableCell className="px-4 py-2 border-r border-slate-100">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-slate-900">{field.displayName || field.efnsDisplayName || field.variableName}</span>
-                          {field.fieldType === 'computed' && <Badge variant="outline" className="text-[10px] border-purple-300 text-purple-700 bg-purple-50">Computed</Badge>}
-                          {isEditable && <Badge variant="outline" className="text-[10px] border-blue-300 text-blue-700 bg-blue-50">Editable</Badge>}
-                          {isValueMissing && <AlertCircle className="h-3.5 w-3.5 text-red-500" />}
+                      <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r bg-slate-50">{fIdx + 1}</TableCell>
+                      <TableCell className="px-4 py-2 border-r">
+                        <div className="flex flex-col">
+                          <span className="text-sm font-semibold text-slate-900">{field.efnsDisplayName || field.variableName}</span>
+                          <span className="text-[10px] text-slate-400 font-mono tracking-tighter">{field.variableName}</span>
                         </div>
                       </TableCell>
 
-                      <TableCell className="px-4 py-2 text-xs text-slate-600">
-                        {isJobQuestion ? (
-                          <div className="font-mono text-[10px] bg-purple-100 text-purple-700 p-1 rounded inline-flex items-center"><HelpCircle className="h-3 w-3 mr-1" /> Job Question</div>
-                        ) : persistenceSource ? (
-                          <TooltipProvider delayDuration={150}>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <div className="font-mono text-[10px] bg-slate-100 p-1 rounded inline-flex items-center cursor-help">
-                                  <Database className="h-3 w-3 mr-1 text-blue-500" />
-                                  {persistenceSource.table?.replace('acc_portal_', '').substring(0, 15)}...
-                                </div>
-                              </TooltipTrigger>
-                              <TooltipContent className="text-xs bg-slate-800 text-white">
-                                <p className="font-bold mb-1">Entity Category: {persistenceSource.source_type}</p>
-                                <p>Table: {persistenceSource.table}</p>
-                                <p>Path: {persistenceSource.path}</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        ) : <div className="text-xs text-slate-400 italic">No Source Map</div>}
+                      <TableCell className="px-4 py-2">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-1.5">
+                            <Badge variant="outline" className={cn("text-[9px] uppercase", field.sourceLogic === 'all' ? "border-blue-200 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-600")}>
+                              {field.sourceLogic === 'all' ? 'Merged' : 'Priority'}
+                            </Badge>
+                            <span className="text-[10px] font-bold text-slate-400">{mIds.length + qIds.length} Src</span>
+                          </div>
+                          {field.fieldType === 'computed' && <span className="text-[9px] text-purple-600 font-medium">Function: {field.computedFunction}</span>}
+                        </div>
                       </TableCell>
 
-                      <TableCell className="px-4 py-1 border-r border-slate-100 h-full">
+                      <TableCell className="px-4 py-1 border-r h-full">
                         {isEditing ? (
                           <div className="flex items-center gap-2">
-                            {isDropdown ? (
-                              <Select value={editValue} onValueChange={setEditValue}>
-                                <SelectTrigger className="h-8 text-sm border-blue-400"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  {dropdownOptions.map((opt, i) => (
-                                    <SelectItem key={`${opt.value}-${i}`} value={String(opt.value)}>{opt.label}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            ) : (
-                              <Input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveEdit(isDropdown, dropdownOptions); if (e.key === 'Escape') cancelEditing(); }} className="h-8 text-sm border-blue-400" />
-                            )}
-                            <Button size="icon" onClick={() => saveEdit(isDropdown, dropdownOptions)} className="h-8 w-8 bg-green-600 hover:bg-green-700"><Check className="h-4 w-4" /></Button>
+                            <Input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEditing(); }} className="h-8 text-sm border-blue-400" />
+                            <Button size="icon" onClick={() => saveEdit()} className="h-8 w-8 bg-green-600 hover:bg-green-700"><Check className="h-4 w-4" /></Button>
                             <Button size="icon" variant="ghost" onClick={cancelEditing} className="h-8 w-8 text-red-500"><X className="h-4 w-4" /></Button>
                           </div>
                         ) : (
-                          <div
-                            className={cn(
-                              "text-sm h-7 flex items-center px-2 rounded -my-1 transition-colors relative",
-                              isEditable ? "cursor-pointer border border-transparent hover:border-blue-400 hover:bg-blue-50" : "cursor-default",
-                              isValueMissing ? "text-red-600 font-medium italic" : "text-slate-900"
-                            )}
-                            onClick={() => {
-                              if (!isEditable) return;
-                              let finalPath = persistenceSource.path || '';
-                              let idToUse = (persistenceSource.table === 'tm_tasks') ? taskId : targetId;
-                              // (Dynamic array logic removed here as handled in array section)
-                              startEditing(
-                                field.variableName,
-                                0,
-                                persistenceSource.table,
-                                finalPath,
-                                mergedValue,
-                                String(idToUse),
-                                persistenceSource.linking_variable || 'id',
-                                field.fieldType,
-                                field.computedFunction
-                              );
-                            }}
-                          >
-                            {isComputing ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : getFinalDisplayValue(mergedValue)}
-                            {isEditable && !isEditing && <Edit3 className="h-3 w-3 ml-auto text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2" />}
-                          </div>
+                          (mIds.length + qIds.length) > 1 ? (
+                            /* --- MULTI-SOURCE SELECTOR --- */
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <div className={cn(
+                                  "text-sm h-7 flex items-center px-2 rounded cursor-pointer border border-dashed border-blue-300 bg-blue-50/30 hover:bg-blue-50 transition-colors",
+                                  isValueMissing ? "text-red-600 font-medium italic" : "text-slate-900"
+                                )}>
+                                  {field.resolvedValue}
+                                  <ChevronDown className="h-3 w-3 ml-auto text-blue-500" />
+                                </div>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-80 p-0 shadow-xl border-blue-100" align="end">
+                                <div className="p-2 bg-slate-50 border-b text-[10px] font-bold text-slate-500 uppercase">
+                                  Linked Sources (Priority Order)
+                                </div>
+                                <div className="p-1 space-y-1">
+                                  {/* List Master Fields */}
+                                  {mIds.map((mid, idx) => {
+                                    const mDef = jobFields[String(mid)];
+                                    const source = mDef?.sources?.find(s => s.source_type === entityCategory) || mDef?.sources?.[0];
+                                    const sourceVal = getFieldValue(String(mid), String(field.targetId));
+
+                                    return (
+                                      <div key={`m-${mid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-200 group">
+                                        <div className="flex flex-col min-w-0">
+                                          <span className="text-[10px] font-bold text-blue-600 flex items-center gap-1">
+                                            <Database className="h-3 w-3" /> DB FIELD {idx + 1}
+                                          </span>
+                                          <span className="text-xs font-medium truncate text-slate-700">{mDef?.label}</span>
+                                          <span className="text-[11px] text-slate-500 truncate italic">{isValidValue(sourceVal) ? sourceVal : 'Empty'}</span>
+                                        </div>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100"
+                                          onClick={() => source && startEditing(field.variableName, idx, source.table, source.path, isValidValue(sourceVal) ? sourceVal : '', field.targetId, source.linking_variable)}
+                                        >
+                                          <Edit3 className="h-3 w-3 text-blue-500" />
+                                        </Button>
+                                      </div>
+                                    );
+                                  })}
+
+                                  {/* List Job Questions */}
+                                  {qIds.map((qid, idx) => {
+                                    const qDef = requirementJobQuestions.find(q => String(q.id) === String(qid));
+                                    const sourceVal = getFieldValue(field.variableName, String(field.targetId)); // Simple for demo
+
+                                    return (
+                                      <div key={`q-${qid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-200 group">
+                                        <div className="flex flex-col min-w-0">
+                                          <span className="text-[10px] font-bold text-purple-600 flex items-center gap-1">
+                                            <HelpCircle className="h-3 w-3" /> QUESTION
+                                          </span>
+                                          <span className="text-xs font-medium truncate text-slate-700">{qDef?.label || qid}</span>
+                                          <span className="text-[11px] text-slate-500 truncate italic">{isValidValue(sourceVal) ? sourceVal : 'Empty'}</span>
+                                        </div>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100"
+                                          onClick={() => startEditing(field.variableName, 99 + idx, 'tm_tasks', `job_specific_answers->>'${qid}'`, isValidValue(sourceVal) ? sourceVal : '', taskId, 'id')}
+                                        >
+                                          <Edit3 className="h-3 w-3 text-blue-500" />
+                                        </Button>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          ) : (
+                            /* --- SINGLE SOURCE: DIRECT EDIT --- */
+                            <div
+                              className={cn(
+                                "text-sm h-7 flex items-center px-2 rounded -my-1 transition-colors relative",
+                                persistenceSource ? "cursor-pointer border border-transparent hover:border-blue-400 hover:bg-blue-50" : "cursor-default",
+                                isValueMissing ? "text-red-600 font-medium italic" : "text-slate-900"
+                              )}
+                              onClick={() => {
+                                if (!persistenceSource) return;
+                                startEditing(field.variableName, 0, persistenceSource.table, persistenceSource.path, isValueMissing ? '' : field.resolvedValue, String(editTargetId), persistenceSource.linking_variable || 'id');
+                              }}
+                            >
+                              {field.resolvedValue}
+                              {persistenceSource && !isEditing && <Edit3 className="h-3 w-3 ml-auto text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2" />}
+                            </div>
+                          )
                         )}
                       </TableCell>
                     </TableRow>
@@ -1902,8 +1682,17 @@ export const AutomationMappingDialog = ({
     <>
       <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
         <DialogContent className="max-w-[95vw] w-[1400px] h-[90vh] flex flex-col p-0 overflow-hidden border-none shadow-2xl bg-white">
-          <div className="p-5 border-b bg-gradient-to-r from-blue-600 to-blue-500 flex items-center justify-between shadow-lg">
-            <div className="flex items-center gap-4">
+          {/* HEADER WITH CLOSE BUTTON */}
+          <div className="p-6 border-b bg-gradient-to-r from-blue-600 to-blue-500 flex items-center justify-between shadow-lg relative">
+            <button
+              onClick={onClose}
+              className="absolute right-6 top-6 rounded-sm opacity-70 ring-offset-white transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 disabled:pointer-events-none z-50"
+            >
+              <X className="h-5 w-5 text-white" />
+              <span className="sr-only">Close</span>
+            </button>
+
+            <div className="flex items-center gap-4 pr-8">
               <div className="h-12 w-12 bg-white/20 rounded-xl flex items-center justify-center text-white backdrop-blur">
                 <Zap className="h-6 w-6 fill-white" />
               </div>
@@ -1915,7 +1704,6 @@ export const AutomationMappingDialog = ({
                   <span className="bg-white/10 px-1.5 py-0.5 rounded font-mono">Task #{task?.id}</span>
                   <span>•</span>
                   <span>ID: {(() => {
-                    // Keep ID logic as fallback to specific entity found via automation context
                     const primaryEntityType = getPrimaryEntityType();
                     const entityInfo = getEntityNameAndId(primaryEntityType);
                     return entityInfo.id !== 'Not specified' ? entityInfo.id : (task?.applicant_details?.id || 'N/A');
@@ -1970,6 +1758,7 @@ export const AutomationMappingDialog = ({
             </div>
           </div>
 
+          {/* CONTENT AREA */}
           <div className="flex-1 flex flex-col overflow-hidden">
             {!selectedAutomationId ? (
               <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
@@ -2012,22 +1801,35 @@ export const AutomationMappingDialog = ({
             )}
           </div>
 
-          <div className="p-4 border-t bg-slate-50 flex justify-between items-center">
-            <Button variant="outline" onClick={onClose} className="h-10">
-              Close
-            </Button>
-            <Button
-              onClick={handleRunAutomation}
-              disabled={isAutomationRunning}
-              className="bg-blue-600 hover:bg-blue-700 h-10 px-6 gap-2"
-            >
-              {isAutomationRunning ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Zap className="h-4 w-4 fill-white" />
-              )}
-              Execute Workflow
-            </Button>
+          {/* UPDATED FOOTER */}
+          <div className="p-6 border-t bg-white flex justify-between items-center shrink-0 shadow-[0_-4px_10px_rgba(0,0,0,0.03)]">
+            <div className="flex flex-col">
+              <span className="text-xs text-slate-400 font-semibold uppercase tracking-wide">Automation Ready</span>
+              <span className="text-sm text-blue-600 font-bold truncate max-w-[400px]">
+                {selectedMapping?.automation?.name || "Select Workflow"}
+              </span>
+            </div>
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                onClick={onClose}
+                className="px-6 font-semibold uppercase text-xs tracking-wide text-slate-500 hover:text-slate-700"
+              >
+                Close
+              </Button>
+              <Button
+                onClick={handleRunAutomation}
+                disabled={isAutomationRunning}
+                className="px-10 bg-blue-600 hover:bg-blue-700 h-11 text-white font-bold uppercase text-xs tracking-wide transition-all"
+              >
+                {isAutomationRunning ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Zap className="mr-2 h-4 w-4 fill-white" />
+                )}
+                Execute Workflow
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
@@ -2037,8 +1839,16 @@ export const AutomationMappingDialog = ({
         <DialogContent className="max-w-[95vw] w-full max-h-[95vh] flex flex-col p-0 overflow-hidden bg-slate-50">
           {showPreviewModal && previewingDocuments && (
             <>
-              <DialogHeader className="p-4 border-b bg-white shrink-0">
-                <div className="flex items-center justify-between">
+              <DialogHeader className="p-4 border-b bg-white shrink-0 relative">
+                <button
+                  onClick={() => setShowPreviewModal(false)}
+                  className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-white transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2"
+                >
+                  <X className="h-5 w-5 text-slate-600" />
+                  <span className="sr-only">Close</span>
+                </button>
+
+                <div className="flex items-center justify-between pr-8">
                   <div>
                     <DialogTitle className="text-xl">
                       <div className="flex items-center p-2">
@@ -2097,8 +1907,18 @@ export const AutomationMappingDialog = ({
                 })}
               </div>
 
-              <div className="p-4 border-t bg-white flex justify-end shrink-0">
-                <Button variant="outline" onClick={() => setShowPreviewModal(false)} className="w-24">
+              <div className="p-6 border-t bg-white flex justify-between items-center shrink-0 shadow-[0_-4px_10px_rgba(0,0,0,0.03)]">
+                <div className="flex flex-col">
+                  <span className="text-xs text-slate-400 font-semibold uppercase tracking-wide">Document Preview</span>
+                  <span className="text-sm text-blue-600 font-bold">
+                    {previewingDocuments?.document_display_name || 'Document'}
+                  </span>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowPreviewModal(false)}
+                  className="px-6 font-semibold uppercase text-xs tracking-wide text-slate-500 hover:text-slate-700"
+                >
                   Close
                 </Button>
               </div>
@@ -2108,4 +1928,4 @@ export const AutomationMappingDialog = ({
       </Dialog>
     </>
   );
-};
+}
