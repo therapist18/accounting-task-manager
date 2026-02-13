@@ -551,24 +551,51 @@ export function RequirementsTable({
     if (!groupToDelete) return;
     const taskIds = groupToDelete.tasks.map(t => t.id);
     if (taskIds.length === 0) return;
+    
     const toastId = toast.loading(`Deleting ${taskIds.length} task(s)...`);
     try {
       const { error } = await supabase.from('tm_tasks').delete().in('id', taskIds);
       if (error) throw error;
-      toast.success(`Successfully deleted ${taskIds.length} task(s)`, { id: toastId });
-      if (selectedApplicant === groupToDelete.applicantName) setSelectedApplicant(null);
+      
+      // Show success toast with details
+      toast.success(
+        `Successfully deleted ${taskIds.length} task(s) for ${groupToDelete.applicantName}`, 
+        { id: toastId, description: "All selected tasks have been removed." }
+      );
+      
+      // Update states - clear selected applicant if it was the deleted one
+      if (selectedApplicant === groupToDelete.applicantName) {
+        setSelectedApplicant(null);
+      }
+      
+      // Close dialog and reset state
       setDeleteConfirmOpen(false);
       setGroupToDelete(null);
+      
+      // Trigger data refresh if callback is available
+      if (onTaskAction) {
+        onTaskAction('delete', groupToDelete.tasks[0]);
+      }
     } catch (error) {
       console.error('Delete error:', error);
-      toast.error(`Failed to delete tasks: ${error.message}`, { id: toastId });
+      toast.error(
+        `Failed to delete tasks: ${error.message || 'Unknown error occurred'}`, 
+        { id: toastId }
+      );
     }
-  }, [groupToDelete, selectedApplicant]);
+  }, [groupToDelete, selectedApplicant, onTaskAction]);
 
   const toggleDocumentExpansion = useCallback((docId: string) => setExpandedDocuments(prev => { const newSet = new Set(prev); newSet.has(docId) ? newSet.delete(docId) : newSet.add(docId); return newSet; }), []);
 
   const handleUploadAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number) => {
     let personName = individualNames[applicantId || task.individual_id] || 'Unknown Person';
+  if (applicantId && task.participants_details) {
+    const participant = task.participants_details.find(p => p.id === applicantId);
+    if (participant && participant.name) personName = participant.name;
+  }
+  if (!personName || personName === 'Unknown Person') {
+    personName = individualNames[task.applicant_details?.id] || task.applicant_details?.name || 'Individual';
+  }
     if (applicantId && task.participants_details) {
       const participant = task.participants_details.find(p => p.id === applicantId);
       if (participant && participant.name) personName = participant.name;
@@ -1149,16 +1176,28 @@ export function RequirementsTable({
       />
 
       {selectedAutomationData && (
-        <AutomationMappingDialog
-          isOpen={isAutomationDialogOpen}
-          onClose={() => setIsAutomationDialogOpen(false)}
-          classId={selectedAutomationData.task?.class_id || ''}
-          requirementId={selectedAutomationData.document?.id || ''}
-          taskId={selectedAutomationData.task?.id}
-          individualId={selectedAutomationData.applicantId?.toString()}
-          task={selectedAutomationData.task}
-          relationshipData={selectedAutomationData.relationshipData}
-        />
+        <>
+          {console.log('Entity Types passed to AutomationMappingDialog:', {
+            task: selectedAutomationData.task,
+            document: selectedAutomationData.document,
+            columnType: selectedAutomationData.columnType,
+            applicantId: selectedAutomationData.applicantId,
+            relationshipData: selectedAutomationData.relationshipData,
+            taskEntityType: selectedAutomationData.task?.entity_type,
+            documentEntityType: selectedAutomationData.document?.entity_type
+          })}
+          <AutomationMappingDialog
+            isOpen={isAutomationDialogOpen}
+            onClose={() => setIsAutomationDialogOpen(false)}
+            classId={selectedAutomationData.task?.class_id || ''}
+            requirementId={selectedAutomationData.document?.id || ''}
+            taskId={selectedAutomationData.task?.id}
+            individualId={selectedAutomationData.applicantId?.toString()}
+            task={selectedAutomationData.task}
+            relationshipData={selectedAutomationData.relationshipData}
+            refreshDocuments={refreshDocuments}
+          />
+        </>
       )}
 
       <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
@@ -1167,7 +1206,7 @@ export function RequirementsTable({
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100">
                 <AlertCircle className="h-5 w-5 text-red-600" />
-              </div>
+              </div> 
               <div>
                 <DialogTitle className="text-lg font-semibold">Delete Tasks</DialogTitle>
                 <DialogDescription className="text-sm text-muted-foreground">

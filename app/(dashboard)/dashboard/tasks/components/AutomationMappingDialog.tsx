@@ -50,6 +50,7 @@ interface AutomationMappingDialogProps {
   allDocuments?: any[];
   stage?: any;
   relationshipData?: any;
+  refreshDocuments?: () => void;
 }
 
 interface EntityAutomationMapping {
@@ -243,9 +244,20 @@ export const AutomationMappingDialog = ({
   individualId,
   allDocuments = [],
   stage,
-  relationshipData
+  relationshipData,
+  refreshDocuments
 }: AutomationMappingDialogProps) => {
-  // --- STATE ---
+  useEffect(() => {
+    if (isOpen && relationshipData) {
+      console.log('👤 [Entity Debug] Relationship Data Source:', {
+        principal: relationshipData.principal?.id,
+        dependants: relationshipData.dependants?.map(d => ({ id: d.id, rel: d.relationship })),
+        directors: relationshipData.directors?.map(d => d.id),
+        sponsor: relationshipData.sponsor?.id,
+        company: relationshipData.company?.id
+      });
+    }
+  }, [isOpen, relationshipData]);
   const [isLoading, setIsLoading] = useState(false);
   const [isAutomationRunning, setIsAutomationRunning] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
@@ -363,6 +375,11 @@ export const AutomationMappingDialog = ({
         ...previewingDocuments,
         documents: updatedDocuments
       });
+
+      // Call refresh callback if provided to update parent table states
+      if (refreshDocuments) {
+        refreshDocuments();
+      }
     } catch (error) {
       console.error('Error saving document details:', error);
       toast.error('Failed to save document details');
@@ -394,103 +411,89 @@ export const AutomationMappingDialog = ({
   const resolveTargetEntityId = useCallback((field: any) => {
     const types = field.entityTypes || [];
 
-    // 1. Try Dependant: Only return if a matching dependant is actually found
+    // 1. Try Dependant
     if (types.includes('dependant')) {
       if (field.dependantRelationships && field.dependantRelationships.length > 0) {
-        const dep = relationshipData?.dependants?.find((d: any) => field.dependantRelationships.includes(d.relationship?.toLowerCase()));
+        const dep = relationshipData?.dependants?.find((d: any) =>
+          field.dependantRelationships.includes(d.relationship?.toLowerCase())
+        );
         if (dep?.id) return dep.id;
       } else {
-        // If no specific relationship requested, try first dependant
         const dep = relationshipData?.dependants?.[0];
         if (dep?.id) return dep.id;
       }
-      // If we are here, 'dependant' was requested but none exist. 
-      // Do NOT return undefined; continue to check other types (like principal).
+      // If 'dependant' was requested but not found, do not fall through to others
+      // unless other types are explicitly in the 'types' array
     }
 
     // 2. Try Sponsor
-    if (types.includes('sponsor')) {
-      if (relationshipData?.sponsor?.id) return relationshipData.sponsor.id;
+    if (types.includes('sponsor') && relationshipData?.sponsor?.id) {
+      return relationshipData.sponsor.id;
     }
 
     // 3. Try Director
-    if (types.includes('director')) {
-      if (relationshipData?.directors?.[0]?.id) return relationshipData.directors[0].id;
+    if (types.includes('director') && relationshipData?.directors?.[0]?.id) {
+      return relationshipData.directors[0].id;
     }
 
     // 4. Try Understudy
-    if (types.includes('understudy')) {
-      if (relationshipData?.understudy?.id) return relationshipData.understudy.id;
+    if (types.includes('understudy') && relationshipData?.understudy?.id) {
+      return relationshipData.understudy.id;
     }
 
-    // 5. Try Principal (This is the fallback for your case where Dependant is missing)
+    // 5. Try Principal (Only if explicitly requested in types)
     if (types.includes('principal')) {
       const pid = relationshipData?.principal?.id || currentIndividualId;
       if (pid) return pid;
     }
 
-    // 6. Try Company
+    // 6. Try Company (Only if explicitly requested in types)
     if (types.includes('company')) {
-      return relationshipData?.company?.id || task?.company_id;
+      const companyId = relationshipData?.company?.id || task?.company_id;
+      if (companyId) return companyId;
     }
 
-    // Default Fallback: If no types matched or no data found for requested types, default to Principal
-    return relationshipData?.principal?.id || currentIndividualId;
+    // REMOVED FALLBACK: No longer returns principal by default
+    return undefined;
   }, [relationshipData, currentIndividualId, task]);
 
   const getEntityNameAndId = useCallback((entityType?: string, entityId?: string) => {
-    const targetId = entityId || currentIndividualId;
-    if (!entityType && !targetId) return { name: task?.applicant_name || individualName || 'Not specified', id: 'Not specified' };
+    const targetId = entityId; // Removed || currentIndividualId fallback
+    if (!entityType && !targetId) return { name: 'Not specified', id: 'Not specified' };
+
     const type = entityType?.toLowerCase();
+
     if (type === 'company') {
       return {
-        name: relationshipData?.company?.company_name || task?.company_name || `Company ${relationshipData?.company?.id || task?.company_id || ''}`,
+        name: relationshipData?.company?.company_name || task?.company_name || 'Not specified',
         id: String(relationshipData?.company?.id || task?.company_id || 'Not specified')
       };
     }
-    if (type === 'director') {
-      const director = relationshipData?.directors?.find((d: any) => String(d.id) === String(targetId)) || relationshipData?.directors?.[0];
-      if (director) {
-        return {
-          name: director.full_name || (director.first_name && director.last_name ? `${director.first_name} ${director.last_name}` : `Director ${director.id}`),
-          id: String(director.id)
-        };
-      }
-    }
-    if (type === 'understudy') {
-      const understudy = relationshipData?.understudy;
-      if (understudy) {
-        return {
-          name: understudy.full_name || (understudy.first_name && understudy.last_name ? `${understudy.first_name} ${understudy.last_name}` : `Understudy ${understudy.id}`),
-          id: String(understudy.id)
-        };
-      }
-    }
-    if (type === 'sponsor') {
-      const sponsor = relationshipData?.sponsor;
-      if (sponsor) {
-        return {
-          name: sponsor.name || sponsor.full_name || (sponsor.first_name && sponsor.last_name ? `${sponsor.first_name} ${sponsor.last_name}` : `Sponsor ${sponsor.id}`),
-          id: String(sponsor.id)
-        };
-      }
+
+    // Individuals (Directors, Dependants, Understudies, Sponsors, Principal)
+    const allPeople = [
+      ...(relationshipData?.directors || []),
+      ...(relationshipData?.dependants || []),
+      relationshipData?.understudy,
+      relationshipData?.sponsor,
+      relationshipData?.principal
+    ].filter(Boolean);
+
+    const person = allPeople.find(p => String(p.id) === String(targetId));
+
+    if (person) {
+      return {
+        name: person.full_name || person.name || (person.first_name ? `${person.first_name} ${person.last_name || ''}` : 'Not specified'),
+        id: String(person.id)
+      };
     }
 
-    if (type === 'dependant') {
-      const dependant = relationshipData?.dependants?.find((d: any) => String(d.id) === String(targetId)) || relationshipData?.dependants?.[0];
-      if (dependant) {
-        return {
-          name: dependant.full_name || (dependant.first_name && dependant.last_name ? `${dependant.first_name} ${dependant.last_name}` : `Dependant ${dependant.id}`),
-          id: String(dependant.id)
-        };
-      }
-    }
-
+    // Final catch - if no ID was found and it's not in our relations, it is truly not specified
     return {
-      name: task?.applicant_name || individualName || targetId || 'Not specified',
-      id: targetId || 'Not specified'
+      name: 'Not specified',
+      id: 'Not specified'
     };
-  }, [relationshipData, task, individualName, currentIndividualId]);
+  }, [relationshipData, task]);
 
   const getPrimaryEntityType = useCallback(() => {
     const activeAutomation = webData.find(w => w.automationId === selectedAutomationId);
@@ -511,77 +514,48 @@ export const AutomationMappingDialog = ({
     const types = field.entityTypes || [];
     const collectedIds = new Set<string>();
 
-    // Check entity types in priority order, return first match
-    const checkEntityType = (type: string) => {
-      switch (type) {
-        case 'principal':
-          const pid = relationshipData?.principal?.id || currentIndividualId;
-          if (pid) {
-            collectedIds.add(String(pid));
-            return true;
-          }
-          break;
+    // Iterate strictly through the requested types
+    types.forEach(type => {
+      const t = type.toLowerCase();
 
-        case 'dependant':
-          if (field.dependantRelationships?.length > 0) {
-            const filtered = (relationshipData?.dependants || []).filter((d: any) => {
-              const match = field.dependantRelationships.includes(d.relationship?.toLowerCase());
-              return match;
-            });
-            if (filtered.length > 0) {
-              filtered.forEach((d: any) => {
-                collectedIds.add(String(d.id));
-              });
-              return true;
+      if (t === 'principal') {
+        const pid = relationshipData?.principal?.id || currentIndividualId;
+        if (pid) collectedIds.add(String(pid));
+      }
+
+      if (t === 'dependant') {
+        if (field.dependantRelationships && field.dependantRelationships.length > 0) {
+          relationshipData?.dependants?.forEach((d: any) => {
+            if (field.dependantRelationships.includes(d.relationship?.toLowerCase())) {
+              collectedIds.add(String(d.id));
             }
-          } else if (relationshipData?.dependants?.length > 0) {
-            relationshipData.dependants.forEach((d: any) => collectedIds.add(String(d.id)));
-            return true;
-          }
-          break;
-
-        case 'director':
-          if (relationshipData?.directors?.length > 0) {
-            const directors = field.directorType === 'primary'
-              ? relationshipData.directors.slice(0, 1)
-              : relationshipData.directors;
-            directors.forEach((d: any) => collectedIds.add(String(d.id)));
-            return true;
-          }
-          break;
-
-        case 'sponsor':
-          if (relationshipData?.sponsor?.id) {
-            collectedIds.add(String(relationshipData.sponsor.id));
-            return true;
-          }
-          break;
-
-        case 'understudy':
-          if (relationshipData?.understudy?.id) {
-            collectedIds.add(String(relationshipData.understudy.id));
-            return true;
-          }
-          break;
-
-        case 'company':
-          if (relationshipData?.company?.id) {
-            collectedIds.add(String(relationshipData.company.id));
-            return true;
-          }
-          break;
+          });
+        } else {
+          relationshipData?.dependants?.forEach((d: any) => collectedIds.add(String(d.id)));
+        }
       }
-      return false;
-    };
 
-    for (const type of types) {
-      if (checkEntityType(type)) {
-        break;
+      if (t === 'sponsor' && relationshipData?.sponsor?.id) {
+        collectedIds.add(String(relationshipData.sponsor.id));
       }
-    }
+
+      if (t === 'understudy' && relationshipData?.understudy?.id) {
+        collectedIds.add(String(relationshipData.understudy.id));
+      }
+
+      if (t === 'director') {
+        relationshipData?.directors?.forEach((d: any) => collectedIds.add(String(d.id)));
+      }
+
+      if (t === 'company') {
+        const cid = relationshipData?.company?.id || task?.company_id;
+        if (cid) collectedIds.add(String(cid));
+      }
+    });
 
     return Array.from(collectedIds);
   };
+
   const toggleArrayFieldExpansion = (fieldVariableName: string) => setExpandedArrayFields(prev => { const newSet = new Set(prev); if (newSet.has(fieldVariableName)) newSet.delete(fieldVariableName); else newSet.add(fieldVariableName); return newSet; });
   const toggleSourceFieldExpansion = (fieldId: string) => setExpandedSourceFields(prev => { const newSet = new Set(prev); if (newSet.has(fieldId)) newSet.delete(fieldId); else newSet.add(fieldId); return newSet; });
 
@@ -625,16 +599,12 @@ export const AutomationMappingDialog = ({
               }
             }
           }
-
-          // Join multiple values with a space or comma based on field type
           if (values.length > 0) {
             columnValues[item.variableName] = item.type === 'text'
               ? values.join(' ')
               : values.join(', ');
           }
         }
-
-        // Handle date formatting
         if (item.type === 'date' && columnValues[item.variableName]) {
           const originalValue = columnValues[item.variableName];
           columnValues[item.variableName] = formatDateValue(
@@ -653,7 +623,6 @@ export const AutomationMappingDialog = ({
         arrayData.push(arrayItem);
       }
     });
-
     return arrayData;
   };
 
@@ -1210,8 +1179,13 @@ export const AutomationMappingDialog = ({
           [table]: { ...(prev[table] || {}), [entityId]: updatedRecord }
         }));
 
-        // If it was a job question, we might want to refresh the UI immediately
+        // Show success toast and refresh documents if callback provided
         toast({ title: 'Success', description: 'Field updated successfully', variant: 'default' });
+
+        // Call refresh callback if provided to update parent table states
+        if (refreshDocuments) {
+          refreshDocuments();
+        }
       }
 
     } catch (error) {
@@ -1324,10 +1298,6 @@ export const AutomationMappingDialog = ({
                   const targetId = resolveTargetEntityId(field);
                   const entityCategory = field.entityTypes?.includes('company') ? 'company' : 'individual';
                   const targetCompanyId = String(relationshipData?.company?.id || task?.company_id);
-
-                  // =========================================================
-                  // CASE: ARRAY FIELDS (Flattened with Header)
-                  // =========================================================
                   if (field.fieldType === 'array') {
                     const entityIds = resolveEntityIdsForArray(field, relationshipData);
                     const arrayData = getArrayFieldData(field);
@@ -1335,7 +1305,6 @@ export const AutomationMappingDialog = ({
 
                     return (
                       <React.Fragment key={fIdx}>
-                        {/* 1. SECTION HEADER ROW */}
                         <TableRow
                           className="bg-blue-50/80 border-b border-blue-200 hover:bg-blue-100 cursor-pointer transition-colors"
                           onClick={() => toggleArrayFieldExpansion(field.variableName)}

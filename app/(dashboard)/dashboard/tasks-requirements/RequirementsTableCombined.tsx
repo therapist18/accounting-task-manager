@@ -842,14 +842,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   }, []);
 
   const handleOpenTemplateGenerator = async (docItem, task, colType, colId) => {
-    // Log the column/ID information when template dialog is being opened
-    console.log('[RequirementsTableCombined] Opening template dialog from:');
-    console.log('  - Column Type:', colType);
-    console.log('  - Column ID:', colId);
-    console.log('  - Document Item:', docItem);
-    console.log('  - Task ID:', task?.id);
-    console.log('  - Task Name:', task?.name);
-    
     setIsPreparingTemplate(true);
     try {
       const participant = task.participants_details?.find(p => p.id === colId);
@@ -897,8 +889,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
           return sponsorPart?.id || null;
         })()
       };
-      console.log('  Final entityIdMap:', entityIdMap);
-
       // 2. Fetch Templates
       const templates = await fetchDocumentTemplates(docItem.document.id, task);
       if (!templates || templates.length === 0) {
@@ -1023,24 +1013,24 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         sponsor: task.participants_details?.find(p => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('sponsor') : p.role === 'sponsor')),
       };
 
-const letterInfo = {
-    document: docItem.document,
-    task: task,
-    masterFields: masterFields,
-    entityIdMap: entityIdMap,
-    sourceDataCache: sourceDataCache,
-    availableTemplates: templates,
-    template: templates.length === 1 ? templates[0] : null,
-    personData: task.applicant_details?.type === 'individual' ? task.applicant_details : {},
-    companyData: task.applicant_details?.type === 'company' ? task.applicant_details : {},
-    extractedData: task.applicant_details || {},
-    relationshipData: relationshipData,
-    // Add these two context keys
-    activeEntityType: colType, 
-    activeEntityId: colId
-};
-setSelectedLetterInfo(letterInfo);
-setShowTemplateGenerator(true);
+      const letterInfo = {
+        document: docItem.document,
+        task: task,
+        masterFields: masterFields,
+        entityIdMap: entityIdMap,
+        sourceDataCache: sourceDataCache,
+        availableTemplates: templates,
+        template: templates.length === 1 ? templates[0] : null,
+        personData: task.applicant_details?.type === 'individual' ? task.applicant_details : {},
+        companyData: task.applicant_details?.type === 'company' ? task.applicant_details : {},
+        extractedData: task.applicant_details || {},
+        relationshipData: relationshipData,
+        // Add these two context keys
+        activeEntityType: colType,
+        activeEntityId: colId
+      };
+      setSelectedLetterInfo(letterInfo);
+      setShowTemplateGenerator(true);
 
     } catch (error) {
       console.error("❌FATAL ERROR:", error);
@@ -1082,46 +1072,40 @@ setShowTemplateGenerator(true);
 
       const companyParticipant = participants.find(p => p.type === 'company');
 
-      // Determine principal: should be the applicant UNLESS they have a dependant role
-      let principal = null;
-      let dependants = [];
-
-      // Check if applicant is a dependant
       const isApplicantDependant = applicant.role === 'dependant' ||
         (Array.isArray(applicant.role) && applicant.role.includes('dependant'));
 
+      let principal = participants.find(p =>
+        p.type === 'individual' &&
+        (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')
+      );
+
+      let dependants = participants
+        .filter(p => p.type === 'individual' && (
+          Array.isArray(p.role) ? p.role.includes('dependant') : p.role === 'dependant'
+        ))
+        .map(dep => ({
+          id: dep.id,
+          name: dep.name,
+          relationship: dep.relationship || 'dependant'
+        }));
+
       if (isApplicantDependant) {
-        // Applicant is a dependant, add to dependants array
-        dependants = [{
-          id: applicant.id || task?.individual_id,
-          name: applicant.name || individualNames[applicant.id],
-          relationship: applicant.relationship || 'dependant'
-        }];
-
-        // Find principal from other participants (non-dependant individual)
-        principal = participants.find(p =>
-          p.type === 'individual' &&
-          p.role !== 'dependant' &&
-          !(Array.isArray(p.role) && p.role.includes('dependant'))
-        );
+        if (!dependants.find(d => d.id === applicant.id)) {
+          dependants.push({
+            id: applicant.id || task?.individual_id,
+            name: applicant.name || individualNames[applicant.id],
+            relationship: applicant.relationship || 'dependant'
+          });
+        }
       } else {
-        // Applicant is the principal
-        principal = {
-          id: applicant.id || task?.individual_id,
-          name: applicant.name || individualNames[applicant.id],
-          role: applicant.role
-        };
-
-        // Find dependants from other participants
-        dependants = participants
-          .filter(p => p.type === 'individual' && (
-            Array.isArray(p.role) ? p.role.includes('dependant') : p.role === 'dependant'
-          ))
-          .map(dep => ({
-            id: dep.id,
-            name: dep.name,
-            relationship: dep.relationship || 'dependant'
-          }));
+        if (!principal) {
+          principal = {
+            id: applicant.id || task?.individual_id,
+            name: applicant.name || individualNames[applicant.id],
+            role: applicant.role
+          };
+        }
       }
 
       return {
@@ -1130,11 +1114,11 @@ setShowTemplateGenerator(true);
           name: companyParticipant?.name || task?.company_name || 'Company',
           type: 'company'
         },
-        principal: principal || {
-          id: applicant.id || task?.individual_id,
-          name: applicant.name || individualNames[applicant.id] || 'Unknown',
-          role: applicant.role || 'principal'
-        },
+        principal: principal ? {
+          id: principal.id,
+          name: principal.name,
+          role: principal.role
+        } : null,
         directors: participants
           .filter(p => p.type === 'individual' && (
             Array.isArray(p.role) ? (p.role.includes('director') || p.role.includes('shareholder')) : (p.role === 'director' || p.role === 'shareholder')
@@ -1146,37 +1130,12 @@ setShowTemplateGenerator(true);
           })),
         dependants: dependants,
         understudy: (() => {
-          const understudyParticipant = participants.find(p =>
-            p.type === 'individual' &&
-            (Array.isArray(p.role) ? p.role.includes('understudy') : p.role === 'understudy')
-          );
-          if (understudyParticipant) {
-            return {
-              id: understudyParticipant.id,
-              name: understudyParticipant.name
-            };
-          }
-
-          const uId = task?.understudy || task?.understudy_id;
-          if (!uId) return null;
-          const uPart = participants.find(p => p.id === uId);
-          return {
-            id: uId,
-            name: uPart?.name || individualNames[uId] || 'Understudy'
-          };
+          const up = participants.find(p => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('understudy') : p.role === 'understudy'));
+          return up ? { id: up.id, name: up.name } : null;
         })(),
         sponsor: (() => {
-          const sponsorParticipant = participants.find(p =>
-            p.type === 'individual' &&
-            (Array.isArray(p.role) ? p.role.includes('sponsor') : p.role === 'sponsor')
-          );
-          if (sponsorParticipant) {
-            return {
-              id: sponsorParticipant.id,
-              name: sponsorParticipant.name
-            };
-          }
-          return null;
+          const sp = participants.find(p => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('sponsor') : p.role === 'sponsor'));
+          return sp ? { id: sp.id, name: sp.name } : null;
         })()
       };
     }).filter(Boolean);
@@ -1860,16 +1819,11 @@ setShowTemplateGenerator(true);
       const requirementId = reqItem.uniqueId || reqItem.id;
       const isExpanded = expandedDocuments.has(requirementId);
       const isCompositeExpanded = expandedCompositeRequirements.has(requirementId);
-
       const docDef = reqItem.documentDefinition;
       const fieldsToRender = docDef?.fields || [];
-
-      // Check if this is a composite requirement (multiple document types)
       const isComposite = reqItem.isMultiDocument && reqItem.document_ids?.length > 1;
 
-      // LOGGING ADDED HERE
       if (!isComposite) {
-        console.log(`[Combined] Rendering Single Req: ${reqItem.name} (ID: ${requirementId})`);
       }
       return (
         <React.Fragment key={`${reqItem.category}-${requirementId}`}>
@@ -2461,29 +2415,29 @@ setShowTemplateGenerator(true);
         </div>
       </div>
 
- {showTemplateGenerator && selectedLetterInfo && (
-    <TemplateGenerationDialog 
-        isOpen={showTemplateGenerator} 
-        onClose={() => setShowTemplateGenerator(false)} 
-        template={selectedLetterInfo.template} 
-        availableTemplates={selectedLetterInfo.availableTemplates} 
-        documentName={selectedLetterInfo.document.display_name} 
-        onSave={handleSaveGeneratedLetter} 
-        masterFields={selectedLetterInfo.masterFields} 
-        entityIdMap={selectedLetterInfo.entityIdMap} 
-        sourceDataCache={selectedLetterInfo.sourceDataCache} 
-        extractedData={selectedLetterInfo.extractedData} 
-        personData={selectedLetterInfo.personData} 
-        companyData={selectedLetterInfo.companyData} 
-        relationshipData={selectedLetterInfo.relationshipData} 
-        onDraftDiscarded={refreshDocumentData} 
-        jobLevel={jobLevel}
-        activeEntityType={selectedLetterInfo.activeEntityType}
-        activeEntityId={selectedLetterInfo.activeEntityId}
-        // ADD THIS PROP:
-        refreshDocuments={refreshDocuments} 
-    />
-)}
+      {showTemplateGenerator && selectedLetterInfo && (
+        <TemplateGenerationDialog
+          isOpen={showTemplateGenerator}
+          onClose={() => setShowTemplateGenerator(false)}
+          template={selectedLetterInfo.template}
+          availableTemplates={selectedLetterInfo.availableTemplates}
+          documentName={selectedLetterInfo.document.display_name}
+          onSave={handleSaveGeneratedLetter}
+          masterFields={selectedLetterInfo.masterFields}
+          entityIdMap={selectedLetterInfo.entityIdMap}
+          sourceDataCache={selectedLetterInfo.sourceDataCache}
+          extractedData={selectedLetterInfo.extractedData}
+          personData={selectedLetterInfo.personData}
+          companyData={selectedLetterInfo.companyData}
+          relationshipData={selectedLetterInfo.relationshipData}
+          onDraftDiscarded={refreshDocumentData}
+          jobLevel={jobLevel}
+          activeEntityType={selectedLetterInfo.activeEntityType}
+          activeEntityId={selectedLetterInfo.activeEntityId}
+          // ADD THIS PROP:
+          refreshDocuments={refreshDocuments}
+        />
+      )}
     </div >
   );
 }

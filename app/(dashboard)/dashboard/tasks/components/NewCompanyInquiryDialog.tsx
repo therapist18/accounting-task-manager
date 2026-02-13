@@ -8,15 +8,22 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Check, ChevronsUpDown, User, Users, Building2, Loader2, FileText, Briefcase, Shield, Info } from "lucide-react"
+import { Check, ChevronsUpDown, User, Users, Building2, Loader2, FileText, Briefcase, Shield, Info, Search, X, Calendar, ListTodo, HelpCircle, Folder } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
 import { format } from "date-fns"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+
+// Photo document IDs
+const COMPANY_LOGO_ID = 'f7a75607-bff9-4995-8bde-0256e86da435';
+const PASSPORT_PHOTO_ID = '48f48255-e5db-4944-8864-6f35b3af4696';
+const CLEAR_PHOTO_ID = 'fa74ff82-09ce-418d-8985-174158d73316';
 
 interface Company {
     id: number
@@ -29,6 +36,7 @@ interface Official {
     is_current: boolean
     roles: string[] // Changed to array to handle multiple roles
     primary_role: string
+    photoUrl?: string // Add photo URL to interface
 }
 
 interface NewCompanyInquiryDialogProps {
@@ -41,7 +49,7 @@ interface NewCompanyInquiryDialogProps {
     selectedClassId?: string
     users: any[]
     officers: any[]
-    initialData?: any 
+    initialData?: any
 }
 
 export function NewCompanyInquiryDialog({
@@ -54,7 +62,7 @@ export function NewCompanyInquiryDialog({
     selectedClassId = '',
     users = [],
     officers = [],
-    initialData = null 
+    initialData = null
 }: NewCompanyInquiryDialogProps) {
     const isEditMode = !!initialData;
 
@@ -63,6 +71,8 @@ export function NewCompanyInquiryDialog({
     const [officials, setOfficials] = useState<Official[]>([])
     const [selectedOfficialIds, setSelectedOfficialIds] = useState<Set<number>>(new Set())
     const [primaryDirectorId, setPrimaryDirectorId] = useState<number | null>(null)
+    const [companyLogo, setCompanyLogo] = useState<string | null>(null)
+    const [loadingLogo, setLoadingLogo] = useState(false)
 
     const [loadingCompanies, setLoadingCompanies] = useState(false)
     const [loadingOfficials, setLoadingOfficials] = useState(false)
@@ -78,7 +88,12 @@ export function NewCompanyInquiryDialog({
     const [availableOfficers, setAvailableOfficers] = useState([])
     const [availableManagers, setAvailableManagers] = useState([])
     const [availableAssistants, setAvailableAssistants] = useState([])
-    
+
+    // Job questions state
+    const [jobQuestions, setJobQuestions] = useState<any[]>([])
+    const [jobAnswers, setJobAnswers] = useState<Record<string, any>>({})
+    const [loadingQuestions, setLoadingQuestions] = useState(false)
+
     const [formData, setFormData] = useState({
         job_description: '',
         department_id: '',
@@ -97,6 +112,45 @@ export function NewCompanyInquiryDialog({
             subclass_id: null
         }
     });
+
+    // Helper function to construct Supabase storage URL
+    const getSupabaseImageUrl = useCallback((filePath: string | null): string | null => {
+        if (!filePath) return null;
+
+        // If it's already a full URL, return as is
+        if (filePath.startsWith('http')) return filePath;
+
+        // Otherwise, construct the Supabase storage URL
+        const bucketName = 'kyc-documents';
+        const fullPath = filePath.startsWith(bucketName) ? filePath : `${bucketName}/${filePath}`;
+        return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${fullPath}`;
+    }, []);
+
+    // Fetch company logo
+    const fetchCompanyLogo = useCallback(async (companyId: number) => {
+        setLoadingLogo(true);
+        setCompanyLogo(null);
+
+        try {
+            const { data: logoDoc } = await supabase
+                .from('acc_portal_kyc_uploads')
+                .select('document_url')
+                .eq('company_id', companyId)
+                .eq('document_id', COMPANY_LOGO_ID)
+                .maybeSingle();
+
+            if (logoDoc?.document_url) {
+                const imageUrl = getSupabaseImageUrl(logoDoc.document_url);
+                if (imageUrl) {
+                    setCompanyLogo(imageUrl);
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching company logo:', error);
+        } finally {
+            setLoadingLogo(false);
+        }
+    }, [getSupabaseImageUrl]);
 
     // Populate form on Edit Mode
     useEffect(() => {
@@ -124,7 +178,7 @@ export function NewCompanyInquiryDialog({
                 id: initialData.company_id,
                 company_name: initialData.applicant_name
             });
-            
+
             if (initialData.directors_details) {
                 const ids = initialData.directors_details.map((d: any) => d.id);
                 setSelectedOfficialIds(new Set(ids));
@@ -149,6 +203,37 @@ export function NewCompanyInquiryDialog({
         }
     }, []);
 
+    // Fetch official photo
+    const fetchOfficialPhoto = useCallback(async (individualId: number): Promise<string | null> => {
+        try {
+            // Try passport photo first
+            let { data: photoDoc } = await supabase
+                .from('acc_portal_directors_documents')
+                .select('file_path')
+                .eq('director_id', individualId)
+                .eq('document_id', PASSPORT_PHOTO_ID)
+                .maybeSingle();
+
+            // Fallback to clear photo
+            if (!photoDoc) {
+                const result = await supabase
+                    .from('acc_portal_directors_documents')
+                    .select('file_path')
+                    .eq('director_id', individualId)
+                    .eq('document_id', CLEAR_PHOTO_ID)
+                    .maybeSingle();
+                photoDoc = result.data;
+            }
+
+            if (photoDoc?.file_path) {
+                return getSupabaseImageUrl(photoDoc.file_path);
+            }
+        } catch (error) {
+            console.error('Error fetching official photo:', error);
+        }
+        return null;
+    }, [getSupabaseImageUrl]);
+
     const fetchOfficials = useCallback(async (companyId: number) => {
         setLoadingOfficials(true);
         try {
@@ -164,14 +249,14 @@ export function NewCompanyInquiryDialog({
             (data || []).forEach(individual => {
                 const associations = individual.employment_data?.associations || [];
                 const relevantAssociations = associations.filter(assoc =>
-                    assoc.company_id?.toString() === companyId.toString() && 
+                    assoc.company_id?.toString() === companyId.toString() &&
                     (assoc.individual_type === 'Director' || assoc.individual_type === 'Shareholder')
                 );
 
                 if (relevantAssociations.length > 0) {
                     const roles = Array.from(new Set(relevantAssociations.map(a => a.individual_type)));
                     const isAnyActive = relevantAssociations.some(a => a.is_current === true);
-                    
+
                     associatedMap.set(individual.id, {
                         id: individual.id,
                         full_name: individual.full_name,
@@ -183,8 +268,20 @@ export function NewCompanyInquiryDialog({
             });
 
             const uniqueOfficials = Array.from(associatedMap.values());
-            setOfficials(uniqueOfficials);
-            
+
+            // Fetch photos for each official
+            const officialsWithPhotos = await Promise.all(
+                uniqueOfficials.map(async (official) => {
+                    const photoUrl = await fetchOfficialPhoto(official.id);
+                    return {
+                        ...official,
+                        photoUrl
+                    };
+                })
+            );
+
+            setOfficials(officialsWithPhotos);
+
             if (!isEditMode) {
                 const activeOfficialIds = uniqueOfficials
                     .filter(d => d.is_current)
@@ -197,7 +294,79 @@ export function NewCompanyInquiryDialog({
         } finally {
             setLoadingOfficials(false);
         }
-    }, [isEditMode]);
+    }, [isEditMode, fetchOfficialPhoto]);
+
+    // Fetch job questions
+    const fetchJobQuestions = useCallback(async (levelObj: any) => {
+        setLoadingQuestions(true)
+        try {
+            const { data } = await supabase
+                .from('tm_class_requirements')
+                .select('job_specific_questions')
+                .contains('job_level', levelObj)
+                .maybeSingle()
+
+            if (data?.job_specific_questions) {
+                setJobQuestions(data.job_specific_questions)
+                // Set defaults
+                const initial: any = {}
+                data.job_specific_questions.forEach((q: any) => {
+                    if (q.default_value) initial[q.id] = q.default_value
+                })
+                setJobAnswers(initial)
+            } else {
+                setJobQuestions([])
+            }
+        } finally {
+            setLoadingQuestions(false)
+        }
+    }, [])
+
+    // Fetch job questions when classification changes
+    useEffect(() => {
+        if (!formData.department_id) return
+        const levelObj = {
+            department_id: Number(formData.department_id),
+            subdepartment_id: formData.subdepartment_id ? Number(formData.subdepartment_id) : null,
+            class_id: formData.class_id ? Number(formData.class_id) : null,
+            level: formData.class_id ? 3 : formData.subdepartment_id ? 2 : 1
+        }
+        fetchJobQuestions(levelObj)
+    }, [formData.department_id, formData.subdepartment_id, formData.class_id, fetchJobQuestions])
+
+    // Check question visibility
+    const checkVisibility = useCallback((q: any) => {
+        if (!q.depends_on || !q.depends_on.id) return true;
+
+        const parentVal = jobAnswers[q.depends_on.id];
+        const targetVal = q.depends_on.value;
+
+        switch (q.depends_on.operator) {
+            case 'equals':
+                return String(parentVal) === String(targetVal);
+            case 'not_equals':
+                return String(parentVal) !== String(targetVal);
+            case 'is_not_empty':
+                if (Array.isArray(parentVal)) return parentVal.length > 0;
+                return parentVal !== undefined && parentVal !== null && parentVal !== '';
+            case 'is_empty':
+                if (Array.isArray(parentVal)) return parentVal.length === 0;
+                return parentVal === undefined || parentVal === null || parentVal === '';
+            default:
+                return true;
+        }
+    }, [jobAnswers]);
+
+    // Group questions by category
+    const groupedQuestions = useMemo(() => {
+        const visible = jobQuestions.filter(q => checkVisibility(q));
+        return visible.reduce((acc, q) => {
+            const cat = q.category || "General Requirements";
+            if (!acc[cat]) acc[cat] = [];
+            acc[cat].push(q);
+            return acc;
+        }, {} as Record<string, any[]>);
+    }, [jobQuestions, checkVisibility]);
 
     useEffect(() => {
         if (open && companies.length === 0) loadCompanies();
@@ -212,8 +381,11 @@ export function NewCompanyInquiryDialog({
     }, [open, selectedDepartmentId, loadCompanies, isEditMode]);
 
     useEffect(() => {
-        if (selectedCompany) fetchOfficials(selectedCompany.id);
-    }, [selectedCompany, fetchOfficials]);
+        if (selectedCompany) {
+            fetchOfficials(selectedCompany.id);
+            fetchCompanyLogo(selectedCompany.id);
+        }
+    }, [selectedCompany, fetchOfficials, fetchCompanyLogo]);
 
     const loadStaffData = useCallback(async () => {
         setLoadingStaff(true);
@@ -242,7 +414,7 @@ export function NewCompanyInquiryDialog({
         const subdept = availableSubdepartments.find(s => String(s.id) === String(formData.subdepartment_id));
         return subdept?.classes?.filter(cls => !cls.parentId) || [];
     }, [availableSubdepartments, formData.subdepartment_id]);
-    
+
     const availableSubclasses = useMemo(() => {
         const subdept = availableSubdepartments.find(s => String(s.id) === String(formData.subdepartment_id));
         if (!subdept?.classes) return [];
@@ -397,6 +569,9 @@ export function NewCompanyInquiryDialog({
         setSelectedOfficialIds(new Set());
         setPrimaryDirectorId(null);
         setTaskType('new');
+        setCompanyLogo(null);
+        setJobQuestions([]);
+        setJobAnswers({});
         setFormData({
             job_description: '',
             department_id: selectedDepartmentId || '',
@@ -417,102 +592,213 @@ export function NewCompanyInquiryDialog({
         });
     };
 
+    const dialogTitle = isEditMode
+        ? `Edit Company Enquiry: ${initialData?.applicant_name || 'Loading...'}`
+        : "New Company Enquiry";
+
+    // Table Row Component for consistent styling
+    const TableRow = ({ label, children, required = false }: { label: string; children: React.ReactNode; required?: boolean }) => (
+        <div className="grid grid-cols-12 gap-4 py-3 border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
+            <div className="col-span-4 flex items-center">
+                <Label className="text-xs font-semibold text-slate-700">
+                    {label}
+                    {required && <span className="text-red-500 ml-1">*</span>}
+                </Label>
+            </div>
+            <div className="col-span-8">
+                {children}
+            </div>
+        </div>
+    );
+
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                    <DialogTitle>{isEditMode ? 'Edit Company Enquiry' : 'New Company Enquiry'}</DialogTitle>
-                    <DialogDescription>
-                        {isEditMode ? 'Modify existing task details.' : 'Register a new enquiry for a company and its officials.'}
-                    </DialogDescription>
+            <DialogContent className="max-w-[1600px] max-h-[95vh] p-0 flex flex-col border-none shadow-2xl overflow-hidden bg-white">
+                {/* STATIC HEADER */}
+                <DialogHeader className="p-6 bg-indigo-600 text-white shrink-0 z-10 shadow-md relative">
+                    <button
+                        onClick={() => onOpenChange(false)}
+                        className="absolute right-6 top-6 rounded-sm opacity-70 ring-offset-white transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 disabled:pointer-events-none"
+                    >
+                        <X className="h-5 w-5" />
+                        <span className="sr-only">Close</span>
+                    </button>
+                    <div className="flex items-center justify-between pr-8">
+                        <div className="flex items-center gap-4">
+                            <div className="bg-white/20 p-2.5 rounded-xl"><Building2 className="h-6 w-6" /></div>
+                            <div>
+                                <DialogTitle className="text-2xl font-bold tracking-tight">
+                                    {dialogTitle}
+                                </DialogTitle>
+                                <DialogDescription className="text-indigo-100 font-medium">
+                                    {isEditMode ? 'Updating existing company records' : 'Register new company enquiry with officials'}
+                                </DialogDescription>
+                            </div>
+                        </div>
+                    </div>
                 </DialogHeader>
 
-                <form onSubmit={handleSubmit} className="space-y-6">
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        {/* LEFT COLUMN: Entity selection */}
-                        <div className="lg:col-span-1 space-y-6">
-                            <Card className="border-blue-100 shadow-sm">
-                                <CardHeader className="pb-3">
-                                    <CardTitle className="text-sm font-bold flex items-center gap-2">
-                                        <Building2 className="h-4 w-4 text-blue-600" /> Company
+                {/* SCROLLABLE CONTENT AREA */}
+                <ScrollArea className="flex-1 w-full overflow-y-auto bg-slate-50/50">
+                    <form id="company-enquiry-form" onSubmit={handleSubmit} className="p-6 space-y-6 grid grid-cols-2 gap-4">
+                        <div className="col-span-1">
+                            {/* COMPANY IDENTIFICATION SECTION */}
+                            <Card className="border-indigo-100 shadow-sm overflow-hidden bg-white mb-4">
+                                <CardHeader className="bg-indigo-50/50 py-3 px-6 border-b border-indigo-100">
+                                    <CardTitle className="text-sm font-black text-indigo-800 uppercase tracking-wider flex items-center gap-2">
+                                        <Building2 className="h-4 w-4" />
+                                        Company Identification
                                     </CardTitle>
                                 </CardHeader>
-                                <CardContent>
-                                    <Popover open={isCompanyPopoverOpen} onOpenChange={setIsCompanyPopoverOpen}>
-                                        <PopoverTrigger asChild>
-                                            <Button variant="outline" role="combobox" className={cn("w-full justify-between text-left font-normal", !selectedCompany && "text-muted-foreground")}>
-                                                <span className="truncate">{selectedCompany ? selectedCompany.company_name : "Search company..."}</span>
-                                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                            </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
-                                            <Command>
-                                                <CommandInput placeholder="Type company name..." />
-                                                <CommandEmpty>No results.</CommandEmpty>
-                                                <CommandGroup className="max-h-60 overflow-auto">
-                                                    {loadingCompanies ? (
-                                                        <div className="flex justify-center p-2"><Loader2 className="h-4 w-4 animate-spin" /></div>
-                                                    ) : companies.map((c) => (
-                                                        <CommandItem key={c.id} onSelect={() => { setSelectedCompany(c); setIsCompanyPopoverOpen(false); }}>
-                                                            {c.company_name}
-                                                            <Check className={cn("ml-auto h-4 w-4", selectedCompany?.id === c.id ? "opacity-100" : "opacity-0")} />
-                                                        </CommandItem>
-                                                    ))}
-                                                </CommandGroup>
-                                            </Command>
-                                        </PopoverContent>
-                                    </Popover>
+                                <CardContent className="p-6 space-y-0">
+                                    <TableRow label="Company" required>
+                                        <div className="flex items-center gap-4">
+                                            {/* Logo Preview */}
+                                            <div className="shrink-0">
+                                                {loadingLogo ? (
+                                                    <div className="w-16 h-16 rounded-lg bg-slate-100 flex items-center justify-center">
+                                                        <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+                                                    </div>
+                                                ) : companyLogo ? (
+                                                    <img
+                                                        src={companyLogo}
+                                                        alt="Company Logo"
+                                                        className="w-16 h-16 rounded-lg object-contain border-2 border-indigo-100 bg-white p-1"
+                                                    />
+                                                ) : selectedCompany ? (
+                                                    <div className="w-16 h-16 rounded-lg bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center">
+                                                        <Building2 className="h-8 w-8 text-indigo-600" />
+                                                    </div>
+                                                ) : (
+                                                    <div className="w-16 h-16 rounded-lg bg-slate-100 flex items-center justify-center">
+                                                        <Building2 className="h-8 w-8 text-slate-400" />
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Search Popover */}
+                                            <div className="flex-1">
+                                                <Popover open={isCompanyPopoverOpen} onOpenChange={setIsCompanyPopoverOpen}>
+                                                    <PopoverTrigger asChild>
+                                                        <Button variant="outline" className="w-full justify-between h-11 border-slate-200 bg-white">
+                                                            {selectedCompany ? <span className="font-bold text-slate-800">{selectedCompany.company_name}</span> : <span className="text-slate-400">Search company database...</span>}
+                                                            <Search className="h-4 w-4 opacity-30" />
+                                                        </Button>
+                                                    </PopoverTrigger>
+                                                    <PopoverContent className="w-[400px] p-0" align="start">
+                                                        <Command>
+                                                            <CommandInput placeholder="Type company name..." />
+                                                            <CommandList className="max-h-[300px] overflow-y-auto">
+                                                                <CommandEmpty>No companies found.</CommandEmpty>
+                                                                <CommandGroup>
+                                                                    {loadingCompanies ? (
+                                                                        <div className="flex justify-center p-4">
+                                                                            <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+                                                                        </div>
+                                                                    ) : companies.map((c) => (
+                                                                        <CommandItem key={c.id} onSelect={() => { setSelectedCompany(c); setIsCompanyPopoverOpen(false); }}>
+                                                                            <Check className={cn("mr-2 h-4 w-4 text-indigo-600", selectedCompany?.id === c.id ? "opacity-100" : "opacity-0")} />
+                                                                            {c.company_name}
+                                                                        </CommandItem>
+                                                                    ))}
+                                                                </CommandGroup>
+                                                            </CommandList>
+                                                        </Command>
+                                                    </PopoverContent>
+                                                </Popover>
+                                            </div>
+                                        </div>
+                                    </TableRow>
+
+                                    <TableRow label="Task Context">
+                                        <Select value={taskType} onValueChange={(v: any) => setTaskType(v)}>
+                                            <SelectTrigger className="h-11 border-slate-200 bg-white max-w-xs">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="new">New Application</SelectItem>
+                                                <SelectItem value="renewal">Renewal/Compliance</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </TableRow>
                                 </CardContent>
                             </Card>
 
+                            {/* COMPANY OFFICIALS SECTION */}
                             {selectedCompany && (
-                                <Card className="border-blue-100 shadow-sm">
-                                    <CardHeader className="pb-3">
-                                        <CardTitle className="text-sm font-bold flex items-center gap-2">
-                                            <Users className="h-4 w-4 text-blue-600" /> Officials
+                                <Card className="border-indigo-100 shadow-sm overflow-hidden bg-white mb-4">
+                                    <CardHeader className="bg-indigo-50/50 py-3 px-6 border-b border-indigo-100">
+                                        <CardTitle className="text-sm font-black text-indigo-800 uppercase tracking-wider flex items-center gap-2">
+                                            <Users className="h-4 w-4" />
+                                            Company Officials
                                         </CardTitle>
-                                        <CardDescription className="text-[11px]">Select directors or shareholders to include.</CardDescription>
+                                        <CardDescription className="text-xs text-indigo-600 mt-1">
+                                            Select directors or shareholders to include in this enquiry
+                                        </CardDescription>
                                     </CardHeader>
-                                    <CardContent>
+                                    <CardContent className="p-6">
                                         {loadingOfficials ? (
-                                            <div className="flex flex-col items-center py-6 text-muted-foreground gap-2">
-                                                <Loader2 className="h-5 w-5 animate-spin" />
-                                                <span className="text-xs">Loading officials...</span>
+                                            <div className="flex flex-col items-center py-8 text-muted-foreground gap-3">
+                                                <Loader2 className="h-6 w-6 animate-spin text-indigo-400" />
+                                                <span className="text-sm text-slate-500">Loading company officials...</span>
                                             </div>
                                         ) : officials.length > 0 ? (
-                                            <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[400px] overflow-y-auto pr-2">
                                                 {officials.map((official) => (
-                                                    <div 
-                                                        key={official.id} 
+                                                    <div
+                                                        key={official.id}
                                                         className={cn(
-                                                            "p-3 rounded-lg border transition-all",
-                                                            selectedOfficialIds.has(official.id) ? "bg-blue-50/50 border-blue-200" : "bg-card border-slate-100"
+                                                            "p-4 rounded-lg border transition-all cursor-pointer",
+                                                            selectedOfficialIds.has(official.id)
+                                                                ? "bg-indigo-50/50 border-indigo-200 shadow-sm"
+                                                                : "bg-white border-slate-200 hover:border-indigo-100"
                                                         )}
+                                                        onClick={() => handleOfficialSelection(official.id)}
                                                     >
-                                                        <div className="flex items-start gap-3">
-                                                            <div className="pt-0.5">
-                                                                <input
-                                                                    type="checkbox"
-                                                                    checked={selectedOfficialIds.has(official.id)}
-                                                                    onChange={() => handleOfficialSelection(official.id)}
-                                                                    className="h-4 w-4 rounded border-slate-300 text-blue-600 cursor-pointer"
-                                                                />
+                                                        <div className="flex items-start gap-4">
+                                                            {/* Photo Preview */}
+                                                            <div className="shrink-0">
+                                                                {official.photoUrl ? (
+                                                                    <img
+                                                                        src={official.photoUrl}
+                                                                        alt={official.full_name}
+                                                                        className="w-12 h-12 rounded-lg object-cover border-2 border-indigo-100"
+                                                                    />
+                                                                ) : (
+                                                                    <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center">
+                                                                        <User className="h-6 w-6 text-indigo-600" />
+                                                                    </div>
+                                                                )}
                                                             </div>
+
                                                             <div className="flex-1 min-w-0">
-                                                                <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
-                                                                    <span className="text-xs font-semibold truncate leading-none">{official.full_name}</span>
+                                                                <div className="flex items-center gap-2 mb-2">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={selectedOfficialIds.has(official.id)}
+                                                                        onChange={() => handleOfficialSelection(official.id)}
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                        className="h-4 w-4 rounded border-slate-300 text-indigo-600 cursor-pointer"
+                                                                    />
+                                                                    <span className="text-sm font-bold truncate text-slate-800">{official.full_name}</span>
                                                                     {official.is_current ? (
-                                                                        <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] px-1.5 py-0 h-4">Active</Badge>
+                                                                        <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] px-2 py-0.5 h-5">
+                                                                            Active
+                                                                        </Badge>
                                                                     ) : (
-                                                                        <Badge className="bg-slate-50 text-slate-500 border-slate-200 text-[10px] px-1.5 py-0 h-4">Inactive</Badge>
+                                                                        <Badge className="bg-slate-50 text-slate-500 border-slate-200 text-[10px] px-2 py-0.5 h-5">
+                                                                            Inactive
+                                                                        </Badge>
                                                                     )}
                                                                 </div>
-                                                                
-                                                                <div className="flex flex-wrap gap-1 mb-2">
+
+                                                                <div className="flex flex-wrap gap-1.5 mb-2">
                                                                     {official.roles.map(role => (
                                                                         <Badge key={role} variant="outline" className={cn(
-                                                                            "text-[9px] px-1.5 py-0 h-4 uppercase font-bold",
-                                                                            role === 'Director' ? "text-indigo-600 border-indigo-200" : "text-amber-600 border-amber-200"
+                                                                            "text-[10px] px-2 py-0.5 h-5 uppercase font-bold",
+                                                                            role === 'Director'
+                                                                                ? "text-indigo-600 border-indigo-200 bg-indigo-50"
+                                                                                : "text-amber-600 border-amber-200 bg-amber-50"
                                                                         )}>
                                                                             {role}
                                                                         </Badge>
@@ -520,17 +806,22 @@ export function NewCompanyInquiryDialog({
                                                                 </div>
 
                                                                 {official.roles.includes('Director') && selectedOfficialIds.has(official.id) && (
-                                                                    <div className="mt-2 pt-2 border-t border-blue-100 flex items-center gap-2">
+                                                                    <div className="mt-2 pt-2 border-t border-indigo-100 flex items-center gap-2">
                                                                         <input
                                                                             type="radio"
                                                                             id={`primary-${official.id}`}
                                                                             name="primary-director"
                                                                             checked={primaryDirectorId === official.id}
                                                                             onChange={() => setPrimaryDirectorId(official.id)}
-                                                                            className="h-3 w-3 text-blue-600"
+                                                                            onClick={(e) => e.stopPropagation()}
+                                                                            className="h-3.5 w-3.5 text-indigo-600 cursor-pointer"
                                                                         />
-                                                                        <label htmlFor={`primary-${official.id}`} className="text-[10px] text-slate-500 cursor-pointer font-medium italic">
-                                                                            Set as Primary Director
+                                                                        <label
+                                                                            htmlFor={`primary-${official.id}`}
+                                                                            className="text-[11px] text-indigo-600 cursor-pointer font-semibold"
+                                                                            onClick={(e) => e.stopPropagation()}
+                                                                        >
+                                                                            Primary Director
                                                                         </label>
                                                                     </div>
                                                                 )}
@@ -540,156 +831,326 @@ export function NewCompanyInquiryDialog({
                                                 ))}
                                             </div>
                                         ) : (
-                                            <div className="text-center py-8 text-slate-400 bg-slate-50 rounded-lg border border-dashed">
-                                                <Info className="h-8 w-8 mx-auto mb-2 opacity-20" />
-                                                <p className="text-xs">No officials linked to this company.</p>
+                                            <div className="text-center py-12 text-slate-400 bg-slate-50 rounded-lg border-2 border-dashed border-slate-200">
+                                                <Info className="h-10 w-10 mx-auto mb-3 opacity-20" />
+                                                <p className="text-sm font-medium">No officials linked to this company</p>
+                                                <p className="text-xs mt-1">Please ensure directors/shareholders are registered</p>
                                             </div>
                                         )}
                                     </CardContent>
                                 </Card>
                             )}
-                        </div>
 
-                        {/* RIGHT COLUMN: Details & Assignment */}
-                        <div className="lg:col-span-2 space-y-6">
-                            <Card className="shadow-sm">
-                                <CardHeader className="pb-3 border-b mb-4">
-                                    <CardTitle className="text-sm font-bold flex items-center gap-2">
-                                        <FileText className="h-4 w-4 text-slate-600" /> Basic Information
+                            {/* PROCESS CLASSIFICATION SECTION */}
+                            <Card className="border-indigo-100 shadow-sm overflow-hidden bg-white mb-4">
+                                <CardHeader className="bg-indigo-50/50 py-3 px-6 border-b border-indigo-100">
+                                    <CardTitle className="text-sm font-black text-indigo-800 uppercase tracking-wider flex items-center gap-2">
+                                        <Briefcase className="h-4 w-4" />
+                                        Process Classification
                                     </CardTitle>
                                 </CardHeader>
-                                <CardContent className="space-y-4">
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="space-y-1.5">
-                                            <Label className="text-xs">Task Context</Label>
-                                            <Select value={taskType} onValueChange={(v: any) => setTaskType(v)}>
-                                                <SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="new" className="text-xs">New</SelectItem>
-                                                    <SelectItem value="renewal" className="text-xs">Renewal/Compliance</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-                                        <div className="space-y-1.5">
-                                            <Label className="text-xs">Date of Enquiry</Label>
-                                            <Input type="date" className="h-9 text-xs" value={formData.enquiry_date} onChange={(e) => setFormData(p => ({ ...p, enquiry_date: e.target.value }))} required />
-                                        </div>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <Label className="text-xs">Job Description</Label>
-                                        <Textarea 
-                                            value={formData.job_description} 
-                                            onChange={(e) => setFormData(p => ({ ...p, job_description: e.target.value }))} 
-                                            placeholder="Specify the services requested or the scope of the work..." 
-                                            className="min-h-[80px] text-xs resize-none"
-                                            required 
-                                        />
-                                    </div>
+                                <CardContent className="p-6 space-y-0">
+                                    <TableRow label="Department" required>
+                                        <Select
+                                            value={formData.department_id}
+                                            onValueChange={(v) => setFormData(prev => ({ ...prev, department_id: v, subdepartment_id: '', class_id: '', subclass_id: '' }))}
+                                        >
+                                            <SelectTrigger className="h-11 bg-white border-slate-200">
+                                                <SelectValue placeholder="Select Department" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {departments.map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                    </TableRow>
+
+                                    <TableRow label="Sub-Department">
+                                        <Select
+                                            value={formData.subdepartment_id}
+                                            onValueChange={(v) => setFormData(prev => ({ ...prev, subdepartment_id: v, class_id: '', subclass_id: '' }))}
+                                            disabled={!formData.department_id}
+                                        >
+                                            <SelectTrigger className="h-11 bg-white border-slate-200">
+                                                <SelectValue placeholder="Select Sub-Department" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {availableSubdepartments.map(sd => <SelectItem key={sd.id} value={sd.id.toString()}>{sd.name}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                    </TableRow>
+
+                                    <TableRow label="Class">
+                                        <Select
+                                            value={formData.class_id}
+                                            onValueChange={(v) => setFormData(prev => ({ ...prev, class_id: v, subclass_id: '' }))}
+                                            disabled={!formData.subdepartment_id}
+                                        >
+                                            <SelectTrigger className="h-11 bg-white border-slate-200">
+                                                <SelectValue placeholder="Select Class" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {availableClasses.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                    </TableRow>
+
+                                    <TableRow label="Subclass">
+                                        <Select
+                                            value={formData.subclass_id}
+                                            onValueChange={(v) => setFormData(p => ({ ...p, subclass_id: v }))}
+                                            disabled={!formData.class_id}
+                                        >
+                                            <SelectTrigger className="h-11 bg-white border-slate-200">
+                                                <SelectValue placeholder="Select Subclass" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {availableSubclasses.map(sc => <SelectItem key={sc.id} value={sc.id.toString()}>{sc.name}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                    </TableRow>
                                 </CardContent>
                             </Card>
 
-                            <Card className="shadow-sm">
-                                <CardHeader className="pb-3 border-b mb-4">
-                                    <CardTitle className="text-sm font-bold flex items-center gap-2">
-                                        <Briefcase className="h-4 w-4 text-slate-600" /> Classification
+                            {/* INTERNAL PROCESSING SECTION */}
+                            <Card className="border-indigo-100 shadow-sm overflow-hidden bg-white mb-4">
+                                <CardHeader className="bg-indigo-50/50 py-3 px-6 border-b border-indigo-100">
+                                    <CardTitle className="text-sm font-black text-indigo-800 uppercase tracking-wider flex items-center gap-2">
+                                        <Shield className="h-4 w-4" />
+                                        Internal Processing
                                     </CardTitle>
                                 </CardHeader>
-                                <CardContent className="space-y-4">
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="space-y-1.5">
-                                            <Label className="text-xs">Department</Label>
-                                            <Select value={formData.department_id} onValueChange={(v) => {
-                                                setFormData(prev => ({ ...prev, department_id: v, subdepartment_id: '', class_id: '', subclass_id: '' }));
-                                            }}>
-                                                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select Dept" /></SelectTrigger>
-                                                <SelectContent>{departments.map(d => <SelectItem key={d.id} value={d.id.toString()} className="text-xs">{d.name}</SelectItem>)}</SelectContent>
-                                            </Select>
-                                        </div>
-                                        <div className="space-y-1.5">
-                                            <Label className="text-xs">Subdepartment</Label>
-                                            <Select value={formData.subdepartment_id} onValueChange={(v) => {
-                                                setFormData(prev => ({ ...prev, subdepartment_id: v, class_id: '', subclass_id: '' }));
-                                            }}>
-                                                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select Subdept" /></SelectTrigger>
-                                                <SelectContent>{availableSubdepartments.map(sd => <SelectItem key={sd.id} value={sd.id.toString()} className="text-xs">{sd.name}</SelectItem>)}</SelectContent>
-                                            </Select>
-                                        </div>
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="space-y-1.5">
-                                            <Label className="text-xs">Class</Label>
-                                            <Select value={formData.class_id} onValueChange={(v) => {
-                                                setFormData(prev => ({ ...prev, class_id: v, subclass_id: '' }));
-                                            }}>
-                                                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select Class" /></SelectTrigger>
-                                                <SelectContent>{availableClasses.map(c => <SelectItem key={c.id} value={c.id.toString()} className="text-xs">{c.name}</SelectItem>)}</SelectContent>
-                                            </Select>
-                                        </div>
-                                        <div className="space-y-1.5">
-                                            <Label className="text-xs">Subclass</Label>
-                                            <Select value={formData.subclass_id} onValueChange={(v) => setFormData(p => ({ ...p, subclass_id: v }))}>
-                                                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select Subclass" /></SelectTrigger>
-                                                <SelectContent>{availableSubclasses.map(sc => <SelectItem key={sc.id} value={sc.id.toString()} className="text-xs">{sc.name}</SelectItem>)}</SelectContent>
-                                            </Select>
-                                        </div>
-                                    </div>
-                                </CardContent>
-                            </Card>
-
-                            <Card className="shadow-sm border-indigo-100">
-                                <CardHeader className="pb-3 border-b border-indigo-50 mb-4">
-                                    <CardTitle className="text-sm font-bold flex items-center gap-2">
-                                        <Shield className="h-4 w-4 text-indigo-600" /> Assignment
-                                    </CardTitle>
-                                </CardHeader>
-                                <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    <div className="space-y-1.5">
-                                        <Label className="text-xs text-indigo-900">Officer</Label>
+                                <CardContent className="p-6 space-y-0">
+                                    <TableRow label="Assigned Officer">
                                         <Select value={formData.officer_id} onValueChange={(v) => setFormData(p => ({ ...p, officer_id: v }))}>
-                                            <SelectTrigger className="h-9 text-xs border-indigo-100"><SelectValue placeholder="Assign Officer" /></SelectTrigger>
+                                            <SelectTrigger className="h-11 bg-white border-slate-200">
+                                                <SelectValue placeholder="Select Officer" />
+                                            </SelectTrigger>
                                             <SelectContent>
                                                 <SelectItem value="none">No Officer</SelectItem>
-                                                {localOfficers.map(o => <SelectItem key={o.id} value={o.id.toString()} className="text-xs">{o.name}</SelectItem>)}
+                                                {localOfficers.map(o => <SelectItem key={o.id} value={o.id.toString()}>{o.name}</SelectItem>)}
                                             </SelectContent>
                                         </Select>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <Label className="text-xs text-indigo-900">Task Manager</Label>
+                                    </TableRow>
+
+                                    <TableRow label="Task Manager">
                                         <Select value={formData.task_manager_id} onValueChange={(v) => setFormData(p => ({ ...p, task_manager_id: v }))}>
-                                            <SelectTrigger className="h-9 text-xs border-indigo-100"><SelectValue placeholder="Assign Manager" /></SelectTrigger>
+                                            <SelectTrigger className="h-11 bg-white border-slate-200">
+                                                <SelectValue placeholder="Select Manager" />
+                                            </SelectTrigger>
                                             <SelectContent>
                                                 <SelectItem value="none">No Manager</SelectItem>
-                                                {localUsers.map(m => <SelectItem key={m.id} value={m.id.toString()} className="text-xs">{m.name}</SelectItem>)}
+                                                {localUsers.map(m => <SelectItem key={m.id} value={m.id.toString()}>{m.name}</SelectItem>)}
                                             </SelectContent>
                                         </Select>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <Label className="text-xs text-indigo-900">Assistant</Label>
+                                    </TableRow>
+
+                                    <TableRow label="Task Assistant">
                                         <Select value={formData.task_assistant_id} onValueChange={(v) => setFormData(p => ({ ...p, task_assistant_id: v }))}>
-                                            <SelectTrigger className="h-9 text-xs border-indigo-100"><SelectValue placeholder="Assign Assistant" /></SelectTrigger>
+                                            <SelectTrigger className="h-11 bg-white border-slate-200">
+                                                <SelectValue placeholder="Select Assistant" />
+                                            </SelectTrigger>
                                             <SelectContent>
                                                 <SelectItem value="none">No Assistant</SelectItem>
-                                                {localUsers.map(a => <SelectItem key={a.id} value={a.id.toString()} className="text-xs">{a.name}</SelectItem>)}
+                                                {localUsers.map(a => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>)}
                                             </SelectContent>
                                         </Select>
-                                    </div>
+                                    </TableRow>
+
+                                    <TableRow label="Enquiry Date" required>
+                                        <div className="relative max-w-sm">
+                                            <Input
+                                                type="date"
+                                                value={formData.enquiry_date}
+                                                onChange={(e) => setFormData(p => ({ ...p, enquiry_date: e.target.value }))}
+                                                className="pl-10 h-11 border-slate-200 bg-white"
+                                                required
+                                            />
+                                            <Calendar className="absolute left-3 top-3.5 h-4 w-4 text-slate-400" />
+                                        </div>
+                                    </TableRow>
                                 </CardContent>
                             </Card>
                         </div>
-                    </div>
 
-                    <DialogFooter className="border-t pt-4">
-                        <Button type="button" variant="ghost" className="text-xs" onClick={() => onOpenChange(false)}>Cancel</Button>
-                        <Button 
-                            type="submit" 
-                            className="bg-blue-600 hover:bg-blue-700 text-xs px-8" 
-                            disabled={loading || !selectedCompany || selectedOfficialIds.size === 0}
-                        >
-                            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                            {isEditMode ? 'Save Changes' : 'Create Inquiry Task'}
-                        </Button>
-                    </DialogFooter>
-                </form>
+                        <div className="col-span-1">
+                            {/* JOB SPECIFIC QUESTIONS SECTION */}
+                            <Card className="border-indigo-100 shadow-sm overflow-hidden bg-white mb-4">
+                                <CardHeader className="bg-indigo-50/50 px-6 border-b border-indigo-100">
+                                    <CardTitle className="text-sm font-black text-indigo-800 uppercase tracking-wider flex items-center gap-2">
+                                        <HelpCircle className="h-4 w-4" />
+                                        Job Specific Questions
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent className="px-6 py-2">
+                                    {Object.entries(groupedQuestions).length > 0 ? (
+                                        <div className="space-y-2">
+                                            {Object.entries(groupedQuestions).map(([category, questions]) => (
+                                                <div key={category} className="space-y-2">
+                                                    <div className="flex items-center gap-2 pb-2 border-b border-slate-200">
+                                                        <Folder className="h-4 w-4 text-indigo-600" />
+                                                        <h3 className="text-sm font-black text-indigo-800 uppercase tracking-wider">{category}</h3>
+                                                    </div>
+                                                    <div className="space-y-0">
+                                                        {questions.map((q) => (
+                                                            <TableRow key={q.id} label={q.label} required={q.required}>
+                                                                {q.type === 'text' && (
+                                                                    <Input
+                                                                        value={jobAnswers[q.id] || ''}
+                                                                        onChange={e => setJobAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
+                                                                        className="h-11 bg-white border-slate-200"
+                                                                    />
+                                                                )}
+
+                                                                {q.type === 'boolean' && (
+                                                                    <RadioGroup
+                                                                        value={jobAnswers[q.id] === undefined ? "" : String(jobAnswers[q.id])}
+                                                                        onValueChange={v => setJobAnswers(prev => ({ ...prev, [q.id]: v === 'true' }))}
+                                                                        className="flex gap-4"
+                                                                    >
+                                                                        <div className="flex items-center space-x-2 bg-slate-50 px-4 py-2 rounded-md border border-slate-200">
+                                                                            <RadioGroupItem value="true" id={`q-yes-${q.id}`} />
+                                                                            <Label htmlFor={`q-yes-${q.id}`} className="text-sm cursor-pointer">Yes</Label>
+                                                                        </div>
+                                                                        <div className="flex items-center space-x-2 bg-slate-50 px-4 py-2 rounded-md border border-slate-200">
+                                                                            <RadioGroupItem value="false" id={`q-no-${q.id}`} />
+                                                                            <Label htmlFor={`q-no-${q.id}`} className="text-sm cursor-pointer">No</Label>
+                                                                        </div>
+                                                                    </RadioGroup>
+                                                                )}
+
+                                                                {(q.type === 'select' || q.type === 'multiselect') && (
+                                                                    <div className="space-y-2">
+                                                                        <Popover>
+                                                                            <PopoverTrigger asChild>
+                                                                                <Button variant="outline" className="w-full justify-between h-11 bg-white border-slate-200">
+                                                                                    <span className="truncate">
+                                                                                        {q.type === 'multiselect'
+                                                                                            ? (jobAnswers[q.id]?.length > 0 ? `${jobAnswers[q.id].length} Selected` : "Choose multiple...")
+                                                                                            : (jobAnswers[q.id] || "Select option...")}
+                                                                                    </span>
+                                                                                    <ChevronsUpDown className="h-4 w-4 opacity-30" />
+                                                                                </Button>
+                                                                            </PopoverTrigger>
+                                                                            <PopoverContent className="w-[400px] p-0">
+                                                                                <Command>
+                                                                                    <CommandInput placeholder="Filter..." />
+                                                                                    <CommandList className="max-h-[250px] overflow-y-auto">
+                                                                                        <CommandGroup>
+                                                                                            {q.options?.map(opt => (
+                                                                                                <CommandItem key={opt} onSelect={() => {
+                                                                                                    if (q.type === 'multiselect') {
+                                                                                                        const current = jobAnswers[q.id] || [];
+                                                                                                        const next = current.includes(opt) ? current.filter(x => x !== opt) : [...current, opt];
+                                                                                                        setJobAnswers(prev => ({ ...prev, [q.id]: next }));
+                                                                                                    } else {
+                                                                                                        setJobAnswers(prev => ({ ...prev, [q.id]: opt }));
+                                                                                                    }
+                                                                                                }}>
+                                                                                                    <Check className={cn(
+                                                                                                        "mr-2 h-4 w-4 text-indigo-600",
+                                                                                                        q.type === 'multiselect'
+                                                                                                            ? jobAnswers[q.id]?.includes(opt) ? "opacity-100" : "opacity-0"
+                                                                                                            : jobAnswers[q.id] === opt ? "opacity-100" : "opacity-0"
+                                                                                                    )} />
+                                                                                                    {opt}
+                                                                                                </CommandItem>
+                                                                                            ))}
+                                                                                        </CommandGroup>
+                                                                                    </CommandList>
+                                                                                </Command>
+                                                                            </PopoverContent>
+                                                                        </Popover>
+
+                                                                        {/* Multiselect Badges */}
+                                                                        {q.type === 'multiselect' && jobAnswers[q.id]?.length > 0 && (
+                                                                            <div className="flex flex-wrap gap-1.5">
+                                                                                {jobAnswers[q.id].map(val => (
+                                                                                    <Badge key={val} variant="secondary" className="text-xs py-1 px-2 bg-indigo-50 text-indigo-600 border-indigo-100 flex items-center gap-1">
+                                                                                        {val}
+                                                                                        <X
+                                                                                            className="h-3 w-3 cursor-pointer hover:text-indigo-800"
+                                                                                            onClick={() => setJobAnswers(prev => ({ ...prev, [q.id]: prev[q.id].filter(x => x !== val) }))}
+                                                                                        />
+                                                                                    </Badge>
+                                                                                ))}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </TableRow>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="text-center py-12">
+                                            <div className="bg-slate-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
+                                                <HelpCircle className="h-8 w-8 text-slate-400" />
+                                            </div>
+                                            <h3 className="text-lg font-semibold text-slate-700 mb-2">Job Questions Not Loaded</h3>
+                                            <p className="text-sm text-slate-500 mb-4">Please select a job level to load requirement-specific questions</p>
+                                            <div className="text-xs text-slate-400 bg-slate-50 rounded-lg p-3 max-w-md mx-auto">
+                                                <p>Select a Department, Sub-Department, and Service Class to load the relevant job questions for this enquiry.</p>
+                                            </div>
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+
+                            {/* ADDITIONAL REMARKS SECTION */}
+                            <Card className="border-indigo-100 shadow-sm overflow-hidden bg-white mb-4">
+                                <CardHeader className="bg-indigo-50/50 py-3 px-6 border-b border-indigo-100">
+                                    <CardTitle className="text-sm font-black text-indigo-800 uppercase tracking-wider flex items-center gap-2">
+                                        <FileText className="h-4 w-4" />
+                                        Job Description
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent className="p-6">
+                                    <Textarea
+                                        value={formData.job_description}
+                                        onChange={(e) => setFormData(p => ({ ...p, job_description: e.target.value }))}
+                                        placeholder="Specify the services requested or the scope of work..."
+                                        className="min-h-[120px] bg-white border-slate-200 p-4"
+                                        required
+                                    />
+                                </CardContent>
+                            </Card>
+                        </div>
+                    </form>
+                </ScrollArea>
+
+                {/* STATIC FOOTER */}
+                <DialogFooter className="p-6 bg-white border-t border-indigo-100 shrink-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.03)]">
+                    <div className="flex items-center justify-between w-full">
+                        <div className="flex flex-col">
+                            <span className="text-xs text-slate-400 font-semibold uppercase tracking-wide">Enquiry Ready</span>
+                            <span className="text-sm text-indigo-600 font-bold truncate max-w-[400px]">
+                                {selectedCompany?.company_name || "Awaiting Selection"}
+                            </span>
+                        </div>
+                        <div className="flex gap-3">
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                onClick={() => onOpenChange(false)}
+                                disabled={loading}
+                                className="px-6 font-semibold uppercase text-xs tracking-wide text-slate-500 hover:text-slate-700"
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                type="submit"
+                                form="company-enquiry-form"
+                                disabled={loading || !selectedCompany || selectedOfficialIds.size === 0}
+                                className="px-10 bg-indigo-600 hover:bg-indigo-700 h-11 text-white font-bold uppercase text-xs tracking-wide transition-all"
+                            >
+                                {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+                                {isEditMode ? 'Update Enquiry' : 'Create Company Enquiry'}
+                            </Button>
+                        </div>
+                    </div>
+                </DialogFooter>
             </DialogContent>
         </Dialog>
     )

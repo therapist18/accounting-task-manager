@@ -597,11 +597,6 @@ const processTextField = (placeholder, targetEntity, combinedCache, masterFields
 };
 
 const processPlaceholderValue = (placeholder, relationshipData, combinedCache, masterFields, entityIdMap = null, extractedData, companyData, arrayIndex = null, sourceArray = null, task = null) => {
-    if (placeholder.name === 'DIR OCCUPATION') {
-        console.log('Processing DIR OCCUPATION placeholder:', placeholder);
-        console.log('Target entity:', getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData));
-    }
-
     if (placeholder.linked_job_question_id) {
         let taskRecord = null;
 
@@ -1087,13 +1082,6 @@ export default function TemplateGenerationDialog({
     activeEntityType, // Added
     activeEntityId, refreshDocuments
 }) {
-    console.log('[TemplateGenerationDialog] Selected entity ID map:', entityIdMap);
-    if (entityIdMap) {
-        const entityTypes = Object.keys(entityIdMap);
-        entityTypes.forEach(type => {
-            console.log(`[TemplateGenerationDialog] Selected ${type} entity ID:`, entityIdMap[type]);
-        });
-    }
     const [panelsVisible, setPanelsVisible] = useState({ form: true, preview: true, source: true });
     const { toast } = useToast();
     const [formData, setFormData] = useState(() => {
@@ -1205,9 +1193,19 @@ export default function TemplateGenerationDialog({
             if (draftData) {
                 setLoadedDraft(draftData);
                 await parseDraftAndPopulateForm(draftData);
+                toast({
+                    title: "Draft Loaded",
+                    description: "Previous work has been restored",
+                    variant: "default"
+                });
             }
         } catch (error) {
             console.error('Error loading draft:', error);
+            toast({
+                title: "Draft Load Failed",
+                description: "Could not load previous draft",
+                variant: "destructive"
+            });
         } finally {
             setIsLoadingDraft(false);
         }
@@ -1485,6 +1483,18 @@ export default function TemplateGenerationDialog({
         ...additionalCache
     }), [sourceDataCache, additionalCache]);
 
+    const handleTemplateSelect = useCallback((templateId) => {
+        const newTemplate = availableTemplates.find(t => t.id === templateId);
+        if (newTemplate) {
+            setSelectedTemplate(newTemplate);
+            toast({
+                title: "Template Changed",
+                description: `Switched to "${newTemplate.file_name}"`,
+                variant: "default"
+            });
+        }
+    }, [availableTemplates]);
+
     const refreshWithLiveData = useCallback(() => {
         const initData = { ...formData };
         const autoMap = new Map();
@@ -1551,48 +1561,81 @@ export default function TemplateGenerationDialog({
         const tablesToFetch = Array.from(tableConfigs.keys());
         setFetchingTables(prev => new Set([...prev, ...tablesToFetch]));
 
-        const fetchPromises = Array.from(tableConfigs.entries()).map(async ([table, config]) => {
-            try {
-                const linkingVars = Array.from(config.linkingVars);
-                let query = supabase.from(table).select('*');
+        try {
+            const fetchPromises = Array.from(tableConfigs.entries()).map(async ([table, config]) => {
+                try {
+                    const linkingVars = Array.from(config.linkingVars);
+                    let query = supabase.from(table).select('*');
 
-                if (linkingVars.length === 1) {
-                    query = query.in(linkingVars[0], idList);
-                } else {
-                    const orConditions = linkingVars.map(linkVar => `${linkVar}.in.(${idList.join(',')})`).join(',');
-                    query = query.or(orConditions);
+                    if (linkingVars.length === 1) {
+                        query = query.in(linkingVars[0], idList);
+                    } else {
+                        const orConditions = linkingVars.map(linkVar => `${linkVar}.in.(${idList.join(',')})`).join(',');
+                        query = query.or(orConditions);
+                    }
+
+                    const { data, error } = await query;
+                    if (error) throw error;
+
+                    const tableCache = {};
+                    data?.forEach(row => {
+                        const primaryId = String(row.id || row.director_id || row.individual_id || row.company_id);
+                        if (primaryId && primaryId !== 'undefined') tableCache[primaryId] = row;
+                        linkingVars.forEach(v => { if (row[v]) tableCache[String(row[v])] = row; });
+                    });
+                    return { table, cache: tableCache };
+                } catch (err) {
+                    console.error(`❌ Error fetching ${table}:`, err);
+                    return { table, cache: null };
                 }
+            });
 
-                const { data, error } = await query;
-                if (error) throw error;
+            const results = await Promise.all(fetchPromises);
+            const newCacheEntries = {};
+            const successfulTables = [];
+            const failedTables = [];
 
-                const tableCache = {};
-                data?.forEach(row => {
-                    const primaryId = String(row.id || row.director_id || row.individual_id || row.company_id);
-                    if (primaryId && primaryId !== 'undefined') tableCache[primaryId] = row;
-                    linkingVars.forEach(v => { if (row[v]) tableCache[String(row[v])] = row; });
-                });
-                return { table, cache: tableCache };
-            } catch (err) {
-                console.error(`❌ Error fetching ${table}:`, err);
-                return { table, cache: null };
+            results.forEach(res => {
+                if (res.cache) {
+                    newCacheEntries[res.table] = res.cache;
+                    successfulTables.push(res.table);
+                } else {
+                    failedTables.push(res.table);
+                }
+            });
+
+            if (Object.keys(newCacheEntries).length > 0) {
+                setAdditionalCache(prev => ({ ...prev, ...newCacheEntries }));
+                
+                if (successfulTables.length > 0) {
+                    toast({
+                        title: "Data Loaded",
+                        description: `Successfully loaded data from ${successfulTables.length} table(s)`,
+                        variant: "default"
+                    });
+                }
             }
-        });
 
-        const results = await Promise.all(fetchPromises);
-        const newCacheEntries = {};
-        results.forEach(res => {
-            if (res.cache) newCacheEntries[res.table] = res.cache;
-        });
-
-        if (Object.keys(newCacheEntries).length > 0) {
-            setAdditionalCache(prev => ({ ...prev, ...newCacheEntries }));
+            if (failedTables.length > 0) {
+                toast({
+                    title: "Partial Data Load",
+                    description: `Failed to load data from ${failedTables.length} table(s)`,
+                    variant: "warning"
+                });
+            }
+        } catch (error) {
+            toast({
+                title: "Data Load Failed",
+                description: "Could not fetch additional data sources",
+                variant: "destructive"
+            });
+        } finally {
+            setFetchingTables(prev => {
+                const newSet = new Set(prev);
+                tablesToFetch.forEach(table => newSet.delete(table));
+                return newSet;
+            });
         }
-        setFetchingTables(prev => {
-            const newSet = new Set(prev);
-            tablesToFetch.forEach(table => newSet.delete(table));
-            return newSet;
-        });
     }, [isOpen, selectedTemplate?.id, entityIdMap, relationshipData, masterFields]);
 
     useEffect(() => {
@@ -1995,12 +2038,18 @@ export default function TemplateGenerationDialog({
     };
 
     const populateHtmlContent = useCallback((data, placeholders, styles) => {
-        if (!selectedTemplate?.content) {
-            return '[NO TEMPLATE CONTENT]';
-        }
+        if (!selectedTemplate?.content) return '[NO TEMPLATE CONTENT]';
+
         let content = selectedTemplate.content;
-        let processedHeader = headerContent;
-        let processedFooter = footerContent;
+        let processedHeader = headerContent || '';
+        let processedFooter = footerContent || '';
+
+        // Helper to perform replacement across all sections
+        const universalReplace = (regex, replacement) => {
+            content = content.replace(regex, replacement);
+            processedHeader = processedHeader.replace(regex, replacement);
+            processedFooter = processedFooter.replace(regex, replacement);
+        };
 
         Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
             const block = groupedPlaceholders.blocks[blockName];
@@ -2013,128 +2062,81 @@ export default function TemplateGenerationDialog({
             content = content.replace(blockRegex, (_, innerTemplate) => {
                 if (rows.length === 0) return '';
 
+                // Handle Horizontal (Digit Split style)
                 if (isHorizontal) {
                     const childName = block.children[0]?.name || 'd';
                     const cells = rows.map(row => {
                         const value = extractDisplayValue(row[childName]);
                         return `<span style="display:inline-block;width:25px;height:30px;border:1px solid #000;text-align:center;line-height:30px;font-weight:bold;margin-right:2px;background:#fff;color:#000;">${value || '&nbsp;'}</span>`;
                     }).join('');
-
                     return `<div style="display:flex;align-items:center;margin:5px 0;">${cells}</div>`;
                 }
 
+                // Handle Standard Vertical Blocks
                 return rows.map((row, rowIndex) => {
                     let rowHtml = innerTemplate;
-
                     block.children.forEach(child => {
                         const rawValue = row?.[child.name];
                         let value = extractDisplayValue(rawValue);
-
                         const childRegex = new RegExp(`\\{+\\s*${child.name}\\s*\\}+`, 'g');
 
-                        if (child.type === 'image' && value && value.startsWith('http')) {
+                        if (child.type === 'image' && value && (value.startsWith('http') || value.startsWith('data:image'))) {
                             const styleKey = `${blockName}_${rowIndex}_${child.name}`;
                             const style = styles[styleKey] || styles[child.name] || {};
                             const imgWidth = style.imageWidth ? `${style.imageWidth}px` : "120px";
                             const textAlign = style.textAlign || 'center';
-                            value = `<div style="text-align:${textAlign};"><img src="${value}" style="width:${imgWidth}; height:auto;" /></div>`;
+                            value = `<div style="text-align:${textAlign};"><img src="${value}" style="width:${imgWidth}; height:auto; display:block; margin:${textAlign === 'center' ? '0 auto' : '0'};" /></div>`;
                         }
-                        else if (child.is_digit_split) {
-                            const chars = processDigitSplit(value, child.digit_count || 8);
-                            const count = child.digit_count || 8;
-                            for (let i = 1; i <= count; i++) {
-                                const seqRegex = new RegExp(`\\{+\\s*${child.name}_${i}\\s*\\}+`, 'gi');
-                                const charVal = chars[i - 1] || '&nbsp;';
-                                rowHtml = rowHtml.replace(seqRegex, charVal);
-                            }
-                            const baseRegex = new RegExp(`\\{+\\s*${child.name}\\s*\\}+`, 'gi');
-                            rowHtml = rowHtml.replace(baseRegex, value || '');
-                            return;
-                        }
-
                         rowHtml = rowHtml.replace(childRegex, value || '');
                     });
-
                     return rowHtml;
                 }).join('');
             });
         });
 
-        groupedPlaceholders.topLevel.forEach(placeholder => {
+        // Handle Top Level Placeholders
+        (placeholders || []).forEach(placeholder => {
+            if (placeholder.parent_name) return; // Skip children of blocks
+
             const rawValue = data[placeholder.name];
             const cleanName = placeholder.name.replace(/[{}]/g, '').trim();
+            const regex = new RegExp(`\\{+\\s*${cleanName}\\s*\\}+`, 'gi');
 
             if (placeholder.is_digit_split) {
                 const chars = processDigitSplit(rawValue, placeholder.digit_count || 8);
-                const count = placeholder.digit_count || 8;
-                for (let i = 1; i <= count; i++) {
+                for (let i = 1; i <= (placeholder.digit_count || 8); i++) {
                     const seqRegex = new RegExp(`\\{+\\s*${cleanName}_${i}\\s*\\}+`, 'gi');
-                    const charVal = chars[i - 1] || '&nbsp;';
-
-                    // Process in all three locations
-                    content = content.replace(seqRegex, charVal);
-                    processedHeader = processedHeader.replace(seqRegex, charVal);
-                    processedFooter = processedFooter.replace(seqRegex, charVal);
+                    universalReplace(seqRegex, chars[i - 1] || '&nbsp;');
                 }
-                const baseRegex = new RegExp(`\\{+\\s*${cleanName}\\s*\\}+`, 'gi');
-                content = content.replace(baseRegex, extractDisplayValue(rawValue) || '');
-                return;
+                universalReplace(regex, extractDisplayValue(rawValue) || '');
             }
-
-            let value = extractDisplayValue(rawValue);
-            const regex = new RegExp(`\\{+\\s*${cleanName}\\s*\\}+`, 'gi');
-
-            if (value) {
-                if (placeholder.type === 'image' && value.startsWith('http')) {
+            else if (placeholder.type === 'image') {
+                const value = extractDisplayValue(rawValue);
+                if (value && (value.startsWith('http') || value.startsWith('data:image'))) {
                     const style = styles[placeholder.name] || {};
-                    const imgWidth = style.imageWidth ? `${style.imageWidth}px` : style.maxWidth || '100%';
-                    const imageHtml = `<div style="text-align:${style.textAlign || 'center'};margin:5px 0;">
-                    <img src="${value}" style="width:${imgWidth};height:auto;max-width:100%;" />
+                    const imgWidth = style.imageWidth ? `${style.imageWidth}px` : "200px";
+                    const textAlign = style.textAlign || 'center';
+                    const imageHtml = `<div style="text-align:${textAlign}; margin:10px 0;">
+                    <img src="${value}" style="width:${imgWidth}; height:auto; max-width:100%; display:inline-block;" />
                 </div>`;
-
-                    // Replace in ALL sections
-                    content = content.replace(regex, imageHtml);
-                    processedHeader = processedHeader.replace(regex, imageHtml);
-                    processedFooter = processedFooter.replace(regex, imageHtml);
+                    universalReplace(regex, imageHtml);
                 } else {
-                    // For non-image fields, also replace in header/footer
-                    const formattedValue = /<[a-z][\s\S]*>/i.test(String(value))
-                        ? value
-                        : String(value).replace(/\n/g, '<br />');
-
-                    content = content.replace(regex, formattedValue);
-                    processedHeader = processedHeader.replace(regex, formattedValue);
-                    processedFooter = processedFooter.replace(regex, formattedValue);
+                    universalReplace(regex, `<span style="color:#999;">[Upload ${placeholder.name}]</span>`);
                 }
-            } else {
-                const placeholder_marker = `<span style="background:#fef08a;padding:2px 4px;color:#854d0e;">[${placeholder.name}]</span>`;
-                content = content.replace(regex, placeholder_marker);
-                processedHeader = processedHeader.replace(regex, placeholder_marker);
-                processedFooter = processedFooter.replace(regex, placeholder_marker);
+            }
+            else {
+                const value = extractDisplayValue(rawValue);
+                const formattedValue = String(value || '').replace(/\n/g, '<br />');
+                universalReplace(regex, formattedValue || `<span style="background:#fef08a;">[${placeholder.name}]</span>`);
             }
         });
 
-        const fullDocument = `
-        ${processedHeader ? `
-            <div style="position: sticky; top: 0; background: white; border-bottom: 1px solid #e5e7eb; padding: 20px; z-index: 10; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-                ${processedHeader}
-            </div>
-        ` : ''}
-        
-        <div style="min-height: 800px; padding: 40px 20px;">
-            ${content}
-        </div>
-        
-        ${processedFooter ? `
-            <div style="position: sticky; bottom: 0; background: white; border-top: 1px solid #e5e7eb; padding: 20px; box-shadow: 0 -2px 4px rgba(0,0,0,0.05);">
-                ${processedFooter}
-            </div>
-        ` : ''}
+        return `
+        ${processedHeader ? `<div style="margin-bottom:20px;">${processedHeader}</div>` : ''}
+        <div style="min-height:800px;">${content}</div>
+        ${processedFooter ? `<div style="margin-top:20px; border-top:1px solid #eee;">${processedFooter}</div>` : ''}
     `;
-
-        return fullDocument;
     }, [selectedTemplate, groupedPlaceholders, headerContent, footerContent]);
-
     const prepareRenderData = useCallback(async (data) => {
         const renderData = {};
         const imagePromises = [];
@@ -2335,11 +2337,9 @@ export default function TemplateGenerationDialog({
 
                         const { headers, footers } = await extractHeadersFooters(arrayBuffer);
                         if (headers.length > 0) {
-                            console.log('🔍 Setting header content:', headers[0].html);
                             setHeaderContent(headers[0].html);
                         }
                         if (footers.length > 0) {
-                            console.log('🔍 Setting footer content:', footers[0].html);
                             setFooterContent(footers[0].html);
                         }
                         await new Promise(resolve => setTimeout(resolve, 100));
@@ -2794,13 +2794,8 @@ export default function TemplateGenerationDialog({
     }, [formData, groupedPlaceholders]);
 
     const saveAsDraft = async () => {
-        console.log('🚀 [saveAsDraft] Starting draft save process...');
-
         const config = getTargetConfig();
-        console.log('📋 [saveAsDraft] Config:', config);
-
         if (!config) {
-            console.error('❌ [saveAsDraft] Entity context missing');
             toast({ title: "Error", description: "Entity context missing", variant: "destructive" });
             return;
         }
@@ -2808,42 +2803,24 @@ export default function TemplateGenerationDialog({
         setIsGenerating(true);
         try {
             const kycDocId = selectedTemplate?.document_id || template?.document_id;
-            console.log('📄 [saveAsDraft] KYC Doc ID:', kycDocId);
-            console.log('📋 [saveAsDraft] Selected Template:', selectedTemplate);
-            console.log('📋 [saveAsDraft] Template:', template);
-
             // --- 1. ROBUST BUFFER RECOVERY ---
             let templateBuffer = docxTemplateBuffer.current;
-            console.log('💾 [saveAsDraft] Initial templateBuffer exists:', !!templateBuffer);
-            console.log('📝 [saveAsDraft] isWordTemplate:', isWordTemplate);
-
             // If buffer is missing and it's a Word template, try fetching it now
             if (!templateBuffer && isWordTemplate) {
-                console.log('🔄 [saveAsDraft] Template buffer missing, attempting to fetch...');
                 const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${selectedTemplate.file_path}`;
-                console.log('🌐 [saveAsDraft] Fetching from URL:', publicUrl);
-
                 const res = await fetch(publicUrl);
-                console.log('📡 [saveAsDraft] Fetch response status:', res.status);
 
                 if (!res.ok) {
-                    console.error('❌ [saveAsDraft] Failed to fetch template source from storage');
                     throw new Error("Failed to fetch template source from storage");
                 }
 
                 templateBuffer = await res.arrayBuffer();
-                console.log('✅ [saveAsDraft] Successfully fetched template buffer, size:', templateBuffer.byteLength);
                 docxTemplateBuffer.current = templateBuffer; // Cache it for next time
             }
 
             let storagePath = null;
-
-            // --- 2. GENERATE AND UPLOAD PHYSICAL FILE ---
             if (isWordTemplate && templateBuffer) {
-                console.log('📝 [saveAsDraft] Processing Word template with buffer...');
                 const renderData = await prepareRenderData(formData);
-                console.log('🔧 [saveAsDraft] Render data prepared, keys:', Object.keys(renderData));
-
                 const zip = new PizZip(templateBuffer);
                 const doc = new Docxtemplater(zip, {
                     paragraphLoop: true,
@@ -2857,61 +2834,35 @@ export default function TemplateGenerationDialog({
                     type: "blob",
                     mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 });
-
-                console.log(' [saveAsDraft] Document blob generated, size:', docBlob.size);
-
                 const timestamp = Date.now();
                 const entityFolder = activeEntityType === 'company' ? 'company-documents' : 'individuals-documents';
                 const path = `${entityFolder}/${config.entityId}/${kycDocId}_${timestamp}.docx`;
-                console.log(' [saveAsDraft] Uploading to path:', path);
 
                 const { data: storageData, error: storageError } = await supabase.storage
                     .from('kyc-documents')
                     .upload(path, docBlob, { cacheControl: '3600', upsert: true });
-
-                console.log(' [saveAsDraft] Storage upload response:', { storageData, storageError });
-
                 if (storageError) {
-                    console.error(' [saveAsDraft] Storage upload error:', storageError);
                     throw storageError;
                 }
                 storagePath = storageData.path;
-                console.log(' [saveAsDraft] File uploaded successfully to:', storagePath);
             } else if (isWordTemplate && !templateBuffer) {
-                // Word template but no buffer - create a simple HTML file as fallback
-                console.warn(' [saveAsDraft] Word template buffer missing, creating HTML fallback for storage');
                 const renderData = await prepareRenderData(formData);
                 const htmlContent = populateHtmlContent(renderData, selectedTemplate?.placeholders || [], imageStyles);
                 const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
-
-                console.log(' [saveAsDraft] HTML fallback blob size:', htmlBlob.size);
-
                 const timestamp = Date.now();
                 const entityFolder = activeEntityType === 'company' ? 'company-documents' : 'individuals-documents';
                 const path = `${entityFolder}/${config.entityId}/${kycDocId}_${timestamp}_fallback.html`;
-                console.log(' [saveAsDraft] Uploading HTML fallback to path:', path);
-
                 const { data: storageData, error: storageError } = await supabase.storage
                     .from('kyc-documents')
                     .upload(path, htmlBlob, { cacheControl: '3600', upsert: true });
-
-                console.log(' [saveAsDraft] HTML fallback storage response:', { storageData, storageError });
-
                 if (storageError) {
-                    console.error(' [saveAsDraft] HTML fallback storage error:', storageError);
                     throw storageError;
                 }
                 storagePath = storageData.path;
-                console.log(' [saveAsDraft] HTML fallback uploaded successfully to:', storagePath);
             } else {
-                // Handle HTML templates - convert to PDF and upload to storage
-                console.log(' [saveAsDraft] Processing HTML template...');
                 const renderData = await prepareRenderData(formData);
                 const htmlContent = populateHtmlContent(renderData, selectedTemplate?.placeholders || [], imageStyles);
 
-                console.log(' [saveAsDraft] Converting HTML to PDF for storage...');
-
-                // Create a temporary element for PDF generation
                 const element = document.createElement('div');
                 element.innerHTML = htmlContent;
                 element.className = EDITOR_PREVIEW_STYLES + ' p-10 bg-white';
@@ -2936,30 +2887,17 @@ export default function TemplateGenerationDialog({
                     })
                     .from(element)
                     .output('blob');
-
-                console.log(' [saveAsDraft] PDF blob generated, size:', pdfBlob.size);
-
                 const timestamp = Date.now();
                 const entityFolder = activeEntityType === 'company' ? 'company-documents' : 'individuals-documents';
                 const path = `${entityFolder}/${config.entityId}/${kycDocId}_${timestamp}.pdf`;
-                console.log(' [saveAsDraft] Uploading PDF to path:', path);
-
                 const { data: storageData, error: storageError } = await supabase.storage
                     .from('kyc-documents')
                     .upload(path, pdfBlob, { cacheControl: '3600', upsert: true });
-
-                console.log(' [saveAsDraft] PDF storage response:', { storageData, storageError });
-
                 if (storageError) {
-                    console.error(' [saveAsDraft] PDF storage error:', storageError);
                     throw storageError;
                 }
                 storagePath = storageData.path;
-                console.log(' [saveAsDraft] PDF uploaded successfully to:', storagePath);
             }
-
-            // --- 3. PREPARE DATABASE PAYLOAD ---
-            console.log(' [saveAsDraft] Preparing database payload...');
             const draftMetadata = {
                 formData: formData,
                 imageStyles: imageStyles,
@@ -2968,8 +2906,6 @@ export default function TemplateGenerationDialog({
                 activeEntityType,
                 activeEntityId
             };
-            console.log(' [saveAsDraft] Draft metadata prepared');
-
             const payload = {
                 [config.idColumn]: config.entityId,
                 [config.docIdColumn]: kycDocId,
@@ -2979,10 +2915,6 @@ export default function TemplateGenerationDialog({
                 metadata: draftMetadata,
                 updated_at: new Date().toISOString()
             };
-            console.log(' [saveAsDraft] Database payload:', payload);
-
-            // --- 4. SAVE TO DATABASE ---
-            console.log(' [saveAsDraft] Checking for existing draft...');
             const { data: existingDraft, error: existingDraftError } = await supabase
                 .from(config.table)
                 .select('id, file_path')
@@ -2991,37 +2923,24 @@ export default function TemplateGenerationDialog({
                 .eq('status', 'draft')
                 .maybeSingle();
 
-            console.log('🔍 [saveAsDraft] Existing draft check result:', { existingDraft, existingDraftError });
-
             let result;
             if (existingDraft) {
-                console.log('🔄 [saveAsDraft] Updating existing draft...');
                 if (existingDraft.file_path && storagePath && existingDraft.file_path !== storagePath) {
-                    console.log('🗑️ [saveAsDraft] Removing old file:', existingDraft.file_path);
                     await supabase.storage.from('kyc-documents').remove([existingDraft.file_path]);
                 }
                 result = await supabase.from(config.table).update(payload).eq('id', existingDraft.id).select();
-                console.log('✅ [saveAsDraft] Draft updated successfully');
             } else {
-                console.log('➕ [saveAsDraft] Creating new draft...');
                 result = await supabase.from(config.table).insert([{ ...payload, created_at: new Date().toISOString() }]).select();
-                console.log('✅ [saveAsDraft] New draft created successfully');
             }
-
-            console.log('📊 [saveAsDraft] Database operation result:', result);
 
             if (result.error) {
                 console.error('❌ [saveAsDraft] Database error:', result.error);
                 throw result.error;
             }
-
-            // --- 5. SYNC UI ---
-            console.log('🔄 [saveAsDraft] Syncing UI state...');
             setLoadedDraft(result.data[0]);
             setOriginalFormData(JSON.parse(JSON.stringify(formData)));
             setManuallyEditedFields(new Set());
 
-            console.log('🎉 [saveAsDraft] Draft save process completed successfully');
             toast({ title: "Draft Saved", description: "Progress has been stored successfully." });
             if (refreshDocuments) await refreshDocuments();
 
@@ -3031,7 +2950,6 @@ export default function TemplateGenerationDialog({
             toast({ title: "Save Error", description: e.message, variant: "destructive" });
         } finally {
             setIsGenerating(false);
-            console.log('🏁 [saveAsDraft] Draft save process finished');
         }
     };
 
@@ -3039,118 +2957,117 @@ export default function TemplateGenerationDialog({
         setIsGenerating(true);
         try {
             const fileName = `${documentName.replace(/[^\w\s-]/g, '_')}_${formatDate(new Date(), 'YYYYMMDD')}`;
-            let templateBuffer = docxTemplateBuffer.current;
-            if (templateBuffer && typeof templateBuffer.then === 'function') {
-                templateBuffer = await templateBuffer;
-            }
 
-            if (!templateBuffer) {
-                const errorMsg = 'No template buffer available for document generation';
-                toast({ title: "Error", description: errorMsg, variant: "destructive" });
-                return;
-            }
-
+            // 1. Prepare Data: This is the source of truth. 
+            // prepareRenderData fetches all image URLs and converts them to Base64 strings.
             const renderData = await prepareRenderData(formData);
-            const processedRenderData = JSON.parse(JSON.stringify(renderData));
-            const imageCache = new Map();
 
-            const processImagesRecursively = (obj, path = '') => {
-                for (const [key, value] of Object.entries(obj)) {
-                    if (value && typeof value === 'string' && (value.startsWith('http') || value.startsWith('data:image'))) {
-                        if (!imageCache.has(value)) {
-                            imageCache.set(value, value);
-                        }
-                    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
-                        processImagesRecursively(value, `${path}.${key}`);
-                    } else if (Array.isArray(value)) {
-                        value.forEach((item, index) => {
-                            if (item && typeof item === 'object') {
-                                processImagesRecursively(item, `${path}.${key}[${index}]`);
-                            }
-                        });
-                    }
+            // 2. Handle Word-based Templates
+            if (isWordTemplate) {
+                let templateBuffer = docxTemplateBuffer.current;
+                if (templateBuffer && typeof templateBuffer.then === 'function') {
+                    templateBuffer = await templateBuffer;
                 }
-            };
-            processImagesRecursively(processedRenderData);
 
-            const zip = new PizZip(templateBuffer);
-
-            const imageModule = new ImageModule({
-                centered: false,
-                getImage: (tag) => {
-                    if (!tag) return null;
-                    try {
-                        if (tag.startsWith('data:image')) {
-                            const base64Data = tag.split('base64,')[1];
-                            if (!base64Data) return null;
-
-                            const binaryStr = atob(base64Data);
-                            const len = binaryStr.length;
-                            const bytes = new Uint8Array(len);
-                            for (let i = 0; i < len; i++) {
-                                bytes[i] = binaryStr.charCodeAt(i);
-                            }
-                            return bytes.buffer;
-                        }
-                        return null;
-                    } catch (error) {
-                        console.error('Error processing image:', error);
-                        return null;
-                    }
-                },
-                getSize: (img, tag, name) => {
-                    // Find placeholder by name to get its image dimensions
-                    const placeholder = selectedTemplate?.placeholders?.find(p => p.name === name);
-                    if (placeholder?.type === 'image') {
-                        const width = parseImageDimension(placeholder.image_width);
-                        const height = parseImageDimension(placeholder.image_height);
-                        return [width || 300, height || 200];
-                    }
-
-                    // Fallback to legacy imageStyles for backward compatibility
-                    const styleKeys = [name, name?.split('_').slice(2).join('_')];
-                    let s = null;
-
-                    for (const key of styleKeys) {
-                        if (key && imageStyles[key]) {
-                            s = imageStyles[key];
-                            break;
-                        }
-                    }
-
-                    if (!s) {
-                        s = imageStyles[name] || {};
-                    }
-
-                    return s ? [s.imageWidth || 300, s.imageHeight || 200] : [300, 200];
+                if (!templateBuffer) {
+                    throw new Error('No template buffer available for document generation');
                 }
-            });
 
-            const doc = new Docxtemplater(zip, {
-                modules: [imageModule],
-                linebreaks: true,
-                paragraphLoop: true,
-                nullGetter: () => ""
-            });
+                const zip = new PizZip(templateBuffer);
 
-            doc.setData(renderData);
-            doc.render();
-
-            const blob = doc.getZip().generate({
-                type: "blob",
-                mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            });
-
-            if (type === 'word') {
-                saveAs(blob, `${fileName}.docx`);
-                toast({
-                    title: "Success",
-                    description: `Document downloaded as ${fileName}.docx`
+                // Configure Image Module for Word
+                const imageModule = new ImageModule({
+                    centered: false,
+                    getImage: (tag) => {
+                        if (!tag) return null;
+                        try {
+                            // Check if the tag is already Base64 (from prepareRenderData)
+                            if (tag.startsWith('data:image')) {
+                                const base64Data = tag.split('base64,')[1];
+                                const binaryStr = atob(base64Data);
+                                const len = binaryStr.length;
+                                const bytes = new Uint8Array(len);
+                                for (let i = 0; i < len; i++) {
+                                    bytes[i] = binaryStr.charCodeAt(i);
+                                }
+                                return bytes.buffer;
+                            }
+                            return null;
+                        } catch (error) {
+                            console.error('Error processing image for Word:', error);
+                            return null;
+                        }
+                    },
+                    getSize: (img, tag, name) => {
+                        const placeholder = selectedTemplate?.placeholders?.find(p => p.name === name);
+                        if (placeholder?.type === 'image') {
+                            const width = parseImageDimension(placeholder.image_width);
+                            const height = parseImageDimension(placeholder.image_height);
+                            return [width || 300, height || 200];
+                        }
+                        const s = imageStyles[name] || {};
+                        return [s.imageWidth || 300, s.imageHeight || 200];
+                    }
                 });
-            } else {
+
+                const doc = new Docxtemplater(zip, {
+                    modules: [imageModule],
+                    linebreaks: true,
+                    paragraphLoop: true,
+                    nullGetter: () => ""
+                });
+
+                doc.setData(renderData);
+                doc.render();
+
+                const docxBuffer = doc.getZip().generate({
+                    type: "arraybuffer",
+                    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                });
+
+                if (type === 'word') {
+                    const blob = new Blob([docxBuffer], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+                    saveAs(blob, `${fileName}.docx`);
+                    toast({ title: "Success", description: `Document downloaded as ${fileName}.docx` });
+                } else {
+                    // PDF requested for a Word template
+                    // We convert the rendered Word buffer to HTML first to ensure PDF content matches Word content
+                    const result = await mammoth.convertToHtml({ arrayBuffer: docxBuffer });
+                    const html2pdf = (await import('html2pdf.js')).default;
+                    const element = document.createElement('div');
+
+                    // Use the same styles as the editor preview
+                    element.className = EDITOR_PREVIEW_STYLES + ' p-10 bg-white';
+                    element.style.width = '800px';
+                    element.innerHTML = result.value;
+
+                    await html2pdf()
+                        .set({
+                            margin: 10,
+                            filename: `${fileName}.pdf`,
+                            image: { type: 'jpeg', quality: 0.98 },
+                            html2canvas: { scale: 2, useCORS: true, logging: false },
+                            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                        })
+                        .from(element)
+                        .save();
+                }
+            }
+
+            // 3. Handle HTML-based Templates
+            else {
                 const html2pdf = (await import('html2pdf.js')).default;
                 const element = document.createElement('div');
-                element.innerHTML = previewContent;
+
+                // IMPORTANT: Use renderData (Base64 images) instead of formData (URLs)
+                // to populate the HTML for the PDF engine.
+                const pdfHtmlContent = populateHtmlContent(
+                    renderData,
+                    selectedTemplate?.placeholders || [],
+                    imageStyles
+                );
+
+                element.innerHTML = pdfHtmlContent;
                 element.className = EDITOR_PREVIEW_STYLES + ' p-10 bg-white';
                 element.style.width = '800px';
 
@@ -3158,9 +3075,10 @@ export default function TemplateGenerationDialog({
                     .set({
                         margin: 10,
                         filename: `${fileName}.pdf`,
+                        image: { type: 'jpeg', quality: 0.98 },
                         html2canvas: {
                             scale: 2,
-                            useCORS: true,
+                            useCORS: true, // Necessary for any lingering URLs
                             logging: false
                         },
                         jsPDF: {
@@ -3171,6 +3089,8 @@ export default function TemplateGenerationDialog({
                     })
                     .from(element)
                     .save();
+
+                toast({ title: "Success", description: `Document downloaded as ${fileName}.pdf` });
             }
         } catch (e) {
             const errorMessage = e instanceof Error ? e.message : String(e);
@@ -3254,7 +3174,7 @@ export default function TemplateGenerationDialog({
                                     AI Refine
                                 </Button>
                                 {availableTemplates.length > 1 && (
-                                    <Select value={selectedTemplate?.id} onValueChange={(v) => setSelectedTemplate(availableTemplates.find(t => t.id === v))}>
+                                    <Select value={selectedTemplate?.id} onValueChange={handleTemplateSelect}>
                                         <SelectTrigger className="w-64 h-9">
                                             <SelectValue />
                                         </SelectTrigger>

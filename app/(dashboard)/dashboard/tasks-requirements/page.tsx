@@ -233,20 +233,51 @@ export default function TasksPage() {
     try {
       const { error } = await supabase.from('tm_tasks').delete().eq('id', taskToDelete.id);
       if (error) throw error;
+      
+      // Update tasks state to remove the deleted task
       setTasks(prev => prev.filter(t => t.id !== taskToDelete.id));
-      toast({ title: 'Task deleted successfully.' });
-    } catch (error) {
-      toast({ title: 'Error deleting task.', variant: 'destructive' });
-    } finally {
-      setIsDeleting(false);
+      
+      // Show success toast with task details
+      toast({ 
+        title: 'Task Deleted Successfully', 
+        description: `Task "${taskToDelete.name || taskToDelete.title || 'Unknown'}" has been deleted.` 
+      });
+      
+      // Close dialog and reset state
       setDeleteDialogOpen(false);
       setTaskToDelete(null);
+    } catch (error) {
+      console.error('Delete error:', error);
+      toast({ 
+        title: 'Error Deleting Task', 
+        description: error.message || 'Failed to delete task. Please try again.',
+        variant: 'destructive' 
+      });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
-  const handleEnquiryCreated = (newEnquiry: UtilTask | UtilTask[]) => {
+  const handleEnquiryCreated = async (newEnquiry: UtilTask | UtilTask[], isEdit = false) => {
     const newEnquiries = Array.isArray(newEnquiry) ? newEnquiry : [newEnquiry];
-    toast({ title: "Success", description: `${newEnquiries.length} new enquiry/enquiries created.` });
+    
+    // Show success toast
+    toast({ 
+      title: "Success", 
+      description: `${isEdit ? "Task updated" : "New enquiry/enquiries created"} successfully.` 
+    });
+
+    // Refresh tasks and stages to get updated data
+    try {
+      await loadTasksAndStages(selectedDepartment, selectedSubdepartment);
+    } catch (error) {
+      console.error("Failed to refresh data after enquiry creation:", error);
+      toast({
+        title: "Warning",
+        description: "Task was saved but failed to refresh data. Please refresh the page.",
+        variant: "destructive"
+      });
+    }
   };
 
   const handleStageStatusSave = async (stageId: string, taskId: string, date: string) => {
@@ -503,8 +534,7 @@ export default function TasksPage() {
               }
             }}
             onEnquiryCreated={(enquiries) => {
-              console.log('✅ [CompanyInquiryDialog] Enquiry Created:', enquiries);
-              handleEnquiryCreated(enquiries);
+              handleEnquiryCreated(enquiries, false);
             }}
             departments={departments}
             selectedDepartmentId={selectedDepartment}
@@ -520,15 +550,7 @@ export default function TasksPage() {
             onOpenChange={setEnquiryDialogOpen}
             taskToEdit={taskToEdit} // PASS STATE HERE
             onEnquiryCreated={(updatedTask) => {
-              // Refresh local tasks state
-              setTasks(prev => {
-                const exists = prev.find(t => t.id === updatedTask.id);
-                if (exists) {
-                  return prev.map(t => t.id === updatedTask.id ? updatedTask : t);
-                }
-                return [updatedTask, ...prev];
-              });
-              toast({ title: "Success", description: taskToEdit ? "Task updated." : "Task created." });
+              handleEnquiryCreated(updatedTask, !!taskToEdit);
             }}
             departments={departments}
             users={internalStaff.users}       // Pass real data
