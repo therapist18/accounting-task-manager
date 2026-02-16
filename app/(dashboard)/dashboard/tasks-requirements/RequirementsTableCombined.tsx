@@ -2091,6 +2091,14 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                 docMetadata?.id ||
                                 'Document';
 
+                              console.log('DEBUG: Setting selected doc for upload - docMetadata:', docMetadata);
+                              console.log('DEBUG: Document type info:', {
+                                id: docMetadata.id,
+                                name: docMetadata.name,
+                                display_name: docMetadata.display_name,
+                                document_type: docMetadata.document_type
+                              });
+                              // Only pass document type information, not full requirement
                               setSelectedDocForUpload({
                                 doc: {
                                   ...docMetadata,

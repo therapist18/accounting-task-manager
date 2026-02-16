@@ -846,15 +846,29 @@ export function RequirementsTable({
     return (
       <div className="flex items-center justify-center gap-1 h-full">
         {item.web_automation?.automationId && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0 text-blue-600 hover:bg-blue-50"
-            onClick={() => handleAutomationAction(task, item, columnType, applicantId, relationshipData)}
-            title={`Run Automation: ${item.web_automation.automationName}`}
-          >
-            <Zap className="h-4 w-4" />
-          </Button>
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0 text-blue-600 hover:bg-blue-50"
+              onClick={() => handleAutomationAction(task, item, columnType, applicantId, relationshipData)}
+              title={`Run Automation: ${item.web_automation.automationName}`}
+            >
+              <Zap className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0 text-amber-600 hover:bg-amber-50"
+              onClick={() => handleUploadAction(task, item, columnType, applicantId)}
+              title={`Upload ${item.display_name}`}
+            >
+              <UploadCloud className="h-4 w-4" />
+            </Button>
+            {status.type === 'view' && (
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-green-600 hover:bg-green-100" onClick={handleViewClick} title={`View ${status.count} document(s)`}><Eye className="h-4 w-4" /></Button>
+            )}
+          </>
         )}
 
         {isLetter && item.hasTemplate && (

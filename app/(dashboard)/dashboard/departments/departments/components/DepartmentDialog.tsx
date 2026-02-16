@@ -16,16 +16,7 @@ import { Plus, Trash2, Layers, User as UserIcon, ChevronsUpDown, FolderPlus, Edi
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { cn } from "@/lib/utils"
-
-const SPECIFICATION_OPTIONS = [
-    { id: "Company", label: "Company" },
-    { id: "Principal", label: "Principal" },
-    { id: "Dependant", label: "Dependant" },
-    { id: "Understudy", label: "Understudy" },
-    { id: "Directors", label: "Directors" },
-    { id: "Shareholders", label: "Shareholders" },
-    { id: "Employees", label: "Employees" },
-];
+import { ENTITY_TYPES } from "@/lib/constants/entity-types"
 
 const MultiSelectSpec = ({ value, onChange }: { value?: string[] | null, onChange: (val: string[]) => void }) => {
     const safeValue = Array.isArray(value) ? value : [];
@@ -45,7 +36,7 @@ const MultiSelectSpec = ({ value, onChange }: { value?: string[] | null, onChang
 
     return (
         <div className="space-y-2">
-            <Label className="text-xs font-bold uppercase text-gray-500">Target Specifications</Label>
+            <Label className="text-xs font-bold uppercase text-gray-500">Entity Types</Label>
             <Popover open={open} onOpenChange={setOpen}>
                 <PopoverTrigger asChild>
                     <Button
@@ -62,7 +53,7 @@ const MultiSelectSpec = ({ value, onChange }: { value?: string[] | null, onChang
                                         variant="secondary" 
                                         className="mr-1 bg-blue-50 text-blue-700 border-blue-200"
                                     >
-                                        {val}
+                                        {ENTITY_TYPES.find(type => type.value === val)?.label || val}
                                         <X 
                                             className="ml-1 h-3 w-3 cursor-pointer hover:text-red-500" 
                                             onClick={(e) => removeOption(e, val)}
@@ -70,7 +61,7 @@ const MultiSelectSpec = ({ value, onChange }: { value?: string[] | null, onChang
                                     </Badge>
                                 ))
                             ) : (
-                                <span className="text-muted-foreground font-normal">Select specifications...</span>
+                                <span className="text-muted-foreground font-normal">Select entity types...</span>
                             )}
                         </div>
                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -78,26 +69,26 @@ const MultiSelectSpec = ({ value, onChange }: { value?: string[] | null, onChang
                 </PopoverTrigger>
                 <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
                     <Command>
-                        <CommandInput placeholder="Search specifications..." />
+                        <CommandInput placeholder="Search entity types..." />
                         <CommandList>
-                            <CommandEmpty>No specification found.</CommandEmpty>
+                            <CommandEmpty>No entity type found.</CommandEmpty>
                             <CommandGroup>
-                                {SPECIFICATION_OPTIONS.map((opt) => (
+                                {ENTITY_TYPES.map((type) => (
                                     <CommandItem
-                                        key={opt.id}
-                                        value={opt.id}
-                                        onSelect={() => toggleOption(opt.id)}
+                                        key={type.value}
+                                        value={type.value}
+                                        onSelect={() => toggleOption(type.value)}
                                         className="cursor-pointer"
                                     >
                                         <div className={cn(
                                             "mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary",
-                                            safeValue.includes(opt.id)
+                                            safeValue.includes(type.value)
                                                 ? "bg-primary text-primary-foreground"
                                                 : "opacity-50 [&_svg]:invisible"
                                         )}>
                                             <Check className="h-4 w-4" />
                                         </div>
-                                        <span>{opt.label}</span>
+                                        <span>{type.label}</span>
                                     </CommandItem>
                                 ))}
                             </CommandGroup>
@@ -189,7 +180,7 @@ const SubClassComponent = memo(({ subClass, onUpdate, onRemove, path, index }) =
                             <Label className="text-xs font-bold uppercase text-gray-500">Description</Label>
                             <Textarea placeholder="Sub-class description" value={subClass.description} onChange={(e) => onUpdate([...path, 'description'], e.target.value)} className="min-h-[80px]" />
                         </div>
-                        <MultiSelectSpec value={subClass.specification || []} onChange={(val) => onUpdate([...path, 'specification'], val)} />
+                        <MultiSelectSpec value={subClass.entity_types || []} onChange={(val) => onUpdate([...path, 'entity_types'], val)} />
                     </div>
 
                     <div className="ml-8 space-y-3 border-t pt-4">
@@ -210,7 +201,7 @@ const SubClassComponent = memo(({ subClass, onUpdate, onRemove, path, index }) =
 // Class Component (Optimized)
 const ClassComponent = memo(({ classItem, onUpdate, onRemove, path, index }) => {
     const handleAddSubClass = () => {
-        const newSC = { id: Date.now(), name: '', description: '', order: classItem.subClasses.length + 1, isVisible: true, default_display: true, requirements: [], specification: [] };
+        const newSC = { id: Date.now(), name: '', description: '', order: classItem.subClasses.length + 1, isVisible: true, default_display: true, requirements: [], entity_types: [] };
         onUpdate([...path, 'subClasses'], [...classItem.subClasses, newSC]);
     };
 
@@ -236,7 +227,7 @@ const ClassComponent = memo(({ classItem, onUpdate, onRemove, path, index }) => 
                         <Label className="text-xs font-bold uppercase text-gray-500">Class Description</Label>
                         <Textarea placeholder="Describe this class..." value={classItem.description} onChange={(e) => onUpdate([...path, 'description'], e.target.value)} />
                     </div>
-                    <MultiSelectSpec value={classItem.specification || []} onChange={(val) => onUpdate([...path, 'specification'], val)} />
+                    <MultiSelectSpec value={classItem.entity_types || []} onChange={(val) => onUpdate([...path, 'entity_types'], val)} />
                 </div>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -312,7 +303,7 @@ export default function DepartmentDialog({ open, onOpenChange, onSave, departmen
                                     <Label htmlFor="dept-def">Set as Default Display</Label>
                                 </div>
                             </div>
-                            <MultiSelectSpec value={departmentForm.specification || []} onChange={(val) => updateFormState(['specification'], val)} />
+                            <MultiSelectSpec value={departmentForm.entity_types || []} onChange={(val) => updateFormState(['entity_types'], val)} />
                         </div>
                     </div>
 
@@ -320,7 +311,7 @@ export default function DepartmentDialog({ open, onOpenChange, onSave, departmen
                     <div className="space-y-4">
                         <div className="flex justify-between items-center">
                             <h3 className="text-lg font-bold flex items-center gap-2"><Workflow className="h-5 w-5 text-blue-600" /> Sub-departments</h3>
-                            <Button onClick={() => updateFormState(['subdepartments'], [...departmentForm.subdepartments, { name: '', description: '', classes: [], specification: [], officer_history: [], manager_history: [], assistant_history: [], default_display: true }])} variant="outline" size="sm">
+                            <Button onClick={() => updateFormState(['subdepartments'], [...departmentForm.subdepartments, { name: '', description: '', classes: [], entity_types: [], officer_history: [], manager_history: [], assistant_history: [], default_display: true }])} variant="outline" size="sm">
                                 <Plus className="h-4 w-4 mr-1" /> Add Sub-dept
                             </Button>
                         </div>
@@ -353,7 +344,7 @@ export default function DepartmentDialog({ open, onOpenChange, onSave, departmen
                                                     <Label htmlFor={`sub-def-${sIndex}`}>Default Display</Label>
                                                 </div>
                                             </div>
-                                            <MultiSelectSpec value={sub.specification || []} onChange={(val) => updateFormState(['subdepartments', sIndex, 'specification'], val)} />
+                                            <MultiSelectSpec value={sub.entity_types || []} onChange={(val) => updateFormState(['subdepartments', sIndex, 'entity_types'], val)} />
                                         </div>
                                     </TabsContent>
 
@@ -406,7 +397,7 @@ export default function DepartmentDialog({ open, onOpenChange, onSave, departmen
                                     <TabsContent value="classes" className="p-6">
                                         <div className="flex justify-between items-center mb-4">
                                             <h4 className="font-bold">Classes in {sub.name || 'this sub-dept'}</h4>
-                                            <Button size="sm" variant="outline" onClick={() => updateFormState(['subdepartments', sIndex, 'classes'], [...sub.classes, { id: Date.now(), name: '', description: '', order: sub.classes.length + 1, isVisible: true, default_display: true, requirements: [], specification: [], subClasses: [] }])}><Plus className="h-4 w-4 mr-1" /> Add Class</Button>
+                                            <Button size="sm" variant="outline" onClick={() => updateFormState(['subdepartments', sIndex, 'classes'], [...sub.classes, { id: Date.now(), name: '', description: '', order: sub.classes.length + 1, isVisible: true, default_display: true, requirements: [], entity_types: [], subClasses: [] }])}><Plus className="h-4 w-4 mr-1" /> Add Class</Button>
                                         </div>
                                         <div className="space-y-6">
                                             {sub.classes.map((cls, cIdx) => (

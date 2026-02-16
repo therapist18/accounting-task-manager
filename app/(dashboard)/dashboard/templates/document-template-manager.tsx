@@ -103,7 +103,7 @@ type ConditionalCondition = {
 type BooleanCondition = {
   tag: string;              // e.g., 'is_male', 'daily_frequency'
   label: string;            // Display text: 'Male', 'Daily'
-  master_field_id?: number; // Optional - for DB-driven fields
+  master_field_id: number; // Required - for DB-driven fields
   comparison?: {            // For DB fields
     field: string;          // e.g., 'gender'
     operator: 'equals' | 'not_equals' | 'contains';
@@ -143,9 +143,9 @@ type Placeholder = {
   image_height?: string;
   is_ai_generated?: boolean;
   ai_prompt?: string;
-   master_field_ids?: number[];
+  master_field_ids?: number[];
   linked_job_question_ids?: string[]; // Plural
-  linked_requirement_ids?: string[]; 
+  linked_requirement_ids?: string[];
   default_value?: string;
 };
 
@@ -515,9 +515,9 @@ function PlaceholderSourceManager({
     onUpdate({ [listKey]: newList });
   };
 
-  const totalSources = (placeholder.master_field_ids?.length || 0) + 
-                       (placeholder.linked_job_question_ids?.length || 0) + 
-                       (placeholder.linked_requirement_ids?.length || 0);
+  const totalSources = (placeholder.master_field_ids?.length || 0) +
+    (placeholder.linked_job_question_ids?.length || 0) +
+    (placeholder.linked_requirement_ids?.length || 0);
 
   if (totalSources === 0) return null;
 
@@ -530,8 +530,8 @@ function PlaceholderSourceManager({
         {totalSources > 1 && (
           <div className="flex items-center gap-2 bg-white px-2 py-1 rounded-lg border shadow-sm">
             <Label className="text-[9px] font-bold text-slate-400 uppercase">Logic:</Label>
-            <Select 
-              value={placeholder.source_logic || 'priority'} 
+            <Select
+              value={placeholder.source_logic || 'priority'}
               onValueChange={(v: 'all' | 'priority') => onUpdate({ source_logic: v })}
             >
               <SelectTrigger className="h-6 w-[130px] text-[10px] border-none shadow-none focus:ring-0">
@@ -551,15 +551,15 @@ function PlaceholderSourceManager({
         {placeholder.master_field_ids?.map((id, idx) => (
           <div key={`db-${id}`} className="flex items-center gap-2 bg-white p-2 rounded-md border shadow-sm group">
             <div className="flex flex-col border-r pr-1 mr-1">
-              <Button variant="ghost" size="icon" className="h-4 w-4 hover:text-blue-600" onClick={() => moveItem('master_field_ids', idx, 'up')} disabled={idx === 0}><ArrowUp className="h-3 w-3"/></Button>
-              <Button variant="ghost" size="icon" className="h-4 w-4 hover:text-blue-600" onClick={() => moveItem('master_field_ids', idx, 'down')} disabled={idx === placeholder.master_field_ids.length - 1}><ArrowDown className="h-3 w-3"/></Button>
+              <Button variant="ghost" size="icon" className="h-4 w-4 hover:text-blue-600" onClick={() => moveItem('master_field_ids', idx, 'up')} disabled={idx === 0}><ArrowUp className="h-3 w-3" /></Button>
+              <Button variant="ghost" size="icon" className="h-4 w-4 hover:text-blue-600" onClick={() => moveItem('master_field_ids', idx, 'down')} disabled={idx === placeholder.master_field_ids.length - 1}><ArrowDown className="h-3 w-3" /></Button>
             </div>
             <Database className="h-3.5 w-3.5 text-blue-600" />
             <div className="flex-1 min-w-0">
               <p className="text-xs font-bold text-slate-700 truncate">{masterFields.find(f => f.id === id)?.label || id}</p>
               <p className="text-[9px] text-blue-500/70 font-mono">DB Field</p>
             </div>
-            <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-300 hover:text-red-500" onClick={() => onRemove('db', id)}><X className="h-4 w-4"/></Button>
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-300 hover:text-red-500" onClick={() => onRemove('db', id)}><X className="h-4 w-4" /></Button>
           </div>
         ))}
 
@@ -567,15 +567,15 @@ function PlaceholderSourceManager({
         {placeholder.linked_job_question_ids?.map((id, idx) => (
           <div key={`job-${id}`} className="flex items-center gap-2 bg-white p-2 rounded-md border shadow-sm group">
             <div className="flex flex-col border-r pr-1 mr-1">
-              <Button variant="ghost" size="icon" className="h-4 w-4 hover:text-purple-600" onClick={() => moveItem('linked_job_question_ids', idx, 'up')} disabled={idx === 0}><ArrowUp className="h-3 w-3"/></Button>
-              <Button variant="ghost" size="icon" className="h-4 w-4 hover:text-purple-600" onClick={() => moveItem('linked_job_question_ids', idx, 'down')} disabled={idx === placeholder.linked_job_question_ids.length - 1}><ArrowDown className="h-3 w-3"/></Button>
+              <Button variant="ghost" size="icon" className="h-4 w-4 hover:text-purple-600" onClick={() => moveItem('linked_job_question_ids', idx, 'up')} disabled={idx === 0}><ArrowUp className="h-3 w-3" /></Button>
+              <Button variant="ghost" size="icon" className="h-4 w-4 hover:text-purple-600" onClick={() => moveItem('linked_job_question_ids', idx, 'down')} disabled={idx === placeholder.linked_job_question_ids.length - 1}><ArrowDown className="h-3 w-3" /></Button>
             </div>
             <HelpCircle className="h-3.5 w-3.5 text-purple-600" />
             <div className="flex-1 min-w-0">
               <p className="text-xs font-bold text-slate-700 truncate">{jobQuestions.find(q => q.id === id)?.label || id}</p>
               <p className="text-[9px] text-purple-500/70 font-mono">Job Question</p>
             </div>
-            <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-300 hover:text-red-500" onClick={() => onRemove('job', id)}><X className="h-4 w-4"/></Button>
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-300 hover:text-red-500" onClick={() => onRemove('job', id)}><X className="h-4 w-4" /></Button>
           </div>
         ))}
 
@@ -583,15 +583,15 @@ function PlaceholderSourceManager({
         {placeholder.linked_requirement_ids?.map((id, idx) => (
           <div key={`req-${id}`} className="flex items-center gap-2 bg-white p-2 rounded-md border shadow-sm group">
             <div className="flex flex-col border-r pr-1 mr-1">
-              <Button variant="ghost" size="icon" className="h-4 w-4 hover:text-green-600" onClick={() => moveItem('linked_requirement_ids', idx, 'up')} disabled={idx === 0}><ArrowUp className="h-3 w-3"/></Button>
-              <Button variant="ghost" size="icon" className="h-4 w-4 hover:text-green-600" onClick={() => moveItem('linked_requirement_ids', idx, 'down')} disabled={idx === placeholder.linked_requirement_ids.length - 1}><ArrowDown className="h-3 w-3"/></Button>
+              <Button variant="ghost" size="icon" className="h-4 w-4 hover:text-green-600" onClick={() => moveItem('linked_requirement_ids', idx, 'up')} disabled={idx === 0}><ArrowUp className="h-3 w-3" /></Button>
+              <Button variant="ghost" size="icon" className="h-4 w-4 hover:text-green-600" onClick={() => moveItem('linked_requirement_ids', idx, 'down')} disabled={idx === placeholder.linked_requirement_ids.length - 1}><ArrowDown className="h-3 w-3" /></Button>
             </div>
             <FileText className="h-3.5 w-3.5 text-green-600" />
             <div className="flex-1 min-w-0">
               <p className="text-xs font-bold text-slate-700 truncate">{requirements.find(r => r.id === id)?.label || id}</p>
               <p className="text-[9px] text-green-500/70 font-mono">Requirement</p>
             </div>
-            <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-300 hover:text-red-500" onClick={() => onRemove('req', id)}><X className="h-4 w-4"/></Button>
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-300 hover:text-red-500" onClick={() => onRemove('req', id)}><X className="h-4 w-4" /></Button>
           </div>
         ))}
       </div>
@@ -946,11 +946,11 @@ export default function DocumentTemplateManager({
         // Fallback: fetch all questions
         const { data, error } = await supabase.from('tm_class_requirements').select('job_specific_questions, requirements');
         if (error) throw error;
-        
+
         const allQuestions = data?.flatMap(r => r.job_specific_questions || []) || [];
         const uniqueQuestions = Array.from(new Map(allQuestions.map(q => [q.label, q])).values());
         setJobQuestions(uniqueQuestions);
-        
+
         const allRequirements = data?.flatMap(r => r.requirements || []) || [];
         const uniqueRequirements = Array.from(new Map(allRequirements.map(r => [r.label, r])).values());
         setRequirements(uniqueRequirements);
@@ -1254,13 +1254,9 @@ export default function DocumentTemplateManager({
     }
   };
 
-  /**
-   * Manual Editor Rescan Handler
-   */
-  const handleRescanPlaceholders = async () => {
+const handleRescanPlaceholders = async () => {
     if (!currentTemplate || currentTemplateIndex === null) return;
 
-    // Check if we scan the editor text or the file
     const source = currentTemplate.content
       ? { type: 'text', content: currentTemplate.content }
       : { type: 'file', content: templateFiles.get(currentTemplate.id)! };
@@ -1270,14 +1266,23 @@ export default function DocumentTemplateManager({
       return;
     }
 
-    const updatedPlaceholders = await extractPlaceholders(source);
+    // 1. Get raw tags from current content
+    const newlyExtracted = await extractPlaceholders(source);
 
+    // 2. Merge safely
     const updatedTemplates = [...templates];
-    updatedTemplates[currentTemplateIndex].placeholders = updatedPlaceholders;
+    const existing = updatedTemplates[currentTemplateIndex].placeholders || [];
+    
+    updatedTemplates[currentTemplateIndex].placeholders = mergePlaceholders(
+      existing,
+      newlyExtracted,
+      masterFields
+    );
+    
     updatedTemplates[currentTemplateIndex].isDirty = false;
     setTemplates(updatedTemplates);
 
-    toast({ title: "Rescan Complete", description: `Updated ${updatedPlaceholders.length} fields.` });
+    toast({ title: "Content Synced", description: "Updated tag list while preserving your field settings." });
   };
 
   const findMatchingMasterFields = (placeholderName: string, masterFields: JobField[]): { ids: number[], sourceType?: string } => {
@@ -1315,7 +1320,6 @@ export default function DocumentTemplateManager({
     };
   };
 
-
   const renderPlaceholderRows = () => {
     if (!currentTemplate?.placeholders) return null;
 
@@ -1328,146 +1332,147 @@ export default function DocumentTemplateManager({
       const isBlock = p.is_block_start;
       const originalIndex = currentTemplate.placeholders.findIndex(orig => orig.id === p.id);
 
+      // Calculate total sources for the Priority Logic indicator
+      const sourceCount = (p.master_field_ids?.length || 0) +
+        (p.linked_job_question_ids?.length || 0) +
+        (p.linked_requirement_ids?.length || 0);
+
       return (
         <TableRow
           key={p.id}
           className={cn(
-            isChild && "bg-muted/10 hover:bg-muted/20",
-            isBlock && "bg-blue-50/40 hover:bg-blue-50/60"
+            "group transition-colors",
+            isChild && "bg-muted/5 hover:bg-muted/10",
+            isBlock && "bg-blue-50/30 hover:bg-blue-50/50"
           )}
         >
-          <TableCell className="border-r">
-            <div className="flex items-center gap-2 font-mono text-sm">
-              <FileText className="h-3.5 w-3.5" />
-              <span>{p.is_digit_split ? `${p.name}_[1-${p.digit_count}]` : `{${p.name}}`}</span>
-              {p.is_digit_split && <Badge className="bg-orange-500">DIGIT SPLIT</Badge>}
-            </div>
-          </TableCell>
-          <TableCell className="border-r">
+          {/* FIELD NAME & TAG */}
+          <TableCell className="border-r py-3">
             <div className={cn(
-              "flex items-center gap-2 font-mono text-sm",
-              isChild && "pl-8 border-l-2 border-blue-200 ml-2"
+              "flex items-center gap-2 font-mono text-[11px]",
+              isChild && "pl-6 border-l-2 border-blue-200 ml-2"
             )}>
               {isBlock ? (
-                <Badge className="bg-blue-600 hover:bg-blue-700 h-5 px-1.5 text-[10px]">BLOCK</Badge>
+                <Badge className="bg-blue-600 hover:bg-blue-700 h-4 px-1 text-[9px] uppercase">Block</Badge>
               ) : isChild ? (
                 <Link2 className="h-3 w-3 text-blue-400" />
               ) : (
-                <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                <FileText className="h-3.5 w-3.5 text-slate-400" />
               )}
-              <span className={cn(isBlock && "font-bold text-blue-800")}>
-                {isBlock ? `{#${p.name}}` : `{${p.name}}`}
-              </span>
+              <div className="flex flex-col">
+                <span className={cn("font-bold", isBlock ? "text-blue-800" : "text-slate-700")}>
+                  {isBlock ? `{#${p.name}}` : `{${p.name}}`}
+                </span>
+                {p.is_digit_split && (
+                  <span className="text-[8px] text-orange-600 font-bold uppercase tracking-tighter">Digit Split: 1-{p.digit_count}</span>
+                )}
+              </div>
             </div>
           </TableCell>
 
+          {/* TYPE INDICATOR */}
           <TableCell className="border-r">
-            <div className="flex items-center gap-1">
-              <Badge variant="outline" className="capitalize text-[10px]">
-                {p.type}
-              </Badge>
-              {p.type === 'boolean' && p.boolean_type && (
-                <Badge variant="secondary" className="text-[8px] bg-purple-100 text-purple-700">
-                  {p.boolean_type === 'single' ? 'Radio' : 'Multi'}
-                </Badge>
-              )}
-              {p.type === 'boolean' && p.boolean_conditions?.length > 0 && (
-                <Badge variant="outline" className="text-[8px]">
-                  {p.boolean_conditions.length} opts
-                </Badge>
-              )}
-              {p.type === 'array' && (
-                <Badge className="text-[8px] bg-orange-100 text-orange-700 hover:bg-orange-100">
-                  {p.array_direction === 'horizontal' ? '→ Horizontal' : '↓ Vertical'}
-                </Badge>
-              )}
-            </div>
-          </TableCell>
-
-          <TableCell className="border-r">
-            <Badge variant="secondary" className={cn("capitalize text-[10px]", isChild && "bg-blue-100 text-blue-700")}>
-              {p.entity_type}
-            </Badge>
-          </TableCell>
-
-          <TableCell className="border-r">
-            {p.type === 'document_checklist' && p.linked_document_ids?.length > 0 ? (
-              <div className="flex flex-wrap gap-1">
-                {p.linked_document_ids.slice(0, 3).map(docId => {
-                  const doc = availableDocuments.find(d => d.id === docId);
-                  return (
-                    <Badge key={docId} variant="outline" className="text-[9px] bg-purple-50 text-purple-700">
-                      {doc?.display_name || doc?.name || 'Doc'}
-                    </Badge>
-                  );
-                })}
-                {p.linked_document_ids.length > 3 && (
-                  <Badge variant="outline" className="text-[9px]">
-                    +{p.linked_document_ids.length - 3}
-                  </Badge>
-                )}
-              </div>
-            ) : p.type === 'boolean' && p.boolean_conditions?.length > 0 ? (
-              <div className="flex flex-wrap gap-1">
-                {p.boolean_conditions.slice(0, 3).map((cond) => (
-                  <Badge key={`${p.id}-${cond.tag}`} variant="outline" className="text-[9px] bg-purple-50 text-purple-700">
-                    {cond.label}
-                  </Badge>
-                ))}
-                {p.boolean_conditions.length > 3 && (
-                  <Badge variant="outline" className="text-[9px]">
-                    +{p.boolean_conditions.length - 3}
-                  </Badge>
-                )}
-              </div>
-            ) : p.master_field_ids?.length > 0 ? (
-              <div className="flex flex-wrap gap-1">
-                {p.master_field_ids.map(id => (
-                  <Badge key={id} variant="outline" className="text-[9px] bg-white">
-                    {masterFieldMap.get(id) || id}
-                  </Badge>
-                ))}
-              </div>
-            ) : (
-              <span className="text-[10px] text-muted-foreground italic">Not Linked</span>
-            )}
-          </TableCell>
-
-          <TableCell className="border-r">
-            <div className="flex items-center gap-1">
-              <Badge variant="outline" className="capitalize text-[10px]">
-                {p.type}
+            <div className="flex flex-wrap gap-1">
+              <Badge variant="outline" className={cn(
+                "capitalize text-[9px] font-bold px-1.5 h-5",
+                p.type === 'document_checklist' && "border-blue-200 bg-blue-50 text-blue-700",
+                p.type === 'conditional' && "border-indigo-200 bg-indigo-50 text-indigo-700",
+                p.type === 'boolean' && "border-purple-200 bg-purple-50 text-purple-700",
+                p.type === 'image' && "border-green-200 bg-green-50 text-green-700",
+                p.type === 'array' && "border-orange-200 bg-orange-50 text-orange-700"
+              )}>
+                {p.type.replace('_', ' ')}
               </Badge>
               {p.is_ai_generated && (
-                <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-[8px] h-4">
-                  AI
-                </Badge>
-              )}
-              {p.type === 'image' && (p.image_width || p.image_height) && (
-                <Badge variant="secondary" className="text-[8px] bg-green-100 text-green-700">
-                  {p.image_width || 'auto'} × {p.image_height || 'auto'}
-                </Badge>
+                <Sparkles className="h-3 w-3 text-purple-500 animate-pulse" />
               )}
             </div>
           </TableCell>
 
+          {/* ENTITY CONTEXT */}
+          <TableCell className="border-r">
+            <div className="flex flex-wrap gap-1">
+              {p.entity_type?.map(et => (
+                <Badge key={et} variant="secondary" className="text-[9px] capitalize h-4 px-1 font-normal">
+                  {et}
+                </Badge>
+              ))}
+            </div>
+          </TableCell>
+
+          {/* DATA SOURCES & PRIORITY */}
+          <TableCell className="border-r min-w-[200px]">
+            <div className="flex flex-col gap-1.5">
+              {/* Database Fields */}
+              {p.master_field_ids?.map(id => (
+                <div key={id} className="flex items-center gap-1.5 text-[10px] text-blue-700 bg-blue-50/50 px-1.5 py-0.5 rounded border border-blue-100 w-fit">
+                  <Database className="h-2.5 w-2.5" />
+                  <span className="truncate max-w-[120px]">{masterFieldMap.get(id) || id}</span>
+                </div>
+              ))}
+
+              {/* Job Questions */}
+              {p.linked_job_question_ids?.map(id => (
+                <div key={id} className="flex items-center gap-1.5 text-[10px] text-purple-700 bg-purple-50/50 px-1.5 py-0.5 rounded border border-purple-100 w-fit">
+                  <HelpCircle className="h-2.5 w-2.5" />
+                  <span className="truncate max-w-[120px]">{jobQuestions.find(q => q.id === id)?.label || 'Job Question'}</span>
+                </div>
+              ))}
+
+              {/* Requirements */}
+              {p.linked_requirement_ids?.map(id => (
+                <div key={id} className="flex items-center gap-1.5 text-[10px] text-green-700 bg-green-50/50 px-1.5 py-0.5 rounded border border-green-100 w-fit">
+                  <FileText className="h-2.5 w-2.5" />
+                  <span className="truncate max-w-[120px]">{requirements.find(r => r.id === id)?.label || 'Requirement'}</span>
+                </div>
+              ))}
+
+              {/* Type Specific Summaries */}
+              {p.type === 'document_checklist' && (
+                <div className="text-[9px] text-slate-500 italic flex items-center gap-1">
+                  <Layers className="h-2.5 w-2.5" /> {p.linked_document_ids?.length || 0} Docs Tracked
+                </div>
+              )}
+
+              {p.type === 'conditional' && (
+                <div className="text-[9px] text-slate-500 italic flex items-center gap-1">
+                  <Code className="h-2.5 w-2.5" /> {p.conditions?.length || 0} Logic Blocks
+                </div>
+              )}
+
+              {sourceCount > 1 && (
+                <div className="pt-1 mt-1 border-t border-slate-100">
+                  <Badge className="bg-slate-700 text-[8px] h-3 px-1 uppercase tracking-tighter">
+                    {p.source_logic === 'all' ? 'Merge All' : 'Priority Fallback'}
+                  </Badge>
+                </div>
+              )}
+
+              {sourceCount === 0 && !isBlock && (
+                <span className="text-[10px] text-slate-400 italic">No Data Source</span>
+              )}
+            </div>
+          </TableCell>
+
+          {/* DEFAULT / FALLBACK */}
           <TableCell className="border-r">
             {p.default_value ? (
-              <Badge variant="secondary" className="text-[9px] bg-blue-50 text-blue-700">
-                {p.default_value.length > 15 ? `${p.default_value.substring(0, 15)}...` : p.default_value}
-              </Badge>
+              <code className="text-[10px] text-slate-600 bg-slate-100 px-1 rounded truncate block max-w-[80px]">
+                "{p.default_value}"
+              </code>
             ) : (
-              <span className="text-[10px] text-muted-foreground italic">None</span>
+              <span className="text-[10px] text-slate-300">--</span>
             )}
           </TableCell>
 
+          {/* ACTIONS */}
           <TableCell className="text-right">
-            <div className="flex justify-end gap-1">
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => editPlaceholder(originalIndex)}>
+            <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-blue-50 hover:text-blue-600" onClick={() => editPlaceholder(originalIndex)}>
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => removePlaceholder(originalIndex)}>
-                <Trash2 className="h-3.5 w-3.5 text-destructive" />
+              <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-red-50 hover:text-red-600" onClick={() => removePlaceholder(originalIndex)}>
+                <Trash2 className="h-3.5 w-3.5" />
               </Button>
             </div>
           </TableCell>
@@ -1476,10 +1481,7 @@ export default function DocumentTemplateManager({
     });
   };
 
-
-  // Update the autoGeneratePlaceholders function to use source_type from master fields and detect array placeholders
   const autoGeneratePlaceholders = (extracted: string[], masterFields: JobField[] = []): Placeholder[] => {
-    // First, identify array placeholders (they typically appear in the format "director" from "{#directors}")
     const arrayPlaceholders = extracted.filter(name =>
       name.endsWith('s') && // Simple heuristic: array names are often plural
       extracted.includes(name.slice(0, -1)) // Check if singular form exists
@@ -1491,7 +1493,6 @@ export default function DocumentTemplateManager({
       const isArray = arrayPlaceholders.includes(name) ||
         (name.endsWith('s') && extracted.includes(name.slice(0, -1)));
 
-      // Find matching master fields and get source type
       const { ids: matchingFieldIds, sourceType } = findMatchingMasterFields(cleanName, masterFields);
 
       return {
@@ -1509,65 +1510,40 @@ export default function DocumentTemplateManager({
     });
   };
 
-  // Update the mergePlaceholders function to use source_type from master fields and handle array placeholders
   const mergePlaceholders = (
     existingPlaceholders: Placeholder[],
-    extractedNames: string[],
+    newlyExtracted: Placeholder[], // Now accepts the full Placeholder objects from extractPlaceholders
     masterFields: JobField[] = []
   ): Placeholder[] => {
+    // Map existing placeholders by name for quick lookup
     const existingMap = new Map(existingPlaceholders.map(p => [p.name, p]));
-    const updatedPlaceholders: Placeholder[] = [];
-    const processedNames = new Set<string>();
+    
+    // We iterate through the newly extracted placeholders to maintain the order found in the document
+    return newlyExtracted.map(newPh => {
+      const existing = existingMap.get(newPh.name);
 
-    // First, identify array placeholders
-    const arrayPlaceholders = extractedNames.filter(name =>
-      name.endsWith('s') && // Simple heuristic: array names are often plural
-      extractedNames.includes(name.slice(0, -1)) // Check if singular form exists
-    );
-
-    for (const name of extractedNames) {
-      const isImageTag = name.startsWith('%') && name.endsWith('%');
-      const cleanName = isImageTag ? name.substring(1, name.length - 1) : name;
-
-      // Check if this is an array placeholder
-      const isArray = arrayPlaceholders.includes(name) ||
-        (name.endsWith('s') && extractedNames.includes(name.slice(0, -1)));
-
-      if (processedNames.has(cleanName)) continue;
-
-      const existingPlaceholder = existingMap.get(cleanName);
-      if (existingPlaceholder) {
-        // Preserve existing placeholder but update the type if it's now detected as an array
-        if (isArray && existingPlaceholder.type !== 'array') {
-          updatedPlaceholders.push({
-            ...existingPlaceholder,
-            type: 'array',
-            description: existingPlaceholder.description || 'Array placeholder'
-          });
-        } else {
-          updatedPlaceholders.push(existingPlaceholder);
-        }
-      } else {
-        // Find matching master fields and get source type
-        const { ids: matchingFieldIds, sourceType } = findMatchingMasterFields(cleanName, masterFields);
-
-        updatedPlaceholders.push({
-          id: `auto_${Date.now()}_${updatedPlaceholders.length}`,
-          name: cleanName,
-          description: matchingFieldIds.length > 0
-            ? `Auto-linked to ${matchingFieldIds.length} field(s)`
-            : isArray ? 'Array placeholder' : '',
-          type: isImageTag ? 'image' : isArray ? 'array' : 'text',
-          required: true,
-          entity_type: (sourceType as EntityType) || 'principal', // Use source_type from master field or default to 'principal'
-          master_field_ids: matchingFieldIds,
-          default_value: ''
-        });
+      if (existing) {
+        // TAG EXISTS: Preserving user-defined logic
+        console.log(`[MERGE] Preserving data for tag: {${newPh.name}}`);
+        
+        return {
+          ...existing, // 1. Start with everything the user already configured
+          // 2. Overlay structural updates from the new scan
+          parent_name: newPh.parent_name,
+          is_block_start: newPh.is_block_start,
+          // Only update type if it's structural (e.g. was text, now is a {#block})
+          // But if the user manually set it to 'date' or 'select', keep that.
+          type: (newPh.type === 'array' || newPh.type === 'conditional' || existing.type === 'image') 
+                ? newPh.type 
+                : existing.type,
+          // Keep description unless it was empty and we have a new one from the scanner
+          description: existing.description || newPh.description,
+        };
       }
-      processedNames.add(cleanName);
-    }
 
-    return updatedPlaceholders;
+      // NEW TAG DETECTED: Use the scanner's version
+      return newPh;
+    });
   };
 
   // Update the addNewFileTemplate function to accept masterFields
@@ -1609,24 +1585,34 @@ export default function DocumentTemplateManager({
     setCurrentTemplateIndex(updatedTemplates.length - 1);
   };
 
-  const handleEditorChange = (content: { html: string; header?: string; footer?: string } | string) => {
+const handleEditorChange = (content: { html: string; header?: string; footer?: string } | string) => {
     if (currentTemplateIndex === null) return;
     const updatedTemplates = [...templates];
-    // Handle both string (legacy) and object (new) formats
+    
+    let processedHtml = '';
+    
     if (typeof content === 'string') {
-      updatedTemplates[currentTemplateIndex].content = content;
+      processedHtml = content;
     } else {
-      // Combine header, main content, and footer with proper separation
       const { html, header = '', footer = '' } = content;
-      updatedTemplates[currentTemplateIndex].content = [
-        header ? `<header>${header}</header>` : '',
-        html,
-        footer ? `<footer>${footer}</footer>` : ''
-      ].join('\n\n');
+      processedHtml = [
+        header ? `<header style="white-space: pre-wrap;">${header}</header>` : '',
+        `<div class="template-body" style="white-space: pre-wrap;">${html}</div>`,
+        footer ? `<footer style="white-space: pre-wrap;">${footer}</footer>` : ''
+      ].filter(Boolean).join('\n');
     }
+
+    updatedTemplates[currentTemplateIndex].content = processedHtml;
     updatedTemplates[currentTemplateIndex].isDirty = true;
     setTemplates(updatedTemplates);
   };
+
+const preserveFormat = (html: string) => {
+  if (!html) return html;
+  return html
+    .replace(/ {2,}/g, (match) => '&nbsp;'.repeat(match.length)) // Convert multiple spaces to &nbsp;
+    .replace(/\n/g, '<br />'); // Ensure literal newlines become HTML breaks
+};
 
   const handleTemplateNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (currentTemplateIndex === null) return;
@@ -1678,6 +1664,13 @@ export default function DocumentTemplateManager({
       ? currentTypes.filter(et => et !== entityType)
       : [...currentTypes, entityType];
     updatedTemplates[currentTemplateIndex].entity_types = newTypes;
+    setTemplates(updatedTemplates);
+  };
+
+  const handleClearEntityTypes = () => {
+    if (currentTemplateIndex === null) return;
+    const updatedTemplates = [...templates];
+    updatedTemplates[currentTemplateIndex].entity_types = [];
     setTemplates(updatedTemplates);
   };
 
@@ -1846,27 +1839,25 @@ export default function DocumentTemplateManager({
     });
   };
 
-  const uploadAndSaveAll = async () => {
+const uploadAndSaveAll = async () => {
     setIsProcessing(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       for (const template of templates) {
         let filePath = template.file_path;
-        if (template.id.startsWith('temp_') && !template.content) {
-          const fileToUpload = templateFiles.get(template.id);
-          if (!fileToUpload) throw new Error(`File for ${template.file_name} not found.`);
-          const storagePath = `kyc-templates/${document.id}-${Date.now()}`;
-          const { data, error } = await supabase.storage.from('templates').upload(storagePath, fileToUpload);
-          if (error) throw error;
-          filePath = data.path;
+        
+        // If it's an HTML template (Text Template), sanitize whitespace
+        let finalContent = template.content;
+        if (finalContent && !template.file_name) {
+           // Only apply this to Text Templates, not docx binary references
+           finalContent = preserveFormat(finalContent);
         }
 
-        // --- MODIFICATION: Use job_level instead of class_id in the payload ---
-        const templateData = {
+       const templateData = {
           file_name: template.name,
           document_id: document.id,
           file_path: filePath,
-          content: template.content,
+          content: finalContent, // Use the sanitized content
           file_type: template.file_type,
           file_size: template.file_size,
           placeholders: template.placeholders || [],
@@ -1881,7 +1872,6 @@ export default function DocumentTemplateManager({
         if (template.id.startsWith('temp_')) {
           ({ error } = await supabase.from('acc_portal_templates').insert(templateData));
         } else {
-          // Exclude created_by from update if you don't want to change ownership
           const { created_by, ...updateData } = templateData;
           ({ error } = await supabase.from('acc_portal_templates').update(updateData).eq('id', template.id));
         }
@@ -1960,46 +1950,49 @@ export default function DocumentTemplateManager({
     }
   };
 
-  // Add this function for manual rescan with enhanced detection
-  const handleManualRescan = async () => {
-    if (!currentTemplate) return;
+ const handleManualRescan = async () => {
+    if (!currentTemplate || currentTemplateIndex === null) return;
 
     try {
       setIsProcessing(true);
 
-      // Use enhanced extractPlaceholders function that includes header/footer support
       let extracted: Placeholder[] = [];
 
-      // If it's a file template, extract from file (includes header/footer)
+      // Determine scan source
       if (currentTemplate.file_name && templateFiles.has(currentTemplate.id)) {
         const file = templateFiles.get(currentTemplate.id);
         if (file) {
           extracted = await extractPlaceholders({ type: 'file', content: file });
         }
       } else {
-        // Extract from editor content
-        extracted = await extractPlaceholders({ type: 'text', content: currentTemplate.content || '' });
+        extracted = await extractPlaceholders({ 
+          type: 'text', 
+          content: currentTemplate.content || '' 
+        });
       }
 
-      // Update placeholders in template with the extracted ones
+      // Perform the safe merge
       const updatedTemplates = [...templates];
       const existingPlaceholders = updatedTemplates[currentTemplateIndex].placeholders || [];
 
-      updatedTemplates[currentTemplateIndex].placeholders = mergePlaceholders(
+      // Pass the arrays of Placeholder objects
+      const merged = mergePlaceholders(
         existingPlaceholders,
         extracted,
         masterFields
       );
 
+      updatedTemplates[currentTemplateIndex].placeholders = merged;
       updatedTemplates[currentTemplateIndex].isDirty = false;
       setTemplates(updatedTemplates);
 
-      const linkedCount = updatedTemplates[currentTemplateIndex].placeholders
-        .filter(p => p.master_field_ids?.length).length;
+      // UI Feedback
+      const newlyAdded = merged.filter(m => !existingPlaceholders.find(e => e.name === m.name)).length;
+      const preserved = merged.length - newlyAdded;
 
       toast({
-        title: 'Manual Rescan Complete',
-        description: `Found ${extracted.length} placeholders including header/footer. ${linkedCount} were automatically linked to master fields.`,
+        title: 'Sync Complete',
+        description: `Synced ${merged.length} tags. Preserved logic for ${preserved} existing fields and added ${newlyAdded} new ones.`,
         variant: 'default'
       });
 
@@ -2007,7 +2000,7 @@ export default function DocumentTemplateManager({
       console.error('Error during manual rescan:', error);
       toast({
         title: 'Rescan Error',
-        description: error instanceof Error ? error.message : 'Failed to rescan placeholders',
+        description: error instanceof Error ? error.message : 'Failed to sync placeholders',
         variant: 'destructive'
       });
     } finally {
@@ -2079,26 +2072,37 @@ export default function DocumentTemplateManager({
                     {currentTemplate.isDirty && (<Button size="sm" onClick={handleRescanPlaceholders}><RefreshCw className="mr-2 h-4 w-4" /> Re-scan</Button>)}
                   </CardHeader>
                   <CardContent className="flex-1 flex flex-col gap-4">
-                    <div className="grid grid-cols-3 flex gap-4">
+                    <div className="grid grid-cols-3 gap-4">
                       <div className="space-y-2"><Label htmlFor="template-name">Template Name</Label><Input id="template-name" value={currentTemplate.name || ''} onChange={handleTemplateNameChange} /></div>
                       <div className="space-y-2"><Label htmlFor="entity-type">Template For</Label>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="outline" className="w-full justify-between">
-                              <span className="truncate pr-2">
-                                {currentTemplate.entity_types?.length > 0 ? currentTemplate.entity_types.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(', ') : "Select entities..."}
-                              </span>
-                              <ChevronDown className="h-4 w-4 opacity-50" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent className="w-[--radix-popover-trigger-width]">
-                            {ENTITY_TYPES.map(t => (
-                              <DropdownMenuCheckboxItem key={t.value} checked={currentTemplate.entity_types?.includes(t.value)} onCheckedChange={() => handleEntityTypeToggle(t.value)}>
-                                {t.label}
-                              </DropdownMenuCheckboxItem>
-                            ))}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                        <div className="flex gap-2 items-center">
+                          <DropdownMenu className="flex-1">
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="outline" className="w-full justify-between">
+                                <span className="truncate pr-2">
+                                  {currentTemplate.entity_types?.length > 0 ? currentTemplate.entity_types.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(', ') : "Select entities..."}
+                                </span>
+                                <ChevronDown className="h-4 w-4 opacity-50" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent className="w-[--radix-popover-trigger-width]">
+                              {ENTITY_TYPES.map(t => (
+                                <DropdownMenuCheckboxItem key={t.value} checked={currentTemplate.entity_types?.includes(t.value)} onCheckedChange={() => handleEntityTypeToggle(t.value)}>
+                                  {t.label}
+                                </DropdownMenuCheckboxItem>
+                              ))}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleClearEntityTypes}
+                            title="Clear all entity types"
+                            className="shrink-0 w-8 h-8 p-0 flex items-center justify-center"
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
                       </div>
                       <div className="flex flex-col items-center justify-between"><Label htmlFor="entity-type"></Label>
                         {currentTemplate.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && (
@@ -2282,25 +2286,37 @@ export default function DocumentTemplateManager({
                                           ))}
                                         </div>
                                       )}
-                                      
+
                                       {p.linked_job_question_id && (
                                         <Badge variant="outline" className="text-[9px] bg-purple-50 text-purple-700 border-purple-200">
                                           <HelpCircle className="h-3 w-3 mr-1" />
                                           {jobQuestions.find(q => q.id === p.linked_job_question_id)?.label || p.linked_job_question_id}
                                         </Badge>
                                       )}
-                                      
+
                                       {p.linked_requirement_id && (
                                         <Badge variant="outline" className="text-[9px] bg-green-50 text-green-700 border-green-200">
                                           <Database className="h-3 w-3 mr-1" />
                                           {requirements.find(r => r.id === p.linked_requirement_id)?.label || p.linked_requirement_id}
                                         </Badge>
                                       )}
-                                      
+
                                       {!p.master_field_ids?.length && !p.linked_job_question_id && !p.linked_requirement_id && (
                                         <span className="text-[10px] text-muted-foreground italic">Not Linked</span>
                                       )}
                                     </div>
+                                  </TableCell>
+
+                                  <TableCell className="border-r">
+                                    <Badge
+                                      variant="secondary"
+                                      className={cn(
+                                        "capitalize text-[10px]",
+                                        isChild && "bg-blue-100 text-blue-700"
+                                      )}
+                                    >
+                                      {p.default_value}
+                                    </Badge>
                                   </TableCell>
 
                                   <TableCell className="text-right">
@@ -2335,256 +2351,583 @@ export default function DocumentTemplateManager({
       </Dialog>
 
       {/* Placeholder Form Dialog */}
-<Dialog open={isPlaceholderFormOpen} onOpenChange={setIsPlaceholderFormOpen}>
-  <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col p-0 border-none shadow-2xl">
-    <DialogHeader className="px-6 py-4 bg-white border-b shrink-0">
-      <DialogTitle className="text-xl font-bold flex items-center gap-2">
-        {isEditingPlaceholder !== null ? <Pencil className="h-5 w-5 text-blue-600" /> : <PlusCircle className="h-5 w-5 text-blue-600" />}
-        {isEditingPlaceholder !== null ? 'Edit' : 'Add'} Placeholder
-      </DialogTitle>
-      <DialogDescription>Define the data sources and logic for document tag <span className="font-mono text-blue-600 font-bold">{'{'}{newPlaceholder.name || '...'}{'}'}</span></DialogDescription>
-    </DialogHeader>
+      <Dialog open={isPlaceholderFormOpen} onOpenChange={setIsPlaceholderFormOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col p-0 border-none shadow-2xl">
+          <DialogHeader className="px-6 py-4 bg-white border-b shrink-0">
+            <DialogTitle className="text-xl font-bold flex items-center gap-2">
+              {isEditingPlaceholder !== null ? <Pencil className="h-5 w-5 text-blue-600" /> : <PlusCircle className="h-5 w-5 text-blue-600" />}
+              {isEditingPlaceholder !== null ? 'Edit' : 'Add'} Placeholder
+            </DialogTitle>
+            <DialogDescription>Define the data sources and logic for document tag <span className="font-mono text-blue-600 font-bold">{'{'}{newPlaceholder.name || '...'}{'}'}</span></DialogDescription>
+          </DialogHeader>
 
-    <ScrollArea className="flex-1 bg-slate-50/30 px-6 py-4">
-      <div className="space-y-6 pb-6">
-        {/* Identity & Basic Info */}
-        <div className="grid grid-cols-2 gap-4 bg-white p-4 rounded-xl border shadow-sm">
-          <div className="space-y-2">
-            <Label htmlFor="name" className="text-[11px] font-black uppercase text-slate-400">JSON Variable Key</Label>
-            <Input
-              id="name"
-              placeholder="e.g. client_first_name"
-              value={newPlaceholder.name}
-              onChange={(e) => setNewPlaceholder({ ...newPlaceholder, name: e.target.value.replace(/\s+/g, '_') })}
-              className="font-mono text-sm bg-slate-50"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="default_value" className="text-[11px] font-black uppercase text-slate-400">Default Fallback Value</Label>
-            <Input
-              id="default_value"
-              placeholder="Optional default..."
-              value={newPlaceholder.default_value || ''}
-              onChange={(e) => setNewPlaceholder({ ...newPlaceholder, default_value: e.target.value })}
-              className="bg-slate-50"
-            />
-          </div>
-          <div className="col-span-2 space-y-2">
-            <Label htmlFor="description" className="text-[11px] font-black uppercase text-slate-400">Description</Label>
-            <Textarea
-              id="description"
-              placeholder="Internal notes about this field..."
-              value={newPlaceholder.description}
-              onChange={(e) => setNewPlaceholder({ ...newPlaceholder, description: e.target.value })}
-              className="min-h-[60px] resize-none bg-slate-50"
-            />
-          </div>
-        </div>
+          <ScrollArea className="flex-1 bg-slate-50/30 px-6 py-4 overflow-auto">
+            <div className="space-y-6 pb-6">
+              {/* Identity & Basic Info */}
+              <div className="grid grid-cols-2 gap-4 bg-white p-4 rounded-xl border shadow-sm">
+                <div className="space-y-2">
+                  <Label htmlFor="name" className="text-[11px] font-black uppercase text-slate-400">JSON Variable Key</Label>
+                  <Input
+                    id="name"
+                    placeholder="e.g. client_first_name"
+                    value={newPlaceholder.name}
+                    onChange={(e) => setNewPlaceholder({ ...newPlaceholder, name: e.target.value.replace(/\s+/g, '_') })}
+                    className="font-mono text-sm bg-slate-50"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="default_value" className="text-[11px] font-black uppercase text-slate-400">Default Fallback Value</Label>
+                  <Input
+                    id="default_value"
+                    placeholder="Optional default..."
+                    value={newPlaceholder.default_value || ''}
+                    onChange={(e) => setNewPlaceholder({ ...newPlaceholder, default_value: e.target.value })}
+                    className="bg-slate-50"
+                  />
+                </div>
+                <div className="col-span-2 space-y-2">
+                  <Label htmlFor="description" className="text-[11px] font-black uppercase text-slate-400">Description</Label>
+                  <Textarea
+                    id="description"
+                    placeholder="Internal notes about this field..."
+                    value={newPlaceholder.description}
+                    onChange={(e) => setNewPlaceholder({ ...newPlaceholder, description: e.target.value })}
+                    className="min-h-[60px] resize-none bg-slate-50"
+                  />
+                </div>
+              </div>
 
-        {/* Source Manager (The Priority List) */}
-        <PlaceholderSourceManager
-          placeholder={newPlaceholder}
-          masterFields={masterFields}
-          jobQuestions={jobQuestions}
-          requirements={requirements}
-          onUpdate={(updates) => setNewPlaceholder(prev => ({ ...prev, ...updates }))}
-          onRemove={(type, id) => {
-            setNewPlaceholder(prev => {
-              if (type === 'db') return { ...prev, master_field_ids: prev.master_field_ids?.filter(fid => fid !== id) };
-              if (type === 'job') return { ...prev, linked_job_question_ids: prev.linked_job_question_ids?.filter(qid => qid !== id) };
-              if (type === 'req') return { ...prev, linked_requirement_ids: prev.linked_requirement_ids?.filter(rid => rid !== id) };
-              return prev;
-            });
-          }}
-        />
-
-        {/* Linking Tools Card */}
-        <div className="bg-white p-4 rounded-xl border space-y-4">
-          <Label className="text-[11px] font-black uppercase text-slate-800 tracking-wider flex items-center gap-2">
-            <Link2 className="h-3.5 w-3.5 text-blue-600" /> Data Linking Tools
-          </Label>
-          
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label className="text-[10px] font-bold text-blue-600 uppercase flex items-center gap-1.5">
-                <Database className="h-3 w-3" /> Master Database Fields
-              </Label>
-              <MasterFieldPicker
+              {/* Source Manager (The Priority List) */}
+              <PlaceholderSourceManager
+                placeholder={newPlaceholder}
                 masterFields={masterFields}
-                selectedFieldIds={newPlaceholder.master_field_ids || []}
-                onSelect={(id) => setNewPlaceholder(prev => ({ ...prev, master_field_ids: [...(prev.master_field_ids || []), id] }))}
-                onRemove={(id) => setNewPlaceholder(prev => ({ ...prev, master_field_ids: prev.master_field_ids?.filter(fid => fid !== id) }))}
-                onClear={() => setNewPlaceholder(prev => ({ ...prev, master_field_ids: [] }))}
+                jobQuestions={jobQuestions}
+                requirements={requirements}
+                onUpdate={(updates) => setNewPlaceholder(prev => ({ ...prev, ...updates }))}
+                onRemove={(type, id) => {
+                  setNewPlaceholder(prev => {
+                    if (type === 'db') return { ...prev, master_field_ids: prev.master_field_ids?.filter(fid => fid !== id) };
+                    if (type === 'job') return { ...prev, linked_job_question_ids: prev.linked_job_question_ids?.filter(qid => qid !== id) };
+                    if (type === 'req') return { ...prev, linked_requirement_ids: prev.linked_requirement_ids?.filter(rid => rid !== id) };
+                    return prev;
+                  });
+                }}
               />
-            </div>
+              {/* Configuration: Type & Entity Scope */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-[11px] font-black uppercase text-slate-400">Placeholder Type</Label>
+                  <Select
+                    value={newPlaceholder.type}
+                    onValueChange={(v) => setNewPlaceholder({ ...newPlaceholder, type: v })}
+                  >
+                    <SelectTrigger className="bg-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PLACEHOLDER_TYPES.map(t => (
+                        <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-[10px] font-bold text-purple-600 uppercase flex items-center gap-1.5">
-                  <HelpCircle className="h-3 w-3" /> Job Questions
-                </Label>
-                <JobQuestionPicker
-                  jobQuestions={jobQuestions}
-                  selectedQuestionId={undefined}
-                  onSelect={(q) => {
-                    const current = newPlaceholder.linked_job_question_ids || [];
-                    if (!current.includes(q.id)) {
-                      setNewPlaceholder(prev => ({ ...prev, linked_job_question_ids: [...current, q.id] }));
-                    }
-                  }}
-                  onClear={() => {}}
-                />
+                <div className="space-y-2">
+                  <Label className="text-[11px] font-black uppercase text-slate-400">Entity Context</Label>
+                  <div className="flex gap-2">
+                    <Popover className="flex-1">
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="w-full justify-between bg-white text-xs">
+                          <span className="truncate pr-2">
+                            {newPlaceholder.entity_type?.length > 0
+                              ? newPlaceholder.entity_type.map(et => ENTITY_TYPES.find(t => t.value === et)?.label || et).join(', ')
+                              : 'Select context...'}
+                          </span>
+                          <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder="Search entities..." />
+                          <CommandList>
+                            <CommandGroup className="max-h-[250px] overflow-y-auto">
+                              {ENTITY_TYPES.map((type) => {
+                                const isSelected = newPlaceholder.entity_type?.includes(type.value);
+                                return (
+                                  <CommandItem
+                                    key={type.value}
+                                    onSelect={() => {
+                                      setNewPlaceholder(prev => ({
+                                        ...prev,
+                                        entity_type: isSelected
+                                          ? prev.entity_type.filter(et => et !== type.value)
+                                          : [...(prev.entity_type || []), type.value]
+                                      }));
+                                    }}
+                                  >
+                                    <div className={`mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary ${isSelected ? 'bg-primary text-primary-foreground' : 'opacity-50'}`}>
+                                      {isSelected && <Check className="h-3 w-3" />}
+                                    </div>
+                                    <span className="text-sm font-medium">{type.label}</span>
+                                  </CommandItem>
+                                );
+                              })}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setNewPlaceholder(prev => ({ ...prev, entity_type: [] }))}
+                      title="Clear all entity contexts"
+                      className="shrink-0 w-8 h-8 p-0 flex items-center justify-center"
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
               </div>
 
-              <div className="space-y-1.5">
-                <Label className="text-[10px] font-bold text-green-600 uppercase flex items-center gap-1.5">
-                  <FileText className="h-3 w-3" /> Requirements
-                </Label>
-                <RequirementPicker
-                  requirements={requirements}
-                  selectedRequirementId={undefined}
-                  onSelect={(r) => {
-                    const current = newPlaceholder.linked_requirement_ids || [];
-                    if (!current.includes(r.id)) {
-                      setNewPlaceholder(prev => ({ ...prev, linked_requirement_ids: [...current, r.id] }));
-                    }
-                  }}
-                  onClear={() => {}}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
+              {/* CONDITIONAL LOGIC BLOCKS */}
+              {newPlaceholder.type === 'conditional' && (
+                <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 space-y-4">
+                  <div className="flex items-center justify-between border-b border-indigo-100 pb-2">
+                    <div className="space-y-0.5">
+                      <Label className="text-[11px] font-black uppercase text-indigo-600">Logic Blocks (Conditional Sections)</Label>
+                      <p className="text-[10px] text-indigo-400">Define sections that only appear if the linked data exists.</p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-[10px] bg-white border-indigo-200 text-indigo-600 hover:bg-indigo-100"
+                      onClick={() => {
+                        const newCond = { tag: '', label: '', master_field_id: undefined };
+                        setNewPlaceholder(prev => ({
+                          ...prev,
+                          conditions: [...(prev.conditions || []), newCond]
+                        }));
+                      }}
+                    >
+                      <PlusCircle className="h-3 w-3 mr-1.5" />
+                      Add Block
+                    </Button>
+                  </div>
 
-        {/* Configuration: Type & Entity Scope */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label className="text-[11px] font-black uppercase text-slate-400">Placeholder Type</Label>
-            <Select
-              value={newPlaceholder.type}
-              onValueChange={(v) => setNewPlaceholder({ ...newPlaceholder, type: v })}
-            >
-              <SelectTrigger className="bg-white">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PLACEHOLDER_TYPES.map(t => (
-                  <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+                  <div className="space-y-3">
+                    {(newPlaceholder.conditions || []).length === 0 && (
+                      <div className="text-center py-6 border-2 border-dashed border-indigo-100 rounded-lg">
+                        <Code className="h-8 w-8 mx-auto text-indigo-200 mb-2" />
+                        <p className="text-[10px] text-indigo-300 uppercase font-bold">No logic blocks added yet</p>
+                      </div>
+                    )}
 
-          <div className="space-y-2">
-            <Label className="text-[11px] font-black uppercase text-slate-400">Entity Context</Label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" className="w-full justify-between bg-white text-xs">
-                  <span className="truncate pr-2">
-                    {newPlaceholder.entity_type?.length > 0
-                      ? newPlaceholder.entity_type.map(et => ENTITY_TYPES.find(t => t.value === et)?.label || et).join(', ')
-                      : 'Select context...'}
-                  </span>
-                  <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-                <Command>
-                  <CommandInput placeholder="Search entities..." />
-                  <CommandList>
-                    <CommandGroup className="max-h-[250px] overflow-y-auto">
-                      {ENTITY_TYPES.map((type) => {
-                        const isSelected = newPlaceholder.entity_type?.includes(type.value);
-                        return (
-                          <CommandItem
-                            key={type.value}
-                            onSelect={() => {
-                              setNewPlaceholder(prev => ({
-                                ...prev,
-                                entity_type: isSelected
-                                  ? prev.entity_type.filter(et => et !== type.value)
-                                  : [...(prev.entity_type || []), type.value]
-                              }));
+                    {(newPlaceholder.conditions || []).map((cond, idx) => (
+                      <div key={idx} className="relative p-4 rounded-lg border bg-white shadow-sm space-y-3 animate-in fade-in slide-in-from-top-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="absolute -right-2 -top-2 h-6 w-6 rounded-full bg-white border shadow-sm text-red-500 hover:bg-red-50"
+                          onClick={() => {
+                            const updated = [...newPlaceholder.conditions];
+                            updated.splice(idx, 1);
+                            setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                          }}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1.5">
+                            <Label className="text-[10px] uppercase font-bold text-slate-400">Variable Tag (slug)</Label>
+                            <Input
+                              placeholder="e.g. spouse_details"
+                              value={cond.tag}
+                              onChange={(e) => {
+                                const val = e.target.value.replace(/\s+/g, '_').toLowerCase();
+                                const updated = [...newPlaceholder.conditions];
+                                updated[idx].tag = val;
+                                setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                              }}
+                              className="h-8 text-xs font-mono bg-slate-50"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-[10px] uppercase font-bold text-slate-400">Display Label (Prefix)</Label>
+                            <Input
+                              placeholder="e.g. Spouse Name: "
+                              value={cond.label}
+                              onChange={(e) => {
+                                const updated = [...newPlaceholder.conditions];
+                                updated[idx].label = e.target.value;
+                                setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                              }}
+                              className="h-8 text-xs bg-slate-50"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5 pt-1">
+                          <Label className="text-[10px] uppercase font-bold text-slate-400">Trigger: If this field has data...</Label>
+                          <MasterFieldPicker
+                            masterFields={masterFields}
+                            selectedFieldIds={cond.master_field_id ? [cond.master_field_id] : []}
+                            onSelect={(fieldId) => {
+                              const updated = [...newPlaceholder.conditions];
+                              updated[idx].master_field_id = fieldId;
+                              setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                            }}
+                            onRemove={() => {
+                              const updated = [...newPlaceholder.conditions];
+                              delete updated[idx].master_field_id;
+                              setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                            }}
+                            onClear={() => {
+                              const updated = [...newPlaceholder.conditions];
+                              delete updated[idx].master_field_id;
+                              setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                            }}
+                          />
+                        </div>
+
+                        <div className="mt-2 pt-2 border-t border-slate-50">
+                          <div className="flex items-center gap-2 bg-slate-50 px-2 py-1 rounded">
+                            <span className="text-[9px] font-bold text-slate-400 uppercase">Tag Preview:</span>
+                            <code className="text-[10px] text-indigo-600 font-bold">
+                              {"{#"}{cond.tag || '...'}{"}"}{cond.label || ''}{"{"}{cond.tag || '...'}{"}"}{"{/"}{cond.tag || '...'}{"}"}
+                            </code>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* BOOLEAN LOGIC */}
+              {newPlaceholder.type === 'boolean' && (
+                <div className="bg-purple-50 p-4 rounded-xl border border-purple-100 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-[11px] font-black uppercase text-purple-600">Boolean Options & Comparison</Label>
+                    <Select
+                      value={newPlaceholder.boolean_type || 'single'}
+                      onValueChange={(v) => setNewPlaceholder(prev => ({ ...prev, boolean_type: v }))}
+                    >
+                      <SelectTrigger className="w-32 h-7 text-xs bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="single">Radio (Pick One)</SelectItem>
+                        <SelectItem value="multiple">Checkbox (Multi)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-3 max-h-[400px] overflow-auto pr-2">
+                    {(newPlaceholder.boolean_conditions || []).map((cond, idx) => (
+                      <div key={idx} className="bg-white p-3 rounded-md border shadow-sm space-y-3 relative">
+                        <Button
+                          variant="ghost" size="icon" className="h-5 w-5 absolute right-1 top-1 text-slate-300 hover:text-red-500"
+                          onClick={() => {
+                            const updated = [...newPlaceholder.boolean_conditions];
+                            updated.splice(idx, 1);
+                            setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
+                          }}
+                        ><X className="h-3.3 w-3.3" /></Button>
+                                                <div className="grid grid-cols-2 gap-2">
+                          <Input placeholder="Tag (e.g. male)" value={cond.tag} onChange={e => {
+                            const updated = [...newPlaceholder.boolean_conditions];
+                            updated[idx].tag = e.target.value.toLowerCase();
+                            setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
+                          }} className="h-8 text-xs font-mono" />
+                          <Input placeholder="Label (e.g. Male)" value={cond.label} onChange={e => {
+                            const updated = [...newPlaceholder.boolean_conditions];
+                            updated[idx].label = e.target.value;
+                            setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
+                          }} className="h-8 text-xs" />
+                        </div>
+                          <div className="flex gap-2 items-center bg-slate-50 p-2 rounded">
+                            <Label className="text-[9px] font-bold text-slate-500">IF VALUE</Label>
+                            <Select
+                              value={cond.comparison?.operator || 'equals'}
+                              onValueChange={v => {
+                                const updated = [...newPlaceholder.boolean_conditions];
+                                updated[idx].comparison = { ...updated[idx].comparison, operator: v };
+                                setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
+                              }}
+                            >
+                              <SelectTrigger className="h-6 text-[10px] w-24 bg-white"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="equals">Equals</SelectItem>
+                                <SelectItem value="not_equals">Not Equals</SelectItem>
+                                <SelectItem value="contains">Contains</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <Input placeholder="Value..." value={cond.comparison?.value} onChange={e => {
+                              const updated = [...newPlaceholder.boolean_conditions];
+                              updated[idx].comparison = { ...updated[idx].comparison, value: e.target.value };
+                              setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
+                            }} className="h-6 text-xs bg-white" />
+                          </div>
+                                {/* Master Field Selection */}
+                        <div className="space-y-2">
+                          <Label className="text-[10px] font-bold text-blue-600 uppercase flex items-center gap-1.5">
+                            <Database className="h-3 w-3" /> Master Field
+                          </Label>
+                          <Select
+                            value={cond.master_field_id?.toString() || ''}
+                            onValueChange={(value) => {
+                              const updated = [...newPlaceholder.boolean_conditions];
+                              const selectedField = masterFields.find(f => f.id === parseInt(value));
+                              if (selectedField) {
+                                updated[idx] = {
+                                  ...updated[idx],
+                                  master_field_id: parseInt(value),
+                                  comparison: {
+                                    field: selectedField.field_key,
+                                    operator: 'equals',
+                                    value: ''
+                                  }
+                                };
+                                setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
+                              }
                             }}
                           >
-                            <div className={`mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary ${isSelected ? 'bg-primary text-primary-foreground' : 'opacity-50'}`}>
-                              {isSelected && <Check className="h-3 w-3" />}
-                            </div>
-                            <span className="text-sm font-medium">{type.label}</span>
-                          </CommandItem>
-                        );
-                      })}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-          </div>
-        </div>
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue placeholder="Select master field..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {masterFields.map(field => (
+                                <SelectItem key={field.id} value={field.id.toString()}>
+                                  {field.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    ))}
+                    <Button variant="outline" size="sm" className="w-full h-8 border-dashed border-purple-300 text-purple-600 hover:bg-purple-100" onClick={() => {
+                      const updated = [...(newPlaceholder.boolean_conditions || []), { 
+                        tag: '', 
+                        label: '', 
+                        master_field_id: 0,
+                        comparison: { operator: 'equals', value: '' } 
+                      }];
+                      setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
+                    }}><PlusCircle className="h-3.5 w-3.5 mr-2" /> Add Logic Option</Button>
+                  </div>
+                </div>
+              )}
 
-        {/* Dynamic Context Sections (Boolean, Array, Image, AI etc) */}
-        <div className="space-y-4 pt-4 border-t">
-          {newPlaceholder.type === 'select' && (
-            <div className="space-y-2">
-              <Label className="text-[11px] font-black uppercase text-slate-400">Select Options</Label>
-              <Textarea 
-                placeholder="Option A&#10;Option B" 
-                value={newPlaceholder.options?.join('\n')}
-                onChange={e => setNewPlaceholder({...newPlaceholder, options: e.target.value.split('\n').filter(Boolean)})}
-              />
-            </div>
-          )}
+              {/* DOCUMENT CHECKLIST LOGIC */}
+              {newPlaceholder.type === 'document_checklist' && (
+                <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-[11px] font-black uppercase text-blue-600">Checklist Data Source Mapping</Label>
+                    <Select
+                      value={newPlaceholder.checklist_data_source?.table || 'acc_portal_kyc_uploads'}
+                      onValueChange={(v) => setNewPlaceholder(prev => ({
+                        ...prev,
+                        checklist_data_source: { ...prev.checklist_data_source, table: v }
+                      }))}
+                    >
+                      <SelectTrigger className="w-48 h-7 text-xs bg-white"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="acc_portal_kyc_uploads">KYC Uploads Table</SelectItem>
+                        <SelectItem value="acc_portal_directors_documents">Directors Docs Table</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-          {newPlaceholder.type === 'image' && (
-            <div className="grid grid-cols-2 gap-4 p-4 bg-green-50 rounded-xl border border-green-100">
-               <div className="space-y-2">
-                 <Label className="text-[11px] font-bold text-green-700">Image Width</Label>
-                 <Input className="bg-white" value={newPlaceholder.image_width} onChange={e => setNewPlaceholder({...newPlaceholder, image_width: e.target.value})} placeholder="e.g. 200px" />
-               </div>
-               <div className="space-y-2">
-                 <Label className="text-[11px] font-bold text-green-700">Image Height</Label>
-                 <Input className="bg-white" value={newPlaceholder.image_height} onChange={e => setNewPlaceholder({...newPlaceholder, image_height: e.target.value})} placeholder="e.g. 150px" />
-               </div>
-            </div>
-          )}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-slate-500 font-bold">Linking Field (e.g. company_id)</Label>
+                      <Input className="h-8 text-xs bg-white" value={newPlaceholder.checklist_data_source?.linking_variable} onChange={e => setNewPlaceholder(prev => ({
+                        ...prev, checklist_data_source: { ...prev.checklist_data_source, linking_variable: e.target.value }
+                      }))} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-slate-500 font-bold">Doc ID Field (e.g. kyc_document_id)</Label>
+                      <Input className="h-8 text-xs bg-white" value={newPlaceholder.checklist_data_source?.document_id_field} onChange={e => setNewPlaceholder(prev => ({
+                        ...prev, checklist_data_source: { ...prev.checklist_data_source, document_id_field: e.target.value }
+                      }))} />
+                    </div>
+                  </div>
 
-          <div className="flex items-center space-x-3 p-3 bg-white rounded-lg border">
-            <Checkbox id="required" checked={newPlaceholder.required} onCheckedChange={c => setNewPlaceholder({...newPlaceholder, required: !!c})} />
-            <Label htmlFor="required" className="text-sm font-semibold">Mandatory Field (Validation will block generation if empty)</Label>
-          </div>
+                  <div className="space-y-2">
+                    <Label className="text-[10px] text-slate-500 font-bold">Selected Tracking Documents</Label>
+                    <div className="flex flex-wrap gap-2 p-2 bg-white rounded border min-h-[40px]">
+                      {newPlaceholder.linked_document_ids?.map(id => (
+                        <Badge key={id} variant="secondary" className="bg-blue-50 text-blue-700">
+                          {availableDocuments.find(d => d.id === id)?.display_name || id}
+                          <X className="ml-1 h-3 w-3 cursor-pointer" onClick={() => setNewPlaceholder(prev => ({
+                            ...prev, linked_document_ids: prev.linked_document_ids.filter(lid => lid !== id)
+                          }))} />
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
 
-          <div className="space-y-4 border-t pt-4">
-             <div className="flex items-center space-x-2">
-                <Checkbox id="is_ai" checked={newPlaceholder.is_ai_generated} onCheckedChange={c => setNewPlaceholder({...newPlaceholder, is_ai_generated: !!c})} />
-                <Label htmlFor="is_ai" className="text-purple-700 font-bold flex items-center gap-2 uppercase text-[11px] tracking-wider">
-                  <Sparkles className="h-4 w-4" /> Enable AI Refinement
+              {/* ARRAY/ORDINAL FORMATTING */}
+              {(newPlaceholder.type === 'array' || newPlaceholder.type === 'ordinal') && (
+                <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 space-y-4">
+                  <Label className="text-[11px] font-black uppercase text-orange-600">List Formatting & Direction</Label>
+                  <div className="grid grid-cols-2 gap-4">
+                    {newPlaceholder.type === 'array' && (
+                      <div className="space-y-2">
+                        <Label className="text-xs">Flow Direction</Label>
+                        <Select value={newPlaceholder.array_direction} onValueChange={v => setNewPlaceholder({ ...newPlaceholder, array_direction: v })}>
+                          <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="vertical">Vertical (New Paragraphs)</SelectItem>
+                            <SelectItem value="horizontal">Horizontal (Table Columns)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    {newPlaceholder.type === 'ordinal' && (
+                      <div className="space-y-2">
+                        <Label className="text-xs">Numbering Style</Label>
+                        <Select value={newPlaceholder.ordinal_format} onValueChange={v => setNewPlaceholder({ ...newPlaceholder, ordinal_format: v })}>
+                          <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="number">1st, 2nd, 3rd...</SelectItem>
+                            <SelectItem value="word">First, Second, Third...</SelectItem>
+                            <SelectItem value="custom">Custom Pattern</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Dynamic Context Sections (Boolean, Array, Image, AI etc) */}
+              <div className="space-y-4 pt-4 border-t">
+                {newPlaceholder.type === 'select' && (
+                  <div className="space-y-2">
+                    <Label className="text-[11px] font-black uppercase text-slate-400">Select Options</Label>
+                    <Textarea
+                      placeholder="Option A&#10;Option B"
+                      value={newPlaceholder.options?.join('\n')}
+                      onChange={e => setNewPlaceholder({ ...newPlaceholder, options: e.target.value.split('\n').filter(Boolean) })}
+                    />
+                  </div>
+                )}
+
+                {newPlaceholder.type === 'image' && (
+                  <div className="grid grid-cols-2 gap-4 p-4 bg-green-50 rounded-xl border border-green-100">
+                    <div className="space-y-2">
+                      <Label className="text-[11px] font-bold text-green-700">Image Width</Label>
+                      <Input className="bg-white" value={newPlaceholder.image_width} onChange={e => setNewPlaceholder({ ...newPlaceholder, image_width: e.target.value })} placeholder="e.g. 200px" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-[11px] font-bold text-green-700">Image Height</Label>
+                      <Input className="bg-white" value={newPlaceholder.image_height} onChange={e => setNewPlaceholder({ ...newPlaceholder, image_height: e.target.value })} placeholder="e.g. 150px" />
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center space-x-3 p-3 bg-white rounded-lg border">
+                  <Checkbox id="required" checked={newPlaceholder.required} onCheckedChange={c => setNewPlaceholder({ ...newPlaceholder, required: !!c })} />
+                  <Label htmlFor="required" className="text-sm font-semibold">Mandatory Field (Validation will block generation if empty)</Label>
+                </div>
+
+                <div className="space-y-4 border-t pt-4">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox id="is_ai" checked={newPlaceholder.is_ai_generated} onCheckedChange={c => setNewPlaceholder({ ...newPlaceholder, is_ai_generated: !!c })} />
+                    <Label htmlFor="is_ai" className="text-purple-700 font-bold flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                      <Sparkles className="h-4 w-4" /> Enable AI Refinement
+                    </Label>
+                  </div>
+                  {newPlaceholder.is_ai_generated && (
+                    <Textarea
+                      className="bg-purple-50/30 border-purple-100"
+                      placeholder="Prompt: Rewrite the source data to be more professional..."
+                      value={newPlaceholder.ai_prompt}
+                      onChange={e => setNewPlaceholder({ ...newPlaceholder, ai_prompt: e.target.value })}
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Linking Tools Card */}
+              <div className="bg-white p-4 rounded-xl border space-y-4">
+                <Label className="text-[11px] font-black uppercase text-slate-800 tracking-wider flex items-center gap-2">
+                  <Link2 className="h-3.5 w-3.5 text-blue-600" /> Data Linking Tools
                 </Label>
-             </div>
-             {newPlaceholder.is_ai_generated && (
-               <Textarea 
-                className="bg-purple-50/30 border-purple-100" 
-                placeholder="Prompt: Rewrite the source data to be more professional..." 
-                value={newPlaceholder.ai_prompt}
-                onChange={e => setNewPlaceholder({...newPlaceholder, ai_prompt: e.target.value})}
-               />
-             )}
-          </div>
-        </div>
-      </div>
-    </ScrollArea>
 
-    <DialogFooter className="px-6 py-4 bg-white border-t shrink-0 flex items-center justify-between">
-      <Button variant="ghost" onClick={() => setIsPlaceholderFormOpen(false)}>Discard Changes</Button>
-      <Button 
-        onClick={savePlaceholder} 
-        disabled={!newPlaceholder.name.trim()}
-        className="bg-blue-600 hover:bg-blue-700 px-8 shadow-lg shadow-blue-100"
-      >
-        {isEditingPlaceholder !== null ? 'Apply Updates' : 'Confirm & Add'}
-      </Button>
-    </DialogFooter>
-  </DialogContent>
-</Dialog>
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-bold text-blue-600 uppercase flex items-center gap-1.5">
+                      <Database className="h-3 w-3" /> Master Database Fields
+                    </Label>
+                    <MasterFieldPicker
+                      masterFields={masterFields}
+                      selectedFieldIds={newPlaceholder.master_field_ids || []}
+                      onSelect={(id) => setNewPlaceholder(prev => ({ ...prev, master_field_ids: [...(prev.master_field_ids || []), id] }))}
+                      onRemove={(id) => setNewPlaceholder(prev => ({ ...prev, master_field_ids: prev.master_field_ids?.filter(fid => fid !== id) }))}
+                      onClear={() => setNewPlaceholder(prev => ({ ...prev, master_field_ids: [] }))}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] font-bold text-purple-600 uppercase flex items-center gap-1.5">
+                        <HelpCircle className="h-3 w-3" /> Job Questions
+                      </Label>
+                      <JobQuestionPicker
+                        jobQuestions={jobQuestions}
+                        selectedQuestionId={undefined}
+                        onSelect={(q) => {
+                          const current = newPlaceholder.linked_job_question_ids || [];
+                          if (!current.includes(q.id)) {
+                            setNewPlaceholder(prev => ({ ...prev, linked_job_question_ids: [...current, q.id] }));
+                          }
+                        }}
+                        onClear={() => { }}
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] font-bold text-green-600 uppercase flex items-center gap-1.5">
+                        <FileText className="h-3 w-3" /> Requirements
+                      </Label>
+                      <RequirementPicker
+                        requirements={requirements}
+                        selectedRequirementId={undefined}
+                        onSelect={(r) => {
+                          const current = newPlaceholder.linked_requirement_ids || [];
+                          if (!current.includes(r.id)) {
+                            setNewPlaceholder(prev => ({ ...prev, linked_requirement_ids: [...current, r.id] }));
+                          }
+                        }}
+                        onClear={() => { }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </ScrollArea>
+
+          <DialogFooter className="px-6 py-4 bg-white border-t shrink-0 flex items-center justify-between">
+            <Button variant="ghost" onClick={() => setIsPlaceholderFormOpen(false)}>Discard Changes</Button>
+            <Button
+              onClick={savePlaceholder}
+              disabled={!newPlaceholder.name.trim()}
+              className="bg-blue-600 hover:bg-blue-700 px-8 shadow-lg shadow-blue-100"
+            >
+              {isEditingPlaceholder !== null ? 'Apply Updates' : 'Confirm & Add'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

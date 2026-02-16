@@ -1026,6 +1026,26 @@ function WebDataGroupEditDialog({
     updateField(listKey, newList);
   };
 
+  const addDocument = (docId: string) => {
+    const current = editingGroup.linkedKycDocuments || [];
+    if (current.includes(docId)) return;
+    updateField('linkedKycDocuments', [...current, docId]);
+  };
+
+  const removeDocument = (docId: string) => {
+    const current = editingGroup.linkedKycDocuments || [];
+    updateField('linkedKycDocuments', current.filter(id => id !== docId));
+  };
+
+  const moveDocument = (index: number, direction: 'up' | 'down') => {
+    const current = editingGroup.linkedKycDocuments || [];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= current.length) return;
+    const newList = [...current];
+    [newList[index], newList[targetIndex]] = [newList[targetIndex], newList[index]];
+    updateField('linkedKycDocuments', newList);
+  };
+
   const isDocument = editingGroup.fieldType === 'document';
   const isComputed = editingGroup.fieldType === 'computed';
   const totalSources = (editingGroup.linkedMasterFields?.length || 0) + (editingGroup.linkedJobQuestionIds?.length || 0);

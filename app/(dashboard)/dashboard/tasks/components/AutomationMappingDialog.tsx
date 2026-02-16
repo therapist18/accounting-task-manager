@@ -1277,6 +1277,15 @@ export const AutomationMappingDialog = ({
                             const rawValue = row[colItem.variableName];
                             const isItemMissing = !isValidValue(rawValue);
 
+                            const masterFieldId = colItem.linkedMasterFields?.[0];
+                            const masterField = masterFieldId ? jobFields[String(masterFieldId)] : null;
+                            const fieldOptions = masterField?.options;
+                            // Normalize options to ensure they are objects { label, value }
+                            const normalizedOptions = Array.isArray(fieldOptions)
+                              ? fieldOptions.map((opt: any) => typeof opt === 'string' ? { label: opt, value: opt } : opt)
+                              : [];
+                            const isDropdown = normalizedOptions.length > 0;
+
                             // Determine editing persistence for array items
                             const firstMasterId = colItem.linkedMasterFields?.[0];
                             const firstQId = colItem.linkedJobQuestionIds?.[0] || colItem.linkedJobQuestionId;
@@ -1309,14 +1318,42 @@ export const AutomationMappingDialog = ({
                                 <TableCell className="px-4 py-1">
                                   {isItemEditing ? (
                                     <div className="flex items-center gap-2">
-                                      <Input
-                                        autoFocus
-                                        value={editValue}
-                                        onChange={e => setEditValue(e.target.value)}
-                                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEditing(); }}
-                                        className="h-7 text-xs border-blue-400"
-                                      />
-                                      <Button size="icon" onClick={() => saveEdit()} className="h-7 w-7 bg-green-600 shrink-0"><Check className="h-3 w-3" /></Button>
+                                      {/* --- MODIFIED INPUT RENDER LOGIC --- */}
+                                      {isDropdown ? (
+                                        <Select
+                                          value={editValue}
+                                          onValueChange={(val) => setEditValue(val)}
+                                        >
+                                          <SelectTrigger className="h-7 text-xs border-blue-400 w-full bg-white">
+                                            <SelectValue placeholder="Select..." />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {normalizedOptions.map((opt: any) => (
+                                              <SelectItem key={opt.value} value={opt.value}>
+                                                {opt.label}
+                                              </SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      ) : (
+                                        <Input
+                                          autoFocus
+                                          value={editValue}
+                                          onChange={e => setEditValue(e.target.value)}
+                                          onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEditing(); }}
+                                          className="h-7 text-xs border-blue-400"
+                                        />
+                                      )}
+                                      {/* --- END MODIFICATION --- */}
+
+                                      <Button
+                                        size="icon"
+                                        // Update saveEdit to pass dropdown options so it can save the Label if required
+                                        onClick={() => saveEdit(isDropdown, normalizedOptions)}
+                                        className="h-7 w-7 bg-green-600 shrink-0"
+                                      >
+                                        <Check className="h-3 w-3" />
+                                      </Button>
                                       <Button size="icon" variant="ghost" onClick={cancelEditing} className="h-7 w-7 text-red-500 shrink-0"><X className="h-3 w-3" /></Button>
                                     </div>
                                   ) : (
@@ -1506,7 +1543,7 @@ export const AutomationMappingDialog = ({
                               )}
                             </div>
                           </div>
-                               </div>
+                        </div>
                       </TableCell>
 
                       <TableCell className="px-4 py-1 border-r h-full">

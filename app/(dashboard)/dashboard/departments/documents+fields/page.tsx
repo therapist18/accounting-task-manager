@@ -6,30 +6,27 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@/lib/utils"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { Plus, Minus, Expand, Minimize2, Info, FileText, Users, Search, X } from "lucide-react"
+import { Plus, Minus, Search, X, Download } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Separator } from "@/components/ui/separator"
 import { toast } from "@/hooks/use-toast"
-import { getTableFields, getGroupedFields } from "./components/formFields"
 import ColumnVisibilityControl, { ColumnVisibilityOption } from "@/app/(dashboard)/dashboard/departments/main-shared-components/column-visibility"
-import { DocumentType, Subdepartment, DocumentField, ClientData, Department, SectionHeader, OptimizedCheckbox, TruncatedText } from "./components/types"
-import { CATEGORY_MAPPING, DEBOUNCE_DELAY } from "./components/config"
+import { DocumentType, Department, OptimizedCheckbox } from "./components/types"
+import { CATEGORY_MAPPING } from "./components/config"
 import {
-  formatFieldValue as formatFieldValueUtil,
   filterAndSortDocuments,
   getColumnKey as getColumnKeyUtil,
   toggleSetItem,
-  shouldShowUnderstudy as shouldShowUnderstudyUtil,
-  shouldShowReferences as shouldShowReferencesUtil,
 } from "./components/utils"
 import { supabase } from "@/lib/supabase/client"
 import { Input } from "@/components/ui/input"
+import ExcelJS from 'exceljs'
+import { saveAs } from 'file-saver'
+import { format } from "date-fns"
 
 const MemoizedCheckbox = memo(OptimizedCheckbox)
-const MemoizedTruncatedText = memo(TruncatedText)
 
 export default function DocumentsFields() {
+  // State
   const [departments, setDepartments] = useState<Department[]>([])
   const [documents, setDocuments] = useState<DocumentType[]>([])
   const [documentAllocations, setDocumentAllocations] = useState<Record<string, any>>({})
@@ -38,22 +35,25 @@ export default function DocumentsFields() {
   const [documentTab, setDocumentTab] = useState<"company" | "individual" | "application">("company")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  
+  // UI State
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set())
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set())
   const [availableColumns, setAvailableColumns] = useState<ColumnVisibilityOption[]>([])
-  const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>(() => {
-    // This will be populated when availableColumns is set
-    return {};
-  })
+  const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>({})
+  
+  // Changes State
   const [pendingChanges, setPendingChanges] = useState({ documents: {}, clientFields: {} })
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
   const [searchQuery, setSearchQuery] = useState("");
-  const lastFetchTimeRef = useRef(0)
   const [allExpanded, setAllExpanded] = useState(false);
+  
+  const lastFetchTimeRef = useRef(0)
 
-  // 1. Unified Fetch (One time)
+  // 1. Optimized Unified Fetch
   const fetchData = useCallback(async () => {
     const now = Date.now()
     if (now - lastFetchTimeRef.current < 1000) return
@@ -62,21 +62,28 @@ export default function DocumentsFields() {
     try {
       setLoading(true)
       const [depts, docs, requirements] = await Promise.all([
-        supabase.from('tm_departments').select(`*, tm_subdepartments (*, classes)`).order('order', { ascending: true }),
-        supabase.from('acc_portal_kyc').select('*').order('main_category_number', { ascending: true }),
-        supabase.from('tm_class_requirements').select('documents_and_fields, client_fields, job_level')
+        supabase.from('tm_departments')
+          .select(`*, tm_subdepartments (*, classes)`)
+          .order('order', { ascending: true }),
+        supabase.from('acc_portal_kyc')
+          .select('*')
+          .order('main_category_number', { ascending: true }),
+        supabase.from('tm_class_requirements')
+          .select('documents_and_fields, client_fields, job_level')
       ]);
 
       if (depts.error || docs.error || requirements.error) throw new Error("Fetch failed");
 
+      // Sort Subdepartments by 'order'
       const transformedDepts = (depts.data || []).map(dept => ({
         ...dept,
-        subdepartments: (dept.tm_subdepartments || []).sort((a, b) => (a.order || 0) - (b.order || 0))
+        subdepartments: (dept.tm_subdepartments || [])
+          .sort((a, b) => (a.order || 0) - (b.order || 0))
           .map(sd => ({ 
             ...sd, 
             classes: (sd.classes || []).map(cls => ({
               ...cls,
-              subclasses: cls.subClasses || cls.subclasses || [] // Handle both subClasses and subclasses
+              subclasses: cls.subClasses || cls.subclasses || [] 
             })), 
             hasClasses: !!(sd.classes && sd.classes.length > 0)
           }))
@@ -90,34 +97,66 @@ export default function DocumentsFields() {
 
       const docAllocations = {};
       const fieldAllocations = {};
+      
       requirements.data?.forEach(req => {
         if (!req.job_level) return;
         
         // Generate class identifier from job_level
         const classId = [
-          req.job_level.department_id,
           req.job_level.subdepartment_id,
           req.job_level.class_id,
           req.job_level.subclass_id
         ].filter(id => id !== null && id !== undefined).join('_');
         
+        // Map DB structure to internal allocation state
         (req.documents_and_fields || []).forEach(doc => {
-          docAllocations[`${doc.id}_${classId}`] = doc;
-          (doc.fields || []).forEach(f => docAllocations[`${doc.id}-${f.id}_${classId}`] = f);
+          // Iterate over keys to find entity types (excluding standard keys like id, fields, updated_at)
+          Object.keys(doc).forEach(key => {
+            if (key !== 'id' && key !== 'fields' && key !== 'updated_at' && doc[key] === true) {
+               docAllocations[`${doc.id}_${classId}`] = { ...docAllocations[`${doc.id}_${classId}`], [key]: true };
+            }
+          });
+
+          // Map fields
+          (doc.fields || []).forEach(f => {
+             Object.keys(f).forEach(key => {
+                if (key !== 'id' && key !== 'updated_at' && f[key] === true) {
+                   docAllocations[`${doc.id}-${f.id}_${classId}`] = { ...docAllocations[`${doc.id}-${f.id}_${classId}`], [key]: true };
+                }
+             });
+          });
         });
-        (req.client_fields || []).forEach(f => fieldAllocations[`${f.id}_${classId}`] = f);
       });
 
+      // Build Columns (Keep existing logic)
       const cols = [];
       transformedDepts.forEach(dept => {
         dept.subdepartments?.forEach(sd => {
           if (sd.hasClasses) {
             sd.classes.forEach((cls, idx) => {
               if (cls.subclasses?.length) {
-                cls.subclasses.forEach((sc, sidx) => cols.push({ id: getColumnKeyUtil(sd.id, idx, sidx), label: `${sd.name} > ${cls.name} > ${sc.name}`, visible: !!sc.default_display, isDefault: !!sc.default_display, group: sd.name }));
-              } else cols.push({ id: getColumnKeyUtil(sd.id, idx, null), label: `${sd.name} > ${cls.name}`, visible: !!cls.default_display, isDefault: !!cls.default_display, group: sd.name });
+                cls.subclasses.forEach((sc, sidx) => cols.push({ 
+                  id: getColumnKeyUtil(sd.id, idx, sidx), 
+                  label: `${sd.name} > ${cls.name} > ${sc.name}`, 
+                  visible: !!sc.default_display, 
+                  isDefault: !!sc.default_display, 
+                  group: sd.name 
+                }));
+              } else cols.push({ 
+                id: getColumnKeyUtil(sd.id, idx, null), 
+                label: `${sd.name} > ${cls.name}`, 
+                visible: !!cls.default_display, 
+                isDefault: !!cls.default_display, 
+                group: sd.name 
+              });
             });
-          } else cols.push({ id: getColumnKeyUtil(sd.id, null, null), label: sd.name, visible: !!sd.default_display, isDefault: !!sd.default_display, group: dept.name });
+          } else cols.push({ 
+            id: getColumnKeyUtil(sd.id, null, null), 
+            label: sd.name, 
+            visible: !!sd.default_display, 
+            isDefault: !!sd.default_display, 
+            group: dept.name 
+          });
         });
       });
 
@@ -127,7 +166,9 @@ export default function DocumentsFields() {
         setDocumentAllocations(docAllocations);
         setClientFieldAllocations(fieldAllocations);
         setAvailableColumns(cols);
-        if (transformedDepts.length > 0) setActiveTab(transformedDepts[0].id);
+        if (transformedDepts.length > 0 && (!activeTab || !transformedDepts.find(d => d.id === activeTab))) {
+           setActiveTab(transformedDepts[0].id);
+        }
       });
     } catch (err) { setError(err.message); } finally { setLoading(false); }
   }, []);
@@ -138,13 +179,13 @@ export default function DocumentsFields() {
     if (availableColumns.length > 0 && Object.keys(columnVisibility).length === 0) {
       const initialVisibility: Record<string, boolean> = {};
       availableColumns.forEach(col => {
-        initialVisibility[col.id] = col.isDefault ?? true; // Use isDefault if available, otherwise default to true
+        initialVisibility[col.id] = col.isDefault ?? true; 
       });
       setColumnVisibility(initialVisibility);
     }
   }, [availableColumns]);
 
-  // 2. Local Instant Filtering
+  // 2. Data Processing & Memoization
   const { groupedDocuments } = useMemo(() => {
     const filteredByCategory = documents.filter(doc => doc.category === CATEGORY_MAPPING[documentTab]);
     const filteredBySearch = searchQuery
@@ -167,40 +208,41 @@ export default function DocumentsFields() {
       ...sd,
       classes: sd.classes?.map(cls => ({ 
         ...cls, 
-        subclasses: cls.subClasses || cls.subclasses || [] // Handle both subClasses and subclasses
+        subclasses: cls.subClasses || cls.subclasses || [] 
       }))
     }));
   }, [currentDepartment]);
 
-  // 3. Specification Filtering (FIXES THE SCREENSHOT BUG)
   const visibleColumns = useMemo(() => {
     const cols = [];
     const isIndiv = documentTab === "individual";
 
     normalizedSubdepartments.forEach(sd => {
-      const getFilteredSpecs = (item) => {
-        const raw = item?.specification
-          ? Array.isArray(item.specification)
-            ? item.specification
-            : [item.specification]
-          : ["Company"];
+      const getFilteredEntityTypes = (item) => {
+        const raw = item?.entity_types
+          ? Array.isArray(item.entity_types)
+            ? item.entity_types
+            : JSON.parse(item.entity_types || "[]")
+          : [];
+        const entityTypes = raw.length > 0 ? raw : ["Company"];
         return isIndiv
-          ? raw.filter(s => s && s.toLowerCase() !== "company")
-          : raw.filter(s => s && s.toLowerCase() === "company");
+          ? entityTypes.filter(s => s && s.toLowerCase() !== "company")
+          : entityTypes.filter(s => s && s.toLowerCase() === "company");
       };
 
       const process = (item, cIdx, scIdx) => {
         const key = getColumnKeyUtil(sd.id, cIdx, scIdx);
         if (!columnVisibility[key]) return;
-        const specs = getFilteredSpecs(item);
-        if (specs.length > 0) {
-          cols.push({
-            subdept: sd, clsIndex: cIdx, subclsIndex: scIdx, columnKey: key,
-            specifications: specs,
-            isExpanded: expandedColumns.has(key),
-            width: expandedColumns.has(key) ? (specs.length * 120) : 120
-          });
-        }
+        
+        let specs = getFilteredEntityTypes(item);
+        if(specs.length === 0) specs = ["Standard"];
+
+        cols.push({
+          subdept: sd, clsIndex: cIdx, subclsIndex: scIdx, columnKey: key,
+          specifications: specs,
+          isExpanded: expandedColumns.has(key),
+          width: expandedColumns.has(key) ? (specs.length * 120) : 120
+        });
       };
 
       if (sd.hasClasses) {
@@ -213,7 +255,7 @@ export default function DocumentsFields() {
     return cols;
   }, [normalizedSubdepartments, columnVisibility, expandedColumns, documentTab]);
 
-  // 4. Checkbox Logic
+  // 3. Interaction Handlers
   const getAllocationStatus = useCallback((id, sdId, cIdx, scIdx, type) => {
     const sd = currentDepartment?.subdepartments?.find(s => s.id === sdId);
     const cls = cIdx !== null ? sd?.classes?.[cIdx] : null;
@@ -243,126 +285,60 @@ export default function DocumentsFields() {
 
   const toggleAllRows = useCallback((expand: boolean) => {
     if (expand) {
-      // Expand all categories and their documents with fields
-      const newExpandedCategories = new Set<string>();
+      const newExpandedCategories = new Set(Object.keys(groupedDocuments));
       const newExpandedItems = new Set<string>();
-
-      Object.entries(groupedDocuments).forEach(([catKey, group]) => {
-        newExpandedCategories.add(catKey);
-        group.documents.forEach(doc => {
-          if (doc.fields?.length > 0) {
-            newExpandedItems.add(doc.id);
-          }
-        });
+      Object.values(groupedDocuments).forEach(group => {
+        group.documents.forEach(doc => { if (doc.fields?.length > 0) newExpandedItems.add(doc.id); });
       });
-
       setExpandedCategories(newExpandedCategories);
       setExpandedItems(newExpandedItems);
       setAllExpanded(true);
     } else {
-      // Collapse everything
       setExpandedCategories(new Set());
       setExpandedItems(new Set());
       setAllExpanded(false);
     }
   }, [groupedDocuments]);
 
-  // 5. Dynamic Rendering Helpers
-  const renderColumnHeaders = useCallback(() => {
-    return visibleColumns.map(col => {
-      if (!col.isExpanded) {
-        return (
-          <TableHead key={col.columnKey} style={{ width: '120px' }} className="border-r border-blue-400 text-center text-white text-[10px] bg-blue-300">
-            <div className="flex items-center justify-center gap-1">
-              <span className="truncate">{col.specifications[0]}</span>
-              <Button variant="ghost" size="sm" className="h-4 w-4 p-0" onClick={() => toggleColumnExpansion(col.columnKey)}><Plus className="h-3 w-3" /></Button>
-            </div>
-          </TableHead>
-        );
-      }
-      return col.specifications.map((spec, idx) => (
-        <TableHead key={`${col.columnKey}-${spec}`} style={{ width: '120px' }} className="border-r border-blue-400 text-center text-white text-[10px] bg-blue-400">
-          <div className="flex items-center justify-center gap-1">
-            <span className="uppercase">{spec}</span>
-            {idx === 0 && <Button variant="ghost" size="sm" className="h-4 w-4 p-0" onClick={() => toggleColumnExpansion(col.columnKey)}><Minus className="h-3 w-3" /></Button>}
-          </div>
-        </TableHead>
-      ));
-    }).flat();
-  }, [visibleColumns]);
 
-  const renderDocumentCheckboxes = useCallback((doc, col) => {
-    if (!col.isExpanded) {
-      const spec = col.specifications[0];
-      return (
-        <TableCell key={`${doc.id}-${col.columnKey}`} className="text-center border-r w-[120px]">
-          <MemoizedCheckbox checked={getAllocationStatus(doc.id, col.subdept.id, col.clsIndex, col.subclsIndex, spec)} onCheckedChange={c => handleToggle(doc.id, col.subdept.id, col.clsIndex, col.subclsIndex, spec, c)} />
-        </TableCell>
-      );
-    }
-    return col.specifications.map(spec => (
-      <TableCell key={`${doc.id}-${col.columnKey}-${spec}`} className="text-center border-r w-[120px]">
-        <MemoizedCheckbox checked={getAllocationStatus(doc.id, col.subdept.id, col.clsIndex, col.subclsIndex, spec)} onCheckedChange={c => handleToggle(doc.id, col.subdept.id, col.clsIndex, col.subclsIndex, spec, c)} />
-      </TableCell>
-    ));
-  }, [getAllocationStatus, handleToggle]);
-
-  const toggleColumnExpansion = (key) => setExpandedColumns(prev => toggleSetItem(prev, key));
-  const toggleCategoryExpansion = (key) => setExpandedCategories(prev => toggleSetItem(prev, key));
-  const toggleItemExpansion = (key) => setExpandedItems(prev => toggleSetItem(prev, key));
-
-  const refreshData = useCallback(() => {
-    fetchData();
-  }, [fetchData]);
-
-  const handleDiscardChanges = useCallback(() => {
-    setPendingChanges({ documents: {}, clientFields: {} })
-    setHasUnsavedChanges(false)
-  }, [])
-
-const handleSaveAllChanges = useCallback(async () => {
+  // 4. UPDATED Save Logic
+  const handleSaveAllChanges = useCallback(async () => {
     if (!hasUnsavedChanges) return;
     setIsSaving(true);
     try {
-      const changesByClassId = {};
+      // Group changes by Class Hierarchy to process them in batches
+      const changesByHierarchy = {};
 
-      // 1. Group all pending changes by their classId string.
-      const groupChanges = (changeType) => {
-        const source = pendingChanges[changeType];
-        Object.entries(source).forEach(([allocationKey, changeData]) => {
-          const firstUnderscoreIndex = allocationKey.indexOf('_');
-          if (firstUnderscoreIndex === -1) return;
+      // Process Document Changes
+      Object.entries(pendingChanges.documents).forEach(([allocationKey, changes]) => {
+        // allocationKey format: docId_sdId_clsId_scId OR docId-fieldId_sdId_clsId_scId
+        const lastUnderscore = allocationKey.indexOf('_');
+        if (lastUnderscore === -1) return;
 
-          const entityId = allocationKey.substring(0, firstUnderscoreIndex);
-          const classHierarchy = allocationKey.substring(firstUnderscoreIndex + 1);
+        const entityPart = allocationKey.substring(0, lastUnderscore); // docId or docId-fieldId
+        const hierarchyPart = allocationKey.substring(lastUnderscore + 1); // sdId_clsId_scId or just sdId
 
-          if (!changesByClassId[classHierarchy]) {
-            changesByClassId[classHierarchy] = { documents: {}, clientFields: {} };
-          }
+        if (!changesByHierarchy[hierarchyPart]) {
+          changesByHierarchy[hierarchyPart] = { documents: {} };
+        }
+        changesByHierarchy[hierarchyPart].documents[entityPart] = changes;
+      });
 
-          changesByClassId[classHierarchy][changeType][entityId] = changeData;
-        });
-      };
-
-      groupChanges('documents');
-      groupChanges('clientFields');
-
-      // 2. Iterate through each unique hierarchy path
-      const savePromises = Object.entries(changesByClassId).map(async ([classHierarchy, classChanges]) => {
-        // Parse the hierarchy string: "sdId" or "sdId_clsId" or "sdId_clsId_scId"
-        const parts = classHierarchy.split('_');
+      // Execute updates per hierarchy (Job Level)
+      const savePromises = Object.entries(changesByHierarchy).map(async ([hierarchyKey, data]) => {
+        const parts = hierarchyKey.split('_');
         const sdId = parts[0] ? parseInt(parts[0]) : null;
         const clsId = parts[1] ? parseInt(parts[1]) : null;
         const scId = parts[2] ? parseInt(parts[2]) : null;
-        const deptId = parseInt(activeTab); // The current active Department tab
+        const deptId = parseInt(activeTab);
 
-        // Determine the level based on specificity
-        let currentLevel = 1; // Default: Department
+        // Determine level
+        let currentLevel = 1; 
         if (scId) currentLevel = 4;
         else if (clsId) currentLevel = 3;
         else if (sdId) currentLevel = 2;
 
-        const jobLevel = {
+        const jobLevelQuery = {
           level: currentLevel,
           department_id: deptId,
           subdepartment_id: sdId,
@@ -370,106 +346,306 @@ const handleSaveAllChanges = useCallback(async () => {
           subclass_id: scId
         };
 
-        // 3. Fetch existing data for this specific job_level
+        // 1. Fetch Existing Record
         const { data: existingRecord, error: fetchError } = await supabase
           .from('tm_class_requirements')
           .select('id, documents_and_fields, client_fields')
-          .eq('job_level->>department_id', jobLevel.department_id.toString())
-          .eq('job_level->>subdepartment_id', jobLevel.subdepartment_id ? jobLevel.subdepartment_id.toString() : 'null')
-          .eq('job_level->>class_id', jobLevel.class_id ? jobLevel.class_id.toString() : 'null')
-          .eq('job_level->>subclass_id', jobLevel.subclass_id ? jobLevel.subclass_id.toString() : 'null')
+          .match({ 
+             'job_level->>department_id': jobLevelQuery.department_id,
+             'job_level->>subdepartment_id': jobLevelQuery.subdepartment_id || 'null',
+             'job_level->>class_id': jobLevelQuery.class_id || 'null',
+             'job_level->>subclass_id': jobLevelQuery.subclass_id || 'null'
+          })
           .maybeSingle();
 
         if (fetchError) throw fetchError;
 
-        // 4. Merge Document Changes
-        const documentsMap = new Map((existingRecord?.documents_and_fields || []).map(doc => [doc.id, doc]));
+        // 2. Prepare Data Structures
+        // Map: DocumentID -> DocObject
+        const docsMap = new Map();
+        
+        if (existingRecord?.documents_and_fields) {
+          existingRecord.documents_and_fields.forEach(doc => docsMap.set(doc.id, doc));
+        }
 
-        Object.entries(classChanges.documents).forEach(([entityId, changeProps]) => {
-          const isField = entityId.length > 37 && entityId[36] === '-';
+        // 3. Merge Changes
+        const docChanges = data.documents; // { "docId": { "Company": true }, "docId-fieldId": { "Individual": false } }
+        
+        Object.entries(docChanges).forEach(([entityKey, typeChanges]) => {
+          const isField = entityKey.includes('-');
           let docId, fieldId;
 
           if (isField) {
-            docId = entityId.substring(0, 36);
-            fieldId = entityId.substring(37);
+            [docId, fieldId] = entityKey.split('-');
           } else {
-            docId = entityId;
-            fieldId = null;
+            docId = entityKey;
           }
 
-          const docData = documentsMap.get(docId) || { id: docId, fields: [] };
+          // Get or Initialize Document
+          let docObj = docsMap.get(docId);
+          if (!docObj) {
+            docObj = { id: docId, fields: [], updated_at: new Date().toISOString() };
+          } else {
+            // Update timestamp on modify
+            docObj.updated_at = new Date().toISOString(); 
+          }
 
-          if (fieldId) {
-            const fieldIndex = docData.fields.findIndex(f => f.id === fieldId);
-            const fieldChanges = { id: fieldId, updated_at: new Date().toISOString(), ...changeProps };
-            if (fieldIndex > -1) {
-              docData.fields[fieldIndex] = { ...docData.fields[fieldIndex], ...fieldChanges };
+          if (isField) {
+            // Handle Field Update
+            if (!docObj.fields) docObj.fields = [];
+            
+            let fieldObj = docObj.fields.find(f => f.id === fieldId);
+            if (!fieldObj) {
+              fieldObj = { id: fieldId, updated_at: new Date().toISOString() };
+              docObj.fields.push(fieldObj);
             } else {
-              docData.fields.push(fieldChanges);
+               fieldObj.updated_at = new Date().toISOString();
             }
+
+            // Apply dynamic entity types to Field (e.g. { "Company": true, "Individual": false })
+            Object.entries(typeChanges).forEach(([type, value]) => {
+               fieldObj[type] = value;
+            });
+
           } else {
-            const docChanges = { updated_at: new Date().toISOString(), ...changeProps };
-            documentsMap.set(docId, { ...docData, ...docChanges });
+            // Handle Document Update
+            // Apply dynamic entity types to Document (e.g. { "Company": true })
+            Object.entries(typeChanges).forEach(([type, value]) => {
+              docObj[type] = value;
+            });
           }
+
+          docsMap.set(docId, docObj);
         });
 
-        // 5. Merge Client Field Changes
-        const clientFieldsMap = new Map((existingRecord?.client_fields || []).map(field => [field.id, field]));
-        Object.entries(classChanges.clientFields).forEach(([entityId, changeProps]) => {
-          const fieldChanges = { id: entityId, updated_at: new Date().toISOString(), ...changeProps };
-          clientFieldsMap.set(entityId, { ...clientFieldsMap.get(entityId), ...fieldChanges });
-        });
+        const finalDocuments = Array.from(docsMap.values());
 
-        // 6. Final Payload
-        const finalPayload = {
-          documents_and_fields: Array.from(documentsMap.values()),
-          client_fields: Array.from(clientFieldsMap.values()),
-          job_level: jobLevel,
+        const payload = {
+          documents_and_fields: finalDocuments,
+          job_level: jobLevelQuery,
           updated_at: new Date().toISOString(),
         };
 
-        // 7. Upsert (Update if exists, else Insert)
-        let result;
+        // 4. Update or Insert
         if (existingRecord?.id) {
-          result = await supabase
+          const { error } = await supabase
             .from('tm_class_requirements')
-            .update(finalPayload)
+            .update(payload)
             .eq('id', existingRecord.id);
+          if (error) throw error;
         } else {
-          result = await supabase
+          const { error } = await supabase
             .from('tm_class_requirements')
-            .insert([finalPayload]);
+            .insert([payload]);
+          if (error) throw error;
         }
-
-        if (result.error) throw result.error;
       });
 
       await Promise.all(savePromises);
-
+      
       setPendingChanges({ documents: {}, clientFields: {} });
       setHasUnsavedChanges(false);
-      await refreshData();
-
-      toast({
-        title: "Success",
-        description: `All hierarchical levels updated successfully.`,
-      });
-
+      await fetchData(); // Refresh data from DB
+      toast({ title: "Success", description: "Changes saved successfully." });
     } catch (error) {
-      console.error('Error saving changes:', error);
-      toast({
-        title: "Error",
-        description: `Failed to save changes: ${error.message}`,
-        variant: "destructive",
-      });
+      console.error("Save Error:", error);
+      toast({ title: "Error", description: "Failed to save changes. " + error.message, variant: "destructive" });
     } finally {
       setIsSaving(false);
     }
-  }, [pendingChanges, hasUnsavedChanges, refreshData, activeTab]);
+  }, [pendingChanges, hasUnsavedChanges, fetchData, activeTab]);
+
+  const exportToExcel = async () => {
+    if (!currentDepartment) return;
+    setIsExporting(true);
+    try {
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet(`${currentDepartment.name} Docs`, {
+        properties: { outlineProperties: { summaryBelow: false, summaryRight: false } },
+      });
+
+      // Styling Constants
+      const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF002060' } }; // Dark Blue
+      const subHeaderFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } }; // Medium Blue
+      const lightFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } }; // Light Blue
+      const whiteFont = { color: { argb: 'FFFFFFFF' }, bold: true };
+      const centerAlign = { vertical: 'middle', horizontal: 'center' };
+
+      // --- Meta Header ---
+      worksheet.mergeCells('A1:E1');
+      worksheet.getCell('A1').value = `Documents for ${currentDepartment.name} - ${documentTab.toUpperCase()}`;
+      worksheet.getCell('A1').font = { size: 16, bold: true };
+      worksheet.getCell('A1').alignment = { vertical: 'middle' };
+
+      // --- Column Headers Construction ---
+      const headerRowStart = 3;
+      
+      const fixedCols = ['#', 'Document / Field Details'];
+      fixedCols.forEach((text, i) => {
+        const col = i + 1;
+        worksheet.mergeCells(headerRowStart, col, headerRowStart + 3, col);
+        const cell = worksheet.getCell(headerRowStart, col);
+        cell.value = text;
+        cell.fill = headerFill;
+        cell.font = whiteFont;
+        cell.alignment = centerAlign;
+        worksheet.getColumn(col).width = i === 0 ? 8 : 50;
+      });
+
+      let colIndex = 3; 
+      
+      let lastSd = null, sdStart = 0;
+      let lastCls = null, clsStart = 0;
+
+      visibleColumns.forEach((col, idx) => {
+        const actualColIdx = colIndex; 
+        const colSpan = col.isExpanded ? col.specifications.length : 1;
+        
+        // 1. Subdepartment Header
+        if (!lastSd || lastSd.id !== col.subdept.id) {
+            if (lastSd && sdStart) {
+               worksheet.mergeCells(headerRowStart, sdStart, headerRowStart, actualColIdx - 1);
+            }
+            lastSd = col.subdept;
+            sdStart = actualColIdx;
+            
+            const cell = worksheet.getCell(headerRowStart, actualColIdx);
+            cell.value = col.subdept.name;
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E78' } };
+            cell.font = whiteFont;
+            cell.alignment = centerAlign;
+        }
+        if (idx === visibleColumns.length - 1) {
+             worksheet.mergeCells(headerRowStart, sdStart, headerRowStart, actualColIdx + colSpan - 1);
+        }
+
+        // 2. Class Header
+        const className = col.clsIndex === null ? "Direct" : col.subdept.classes[col.clsIndex].name;
+        const uniqueClassId = `${col.subdept.id}-${col.clsIndex}`;
+        
+        if (!lastCls || lastCls.id !== uniqueClassId) {
+             if (lastCls && clsStart) {
+                worksheet.mergeCells(headerRowStart + 1, clsStart, headerRowStart + 1, actualColIdx - 1);
+             }
+             lastCls = { id: uniqueClassId, name: className };
+             clsStart = actualColIdx;
+
+             const cell = worksheet.getCell(headerRowStart + 1, actualColIdx);
+             cell.value = className;
+             cell.fill = subHeaderFill;
+             cell.font = whiteFont;
+             cell.alignment = centerAlign;
+        }
+        if (idx === visibleColumns.length - 1) {
+            worksheet.mergeCells(headerRowStart + 1, clsStart, headerRowStart + 1, actualColIdx + colSpan - 1);
+        }
+
+        // 3. Subclass Header
+        const subclassName = col.subclsIndex !== null ? col.subdept.classes[col.clsIndex].subclasses[col.subclsIndex].name : "-";
+        const scCell = worksheet.getCell(headerRowStart + 2, actualColIdx);
+        scCell.value = subclassName;
+        scCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF5B9BD5' } };
+        scCell.font = { color: { argb: 'FFFFFFFF' } };
+        scCell.alignment = centerAlign;
+        if (colSpan > 1) {
+            worksheet.mergeCells(headerRowStart + 2, actualColIdx, headerRowStart + 2, actualColIdx + colSpan - 1);
+        }
+
+        // 4. Entity Type Header
+        if (col.isExpanded) {
+            col.specifications.forEach((entityType, sIdx) => {
+                const specCell = worksheet.getCell(headerRowStart + 3, actualColIdx + sIdx);
+                specCell.value = entityType;
+                specCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFBDD7EE' } };
+                specCell.font = { bold: true };
+                specCell.alignment = centerAlign;
+                worksheet.getColumn(actualColIdx + sIdx).width = 15;
+            });
+        } else {
+            const specCell = worksheet.getCell(headerRowStart + 3, actualColIdx);
+            specCell.value = col.specifications[0];
+            specCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFBDD7EE' } };
+            specCell.font = { bold: true };
+            specCell.alignment = centerAlign;
+            worksheet.getColumn(actualColIdx).width = 15;
+        }
+
+        colIndex += colSpan;
+      });
+
+      // --- Data Rows ---
+      Object.entries(groupedDocuments).sort(([a], [b]) => parseInt(a) - parseInt(b)).forEach(([catKey, group]) => {
+         const catRow = worksheet.addRow([group.mainCategoryNumber, group.mainCategory]);
+         catRow.outlineLevel = 0;
+         catRow.font = { bold: true };
+         catRow.fill = lightFill;
+
+         group.documents.forEach((doc, dIdx) => {
+             const docRowIdx = `${group.mainCategoryNumber}.${dIdx + 1}`;
+             const row = worksheet.addRow([docRowIdx, doc.display_name]);
+             row.outlineLevel = 1;
+             
+             let currentDataCol = 3;
+             visibleColumns.forEach(col => {
+                 const entityTypes = col.isExpanded ? col.specifications : [col.specifications[0]];
+                 entityTypes.forEach(entityType => {
+                     const isChecked = getAllocationStatus(doc.id, col.subdept.id, col.clsIndex, col.subclsIndex, entityType);
+                     const cell = row.getCell(currentDataCol++);
+                     if (isChecked) {
+                         cell.value = '✓';
+                         cell.alignment = centerAlign;
+                         cell.font = { color: { argb: 'FF00B050' }, bold: true }; 
+                     }
+                 });
+             });
+
+             if (doc.fields && doc.fields.length > 0) {
+                 doc.fields.forEach(field => {
+                     const fieldRow = worksheet.addRow([field.path, `    ${field.name}`]);
+                     fieldRow.outlineLevel = 2;
+                     fieldRow.font = { italic: true, color: { argb: 'FF555555' } };
+                     
+                     let fieldDataCol = 3;
+                     visibleColumns.forEach(col => {
+                        const entityTypes = col.isExpanded ? col.specifications : [col.specifications[0]];
+                        entityTypes.forEach(entityType => {
+                            const isChecked = getAllocationStatus(`${doc.id}-${field.id}`, col.subdept.id, col.clsIndex, col.subclsIndex, entityType);
+                            const cell = fieldRow.getCell(fieldDataCol++);
+                            if (isChecked) {
+                                cell.value = '✓';
+                                cell.alignment = centerAlign;
+                                cell.font = { color: { argb: 'FF00B050' }, bold: true };
+                            }
+                        });
+                     });
+                 });
+             }
+         });
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `${currentDepartment.name}_Documents_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+      toast({ title: "Export Successful" });
+
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Export Failed", variant: "destructive" });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const toggleColumnExpansion = (key) => setExpandedColumns(prev => toggleSetItem(prev, key));
+  const toggleCategoryExpansion = (key) => setExpandedCategories(prev => toggleSetItem(prev, key));
+  const toggleItemExpansion = (key) => setExpandedItems(prev => toggleSetItem(prev, key));
+
+  const handleDiscardChanges = useCallback(() => {
+    setPendingChanges({ documents: {}, clientFields: {} })
+    setHasUnsavedChanges(false)
+  }, [])
 
   if (loading) return <div className="p-12 text-center animate-pulse">Loading Document Map...</div>;
-
-  const totalBodyColspan = 2 + visibleColumns.reduce((acc, c) => acc + (c.isExpanded ? c.specifications.length : 1), 0);
 
   return (
     <div className="w-full min-h-screen p-4">
@@ -479,6 +655,10 @@ const handleSaveAllChanges = useCallback(async () => {
           {hasUnsavedChanges && <p className="text-orange-500 text-sm">Unsaved Changes Pending</p>}
         </div>
         <div className="flex gap-2">
+           <Button variant="outline" size="sm" onClick={exportToExcel} disabled={isExporting}>
+             <Download className="mr-2 h-4 w-4" />
+             {isExporting ? "Exporting..." : "Export Excel"}
+           </Button>
           <ColumnVisibilityControl columns={availableColumns.map(c => ({ ...c, visible: !!columnVisibility[c.id] }))} onVisibilityChange={(id, v) => setColumnVisibility(prev => ({ ...prev, [id]: v }))} />
           <div className="flex items-center gap-2 ml-4">
             <Button
@@ -487,34 +667,14 @@ const handleSaveAllChanges = useCallback(async () => {
               onClick={() => toggleAllRows(!allExpanded)}
               className="h-8 text-xs"
             >
-              {allExpanded ? (
-                <>
-                  <Minus className="h-3 w-3 mr-1" />
-                  Collapse All
-                </>
-              ) : (
-                <>
-                  <Plus className="h-3 w-3 mr-1" />
-                  Expand All
-                </>
-              )}
+              {allExpanded ? <><Minus className="h-3 w-3 mr-1" />Collapse All</> : <><Plus className="h-3 w-3 mr-1" />Expand All</>}
             </Button>
           </div>
           {hasUnsavedChanges && (
             <>
-              <Button
-                variant="outline"
-                onClick={handleDiscardChanges}
-                disabled={isSaving}
-              >
-                Discard Changes
-              </Button>
-              <Button
-                onClick={handleSaveAllChanges}
-                disabled={isSaving}
-                className="bg-green-600 hover:bg-green-700"
-              >
-                {isSaving ? 'Saving...' : 'Save All Changes'}
+              <Button variant="outline" onClick={handleDiscardChanges} disabled={isSaving}>Discard</Button>
+              <Button onClick={handleSaveAllChanges} disabled={isSaving} className="bg-green-600 hover:bg-green-700">
+                {isSaving ? 'Saving...' : 'Save Changes'}
               </Button>
             </>
           )}
@@ -522,7 +682,7 @@ const handleSaveAllChanges = useCallback(async () => {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="mb-4">
+        <TabsList className="mb-4 flex-wrap h-auto">
           {departments.map(d => <TabsTrigger key={d.id} value={d.id}>{d.name}</TabsTrigger>)}
         </TabsList>
 
@@ -532,7 +692,7 @@ const handleSaveAllChanges = useCallback(async () => {
               value={documentTab}
               onValueChange={value => {
                 setDocumentTab(value as "company" | "individual" | "application");
-                setSearchQuery(""); // Reset search when changing tabs
+                setSearchQuery("");
               }}
               className="w-full"
             >
@@ -543,7 +703,7 @@ const handleSaveAllChanges = useCallback(async () => {
                   <TabsTrigger value="application">Application Documents</TabsTrigger>
                 </TabsList>
               </div>
-              <div className="relative w-64">
+              <div className="relative w-64 mt-2">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
                   type="search"
@@ -553,17 +713,14 @@ const handleSaveAllChanges = useCallback(async () => {
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
                 {searchQuery && (
-                  <X
-                    className="absolute right-2.5 top-2.5 h-4 w-4 text-muted-foreground cursor-pointer"
-                    onClick={() => setSearchQuery("")}
-                  />
+                  <X className="absolute right-2.5 top-2.5 h-4 w-4 text-muted-foreground cursor-pointer" onClick={() => setSearchQuery("")} />
                 )}
               </div>
+              
               <div className="mt-4 border rounded-lg overflow-hidden bg-white shadow-sm">
                 <div className="overflow-auto max-h-[calc(100vh-250px)]">
                   <Table>
-                    <TableHeader className="bg-blue-600 sticky top-0 z-20">
-                      {/* Row 1: Subdepartments */}
+                    <TableHeader className="bg-blue-600 sticky top-0 z-20 shadow-sm">
                       <TableRow>
                         <TableHead rowSpan={4} className="bg-blue-600 text-white w-16 border-r border-blue-500 text-center">#</TableHead>
                         <TableHead rowSpan={4} className="bg-blue-600 text-white w-[300px] border-r border-blue-500 sticky left-0 z-30">Document / Field Details</TableHead>
@@ -572,13 +729,11 @@ const handleSaveAllChanges = useCallback(async () => {
                           if (!prev || prev.subdept.id !== col.subdept.id) {
                             const group = visibleColumns.filter(c => c.subdept.id === col.subdept.id);
                             const span = group.reduce((s, c) => s + (c.isExpanded ? c.specifications.length : 1), 0);
-                            acc.push(<TableHead key={col.subdept.id} colSpan={span} className="bg-blue-700 text-white text-center border-r border-blue-500">{col.subdept.name}</TableHead>);
+                            acc.push(<TableHead key={`sd-${col.subdept.id}`} colSpan={span} className="bg-blue-700 text-white text-center border-r border-blue-500 font-bold">{col.subdept.name}</TableHead>);
                           }
                           return acc;
                         }, [])}
                       </TableRow>
-
-                      {/* Row 2: Classes */}
                       <TableRow>
                         {visibleColumns.reduce((acc, col, idx) => {
                           const prev = visibleColumns[idx - 1];
@@ -591,8 +746,6 @@ const handleSaveAllChanges = useCallback(async () => {
                           return acc;
                         }, [])}
                       </TableRow>
-
-                      {/* Row 3: Subclasses */}
                       <TableRow>
                         {visibleColumns.map((col, idx) => (
                           <TableHead key={`sc-${idx}`} colSpan={col.isExpanded ? col.specifications.length : 1} className="bg-blue-500 text-white text-center border-r border-blue-400 text-[10px]">
@@ -600,117 +753,91 @@ const handleSaveAllChanges = useCallback(async () => {
                           </TableHead>
                         ))}
                       </TableRow>
-
-                      {/* Row 4: Final Specifications */}
-                      <TableRow>{renderColumnHeaders()}</TableRow>
+                      <TableRow>
+                        {visibleColumns.map(col => {
+                           if (!col.isExpanded) {
+                             return (
+                               <TableHead key={col.columnKey} style={{ width: '120px' }} className="border-r border-blue-400 text-center text-white text-[10px] bg-blue-300">
+                                 <div className="flex items-center justify-center gap-1">
+                                   <span className="truncate">{col.specifications[0]}</span>
+                                   <Button variant="ghost" size="sm" className="h-4 w-4 p-0" onClick={() => toggleColumnExpansion(col.columnKey)}><Plus className="h-3 w-3" /></Button>
+                                 </div>
+                               </TableHead>
+                             );
+                           }
+                           return col.specifications.map((spec, idx) => (
+                             <TableHead key={`${col.columnKey}-${spec}`} style={{ width: '120px' }} className="border-r border-blue-400 text-center text-white text-[10px] bg-blue-400">
+                               <div className="flex items-center justify-center gap-1">
+                                 <span className="uppercase">{spec}</span>
+                                 {idx === 0 && <Button variant="ghost" size="sm" className="h-4 w-4 p-0" onClick={() => toggleColumnExpansion(col.columnKey)}><Minus className="h-3 w-3" /></Button>}
+                               </div>
+                             </TableHead>
+                           ));
+                        }).flat()}
+                      </TableRow>
                     </TableHeader>
 
                     <TableBody>
                       {Object.entries(groupedDocuments)
-                        .sort(([a], [b]) => {
-                          const aNum = parseInt(a === 'other' ? '999' : a, 10);
-                          const bNum = parseInt(b === 'other' ? '999' : b, 10);
-                          return aNum - bNum;
-                        })
+                        .sort(([a], [b]) => parseInt(a === 'other' ? '999' : a) - parseInt(b === 'other' ? '999' : b))
                         .map(([catKey, group]) => {
                           const isCatExpanded = expandedCategories.has(catKey);
-                          const hasFields = group.documents.some(doc => doc.fields && doc.fields.length > 0);
-
                           return (
                             <React.Fragment key={`category-${catKey}`}>
-                              <TableRow
-                                className="bg-blue-50 hover:bg-blue-100 transition-colors cursor-pointer"
-                                onClick={() => toggleCategoryExpansion(catKey)}
-                              >
-                                <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-gray-700 w-16">
-                                  {group.mainCategoryNumber}
-                                </TableCell>
+                              <TableRow className="bg-blue-50 hover:bg-blue-100 transition-colors cursor-pointer" onClick={() => toggleCategoryExpansion(catKey)}>
+                                <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-gray-700 w-16">{group.mainCategoryNumber}</TableCell>
                                 <TableCell className="sticky left-10 bg-blue-100 border-r z-[5] w-[300px]">
                                   <div className="flex items-center justify-between px-4">
-                                    <span className="font-semibold text-gray-700 flex-1 min-w-0 pr-2 truncate">
-                                      {group.mainCategory}
-                                    </span>
-                                    <span className="text-xs bg-blue-200 text-gray-700 px-2 py-1 rounded-full mr-2">
-                                      {group.documents.length}
-                                    </span>
-                                    {isCatExpanded ? (
-                                      <Minus className="h-4 w-4 text-gray-600 flex-shrink-0" />
-                                    ) : (
-                                      <Plus className="h-4 w-4 text-gray-600 flex-shrink-0" />
-                                    )}
+                                    <span className="font-semibold text-gray-700 flex-1 min-w-0 pr-2 truncate">{group.mainCategory}</span>
+                                    <span className="text-xs bg-blue-200 text-gray-700 px-2 py-1 rounded-full mr-2">{group.documents.length}</span>
+                                    {isCatExpanded ? <Minus className="h-4 w-4 text-gray-600" /> : <Plus className="h-4 w-4 text-gray-600" />}
                                   </div>
                                 </TableCell>
-                                {visibleColumns.map(col => (
-                                  <TableCell
-                                    key={`cat-${col.columnKey}`}
-                                    colSpan={col.isExpanded ? col.specifications.length : 1}
-                                    className="border-r text-center bg-blue-50"
-                                  >
-                                    -
-                                  </TableCell>
-                                ))}
+                                <TableCell colSpan={999} className="bg-blue-50" />
                               </TableRow>
-
                               {isCatExpanded && group.documents.map((doc, docIndex) => {
                                 const isDocExpanded = expandedItems.has(doc.id);
                                 const docHasFields = doc.fields && doc.fields.length > 0;
-
                                 return (
                                   <React.Fragment key={`doc-${doc.id}`}>
                                     <TableRow className="group hover:bg-blue-50">
-                                      <TableCell className="sticky left-0 bg-white group-hover:bg-blue-50 border-r z-[5] text-center font-medium text-sm w-16">
-                                        {`${group.mainCategoryNumber}.${docIndex + 1}`}
-                                      </TableCell>
-                                      <TableCell className="sticky left-10 bg-white group-hover:bg-blue-50 border-r z-[5] w-[300px] pr-2">
+                                      <TableCell className="sticky left-0 bg-white group-hover:bg-blue-50 border-r z-[5] text-center font-medium text-sm">{`${group.mainCategoryNumber}.${docIndex + 1}`}</TableCell>
+                                      <TableCell className="sticky left-10 bg-white group-hover:bg-blue-50 border-r z-[5] pr-2">
                                         <div className="flex items-center justify-between px-4">
-                                          <span className="font-medium text-gray-800 flex-1 min-w-0 pr-2 truncate">
-                                            {doc.display_name}
-                                          </span>
+                                          <span className="font-medium text-gray-800 flex-1 min-w-0 pr-2 truncate">{doc.display_name}</span>
                                           {docHasFields && (
-                                            <Button
-                                              variant="ghost"
-                                              size="sm"
-                                              className="h-6 w-6 p-0 flex-shrink-0 text-blue-600 hover:bg-blue-200"
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                toggleItemExpansion(doc.id);
-                                              }}
-                                            >
-                                              {isDocExpanded ? (
-                                                <Minus className="h-4 w-4" />
-                                              ) : (
-                                                <Plus className="h-4 w-4" />
-                                              )}
+                                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-blue-600" onClick={(e) => { e.stopPropagation(); toggleItemExpansion(doc.id); }}>
+                                              {isDocExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
                                             </Button>
                                           )}
                                         </div>
                                       </TableCell>
-                                      {visibleColumns.map(col => renderDocumentCheckboxes(doc, col)).flat()}
+                                      {visibleColumns.map(col => {
+                                         const specs = col.isExpanded ? col.specifications : [col.specifications[0]];
+                                         return specs.map(spec => (
+                                           <TableCell key={`${doc.id}-${col.columnKey}-${spec}`} className="text-center border-r w-[120px]">
+                                             <MemoizedCheckbox 
+                                                checked={getAllocationStatus(doc.id, col.subdept.id, col.clsIndex, col.subclsIndex, spec)} 
+                                                onCheckedChange={c => handleToggle(doc.id, col.subdept.id, col.clsIndex, col.subclsIndex, spec, c)} 
+                                             />
+                                           </TableCell>
+                                         ));
+                                      })}
                                     </TableRow>
-
                                     {isDocExpanded && docHasFields && doc.fields.map((field) => (
                                       <TableRow key={`field-${field.id}`} className="bg-gray-50/80 hover:bg-gray-100">
-                                        <TableCell className="sticky left-0 bg-gray-50 hover:bg-gray-100 border-r z-[5] w-16 text-center text-xs text-gray-500">
-                                          {field.path}
-                                        </TableCell>
-                                        <TableCell className="sticky left-10 bg-gray-50 hover:bg-gray-100 border-r z-[5] w-[300px] pl-12 pr-4">
-                                          <div className="flex items-center">
-                                            <span className="text-sm text-gray-600">
-                                              {field.name}
-                                            </span>
-                                          </div>
-                                        </TableCell>
+                                        <TableCell className="sticky left-0 bg-gray-50 hover:bg-gray-100 border-r z-[5] text-center text-xs text-gray-500">{field.path}</TableCell>
+                                        <TableCell className="sticky left-10 bg-gray-50 hover:bg-gray-100 border-r z-[5] pl-12 pr-4"><span className="text-sm text-gray-600">{field.name}</span></TableCell>
                                         {visibleColumns.map(col => {
-                                          const span = col.isExpanded ? col.specifications.length : 1;
-                                          return (
-                                            <TableCell
-                                              key={`${field.id}-${col.columnKey}`}
-                                              colSpan={span}
-                                              className="text-center border-r text-xs bg-white"
-                                            >
-                                              -
-                                            </TableCell>
-                                          );
+                                            const specs = col.isExpanded ? col.specifications : [col.specifications[0]];
+                                            return specs.map(spec => (
+                                              <TableCell key={`${field.id}-${col.columnKey}-${spec}`} className="text-center border-r w-[120px] bg-white">
+                                                 <MemoizedCheckbox 
+                                                    checked={getAllocationStatus(`${doc.id}-${field.id}`, col.subdept.id, col.clsIndex, col.subclsIndex, spec)} 
+                                                    onCheckedChange={c => handleToggle(`${doc.id}-${field.id}`, col.subdept.id, col.clsIndex, col.subclsIndex, spec, c)} 
+                                                 />
+                                              </TableCell>
+                                            ));
                                         })}
                                       </TableRow>
                                     ))}
