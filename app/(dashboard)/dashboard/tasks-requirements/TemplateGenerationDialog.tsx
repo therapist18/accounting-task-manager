@@ -1906,15 +1906,43 @@ export default function TemplateGenerationDialog({
         });
     }, [formData, groupedPlaceholders, relationshipData, combinedCache, masterFields, entityIdMap, extractedData, companyData]);
 
-    const fetchMissingDataSources = useCallback(async () => {
+  const fetchMissingDataSources = useCallback(async () => {
         if (!isOpen || !selectedTemplate || !masterFields) return;
 
         const allIds = new Set();
+        
+        // --- FIX START: robustly collect all entity IDs ---
+        // 1. Core Map IDs
         if (entityIdMap.company) allIds.add(String(entityIdMap.company));
-        const dirIds = Array.isArray(entityIdMap.directors) ? entityIdMap.directors : [entityIdMap.director];
+        if (entityIdMap.principal) allIds.add(String(entityIdMap.principal));
+        if (entityIdMap.sponsor) allIds.add(String(entityIdMap.sponsor));
+        
+        // 2. Arrays from Entity Map
+        const dirIds = Array.isArray(entityIdMap.directors) ? entityIdMap.directors : (entityIdMap.director ? [entityIdMap.director] : []);
         dirIds.forEach(id => id && allIds.add(String(id)));
-        relationshipData?.directors?.forEach(d => d.id && allIds.add(String(d.id)));
-        relationshipData?.dependants?.forEach(d => d.id && allIds.add(String(d.id)));
+
+        const depIds = Array.isArray(entityIdMap.dependants) ? entityIdMap.dependants : [];
+        depIds.forEach(id => id && allIds.add(String(id)));
+
+        // 3. Objects from Relationship Data (fallback if not in Map)
+        relationshipData?.directors?.forEach(d => (d.id || d.director_id) && allIds.add(String(d.id || d.director_id)));
+        relationshipData?.dependants?.forEach(d => {
+            // Handle both object {id: 1} and raw ID 1
+            const id = typeof d === 'object' ? (d.id || d.individual_id) : d;
+            if (id) allIds.add(String(id));
+        });
+        
+        if (relationshipData?.principal) {
+             const p = relationshipData.principal;
+             const pid = typeof p === 'object' ? (p.id || p.individual_id) : p;
+             if(pid) allIds.add(String(pid));
+        }
+        
+        if (relationshipData?.sponsor) {
+             const s = relationshipData.sponsor;
+             const sid = typeof s === 'object' ? (s.id || s.individual_id) : s;
+             if(sid) allIds.add(String(sid));
+        }
 
         const idList = Array.from(allIds).filter(Boolean);
         if (idList.length === 0) return;
@@ -3029,83 +3057,168 @@ export default function TemplateGenerationDialog({
         return obj;
     };
 
-    const saveFieldToDatabase = async (placeholder, newValue, specificSource = null, arrayIndex = null) => {
+ const saveFieldToDatabase = async (placeholder, newValue, specificSource = null, arrayIndex = null) => {
         setIsSavingProfile(true);
         try {
             let table, path, linkVar, entId, sourceLabel = "Profile";
 
-            // 1. Resolve Target Entity
+            // ---------------------------------------------------------
+            // 1. Resolve Target Entity (Who are we saving this for?)
+            // ---------------------------------------------------------
             let sourceArray = null;
             if (arrayIndex !== null && placeholder.parent_name) {
                 const blockName = placeholder.parent_name;
                 const blockPlaceholder = selectedTemplate?.placeholders?.find(p => p.name === blockName && p.is_block_start);
                 if (blockPlaceholder) {
                     const entityType = Array.isArray(blockPlaceholder.entity_type) ? blockPlaceholder.entity_type[0] : (blockPlaceholder.entity_type || 'director');
-                    if (entityType === 'director') sourceArray = relationshipData.directors;
-                    else if (entityType === 'dependant') sourceArray = relationshipData.dependants;
+                    // Normalize type for matching
+                    const normType = entityType.toLowerCase();
+                    if (normType === 'director') sourceArray = relationshipData.directors;
+                    else if (['dependant', 'spouse', 'child'].includes(normType)) sourceArray = relationshipData.dependants;
                 }
             }
 
             const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData);
 
-            // 2. Determine target metadata
-            console.log(`[SAVE FIELD DEBUG] Processing placeholder: ${placeholder.name}, newValue: ${newValue}`);
-            console.log(`[SAVE FIELD DEBUG] Entity types:`, placeholder.entity_type);
-            console.log(`[SAVE FIELD DEBUG] Target entity before resolution:`, targetEntity);
+            // Determine the ID immediately
+            entId = targetEntity?.id || targetEntity?.individual_id || targetEntity?.director_id || targetEntity?.company_id;
 
+            // Fallback: If getTargetEntity returns a generic object without ID, try the map
+            if (!entId && placeholder.entity_type) {
+                const typeKey = Array.isArray(placeholder.entity_type) ? placeholder.entity_type[0] : placeholder.entity_type;
+                entId = entityIdMap[typeKey];
+            }
+
+            console.log(`[SAVE FIELD DEBUG] Saving: ${placeholder.name} | Value: ${newValue}`);
+            console.log(`[SAVE FIELD DEBUG] Target Entity found:`, targetEntity);
+            console.log(`[SAVE FIELD DEBUG] Target ID resolved:`, entId);
+
+            // ---------------------------------------------------------
+            // 2. Determine Database Metadata (Table, Path, Linking Var)
+            // ---------------------------------------------------------
+            
+            // CASE A: User selected a specific database source from the UI
             if (specificSource?.type === 'db') {
                 const mf = masterFields.get(parseInt(specificSource.id));
-                const pEnt = Array.isArray(placeholder.entity_type) ? placeholder.entity_type[0] : (placeholder.entity_type || 'company');
-                const src = mf?.sources?.find(s => s.source_type === 
-                    (pEnt === 'company' ? 'company' : 
-                     pEnt === 'sponsor' ? 'individual' : 
-                     'individual')) || mf?.sources?.[0];
+                
+                // Try to find the source matching the specific table requested
+                // If not found, fall back to smart type matching
+                let src = mf?.sources?.find(s => s.table === specificSource.table);
 
-                console.log(`[SAVE FIELD DEBUG] Entity resolution:`, {
-                    placeholderEntityType: pEnt,
-                    resolvedEntityType: pEnt === 'sponsor' ? 'individual' : (pEnt === 'company' ? 'company' : 'individual'),
-                    sourcesFound: mf?.sources?.length || 0,
-                    sources: mf?.sources,
-                    selectedSource: src
-                });
+                if (!src) {
+                     const pEnt = Array.isArray(placeholder.entity_type) ? placeholder.entity_type[0] : (placeholder.entity_type || 'company');
+                     const targetType = (pEnt === 'company') ? 'company' : 'individual';
+                     src = mf?.sources?.find(s => s.source_type === targetType) || mf?.sources?.[0];
+                }
+
+                if (!src) throw new Error(`Source configuration not found for Master Field ${specificSource.id}`);
 
                 table = src.table;
                 path = src.path;
                 linkVar = src.linking_variable || 'id';
-                entId = targetEntity?.id || targetEntity?.individual_id || targetEntity?.director_id;
                 sourceLabel = `Master Field: ${mf?.label || specificSource.id}`;
             }
+            // CASE B: User selected a Job Question source
             else if (specificSource?.type === 'job') {
                 table = 'tm_tasks';
                 path = `job_specific_answers->>'${specificSource.id}'`;
                 linkVar = 'id';
-                entId = task?.id;
+                entId = task?.id; // Override entId for job questions (always attached to task)
                 sourceLabel = `Job Question: ${specificSource.id}`;
             }
+            // CASE C: Default / Inline Edit (The Critical Fix)
             else {
                 const mfId = placeholder.master_field_ids?.[0];
+                if (!mfId) throw new Error("No Master Field ID linked to this placeholder");
+
                 const mf = masterFields.get(parseInt(mfId));
-                const src = mf?.sources?.[0];
+                if (!mf || !mf.sources) throw new Error("Master Field configuration missing");
+
+                // --- SMART SOURCE SELECTION ---
+                // 1. Determine the effective type of the target entity
+                let targetType = 'individual'; // Default to individual (Director, Sponsor, Principal, Dependant)
+                
+                const pTypes = Array.isArray(placeholder.entity_type) ? placeholder.entity_type : [placeholder.entity_type];
+                
+                if (pTypes.includes('company')) {
+                    targetType = 'company';
+                } else if (targetEntity && (targetEntity.company_name || targetEntity.registration_number)) {
+                    // Heuristic: If the entity object looks like a company
+                    targetType = 'company';
+                }
+
+                console.log(`[SAVE FIELD DEBUG] Detected Target Type: ${targetType}`);
+
+                // 2. Find the source definition that matches this type
+                // Note: Database usually uses 'company' or 'individual' as source_type
+                const src = mf.sources.find(s => s.source_type === targetType) 
+                         || mf.sources[0]; // Fallback to first if no specific match
+
+                if (!src) throw new Error(`No database source found for type '${targetType}'`);
+
                 table = src.table;
                 path = src.path;
                 linkVar = src.linking_variable || 'id';
-                entId = targetEntity?.id || targetEntity?.individual_id || targetEntity?.director_id;
+                
+                // Double check for Sponsor/Individual mismatch
+                // If we are saving an Individual but the table is a Company table, try to find an alternative
+                if (targetType === 'individual' && table.includes('acc_portal_company')) {
+                    console.warn(`[SAVE WARNING] Type is individual but table is ${table}. Attempting to find individual table...`);
+                    const altSource = mf.sources.find(s => s.table === 'registry_individuals' || s.source_type === 'individual');
+                    if (altSource) {
+                        table = altSource.table;
+                        path = altSource.path;
+                        linkVar = altSource.linking_variable || 'id';
+                        console.log(`[SAVE FIX] Switched to table: ${table}`);
+                    }
+                }
             }
 
-            if (!entId || !table) throw new Error("Could not resolve database target");
+            if (!entId || !table) {
+                throw new Error(`Could not resolve database target. Table: ${table}, ID: ${entId}`);
+            }
 
+            // ---------------------------------------------------------
             // 3. Perform the Update
-            const { data: existing } = await supabase.from(table).select('*').eq(linkVar, entId).maybeSingle();
+            // ---------------------------------------------------------
+            console.log(`[SAVE EXECUTING] Updating ${table} where ${linkVar}=${entId}. Path: ${path}`);
+
+            const { data: existing, error: findError } = await supabase.from(table).select('*').eq(linkVar, entId).maybeSingle();
+            
+            if (findError) {
+                 console.error("Error finding record:", findError);
+                 // Don't throw here, sometimes maybeSingle returns null without error, but if error exists we should know
+            }
+
             let updatePayload = {};
 
             if (path && (path.includes('->') || path.includes('.'))) {
+                // Handle JSON path updates (e.g., residential_address->>city)
                 const pathParts = path.split(/->>|->|\./).map(p => p.trim().replace(/['"]/g, '')).filter(Boolean);
                 const column = pathParts[0];
                 const nestedPath = pathParts.slice(1);
-                const existingJson = { ...(existing?.[column] || {}) };
+                
+                // Get existing JSON or empty object
+                const existingJson = existing ? { ...(existing[column] || {}) } : {};
+                
+                // Helper to set deep value safely
+                const setDeepValue = (obj, parts, val) => {
+                    let current = obj;
+                    for (let i = 0; i < parts.length - 1; i++) {
+                        const key = parts[i];
+                        if (!(key in current) || typeof current[key] !== 'object') {
+                            current[key] = {};
+                        }
+                        current = current[key];
+                    }
+                    current[parts[parts.length - 1]] = val;
+                    return obj;
+                };
+
                 updatePayload[column] = setDeepValue(existingJson, nestedPath, newValue);
             } else {
-                updatePayload = { [path || placeholder.name]: newValue };
+                // Standard column update
+                updatePayload[path || placeholder.name] = newValue;
             }
 
             const { error: updateError } = await supabase
@@ -3115,7 +3228,9 @@ export default function TemplateGenerationDialog({
 
             if (updateError) throw updateError;
 
-            // --- NEW: FETCH UPDATED DETAILS ---
+            // ---------------------------------------------------------
+            // 4. Fetch Updated Data & Refresh UI
+            // ---------------------------------------------------------
             const { data: refreshedRecord, error: fetchError } = await supabase
                 .from(table)
                 .select('*')
@@ -3124,7 +3239,7 @@ export default function TemplateGenerationDialog({
 
             if (fetchError) throw fetchError;
 
-            // 4. Update the Cache so resolvers see the new data
+            // Update the Cache so resolvers see the new data
             setAdditionalCache(prev => ({
                 ...prev,
                 [table]: {
@@ -3133,7 +3248,17 @@ export default function TemplateGenerationDialog({
                 }
             }));
 
-            const updatedCombinedCache = { ...combinedCache, [table]: { ...(combinedCache[table] || {}), [entId]: refreshedRecord } };
+            // Create a temporary cache object for immediate resolution
+            const updatedCombinedCache = { 
+                ...combinedCache, 
+                ...additionalCache, // include existing additional cache
+                [table]: { 
+                    ...(combinedCache[table] || {}), 
+                    ...(additionalCache[table] || {}),
+                    [entId]: refreshedRecord 
+                } 
+            };
+
             const match = processPlaceholderValue(
                 placeholder,
                 relationshipData,
@@ -3149,7 +3274,7 @@ export default function TemplateGenerationDialog({
 
             const finalResolvedValue = placeholder.type === 'boolean' ? match.value : extractDisplayValue(match.value);
 
-            // 6. Sync UI state
+            // Sync UI state
             if (arrayIndex !== null && placeholder.parent_name) {
                 handleArrayInputChange(placeholder.parent_name, arrayIndex, placeholder.name, finalResolvedValue);
             } else {
@@ -3178,6 +3303,7 @@ export default function TemplateGenerationDialog({
             setIsSavingProfile(false);
         }
     };
+    
     const refineFieldWithAI = async (placeholder, allFormData) => {
         if (!placeholder.ai_prompt) return null;
         const regex = /\{([^}]+)\}/g;
