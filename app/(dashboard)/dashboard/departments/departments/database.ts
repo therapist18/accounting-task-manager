@@ -1,5 +1,6 @@
 // @ts-nocheck
 import supabase from '@/lib/supabase/client'
+import { toast } from 'sonner'
 
 // Helper function to generate sequential requirement IDs
 const generateRequirementId = (existingRequirements: any[] = []): string => {
@@ -580,6 +581,7 @@ export async function createDepartment(departmentData: any): Promise<Department>
     return await fetchDepartmentById(department.id)
   } catch (error) {
     console.error('Error in createDepartment:', error)
+    toast.error("Failed to create department")
     throw error
   }
 }
@@ -597,15 +599,21 @@ export async function fetchDepartments(): Promise<Department[]> {
 
     if (deptError) throw deptError
 
-    // Process the data without ordering (handled in DepartmentSidebar)
+    // Process the data with proper ordering
     const processedData = (departmentsData || []).map((dept: any) => {
-      const subdepartments = (dept.tm_subdepartments || []).map((subdept: any) => {
-        // Process classes without ordering (handled in DepartmentSidebar)
-        const classes = (subdept.classes || []).map((cls: any) => ({
+      const subdepartments = (dept.tm_subdepartments || [])
+        .sort((a: any, b: any) => (a.order || 0) - (b.order || 0))
+        .map((subdept: any) => {
+        // Process classes with ordering
+        const classes = (subdept.classes || [])
+          .sort((a: any, b: any) => (a.order || 0) - (b.order || 0))
+          .map((cls: any) => ({
           ...cls,
           subdepartmentId: subdept.id,
           default_display: cls.default_display || false,
-          subClasses: (cls.subClasses || []).map((subCls: any) => ({
+          subClasses: (cls.subClasses || [])
+            .sort((a: any, b: any) => (a.order || 0) - (b.order || 0))
+            .map((subCls: any) => ({
                   ...subCls,
                   default_display: subCls.default_display || false
                 }))
@@ -691,8 +699,10 @@ export async function saveOrderAndDefaultDisplay(departments: Department[]): Pro
     await supabase.from('tm_departments').upsert(deptUpdates)
     await supabase.from('tm_subdepartments').upsert(subdeptUpdates)
 
+    toast.success("Order and display settings saved successfully!")
   } catch (error) {
     console.error('Error saving order and specification:', error)
+    toast.error("Failed to save order and display settings")
     throw error
   }
 }

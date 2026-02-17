@@ -50,6 +50,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import ExcelJS from 'exceljs'
 import { saveAs } from 'file-saver'
+import { ENTITY_TYPES } from "@/lib/constants/entity-types"
 // Helper function for deep cloning
 const deepClone = (obj: any) => JSON.parse(JSON.stringify(obj))
 
@@ -502,35 +503,43 @@ export default function Departments() {
     setExpanded(updates);
   };
 
-  const fetchData = async () => {
+const fetchData = async (isSilent = false) => {
+  try {
+    // Only show the global loader if it's the first time or not a silent refresh
+    if (!isSilent) setLoading(true);
+    
+    const departmentsData = await fetchDepartments();
+    
+    // Simply update the state with the fresh data
+    setDepartments(departmentsData);
+    
+    // If we are editing, we might want to refresh the expanded states 
+    // but usually, keeping the current expanded keys is better for UX.
+  } catch (error) {
+    console.error('Error fetching data:', error);
+    toast.error('Failed to sync data. Please try again.');
+  } finally {
+    if (!isSilent) setLoading(false);
+  }
+};
+
+useEffect(() => {
+  async function loadInitialData() {
+    // First load is NOT silent
+    await fetchData(false); 
     try {
-      setLoading(true)
-      const departmentsData = await fetchDepartments()
-      setDepartments(departmentsData)
+      const [usersData, officersData] = await Promise.all([
+        fetchUsers(),
+        fetchOfficers()
+      ]);
+      setUsers(usersData);
+      setOfficers(officersData);
     } catch (error) {
-      console.error('Error fetching data:', error)
-      toast.error('Failed to load data. Please try again.')
-    } finally {
-      setLoading(false)
+      toast.error('Failed to load users');
     }
   }
-
-  useEffect(() => {
-    async function loadInitialData() {
-      await fetchData();
-      try {
-        const [usersData, officersData] = await Promise.all([
-          fetchUsers(),
-          fetchOfficers()
-        ]);
-        setUsers(usersData);
-        setOfficers(officersData);
-      } catch (error) {
-        toast.error('Failed to load users');
-      }
-    }
-    loadInitialData();
-  }, [])
+  loadInitialData();
+}, []);
 
   // --- REORDERING LOGIC ---
   const handleReorder = (list: any[], index: number, direction: 'up' | 'down') => {
@@ -626,46 +635,77 @@ export default function Departments() {
       )
     );
 
-  // --- CREATE / UPDATE LOGIC ---
-  const handleSaveDepartment = async () => {
-    setSaving(true);
-    
-    // Clean form data
-    const cleanDepartmentForm = JSON.parse(JSON.stringify(departmentForm));
-    const removeOfficersHistory = (obj: any) => {
-      if (!obj || typeof obj !== 'object') return;
-      if ('officers_history' in obj) delete obj.officers_history;
-      Object.values(obj).forEach(value => {
-        if (Array.isArray(value)) value.forEach(item => removeOfficersHistory(item));
-        else if (value && typeof value === 'object') removeOfficersHistory(value);
-      });
-    };
-    removeOfficersHistory(cleanDepartmentForm);
-
-    try {
-      if (!editingDepartmentId && !editingSubdepartmentId) {
-        await createNewDepartment(cleanDepartmentForm);
-      }
-      else if (editingDepartmentId && !editingSubdepartmentId && cleanDepartmentForm.subdepartments.length === 0) {
-        await updateExistingDepartment(cleanDepartmentForm);
-      }
-      else if (editingDepartmentId && !editingSubdepartmentId && cleanDepartmentForm.subdepartments.length > 0) {
-        await createNewSubdepartment(cleanDepartmentForm);
-      }
-      else if (editingSubdepartmentId) {
-        await updateExistingSubdepartment(cleanDepartmentForm);
-      }
-
-      toast.success('Saved successfully!');
-      setIsAddDepartmentOpen(false);
-      await fetchData();
-    } catch (error) {
-      console.error('Save error:', error);
-      toast.error(error.message || 'Failed to save. Please try again.');
-    } finally {
-      setSaving(false);
+ // Inside handleSaveDepartment function in Departments.tsx
+const handleSaveDepartment = async () => {
+  setSaving(true);
+  try {
+    // 1. Core Department Update
+    if (editingDepartmentId) {
+       await updateExistingDepartment(departmentForm);
+    } else {
+       const newDept = await createNewDepartment(departmentForm);
+       setEditingDepartmentId(newDept.id);
     }
-  };
+
+    // 2. Loop through subdepartments and UPSERT them
+    // This replaces the separate "createNewSubdepartment" vs "updateExistingSubdepartment" logic
+    // which was causing the confusion and the duplicate name error.
+    for (const sub of departmentForm.subdepartments) {
+      const isNew = !sub.id;
+      
+      // Duplication check ONLY if it's a new subdepartment or name changed
+      if (isNew) {
+        const { data: existing } = await supabase
+          .from('tm_subdepartments')
+          .select('id')
+          .ilike('name', sub.name.trim())
+          .eq('department_id', editingDepartmentId)
+          .limit(1);
+
+        if (existing?.length > 0) {
+          toast.error(`Subdepartment "${sub.name}" already exists. Skipping create.`);
+          continue;
+        }
+      }
+
+      // Prepare payload
+      const payload = {
+        name: sub.name.trim(),
+        description: sub.description,
+        department_id: editingDepartmentId,
+        default_display: sub.default_display,
+        classes: sub.classes || [],
+        officer_history: sub.officer_history || [],
+        manager_history: sub.manager_history || [],
+        assistant_history: sub.assistant_history || [],
+        entity_types: sub.entity_types || []
+      };
+
+      if (isNew) {
+        const { data: newSub } = await supabase
+          .from('tm_subdepartments')
+          .insert(payload)
+          .select().single();
+        if (newSub) await saveClassRequirements(newSub.id, sub.classes);
+      } else {
+        await supabase
+          .from('tm_subdepartments')
+          .update(payload)
+          .eq('id', sub.id);
+        await updateClassRequirements(sub.id, sub.classes);
+      }
+    }
+
+    toast.success('Department structure saved successfully!');
+    setIsAddDepartmentOpen(false);
+    await fetchData();
+  } catch (error) {
+    console.error('Save error:', error);
+    toast.error(error.message || 'Failed to save.');
+  } finally {
+    setSaving(false);
+  }
+};
 
   const createNewDepartment = async (formData: DepartmentForm) => {
     const { officerId, subdepartments, ...departmentData } = formData;
@@ -880,17 +920,50 @@ export default function Departments() {
     setIsAddDepartmentOpen(true);
   };
 
-  const handleEditDepartment = (dept) => {
+const handleEditDepartment = (dept) => {
     setEditingDepartmentId(dept.id);
     setEditingSubdepartmentId(null);
     const currentOfficer = getCurrentOfficer(dept.officers_history || []);
+   
+   const mappedSubdepartments = (dept.tm_subdepartments || []).map(sub => ({
+      id: sub.id, // Important: pass ID so the save function updates instead of creating new
+      name: sub.name,
+      description: sub.description || '',
+      default_display: sub.default_display ?? true,
+      entity_types: sub.entity_types || [],
+      officer_history: sub.officer_history || [],
+      manager_history: sub.manager_history || [],
+      assistant_history: sub.assistant_history || [],
+      classes: (sub.classes || []).map(cls => ({
+        id: cls.id,
+        name: cls.name,
+        description: cls.description || '',
+        order: cls.order,
+        isVisible: cls.isVisible ?? true,
+        default_display: cls.default_display ?? true,
+        entity_types: cls.entity_types || [],
+         subClasses: (cls.subClasses || []).map(sc => ({
+          id: sc.id,
+          name: sc.name,
+          description: sc.description || '',
+          order: sc.order,
+          isVisible: sc.isVisible ?? true,
+          default_display: sc.default_display ?? true,
+          entity_types: sc.entity_types || [],
+          requirements: sc.requirements || []
+        }))
+      }))
+    }));
+
     setDepartmentForm({
       name: dept.name,
       description: dept.description || '',
-      default_display: dept.default_display || true,
-      subdepartments: [],
+      default_display: dept.default_display ?? true,
+      entity_types: dept.entity_types || [], 
+      subdepartments: mappedSubdepartments,   
       officerId: currentOfficer?.id || ''
     });
+
     setIsAddDepartmentOpen(true);
   };
 
@@ -962,15 +1035,15 @@ export default function Departments() {
   }, [isAddDepartmentOpen]);
 
   const getUserName = (userId: string) => users.find(u => u.id === userId)?.name || 'Unassigned';
-
-  if (loading && departments.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-gray-50">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
-        <span className="ml-3 text-lg text-gray-600">Loading Departments...</span>
-      </div>
-    );
-  }
+// Change this condition
+if (loading && departments.length === 0) {
+  return (
+    <div className="flex items-center justify-center h-screen bg-gray-50">
+      <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+      <span className="ml-3 text-lg text-gray-600">Initialising Departments...</span>
+    </div>
+  );
+}
 
   const OrderButtons = ({ onReorder, index, listLength, disabled = false }) => (
     <div className="flex flex-col -space-y-1.5">
@@ -1131,6 +1204,7 @@ export default function Departments() {
               <TableHead className="border-r text-white">Officer</TableHead>
               <TableHead className="border-r text-white">Task Manager</TableHead>
               <TableHead className="border-r text-white">Task Assistants</TableHead>
+              <TableHead className="border-r text-white">Entities</TableHead>
               <TableHead className="border-r text-white">Structure</TableHead>
               <TableHead className="border-r text-white">Default Display</TableHead>
               <TableHead className="w-[180px] border-r text-white">Actions</TableHead>
@@ -1139,7 +1213,7 @@ export default function Departments() {
           <TableBody>
             {filteredDepartments.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="h-24 text-center text-gray-500">No departments found.</TableCell>
+                <TableCell colSpan={9} className="h-24 text-center text-gray-500">No departments found.</TableCell>
               </TableRow>
             ) : (
               filteredDepartments.map((dept, deptIndex) => {
@@ -1157,6 +1231,22 @@ export default function Departments() {
                       <TableCell className="border-r"><div className="text-gray-400 text-sm">View in stats</div></TableCell>
                       <TableCell className="border-r"><div className="text-gray-400 text-sm">View in stats</div></TableCell>
                       <TableCell className="border-r"><div className="text-gray-400 text-sm">View in stats</div></TableCell>
+                      <TableCell className="text-base text-gray-800 border-r">
+                        {dept.entity_types && dept.entity_types.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {dept.entity_types.map((entityType, index) => {
+                              const entityConfig = ENTITY_TYPES.find(type => type.value === entityType)
+                              return (
+                                <Badge key={index} variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                                  {entityConfig?.label || entityType}
+                                </Badge>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 text-sm">All Types</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-base text-gray-800 border-r">{(dept.tm_subdepartments || []).length} Sub Dept</TableCell>
                       <TableCell className="text-center border-r">
                         <Checkbox checked={dept.default_display || false} onCheckedChange={(checked) => handleDepartmentDefaultDisplayToggle(deptIndex, Boolean(checked))} />
@@ -1235,13 +1325,31 @@ export default function Departments() {
                                 {currentAssistants.length > 0 ? (
                                   <div className="flex flex-col space-y-1">
                                     {currentAssistants.map((assistant, i) => (
-                                      <UserDetailsPopover key={i} userId={assistant.id} users={users} role="assistant">
-                                        <div className="flex items-center gap-2"><Users className="h-4 w-4 text-amber-600" /><span>{getUserName(assistant.id)}</span></div>
-                                      </UserDetailsPopover>
+                                      <div key={i} className="flex items-center gap-2">
+                                        <UserDetailsPopover userId={assistant.id} users={users} role="assistant">
+                                          <div className="flex items-center gap-2"><Users className="h-4 w-4 text-purple-600" /><span>{getUserName(assistant.id)}</span></div>
+                                        </UserDetailsPopover>
+                                      </div>
                                     ))}
                                   </div>
                                 ) : <span className="text-gray-400">None</span>}
                               </div>
+                            </TableCell>
+                            <TableCell className="text-base text-gray-800 border-r">
+                              {subdept.entity_types && subdept.entity_types.length > 0 ? (
+                                <div className="flex flex-wrap gap-1">
+                                  {subdept.entity_types.map((entityType, index) => {
+                                    const entityConfig = ENTITY_TYPES.find(type => type.value === entityType)
+                                    return (
+                                      <Badge key={index} variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                                        {entityConfig?.label || entityType}
+                                      </Badge>
+                                    )
+                                  })}
+                                </div>
+                              ) : (
+                                <span className="text-gray-400 text-sm">All Types</span>
+                              )}
                             </TableCell>
                             <TableCell className="border-r">{hasClasses && <span className="text-sm text-gray-600">{subdept.classes.length} Classes</span>}</TableCell>
                             <TableCell className="text-center border-r">

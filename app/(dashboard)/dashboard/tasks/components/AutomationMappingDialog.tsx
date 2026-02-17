@@ -952,6 +952,80 @@ export const AutomationMappingDialog = ({
     return () => clearTimeout(timer);
   }, [currentIndividualId, selectedAutomationId, webData, relationshipData, task]);
 
+  // Helper function to clean missing values from form data
+  const cleanFormData = (data: Record<string, any>): Record<string, any> => {
+    const cleaned: Record<string, any> = {};
+
+    for (const [key, value] of Object.entries(data)) {
+      if (value === null || value === undefined || value === '' || value === 'Missing') {
+        // Skip missing values entirely
+        continue;
+      }
+
+      if (Array.isArray(value)) {
+        // Process arrays
+        const cleanedArray = value
+          .map(item => {
+            if (typeof item === 'object' && item !== null) {
+              // Clean object properties, excluding system fields
+              const cleanedItem: Record<string, any> = {};
+              let hasMeaningfulData = false;
+              
+              for (const [itemKey, itemValue] of Object.entries(item)) {
+                // Skip system fields that don't represent meaningful data
+                if (['entityId', 'index', 'id'].includes(itemKey)) {
+                  cleanedItem[itemKey] = itemValue;
+                  continue;
+                }
+                
+                if (itemValue !== null && itemValue !== undefined && itemValue !== '' && itemValue !== 'Missing') {
+                  cleanedItem[itemKey] = itemValue;
+                  hasMeaningfulData = true;
+                }
+              }
+              
+              // Only keep the item if it has meaningful data beyond system fields
+              return hasMeaningfulData ? cleanedItem : null;
+            }
+            return item;
+          })
+          .filter(item => item !== null);
+
+        // Only include the array if it's not empty after cleaning
+        if (cleanedArray.length > 0) {
+          cleaned[key] = cleanedArray;
+        }
+      } else if (typeof value === 'object' && value !== null) {
+        // Process objects
+        const cleanedObj: Record<string, any> = {};
+        let hasMeaningfulData = false;
+        
+        for (const [objKey, objValue] of Object.entries(value)) {
+          // Skip system fields that don't represent meaningful data
+          if (['entityId', 'index', 'id'].includes(objKey)) {
+            cleanedObj[objKey] = objValue;
+            continue;
+          }
+          
+          if (objValue !== null && objValue !== undefined && objValue !== '' && objValue !== 'Missing') {
+            cleanedObj[objKey] = objValue;
+            hasMeaningfulData = true;
+          }
+        }
+        
+        // Only include object if it has meaningful data beyond system fields
+        if (hasMeaningfulData) {
+          cleaned[key] = cleanedObj;
+        }
+      } else {
+        // Include primitive values that are not missing
+        cleaned[key] = value;
+      }
+    }
+
+    return cleaned;
+  };
+
   const handleRunAutomation = async () => {
     if (!selectedAutomationId) { toast({ title: "Validation Error", description: "Missing automation selection", variant: "destructive" }); return; }
     setIsAutomationRunning(true);
@@ -987,6 +1061,9 @@ export const AutomationMappingDialog = ({
           formData[config.variableName] = val;
         }
       }
+      // Clean the form data to remove missing values
+      const cleanedFormData = cleanFormData(formData);
+
       const payload = {
         url: automationLogin.url || "https://fns.immigration.go.ke/account/login.html",
         photoPath: "",
@@ -995,7 +1072,7 @@ export const AutomationMappingDialog = ({
           idNumber: (typeof automationLogin.idNumber === 'string' && automationLogin.idNumber !== '[object Object]') ? automationLogin.idNumber : "",
           password: automationLogin.password || ""
         },
-        formData: formData,
+        formData: cleanedFormData,
         step2Data: {},
         step3Data: {}
       };

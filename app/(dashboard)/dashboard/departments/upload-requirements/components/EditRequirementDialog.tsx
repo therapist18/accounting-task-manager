@@ -25,7 +25,8 @@ import {
   ENTITY_TYPES,
   type NationalityType,
   type AgeRangeType,
-  type EntityType
+  type EntityType,
+  REQUIREMENT_CATEGORIES, type RequirementCategory
 } from "@/lib/constants/entity-types"
 import { COMPUTED_FUNCTIONS, EXECUTION_MODES, LINKING_VARIABLES } from "@/lib/constants/computed-functions"
 import { useTableData, type TableOption } from "@/lib/tableUtils"
@@ -387,6 +388,23 @@ export function EditRequirementDialog({
                     className="h-10"
                   />
                 </div>
+              </div>
+
+              {/* CATEGORY SELECTION */}
+              <div className="space-y-2">
+                <Label className="text-xs font-bold uppercase text-slate-500">Category</Label>
+                <Select value={formData.category || 'general'} onValueChange={(value: RequirementCategory) => updateField('category', value)}>
+                  <SelectTrigger className="bg-white h-10">
+                    <SelectValue placeholder="Select category..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {REQUIREMENT_CATEGORIES.map(category => (
+                      <SelectItem key={category.value} value={category.value}>
+                        {category.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* APPLICANT TYPES POPOVER */}

@@ -25,14 +25,14 @@ import {
   ENTITY_TYPES,
   type NationalityType,
   type AgeRangeType,
-  type EntityType
+  type EntityType,
+  REQUIREMENT_CATEGORIES, type RequirementCategory
 } from "@/lib/constants/entity-types"
 import { COMPUTED_FUNCTIONS, EXECUTION_MODES, LINKING_VARIABLES } from "@/lib/constants/computed-functions"
 import { useTableData, type TableOption } from "@/lib/tableUtils"
 import { Card } from "@/components/ui/card"
 
 export type EntityType = EntityType;
-export type RequirementCategory = 'general' | 'processing' | 'issuance' | 'job-specific';
 export type SubmissionMode = 'standard' | 'template' | 'webform';
 export type QuestionType = 'text' | 'number' | 'date' | 'select' | 'multiselect' | 'boolean';
 export type LogicOperator = 'equals' | 'not_equals' | 'is_not_empty' | 'is_empty';
@@ -481,7 +481,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
 
         <div className="flex-1 overflow-auto flex flex-col px-6 space-y-4 pt-4">
           <div className="bg-slate-200/50 p-1 rounded-xl sticky top-0 z-20 backdrop-blur-md flex gap-1">
-            {['general', 'processing', 'issuance', 'job-specific'].filter(sec => context?.departmentId === 1 || sec === 'general' || sec === 'job-specific').map((sec) => (
+            {REQUIREMENT_CATEGORIES.map(cat => cat.value).filter(sec => context?.departmentId === 1 || sec === 'general' || sec === 'job-specific').map((sec) => (
               <Button key={sec} variant={activeSection === sec ? 'default' : 'ghost'} className={cn("flex-1 h-8 text-xs capitalize rounded-lg transition-all", activeSection === sec && "shadow-sm")} onClick={() => setActiveSection(sec as RequirementCategory)}>
                 {sec.replace('-', ' ')}
               </Button>

@@ -49,3 +49,12 @@ export const AGE_RANGE_TYPES: { value: AgeRangeType; label: string }[] = [
   { value: 'minor', label: 'Minor (Under 18)' },
   { value: 'adult', label: 'Adult (18+)' },
 ];
+
+export type RequirementCategory = 'general' | 'processing' | 'issuance' | 'job-specific';
+
+export const REQUIREMENT_CATEGORIES: { value: RequirementCategory; label: string; description?: string }[] = [
+  { value: 'general', label: 'General', description: 'General document requirements' },
+  { value: 'processing', label: 'Processing', description: 'Documents needed for processing' },
+  { value: 'issuance', label: 'Issuance', description: 'Documents for issuance purposes' },
+  { value: 'job-specific', label: 'Job Specific', description: 'Job-specific document requirements' }
+];
