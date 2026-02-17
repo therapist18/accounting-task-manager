@@ -263,6 +263,43 @@ export default function DocumentsFields() {
     return cols;
   }, [columnVisibility, expandedColumns]);
 
+  // Column builder for export that includes ALL columns regardless of visibility
+  const buildAllColumns = useCallback((tabValue: string, subdepts: any[]) => {
+    const cols = [];
+    const isIndiv = tabValue === "individual";
+
+    subdepts.forEach(sd => {
+      const getFilteredEntityTypes = (item) => {
+        const raw = item?.entity_types
+          ? Array.isArray(item.entity_types) ? item.entity_types : JSON.parse(item.entity_types || "[]")
+          : [];
+        const entityTypes = raw.length > 0 ? raw : ["Company"];
+        return isIndiv
+          ? entityTypes.filter(s => s && s.toLowerCase() !== "company")
+          : entityTypes.filter(s => s && s.toLowerCase() === "company");
+      };
+      const process = (item, cIdx, scIdx) => {
+        const key = getColumnKeyUtil(sd.id, cIdx, scIdx);
+        let specs = getFilteredEntityTypes(item);
+        if (specs.length === 0) specs = ["Standard"];
+        cols.push({
+          subdept: sd, clsIndex: cIdx, subclsIndex: scIdx, columnKey: key,
+          specifications: specs,
+          isExpanded: expandedColumns.has(key),
+          width: expandedColumns.has(key) ? (specs.length * 120) : 120
+        });
+      };
+
+      if (sd.hasClasses) {
+        sd.classes.forEach((cls, cIdx) => {
+          if (cls.subclasses.length) cls.subclasses.forEach((sc, scIdx) => process(sc, cIdx, scIdx));
+          else process(cls, cIdx, null);
+        });
+      } else process(sd, null, null);
+    });
+    return cols;
+  }, [expandedColumns]);
+
   const visibleColumns = useMemo(
     () => buildVisibleColumns(documentTab, normalizedSubdepartments),
     [buildVisibleColumns, documentTab, normalizedSubdepartments]
@@ -498,6 +535,7 @@ export default function DocumentsFields() {
     let colIndex = 5;
     let lastSd = null, sdStart = 0;
     let lastCls = null, clsStart = 0;
+    const subdepartmentBoundaries = []; // Track where each subdepartment ends for borders
 
     tabCols.forEach((col, idx) => {
       const actualColIdx = colIndex;
@@ -506,6 +544,8 @@ export default function DocumentsFields() {
       // Subdept header (row HEADER_START)
       if (!lastSd || lastSd.id !== col.subdept.id) {
         if (lastSd && sdStart) {
+          // Add border to the right of the previous subdepartment
+          subdepartmentBoundaries.push(actualColIdx - 1);
           try { worksheet.mergeCells(HEADER_START, sdStart, HEADER_START, actualColIdx - 1); } catch {}
         }
         lastSd = col.subdept; sdStart = actualColIdx;
@@ -515,6 +555,8 @@ export default function DocumentsFields() {
         cell.font  = whiteFont; cell.alignment = centerAlign;
       }
       if (idx === tabCols.length - 1) {
+        // Add border to the right of the last subdepartment
+        subdepartmentBoundaries.push(actualColIdx + colSpan - 1);
         try { worksheet.mergeCells(HEADER_START, sdStart, HEADER_START, actualColIdx + colSpan - 1); } catch {}
       }
 
@@ -623,6 +665,21 @@ export default function DocumentsFields() {
         });
       });
 
+    // Apply distinguishable borders between subdepartments
+    const thickBorder = { style: 'thick', color: { argb: 'FF000000' } };
+    subdepartmentBoundaries.forEach(colIndex => {
+      // Apply thick right border to all rows in this column
+      worksheet.eachRow((row, rowNumber) => {
+        if (rowNumber >= HEADER_START) { // Only apply to header and data rows
+          const cell = row.getCell(colIndex);
+          cell.border = {
+            ...cell.border,
+            right: thickBorder
+          };
+        }
+      });
+    });
+
     // Freeze pane: first 4 columns + 6 header rows
     worksheet.views = [{ state: 'frozen', xSplit: 4, ySplit: HEADER_START + 4 }];
   }, [groupedDocsByTab, currentDepartment, documentAllocations, pendingChanges]);
@@ -639,7 +696,7 @@ export default function DocumentsFields() {
         const ws = workbook.addWorksheet(tab.label, {
           properties: { outlineProperties: { summaryBelow: false, summaryRight: false } }
         });
-        const tabCols = buildVisibleColumns(tab.value, normalizedSubdepartments);
+        const tabCols = buildAllColumns(tab.value, normalizedSubdepartments);
         writeSheetForTab(ws, tab.value, tabCols);
       });
 
@@ -653,7 +710,7 @@ export default function DocumentsFields() {
     } finally {
       setIsExporting(false);
     }
-  }, [currentDepartment, buildVisibleColumns, normalizedSubdepartments, writeSheetForTab]);
+  }, [currentDepartment, buildAllColumns, normalizedSubdepartments, writeSheetForTab]);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // IMPORT — reads "Yes" cells from each sheet and upserts to Supabase
