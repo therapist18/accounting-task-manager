@@ -2066,60 +2066,41 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                             })()}
                           </div>
                         ) : (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0 text-amber-600 hover:bg-amber-50"
-                            onClick={(e) => {
-                              e.stopPropagation();
+                         <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 w-6 p-0 text-amber-600 hover:bg-amber-50"
+          onClick={(e) => {
+            e.stopPropagation();
 
-                              // Get a better person name
-                              let personName = col.label;
-                              if (!personName || personName === 'Unknown Person') {
-                                personName = individualNames[col.task?.individual_id] ||
-                                  individualNames[col.task?.applicant_details?.id] ||
-                                  col.task?.applicant_details?.name ||
-                                  'Individual';
-                              }
+            console.log('DEBUG: Composite Sub-Doc Upload Clicked', {
+              parentRequirement: reqItem.name,
+              targetDocMetadata: docMetadata,
+              docId: docId
+            });
 
-                              // Get document name with comprehensive fallbacks
-                              let documentName = docMetadata?.display_name ||
-                                docMetadata?.name ||
-                                docMetadata?.document_name ||
-                                docMetadata?.main_category ||
-                                docMetadata?.sub_category ||
-                                docMetadata?.id ||
-                                'Document';
+            let personName = col.label;
+            // ... (name resolution logic)
 
-                              console.log('DEBUG: Setting selected doc for upload - docMetadata:', docMetadata);
-                              console.log('DEBUG: Document type info:', {
-                                id: docMetadata.id,
-                                name: docMetadata.name,
-                                display_name: docMetadata.display_name,
-                                document_type: docMetadata.document_type
-                              });
-                              // Only pass document type information, not full requirement
-                              setSelectedDocForUpload({
-                                doc: {
-                                  ...docMetadata,
-                                  display_name: documentName // Ensure we have a display_name
-                                },
-                                fields: docMetadata.fields,
-                                person: {
-                                  full_name: personName,
-                                  id: col.id,  // This is the director ID!
-                                  type: 'individual'
-                                },
-                                task: col.task,
-                                columnType: col.type,
-                                columnId: col.id
-                              });
-                              setShowUploadModal(true);
-                            }}
-                            title={`Upload ${docMetadata.display_name || docMetadata.name}`}
-                          >
-                            <UploadCloud className="h-3 w-3" />
-                          </Button>
+            setSelectedDocForUpload({
+              // CRITICAL: We pass docMetadata which contains the specific fields/config for THIS doc type
+              doc: docMetadata, 
+              fields: docMetadata?.fields || [],
+              person: {
+                full_name: personName,
+                id: col.id,
+                type: isCompanyType(col.type) ? 'company' : 'individual'
+              },
+              task: col.task,
+              columnType: col.type,
+              columnId: col.id
+            });
+            setShowUploadModal(true);
+          }}
+          title={`Upload ${docMetadata?.display_name || 'Document'}`}
+        >
+          <UploadCloud className="h-3 w-3" />
+        </Button>
                         )}
                       </div>
                     </TableCell>
@@ -2167,7 +2148,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         onClose={() => setShowUploadModal(false)}
         onUpload={handleUploadSubmit}
         onSuccess={handleDocumentUploadSuccess}
-        documentName={selectedDocForUpload?.doc?.display_name || selectedDocForUpload?.doc?.name || selectedDocForUpload?.doc?.document_name || 'Document'}
+        documentName={selectedDocForUpload?.doc?.name || selectedDocForUpload?.doc?.display_name || selectedDocForUpload?.doc?.main_category || selectedDocForUpload?.doc?.sub_category || selectedDocForUpload?.doc?.id || 'Document'}
         documentFields={selectedDocForUpload?.fields}
         entityName={selectedDocForUpload?.person?.full_name}
         entityId={selectedDocForUpload?.person?.id || selectedDocForUpload?.person?.director_id || selectedDocForUpload?.task?.principal_id || selectedDocForUpload?.task?.director_id || selectedDocForUpload?.task?.individual_id}
@@ -2184,22 +2165,29 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         idFieldName={selectedDocForUpload?.person?.type === 'company' ? 'company_id' : 'director_id'}
         documentIdFieldName='document_id'
         isCompanyUpload={selectedDocForUpload?.person?.type === 'company'}
-        additionalFields={{
-          issue_date: new Date().toISOString().split('T')[0],
-          expiry_date: null,
-          ...selectedDocForUpload?.additionalFields
-        }}
+        
         onBeforeUpload={async (recordData) => {
+
           // Custom handling before upload if needed
+
           if (selectedDocForUpload?.onBeforeUpload) {
+
             return selectedDocForUpload.onBeforeUpload(recordData);
+
           }
+
           return null;
+
         }}
+
       />
+
       <Dialog open={showPreviewModal} onOpenChange={setShowPreviewModal}>
+
         <DialogContent className="max-w-[95vw] w-full max-h-[95vh] flex flex-col p-0 overflow-hidden bg-slate-50">
+
           {showPreviewModal && previewingDocuments && (
+
             <>
               <DialogHeader className="p-4 border-b bg-white shrink-0">
                 <div className="flex items-center justify-between">
@@ -2256,6 +2244,9 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                           extractionStatus={doc.extraction_status || 'success'}
                           supabase={supabase}
                           onDialogClose={() => {
+                            // Close the preview dialog
+                            setShowPreviewModal(false);
+                            // Also collapse the document expansion if needed
                             if (previewingDocuments?.requirementId && toggleDocumentExpansion) {
                               toggleDocumentExpansion(previewingDocuments.requirementId);
                             }

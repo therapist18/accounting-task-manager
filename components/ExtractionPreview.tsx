@@ -97,7 +97,7 @@ const ValueCell = ({ children }) => (
 // ---------------------------------------
 
 const DocumentPreview = ({ fileUrl, fileName, documentName }) => {
-  const isPDF = fileName?.toLowerCase().endsWith('.pdf') || fileUrl?.toLowerCase().endsWith('.pdf');
+  const isPDF = fileName?.toLowerCase().endsWith('.pdf') || fileUrl?.toLowerCase().endsWith('.pdf') || fileUrl?.includes('/sign/') || fileUrl?.includes('.pdf?');
 
   // State for image transformations
   const [zoom, setZoom] = useState(1);
@@ -329,8 +329,11 @@ export const ExtractionPreview = ({
 
   const handleDelete = async (docData?: any) => {
     if (!onDelete) return;
+    
     try {
       setIsDeleting(true);
+      
+      // Prepare document data for deletion
       const documentData = docData || {
         file_path: fileUrl,
         file_name: fileName,
@@ -338,23 +341,30 @@ export const ExtractionPreview = ({
         extracted_details: extractedData,
         document_type: type,
         id: file?.id,
+        company_id: file?.company_id,
+        kyc_document_id: file?.kyc_document_id,
+        director_id: file?.director_id,
         ...file
       };
       
+      // Call parent delete function - this will handle toast, data refresh, etc.
       await onDelete(documentData);
       
-      toast.success('Document deleted successfully');
-      
-      // Close the dialog - use parent callback if available, otherwise internal state
+      // Close the dialog after successful deletion
+      // Use parent callback if available, otherwise internal state
       if (onDialogClose) {
         onDialogClose();
       } else {
         setIsOpen(false);
       }
+      
     } catch (error) {
       console.error('Error deleting document:', error);
-      toast.error(error.message || 'Failed to delete document');
-      throw error;
+      // Only show error toast if parent didn't handle it
+      if (!error.message?.includes('already handled')) {
+        toast.error(error.message || 'Failed to delete document');
+      }
+      // Don't re-throw error to prevent breaking the flow
     } finally {
       setIsDeleting(false);
     }

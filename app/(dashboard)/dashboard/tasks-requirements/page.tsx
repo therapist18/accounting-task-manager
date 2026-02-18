@@ -221,19 +221,22 @@ export default function TasksPage() {
     setSelectedSubclass(subclassId);
   };
 
-  const handleTaskAction = (action: 'edit' | 'delete', task: UtilTask) => {
+  const handleTaskAction = (action: 'edit' | 'delete' | 'refresh', task?: UtilTask) => {
     if (action === 'delete') {
-      setTaskToDelete(task);
+      setTaskToDelete(task!);
       setDeleteDialogOpen(true);
     } else if (action === 'edit') {
-      setTaskToEdit(task);
+      setTaskToEdit(task!);
       // Determine which dialog to open based on department entity_types
-      const currentDept = departments.find(d => String(d.id) === String(task.job_level?.department_id));
+      const currentDept = departments.find(d => String(d.id) === String(task!.job_level?.department_id));
       if (currentDept?.entity_types?.includes('company')) {
         setCompanyInquiryDialogOpen(true);
       } else {
         setEnquiryDialogOpen(true);
       }
+    } else if (action === 'refresh') {
+      // Refresh tasks and stages
+      loadTasksAndStages(selectedDepartment, selectedSubdepartment);
     }
   };
 

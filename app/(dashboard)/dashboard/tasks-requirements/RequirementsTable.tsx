@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
-import { Briefcase, FileText, Loader2, Search, UploadCloud, Eye, Zap, FileType, Wand2, Download, FileUp, Trash2, AlertCircle, Edit3 } from "lucide-react"
+import { Briefcase, FileText, Loader2, Search, UploadCloud, Eye, Zap, FileType, Wand2, Download, FileUp, Trash2, AlertCircle, Edit3, RefreshCw } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
@@ -64,7 +64,7 @@ interface RequirementsTableProps {
   error: string | null
   activeTab?: string
   handleDeleteDocument?: (document: any) => Promise<void>
-  onTaskAction?: (action: 'edit' | 'delete', task: any) => void; // Add this
+  onTaskAction?: (action: 'edit' | 'delete' | 'refresh', task?: any) => void;
 }
 
 const REFERENCE_SUBDEPARTMENT_IDS = [10, 5];
@@ -119,6 +119,7 @@ export function RequirementsTable({
   const [searchQuery, setSearchQuery] = useState("");
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [groupToDelete, setGroupToDelete] = useState<any>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const parseSelectionId = useCallback((selectionId: string) => {
     const cleanId = selectionId.replace(/_\d+_\d+$/, '');
@@ -133,7 +134,6 @@ export function RequirementsTable({
 
   const filteredTasks = useMemo(() => tasks.filter(task => activeTab === "completed" ? (task.status === "completed" || task.status === "approved") : (task.status !== "completed" && task.status !== "approved")), [tasks, activeTab]);
 
-  // ... (keeping existing useMemos and fetches) ...
   const companyIds = useMemo(() =>
     [...new Set(filteredTasks.map(t => t.company_id).filter(Boolean))],
     [filteredTasks]
@@ -168,7 +168,7 @@ export function RequirementsTable({
     });
     return Array.from(ids);
   }, [taskClassRequirements]);
-
+  
   // OPTIMIZED: Batch fetch individual documents
   const fetchAllIndividualData = useCallback(async (tasksToFetch: any[], requiredKycIds: string[]) => {
     const startTime = performance.now();
@@ -304,7 +304,41 @@ export function RequirementsTable({
     }
   }, []);
 
-  // ... (useEffect for loading data remains same) ...
+  const handleManualRefresh = useCallback(async () => {
+    console.log('[RequirementsTable] Manual refresh triggered');
+    setIsRefreshing(true);
+    const toastId = toast.loading("Refreshing data...");
+    
+    try {
+      if (filteredTasks.length > 0) {
+        const requiredKycIds = getRequiredKycIds();
+        console.log('[RequirementsTable] Manual refresh for', filteredTasks.length, 'tasks');
+        
+        // Re-fetch everything
+        await Promise.all([
+          fetchAllIndividualData(filteredTasks, requiredKycIds),
+          fetchAllCompanyDocuments(filteredTasks, requiredKycIds),
+          fetchCompanyData(filteredTasks)
+        ]);
+        
+        // Force re-render
+        setDocuments(prev => [...prev]);
+        setAllIndividualDocuments(prev => ({ ...prev }));
+        setAllCompanyDocuments(prev => ({ ...prev }));
+        
+        console.log('[RequirementsTable] Manual refresh completed successfully');
+        toast.success("Data refreshed successfully", { id: toastId });
+      } else {
+        toast.info("No data to refresh", { id: toastId });
+      }
+    } catch (error) {
+      console.error('Error during manual refresh:', error);
+      toast.error("Failed to refresh data", { id: toastId });
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [filteredTasks, getRequiredKycIds, fetchAllIndividualData, fetchAllCompanyDocuments, fetchCompanyData]);
+  
   useEffect(() => {
     let isMounted = true;
     const loadData = async () => {
@@ -676,20 +710,47 @@ export function RequirementsTable({
     }
   }, [documents, allIndividualDocuments, allCompanyDocuments]);
 
-  const handleUploadComplete = useCallback(() => {
-    setShowUploadModal(false);
-    if (filteredTasks.length > 0) {
-      const requiredKycIds = getRequiredKycIds();
-      try {
-        Promise.all([
+const handleUploadComplete = useCallback(async () => {
+  console.log('[RequirementsTable] handleUploadComplete called');
+  setShowUploadModal(false);
+  const toastId = toast.loading("Refreshing document status...");
+  
+  try {
+    // Use parent refresh like deletion does - this reloads the entire tasks structure
+    if (onTaskAction) {
+      console.log('[RequirementsTable] Triggering parent refresh via onTaskAction');
+      onTaskAction('refresh');
+      toast.success("Requirements updated", { id: toastId });
+    } else {
+      console.log('[RequirementsTable] No onTaskAction callback, falling back to local refresh');
+      // Fallback to local refresh if parent callback not available
+      if (filteredTasks.length > 0) {
+        const requiredKycIds = getRequiredKycIds();
+        console.log('[RequirementsTable] Starting local data refresh for', filteredTasks.length, 'tasks');
+        
+        await Promise.all([
           fetchAllIndividualData(filteredTasks, requiredKycIds),
-          fetchAllCompanyDocuments(filteredTasks, requiredKycIds)
+          fetchAllCompanyDocuments(filteredTasks, requiredKycIds),
+          fetchCompanyData(filteredTasks)
         ]);
-      } catch (error) {
-        console.error('Error refreshing documents:', error);
+        
+        // Force re-render
+        setDocuments(prev => [...prev]);
+        setAllIndividualDocuments(prev => ({ ...prev }));
+        setAllCompanyDocuments(prev => ({ ...prev }));
+        
+        console.log('[RequirementsTable] Local data refresh completed successfully');
+        toast.success("Requirements updated", { id: toastId });
+      } else {
+        console.log('[RequirementsTable] No filtered tasks to refresh');
+        toast.info("No data to refresh", { id: toastId });
       }
     }
-  }, [filteredTasks, getRequiredKycIds, fetchAllIndividualData, fetchAllCompanyDocuments]);
+  } catch (error) {
+    console.error('Error during upload completion refresh:', error);
+    toast.error("Failed to refresh data", { id: toastId });
+  }
+}, [filteredTasks, getRequiredKycIds, fetchAllIndividualData, fetchAllCompanyDocuments, fetchCompanyData, onTaskAction]);
 
   const handleDocumentUploadSuccess = (uploadedDocument: any) => {
     toast.success('Document uploaded successfully!');
@@ -788,10 +849,25 @@ export function RequirementsTable({
     });
   }, []);
 
-  const renderDocumentStatus = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number, relationshipData?: any) => {
-    const status = getDocumentStatusForColumn(task, item, columnType, applicantId);
-    const isLetter = item.main_category === 'Letters';
+const renderDocumentStatus = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number, relationshipData?: any) => {
+  const status = getDocumentStatusForColumn(task, item, columnType, applicantId);
+  const isLetter = item.main_category === 'Letters';
 
+  // Find the actual KYC Document Type definition for this requirement
+  // This ensures we pass fields and metadata, not just the requirement name
+  const docId = item.document_id || (item.document_ids && item.document_ids[0]);
+  const docDefinition = documents.find(d => d.id === docId);
+
+  const handleUploadClick = () => {
+    console.log('DEBUG: Requirement Upload Clicked', {
+      requirementName: item.name || item.display_name,
+      resolvedDocDefinition: docDefinition,
+      docId: docId
+    });
+
+    // Pass the actual document definition (docDefinition) instead of the requirement (item)
+    handleUploadAction(task, docDefinition || item, columnType, applicantId);
+  };
     const handleViewClick = async () => {
       if (status.documents.length === 0) return;
 
@@ -897,9 +973,17 @@ export function RequirementsTable({
           </Button>
         )}
 
-        {!item.web_automation?.automationId && (
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-amber-600 hover:bg-amber-50" onClick={() => handleUploadAction(task, item, columnType, applicantId)} title={`Upload ${item.display_name}`}><UploadCloud className="h-4 w-4" /></Button>
-        )}
+        {!item.web_automation?.automationId && !isLetter && (
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          className="h-8 w-8 p-0 text-amber-600 hover:bg-amber-50" 
+          onClick={handleUploadClick} 
+          title={`Upload ${docDefinition?.display_name || item.display_name}`}
+        >
+          <UploadCloud className="h-4 w-4" />
+        </Button>
+      )}
 
         {status.type === 'view' && (
           <div className="flex items-center gap-1">
@@ -1059,7 +1143,16 @@ export function RequirementsTable({
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input placeholder="Search requirements..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
             </div>
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              <Button 
+                variant="outline" 
+                onClick={handleManualRefresh}
+                disabled={isRefreshing}
+                className="flex items-center gap-2"
+              >
+                <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                {isRefreshing ? 'Refreshing...' : 'Refresh'}
+              </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild><Button variant="outline"><Download className="mr-2 h-4 w-4" /> Export</Button></DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
@@ -1140,6 +1233,7 @@ export function RequirementsTable({
                       onSave={(data) => handleSaveDocument(doc.originalDoc, data)}
                       onDataChange={(fieldName, value) => handlePreviewDataChange(doc.id, fieldName, value)}
                       onDelete={() => handleDeleteDocument?.(doc.originalDoc)}
+                      onDialogClose={() => setDocumentPreviewOpen(false)}
                     />
                   </div>
                 ))}
@@ -1155,9 +1249,9 @@ export function RequirementsTable({
       <UploadModal
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
-        onUpload={handleUploadComplete}
-        onSuccess={handleDocumentUploadSuccess}
-        documentName={selectedDocForUpload?.doc?.display_name || selectedDocForUpload?.doc?.name || selectedDocForUpload?.doc?.document_name || 'Document'}
+       onUpload={handleUploadComplete} // This is called on start of process
+  onSuccess={handleUploadComplete} 
+            documentName={selectedDocForUpload?.doc?.display_name || selectedDocForUpload?.doc?.name || selectedDocForUpload?.doc?.document_name || 'Document'}
         documentFields={selectedDocForUpload?.fields}
         entityName={selectedDocForUpload?.person?.full_name}
         selectedDoc={selectedDocForUpload?.doc}
@@ -1173,11 +1267,7 @@ export function RequirementsTable({
         idFieldName={selectedDocForUpload?.person?.type === 'company' ? 'company_id' : 'director_id'}
         documentIdFieldName='document_id'
         isCompanyUpload={selectedDocForUpload?.person?.type === 'company'}
-        additionalFields={{
-          issue_date: new Date().toISOString().split('T')[0],
-          expiry_date: null
-        }}
-        onBeforeUpload={async (recordData) => {
+               onBeforeUpload={async (recordData) => {
           return null;
         }}
       />

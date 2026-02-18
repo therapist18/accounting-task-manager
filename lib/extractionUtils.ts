@@ -2,103 +2,22 @@
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import dayjs from 'dayjs'; // Import dayjs library
-import { API_KEYS } from './apiKeys';
 import { supabase } from "@/utils/supabase/client";
 
-// Initialize the Gemini API
-let currentApiKeyIndex = 0;
-let genAI = new GoogleGenerativeAI(API_KEYS[currentApiKeyIndex]);
+// Initialize the Gemini API with environment variable
+const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
 
-// Track rate limits for each API key
-const apiKeyStatus = new Map<string, {
-  lastUsed: number;
-  failureCount: number;
-  cooldownUntil: number;
-}>();
-
-// Initialize status for all API keys
-API_KEYS.forEach(key => {
-  apiKeyStatus.set(key, {
-    lastUsed: 0,
-    failureCount: 0,
-    cooldownUntil: 0
-  });
+console.log('Environment variables check:', {
+  NEXT_PUBLIC_GEMINI_API_KEY: process.env.NEXT_PUBLIC_GEMINI_API_KEY ? 'SET' : 'NOT SET',
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY ? 'SET' : 'NOT SET',
+  FINAL_VALUE: GEMINI_API_KEY ? 'SET' : 'NOT SET'
 });
 
-const RATE_LIMIT_COOLDOWN = 60000; // 1 minute cooldown
-const MAX_FAILURES = 3; // Max consecutive failures before cooling down
+if (!GEMINI_API_KEY) {
+  throw new Error('GEMINI_API_KEY environment variable is not set. Please check your .env.local file.');
+}
 
-const getNextAvailableApiKey = (): string | null => {
-  const now = Date.now();
-  
-  // Try to find a key that's not in cooldown
-  for (let i = 0; i < API_KEYS.length; i++) {
-    const key = API_KEYS[i];
-    const status = apiKeyStatus.get(key);
-    
-    if (!status) continue;
-    
-    // Skip keys in cooldown
-    if (now < status.cooldownUntil) continue;
-    
-    // Reset failure count if it's been more than the cooldown period
-    if (now - status.lastUsed > RATE_LIMIT_COOLDOWN) {
-      status.failureCount = 0;
-    }
-    
-    // Use this key if it hasn't failed too many times
-    if (status.failureCount < MAX_FAILURES) {
-      return key;
-    }
-  }
-  
-  return null; // All keys are in cooldown
-};
-
-const markApiKeyFailure = (key: string) => {
-  const status = apiKeyStatus.get(key);
-  if (!status) return;
-  
-  status.failureCount++;
-  status.lastUsed = Date.now();
-  
-  // Put key in cooldown if it's failed too many times
-  if (status.failureCount >= MAX_FAILURES) {
-    status.cooldownUntil = Date.now() + RATE_LIMIT_COOLDOWN;
-    console.log(`API key ${key} put in cooldown until ${new Date(status.cooldownUntil).toISOString()}`);
-  }
-  
-  apiKeyStatus.set(key, status);
-};
-
-const resetApiKeyStatus = (key: string) => {
-  apiKeyStatus.set(key, {
-    lastUsed: Date.now(),
-    failureCount: 0,
-    cooldownUntil: 0
-  });
-};
-
-// Update getNextApiKey to use the new rotation mechanism
-const getNextApiKey = (): string => {
-  const nextKey = getNextAvailableApiKey();
-  
-  if (!nextKey) {
-    // All keys are in cooldown, wait for the shortest cooldown
-    const minCooldown = Math.min(...Array.from(apiKeyStatus.values()).map(s => s.cooldownUntil));
-    const waitTime = Math.max(0, minCooldown - Date.now());
-    
-    if (waitTime > 0) {
-      console.log(`All API keys are in cooldown. Waiting ${waitTime}ms...`);
-      return API_KEYS[0]; // Rern first key, it will fail but that's okay
-    }
-    
-    // Reset all keys if all are in cooldown
-    API_KEYS.forEach(key => resetApiKeyStatus(key));
-  }
-  
-  return nextKey || API_KEYS[0];
-};
+let genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 const generationConfig = {
   temperature: 1,
@@ -563,16 +482,9 @@ export const performExtraction = async (
       attempts++;
       console.error(`Extraction attempt ${attempts} failed:`, error);
       
-      if (error.message?.includes('429') || error.message?.includes('quota')) {
-        markApiKeyFailure(API_KEYS[currentApiKeyIndex]);
-      }
-      
       if (attempts < MAX_ATTEMPTS) {
-        onProgress?.(`Extraction failed. Trying with backup API key (Attempt ${attempts + 1}/${MAX_ATTEMPTS})...`);
-        const nextKey = getNextApiKey();
-        currentApiKeyIndex = API_KEYS.indexOf(nextKey);
-        genAI = new GoogleGenerativeAI(nextKey);
-        await delay(1000);
+        onProgress?.(`Extraction failed. Retrying with same API key (Attempt ${attempts + 1}/${MAX_ATTEMPTS})...`);
+        await delay(2000); // Wait 2 seconds before retrying
       } else {
         return {
           extractedData: {},
