@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import React, { useEffect, useState, useMemo } from "react"
+import React, { useEffect, useState, useMemo, useRef, useCallback } from "react"
 import { cn } from "@/lib/utils"
 import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff, Zap, FileType, Database, Code, HelpCircle, Folder, Split } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -27,6 +27,11 @@ import { AddRequirementsDialog } from "./components/AddRequirementsDialog"
 import { EditJobQuestionDialog } from "./components/EditJobQuestionDialog"
 import { COMPUTED_FUNCTIONS } from "@/lib/constants/computed-functions"
 import { ENTITY_TYPES, type EntityType } from "@/lib/constants/entity-types"
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup
+} from "@/components/ui/resizable"
 
 interface Department {
   id: string | number
@@ -145,6 +150,20 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const [editingContext, setEditingContext] = useState<EditingContext | null>(null)
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
   const [masterFields, setMasterFields] = useState<any[]>([])
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const sidebarPanelRef = useRef(null);
+
+  // Add the programmatic toggle handler
+  const handleSidebarToggle = useCallback(() => {
+    const panel = sidebarPanelRef.current;
+    if (panel) {
+      if (isSidebarCollapsed) {
+        panel.expand();
+      } else {
+        panel.collapse();
+      }
+    }
+  }, [isSidebarCollapsed]);
 
   const activeSelection = useMemo(() => {
     const currentDept = departments.find(d => String(d.id) === String(activeDept))
@@ -880,44 +899,68 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   };
 
   return (
-    <div className="flex h-screen bg-slate-50/50">
-      <DepartmentSidebar
-        departments={departments}
-        activeDept={activeDept}
-        activeSubdept={activeSubdept}
-        activeClass={activeClass}
-        activeSubclass={activeSubclass}
-        onDeptClick={handleDeptClick}
-        onSubdeptClick={handleSubdeptClick}
-        onClassClick={handleClassClick}
-        onSubclassClick={handleSubclassClick}
-        expandedItems={expandedItems}
-        onToggleExpand={(key) => setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }))}
-      />
-      <main className="flex-1 overflow-hidden">
-        <div className="h-full overflow-auto p-4 space-y-4">
-          <header className="flex items-center justify-between"><div><h2 className="text-3xl font-bold tracking-tight">Requirement Logic Manager</h2></div></header>
-          {!activeDept ? <Card className="p-20 text-center"><FileText className="mx-auto h-12 w-12 text-slate-300 mb-4" /><p>Select a department to manage logic.</p></Card> : renderMainContent()}
-
-          <AddRequirementsDialog isOpen={isAddDialogOpen} onOpenChange={setIsAddDialogOpen} onSubmit={handleAddRequirements} isSubmitting={isSubmitting} context={addContext} />
-          <EditRequirementDialog isOpen={isEditDialogOpen} onOpenChange={setIsEditDialogOpen} requirement={editingRequirement} onSave={handleSaveRequirement} isSubmitting={isSubmitting} context={editingContext} />
-
-          <EditJobQuestionDialog
-            isOpen={isEditQuestionDialogOpen}
-            onOpenChange={setIsEditQuestionDialogOpen}
-            question={editingQuestion}
-            /* Correctly pass only questions from the currently active selection */
-            allQuestions={activeSelection.questions || []}
-            onSave={handleSaveQuestion}
-            isSubmitting={isSubmitting}
-            masterFields={masterFields}
+    <div className="h-screen w-full overflow-hidden bg-background">
+      <ResizablePanelGroup direction="horizontal">
+        {/* SIDEBAR PANEL */}
+        <ResizablePanel
+          ref={sidebarPanelRef}
+          defaultSize={20}
+          minSize={15}
+          maxSize={30}
+          collapsible={true}
+          onCollapse={() => setIsSidebarCollapsed(true)}
+          onExpand={() => setIsSidebarCollapsed(false)}
+          className={cn(
+            "transition-all duration-300 ease-in-out",
+            isSidebarCollapsed ? "min-w-[50px]" : ""
+          )}
+        >
+          <DepartmentSidebar
+            departments={departments}
+            activeDept={activeDept}
+            activeSubdept={activeSubdept}
+            activeClass={activeClass}
+            activeSubclass={activeSubclass}
+            onDeptClick={handleDeptClick}
+            onSubdeptClick={handleSubdeptClick}
+            onClassClick={handleClassClick}
+            onSubclassClick={handleSubclassClick}
+            expandedItems={expandedItems}
+            onToggleExpand={(key) => setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }))}
+            isCollapsed={isSidebarCollapsed}
+            onCollapseToggle={handleSidebarToggle}
           />
+        </ResizablePanel>
 
-          <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-            <DialogContent><DialogHeader><DialogTitle>Confirm Delete</DialogTitle></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>Cancel</Button><Button variant="destructive" onClick={() => deleteContext?.requirementId && handleDeleteRequirement(deleteContext.requirementId)} disabled={isSubmitting}>Delete</Button></DialogFooter></DialogContent>
-          </Dialog>
-        </div>
-      </main>
+        <ResizableHandle withHandle />
+
+        {/* MAIN CONTENT PANEL */}
+        <ResizablePanel defaultSize={80}>
+          <main className="h-full flex flex-col overflow-hidden">
+            <div className="h-full overflow-auto p-4 space-y-4">
+              <header className="flex items-center justify-between"><div><h2 className="text-3xl font-bold tracking-tight">Requirement Logic Manager</h2></div></header>
+              {!activeDept ? <Card className="p-20 text-center"><FileText className="mx-auto h-12 w-12 text-slate-300 mb-4" /><p>Select a department to manage logic.</p></Card> : renderMainContent()}
+
+              <AddRequirementsDialog isOpen={isAddDialogOpen} onOpenChange={setIsAddDialogOpen} onSubmit={handleAddRequirements} isSubmitting={isSubmitting} context={addContext} />
+              <EditRequirementDialog isOpen={isEditDialogOpen} onOpenChange={setIsEditDialogOpen} requirement={editingRequirement} onSave={handleSaveRequirement} isSubmitting={isSubmitting} context={editingContext} />
+
+              <EditJobQuestionDialog
+                isOpen={isEditQuestionDialogOpen}
+                onOpenChange={setIsEditQuestionDialogOpen}
+                question={editingQuestion}
+                allQuestions={activeSelection.questions || []}
+                onSave={handleSaveQuestion}
+                isSubmitting={isSubmitting}
+                masterFields={masterFields}
+              />
+
+              <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+                <DialogContent><DialogHeader><DialogTitle>Confirm Delete</DialogTitle></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>Cancel</Button><Button variant="destructive" onClick={() => deleteContext?.requirementId && handleDeleteRequirement(deleteContext.requirementId)} disabled={isSubmitting}>Delete</Button></DialogFooter></DialogContent>
+              </Dialog>
+            </div>
+          </main>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </div>
   )
 }

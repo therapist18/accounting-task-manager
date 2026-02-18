@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Loader2, PlusCircle, Trash2, FileText, Pencil, Save, RefreshCw, ChevronDown, Check, ChevronsUpDown, Link2, X, Search, View, Download, UserCog, Users, User, Code, Hash, Database, Sparkles, HelpCircle, Layers, Info, ArrowUp, ArrowDown } from "lucide-react";
+import { Loader2, PlusCircle, Trash2, FileText, Pencil, Save, RefreshCw, ChevronDown, Check, ChevronsUpDown, Link2, X, Search, View, Download, UserCog, Users, User, Code, Hash, Database, Sparkles, HelpCircle, Layers, Info, ArrowUp, ArrowDown, Plus } from "lucide-react";
 import { DocxLivePreview } from "@/components/DocxLivePreview";
 import { DocumentTemplate as BaseDocumentTemplate } from "./types";
 import { TableHeader, Table, TableBody, TableCell, TableHead, TableRow } from "@/components/ui/table";
@@ -24,7 +24,9 @@ import Docxtemplater from "docxtemplater";
 import PizZip from "pizzip";
 import InspectModule from 'docxtemplater/js/inspect-module';
 import { renderAsync } from "docx-preview";
-import { EntityType, ENTITY_TYPES, DEPENDANT_RELATIONSHIPS } from "@/lib/constants/entity-types";
+import { EntityType, ENTITY_TYPES, DEPENDANT_RELATIONSHIPS, DIRECTOR_TYPES, type DirectorType } from "@/lib/constants/entity-types";
+import { COMPUTED_FUNCTIONS, EXECUTION_MODES, LINKING_VARIABLES } from "@/lib/constants/computed-functions";
+import { useTableData, type TableOption } from "@/lib/tableUtils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 const cn = (...classes: any[]) => classes.filter(Boolean).join(' ');
@@ -115,6 +117,7 @@ type Placeholder = {
   id: string;
   name: string;
   description?: string;
+  display_value?: string;
   type: 'text' | 'number' | 'date' | 'select' | 'array' | 'conditional' | 'image' | 'boolean' | 'ordinal' | 'document_checklist';
   array_direction?: 'horizontal' | 'vertical';
   boolean_conditions?: BooleanCondition[];
@@ -124,7 +127,7 @@ type Placeholder = {
   entity_type: EntityType[];
   parent_name?: string;
   is_block_start?: boolean;
-  director_type?: 'all' | 'primary';
+  director_type?: DirectorType;
   dependant_relationship?: string[];
   conditions?: ConditionalCondition[];
   ordinal_format?: 'number' | 'word' | 'custom';
@@ -132,12 +135,15 @@ type Placeholder = {
   source_logic?: 'all' | 'priority'
   linked_document_ids?: string[];
   checklist_display_format?: 'bullets' | 'checkboxes' | 'table';
-  // NEW: Data source configuration
-  checklist_data_source?: {
+  // NEW: Data source configuration - now supports multiple sources with entity contexts
+  checklist_data_sources?: Array<{
     table: 'acc_portal_kyc_uploads' | 'acc_portal_directors_documents';
     linking_variable: string; // e.g., 'company_id', 'director_id', 'individual_id'
-    document_id_field: string; // e.g., 'kyc_document_id', 'document_id'
-  };
+    id: string; // unique identifier for this mapping
+    entity_types: EntityType[]; // entity context for this specific data source
+    computed_function?: string; // computed function for this data source
+    linked_document_ids?: string[]; // documents linked to this data source
+  }>;
   // NEW: Image size properties
   image_width?: string;
   image_height?: string;
@@ -147,6 +153,12 @@ type Placeholder = {
   linked_job_question_ids?: string[]; // Plural
   linked_requirement_ids?: string[];
   default_value?: string;
+  computed_function?: string;
+  execution_mode?: 'all' | 'latest';
+  // NEW: Image-specific fields for data extraction
+  source_table?: string;
+  linking_variable?: "id" | "individual_id" | "director_id" | "document_id" | "company_id" | null;
+  linked_master_field_id?: string;
 };
 
 const getCleanText = (str: string) => str.replace(/<[^>]+>/g, '');
@@ -377,6 +389,336 @@ function JobQuestionPicker({
             <HelpCircle className="h-3 w-3" />
             <span className="max-w-[200px] truncate">{selectedQuestion.label}</span>
           </Badge>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DataSourceMappingManager({
+  dataSources,
+  onChange,
+  availableDocuments,
+}: {
+  dataSources: Array<{
+    id: string;
+    table: 'acc_portal_kyc_uploads' | 'acc_portal_directors_documents';
+    linking_variable: string;
+    entity_types: EntityType[];
+    computed_function?: string;
+    linked_document_ids?: string[];
+  }>;
+  onChange: (dataSources: Array<{
+    id: string;
+    table: 'acc_portal_kyc_uploads' | 'acc_portal_directors_documents';
+    linking_variable: string;
+    entity_types: EntityType[];
+    computed_function?: string;
+    linked_document_ids?: string[];
+  }>) => void;
+  availableDocuments: Array<{ id: string; display_name: string; name: string }>;
+}) {
+  const addDataSource = () => {
+    const newDataSource = {
+      id: Date.now().toString(),
+      table: 'acc_portal_kyc_uploads' as const,
+      linking_variable: 'company_id',
+      entity_types: ['company'] as EntityType[],
+      computed_function: 'none',
+      linked_document_ids: [] as string[]
+    };
+    onChange([...dataSources, newDataSource]);
+  };
+
+  const updateDataSource = (id: string, updates: Partial<typeof dataSources[0]>) => {
+    onChange(dataSources.map(ds => ds.id === id ? { ...ds, ...updates } : ds));
+  };
+
+  const removeDataSource = (id: string) => {
+    if (dataSources.length > 1) {
+      onChange(dataSources.filter(ds => ds.id !== id));
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      {dataSources.map((dataSource, index) => (
+        <div key={dataSource.id} className="p-3 bg-white rounded-lg border border-slate-200 space-y-3">
+          <div className="flex items-center justify-between">
+            <Label className="text-[10px] font-bold text-blue-700">Data Source {index + 1}</Label>
+            {dataSources.length > 1 && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => removeDataSource(dataSource.id)}
+                className="h-6 w-6 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 gap-3">
+            <div className="space-y-1">
+              <Label className="text-[9px] text-slate-500 font-semibold">Entity Context</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" role="combobox" className="w-full h-7 text-xs justify-between bg-white">
+                    {dataSource.entity_types.length > 0
+                      ? `${dataSource.entity_types.length} entit${dataSource.entity_types.length > 1 ? 'ies' : 'y'} selected`
+                      : "Select entity types..."
+                    }
+                    <ChevronsUpDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-full p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search entity types..." className="h-7 text-xs" />
+                    <CommandList>
+                      <CommandEmpty>No entity types found.</CommandEmpty>
+                      <CommandGroup className="max-h-[200px] overflow-y-auto">
+                        {ENTITY_TYPES.map((type) => {
+                          const isSelected = dataSource.entity_types.includes(type.value);
+                          return (
+                            <CommandItem
+                              key={type.value}
+                              value={type.value}
+                              onSelect={() => {
+                                const current = dataSource.entity_types;
+                                if (isSelected) {
+                                  updateDataSource(dataSource.id, {
+                                    entity_types: current.filter(t => t !== type.value)
+                                  });
+                                } else {
+                                  updateDataSource(dataSource.id, {
+                                    entity_types: [...current, type.value]
+                                  });
+                                }
+                              }}
+                              className="cursor-pointer text-xs"
+                            >
+                              <div className={`mr-2 flex h-3 w-3 items-center justify-center rounded-sm border border-primary ${isSelected ? 'bg-primary text-primary-foreground' : 'opacity-50'}`}>
+                                {isSelected && <Check className="h-2 w-2" />}
+                              </div>
+                              <span className="text-xs">{type.label}</span>
+                            </CommandItem>
+                          );
+                        })}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-[9px] text-slate-500 font-semibold">Source Table</Label>
+              <Select
+                value={dataSource.table}
+                onValueChange={(v: 'acc_portal_kyc_uploads' | 'acc_portal_directors_documents') =>
+                  updateDataSource(dataSource.id, { table: v })
+                }
+              >
+                <SelectTrigger className="h-7 text-xs bg-white"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="acc_portal_kyc_uploads">KYC Uploads Table</SelectItem>
+                  <SelectItem value="acc_portal_directors_documents">Directors Docs Table</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-[9px] text-slate-500 font-semibold">Linking Field</Label>
+              <Input
+                className="h-7 text-xs bg-white"
+                placeholder="e.g. company_id"
+                value={dataSource.linking_variable}
+                onChange={e => updateDataSource(dataSource.id, { linking_variable: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-[9px] text-slate-500 font-semibold">Computed Function</Label>
+              <Select
+                value={dataSource.computed_function || 'none'}
+                onValueChange={(v) => {
+                  updateDataSource(dataSource.id, { computed_function: v });
+                }}
+              >
+                <SelectTrigger className="h-7 text-xs bg-white"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {COMPUTED_FUNCTIONS.map(fn => (
+                    <SelectItem key={fn.value} value={fn.value} className="text-xs">
+                      {fn.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-[9px] text-slate-500 font-semibold">Selected Documents</Label>
+              <DocumentPicker
+                documents={availableDocuments}
+                selectedDocumentIds={dataSource.linked_document_ids || []}
+                onSelect={(documentId) => {
+                  const current = dataSource.linked_document_ids || [];
+                  updateDataSource(dataSource.id, {
+                    linked_document_ids: [...current, documentId]
+                  });
+                }}
+                onRemove={(documentId) => {
+                  const current = dataSource.linked_document_ids || [];
+                  updateDataSource(dataSource.id, {
+                    linked_document_ids: current.filter(id => id !== documentId)
+                  });
+                }}
+                onClear={() => {
+                  updateDataSource(dataSource.id, {
+                    linked_document_ids: []
+                  });
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      ))}
+
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={addDataSource}
+        className="w-full h-8 border-dashed border-blue-300 text-blue-600 hover:bg-blue-100"
+      >
+        <PlusCircle className="h-3 w-3 mr-2" />
+        Add Data Source Mapping
+      </Button>
+    </div>
+  );
+}
+
+function DocumentPicker({
+  documents,
+  selectedDocumentIds = [],
+  onSelect,
+  onRemove,
+  onClear,
+}: {
+  documents: Array<{ id: string; display_name: string; name: string }>;
+  selectedDocumentIds?: string[];
+  onSelect: (documentId: string) => void;
+  onRemove: (documentId: string) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const selectedDocuments = useMemo(() =>
+    documents.filter(d => selectedDocumentIds.includes(d.id)),
+    [documents, selectedDocumentIds]);
+
+  const filteredDocuments = useMemo(() => {
+    if (!search) return documents;
+    const searchLower = search.toLowerCase();
+    return documents.filter(document =>
+      document.display_name?.toLowerCase().includes(searchLower) ||
+      document.name?.toLowerCase().includes(searchLower)
+    );
+  }, [documents, search]);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>
+            <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between">
+              <span className="truncate">
+                {selectedDocuments.length > 0
+                  ? `${selectedDocuments.length} document${selectedDocuments.length > 1 ? 's' : ''} selected`
+                  : "Select documents..."}
+              </span>
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+            <Command>
+              <CommandInput
+                placeholder="Search documents..."
+                value={search}
+                onValueChange={setSearch}
+              />
+              <CommandList>
+                <CommandEmpty>No documents found.</CommandEmpty>
+                <CommandGroup className="max-h-[300px] overflow-y-auto">
+                  {filteredDocuments.map((document) => {
+                    const isSelected = selectedDocumentIds.includes(document.id);
+                    return (
+                      <CommandItem
+                        key={document.id}
+                        value={document.display_name || document.name}
+                        onSelect={() => {
+                          if (isSelected) {
+                            onRemove(document.id);
+                          } else {
+                            onSelect(document.id);
+                          }
+                        }}
+                        className="cursor-pointer"
+                      >
+                        <div className="flex items-center">
+                          <div className={`mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary ${isSelected ? 'bg-primary text-primary-foreground' : 'opacity-50'}`}>
+                            {isSelected && <Check className="h-3 w-3" />}
+                          </div>
+                          <div>
+                            <div className="font-medium">{document.display_name || document.name}</div>
+                          </div>
+                        </div>
+                      </CommandItem>
+                    );
+                  })}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+        {selectedDocuments.length > 0 && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClear();
+            }}
+          >
+            <X className="h-4 w-4 text-muted-foreground" />
+          </Button>
+        )}
+      </div>
+
+      {selectedDocuments.length > 0 && (
+        <div className="flex flex-wrap gap-2 mt-2">
+          {selectedDocuments.map(document => (
+            <Badge
+              key={document.id}
+              variant="secondary"
+              className="flex items-center gap-1.5 pr-1.5 bg-green-50 text-green-700 border-green-200"
+            >
+              <FileText className="h-3 w-3" />
+              <span className="max-w-[200px] truncate">{document.display_name || document.name}</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemove(document.id);
+                }}
+                className="ml-1 rounded-full p-0.5 hover:bg-muted"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          ))}
         </div>
       )}
     </div>
@@ -641,22 +983,35 @@ export default function DocumentTemplateManager({
     id: '',
     name: '',
     description: '',
+    display_value: '',
     type: 'text',
     required: false,
     entity_type: [],
     default_value: '',
     array_direction: 'vertical',
-    checklist_data_source: {
-      table: 'acc_portal_kyc_uploads',
-      linking_variable: 'company_id',
-      document_id_field: 'kyc_document_id'
-    },
+    checklist_data_sources: [
+      {
+        id: 'default',
+        table: 'acc_portal_kyc_uploads',
+        linking_variable: 'company_id',
+        entity_types: ['company'],
+        computed_function: 'none',
+        linked_document_ids: []
+      }
+    ],
     image_width: '',
     image_height: '',
     linked_job_question_id: undefined,
-    linked_requirement_id: undefined
+    linked_requirement_id: undefined,
+    director_type: 'all',
+    dependant_relationship: [],
+    computed_function: 'none',
+    execution_mode: 'latest',
+    source_table: '',
+    linking_variable: null,
+    linked_master_field_id: undefined,
   });
-  const [directorType, setDirectorType] = useState<'all' | 'primary'>('all');
+  const [directorType, setDirectorType] = useState<DirectorType>('all');
   const [dependantRelationship, setDependantRelationship] = useState<string[]>([]);
   const [templateFiles, setTemplateFiles] = useState<Map<string, File>>(new Map());
   const [masterFields, setMasterFields] = useState<JobField[]>([]);
@@ -671,6 +1026,10 @@ export default function DocumentTemplateManager({
   const [availableFields, setAvailableFields] = useState<string[]>([]);
   const [showLinkPrompt, setShowLinkPrompt] = useState(false);
   const [availableDocuments, setAvailableDocuments] = useState<Array<{ id: string; display_name: string; name: string }>>([]);
+
+  // Table data hook for fetching available tables
+  const { tables, loadingTables } = useTableData();
+  const [kycDocuments, setKycDocuments] = useState<any[]>([]);
 
   // Extract scalar fields from conditional template
   const extractScalarFields = (templateContent: string): string[] => {
@@ -965,6 +1324,7 @@ export default function DocumentTemplateManager({
     if (isOpen) {
       fetchMasterFields();
       fetchJobQuestions();
+      fetchKycDocuments();
       const initialData = initialTemplates?.map(t => ({
         ...t,
         name: t.file_name,
@@ -977,6 +1337,17 @@ export default function DocumentTemplateManager({
       setCurrentTemplateIndex(null);
     }
   }, [isOpen, initialTemplates, jobLevel]);
+
+  const fetchKycDocuments = async () => {
+    try {
+      const { data, error } = await supabase.from('acc_portal_kyc').select('*').order('name');
+      if (error) throw error;
+      setKycDocuments(data || []);
+    } catch (error) {
+      console.error('Error fetching KYC documents:', error);
+      setKycDocuments([]);
+    }
+  };
 
   const validateTemplate = async (file: File): Promise<boolean> => {
     try {
@@ -1254,7 +1625,7 @@ export default function DocumentTemplateManager({
     }
   };
 
-const handleRescanPlaceholders = async () => {
+  const handleRescanPlaceholders = async () => {
     if (!currentTemplate || currentTemplateIndex === null) return;
 
     const source = currentTemplate.content
@@ -1272,13 +1643,13 @@ const handleRescanPlaceholders = async () => {
     // 2. Merge safely
     const updatedTemplates = [...templates];
     const existing = updatedTemplates[currentTemplateIndex].placeholders || [];
-    
+
     updatedTemplates[currentTemplateIndex].placeholders = mergePlaceholders(
       existing,
       newlyExtracted,
       masterFields
     );
-    
+
     updatedTemplates[currentTemplateIndex].isDirty = false;
     setTemplates(updatedTemplates);
 
@@ -1517,7 +1888,7 @@ const handleRescanPlaceholders = async () => {
   ): Placeholder[] => {
     // Map existing placeholders by name for quick lookup
     const existingMap = new Map(existingPlaceholders.map(p => [p.name, p]));
-    
+
     // We iterate through the newly extracted placeholders to maintain the order found in the document
     return newlyExtracted.map(newPh => {
       const existing = existingMap.get(newPh.name);
@@ -1525,7 +1896,7 @@ const handleRescanPlaceholders = async () => {
       if (existing) {
         // TAG EXISTS: Preserving user-defined logic
         console.log(`[MERGE] Preserving data for tag: {${newPh.name}}`);
-        
+
         return {
           ...existing, // 1. Start with everything the user already configured
           // 2. Overlay structural updates from the new scan
@@ -1533,9 +1904,9 @@ const handleRescanPlaceholders = async () => {
           is_block_start: newPh.is_block_start,
           // Only update type if it's structural (e.g. was text, now is a {#block})
           // But if the user manually set it to 'date' or 'select', keep that.
-          type: (newPh.type === 'array' || newPh.type === 'conditional' || existing.type === 'image') 
-                ? newPh.type 
-                : existing.type,
+          type: (newPh.type === 'array' || newPh.type === 'conditional' || existing.type === 'image')
+            ? newPh.type
+            : existing.type,
           // Keep description unless it was empty and we have a new one from the scanner
           description: existing.description || newPh.description,
         };
@@ -1585,12 +1956,12 @@ const handleRescanPlaceholders = async () => {
     setCurrentTemplateIndex(updatedTemplates.length - 1);
   };
 
-const handleEditorChange = (content: { html: string; header?: string; footer?: string } | string) => {
+  const handleEditorChange = (content: { html: string; header?: string; footer?: string } | string) => {
     if (currentTemplateIndex === null) return;
     const updatedTemplates = [...templates];
-    
+
     let processedHtml = '';
-    
+
     if (typeof content === 'string') {
       processedHtml = content;
     } else {
@@ -1607,12 +1978,12 @@ const handleEditorChange = (content: { html: string; header?: string; footer?: s
     setTemplates(updatedTemplates);
   };
 
-const preserveFormat = (html: string) => {
-  if (!html) return html;
-  return html
-    .replace(/ {2,}/g, (match) => '&nbsp;'.repeat(match.length)) // Convert multiple spaces to &nbsp;
-    .replace(/\n/g, '<br />'); // Ensure literal newlines become HTML breaks
-};
+  const preserveFormat = (html: string) => {
+    if (!html) return html;
+    return html
+      .replace(/ {2,}/g, (match) => '&nbsp;'.repeat(match.length)) // Convert multiple spaces to &nbsp;
+      .replace(/\n/g, '<br />'); // Ensure literal newlines become HTML breaks
+  };
 
   const handleTemplateNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (currentTemplateIndex === null) return;
@@ -1704,11 +2075,14 @@ const preserveFormat = (html: string) => {
       ...(newPlaceholder.type === 'document_checklist' && {
         linked_document_ids: newPlaceholder.linked_document_ids || [],
         checklist_display_format: newPlaceholder.checklist_display_format || 'checkboxes',
-        checklist_data_source: newPlaceholder.checklist_data_source || {
-          table: 'acc_portal_kyc_uploads',
-          linking_variable: 'company_id',
-          document_id_field: 'kyc_document_id'
-        }
+        checklist_data_sources: newPlaceholder.checklist_data_sources || [
+          {
+            id: 'default',
+            table: 'acc_portal_kyc_uploads',
+            linking_variable: 'company_id',
+            document_id_field: 'kyc_document_id'
+          }
+        ],
       }),
       // Include default_value field
       default_value: newPlaceholder.default_value || ''
@@ -1736,6 +2110,7 @@ const preserveFormat = (html: string) => {
       id: '',
       name: '',
       description: '',
+      display_value: '',
       type: 'text',
       required: false,
       entity_type: [],
@@ -1747,7 +2122,24 @@ const preserveFormat = (html: string) => {
       image_width: '',
       image_height: '',
       linked_job_question_id: undefined,
-      linked_requirement_id: undefined
+      linked_requirement_id: undefined,
+      director_type: 'all',
+      dependant_relationship: [],
+      computed_function: 'none',
+      execution_mode: 'latest',
+      source_table: '',
+      linking_variable: null,
+      linked_master_field_id: undefined,
+      checklist_data_sources: [
+        {
+          id: 'default',
+          table: 'acc_portal_kyc_uploads',
+          linking_variable: 'company_id',
+          entity_types: ['company'],
+          computed_function: 'none',
+          linked_document_ids: []
+        }
+      ],
     });
 
     setDirectorType('all');
@@ -1773,11 +2165,29 @@ const preserveFormat = (html: string) => {
       is_ai_generated: placeholder.is_ai_generated || false, // Add this
       ai_prompt: placeholder.ai_prompt || '',
       default_value: placeholder.default_value || '',
+      display_value: placeholder.display_value || '',
+      director_type: placeholder.director_type || 'all',
+      dependant_relationship: placeholder.dependant_relationship || [],
+      computed_function: placeholder.computed_function || 'none',
+      execution_mode: placeholder.execution_mode || 'latest',
+      source_table: placeholder.source_table || '',
+      linking_variable: placeholder.linking_variable || null,
+      linked_master_field_id: placeholder.linked_master_field_id || undefined,
+      checklist_data_sources: placeholder.checklist_data_sources || [
+        {
+          id: 'default',
+          table: 'acc_portal_kyc_uploads',
+          linking_variable: 'company_id',
+          entity_types: ['company'],
+          computed_function: 'none',
+          linked_document_ids: []
+        }
+      ],
     });
 
     // Set director type if applicable
     if (placeholder.entity_type?.includes('director') && placeholder.director_type) {
-      setDirectorType(placeholder.director_type as 'all' | 'primary');
+      setDirectorType(placeholder.director_type as DirectorType);
     } else {
       setDirectorType('all');
     }
@@ -1839,24 +2249,44 @@ const preserveFormat = (html: string) => {
     });
   };
 
-const uploadAndSaveAll = async () => {
+  const uploadAndSaveAll = async () => {
     setIsProcessing(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       for (const template of templates) {
         let filePath = template.file_path;
-        
+
+        // If template has a file to upload, upload it to kyc-templates/document_id structure
+        if (template.id.startsWith('temp_') && templateFiles.has(template.id)) {
+          const file = templateFiles.get(template.id);
+          if (file) {
+            // Create the new file path in kyc-templates/document_id structure
+            const fileName = `${Date.now()}_${file.name}`;
+            filePath = `kyc-templates/${document.id}/${fileName}`;
+
+            // Upload file to the new path
+            const { error: uploadError } = await supabase.storage
+              .from('templates')
+              .upload(filePath, file, {
+                contentType: file.type,
+                upsert: true
+              });
+
+            if (uploadError) throw uploadError;
+          }
+        }
+
         // If it's an HTML template (Text Template), sanitize whitespace
         let finalContent = template.content;
         if (finalContent && !template.file_name) {
-           // Only apply this to Text Templates, not docx binary references
-           finalContent = preserveFormat(finalContent);
+          // Only apply this to Text Templates, not docx binary references
+          finalContent = preserveFormat(finalContent);
         }
 
-       const templateData = {
+        const templateData = {
           file_name: template.name,
           document_id: document.id,
-          file_path: filePath,
+          file_path: filePath, // Updated with new path
           content: finalContent, // Use the sanitized content
           file_type: template.file_type,
           file_size: template.file_size,
@@ -1933,13 +2363,32 @@ const uploadAndSaveAll = async () => {
       if (error) throw error;
 
       const url = URL.createObjectURL(data);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = currentTemplate.file_name || 'document.docx';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+
+      // More robust client-side check
+      if (typeof window !== 'undefined' && typeof document !== 'undefined' && document.createElement) {
+        try {
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = currentTemplate.file_name || 'document.docx';
+          a.style.display = 'none';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        } catch (domError) {
+          console.error('DOM manipulation error:', domError);
+          // Fallback: open in new tab
+          window.open(url, '_blank');
+          setTimeout(() => URL.revokeObjectURL(url), 100);
+        }
+      } else {
+        console.error('Download not available in this environment');
+        // Fallback for non-browser environments
+        if (typeof window !== 'undefined') {
+          window.open(url, '_blank');
+          setTimeout(() => URL.revokeObjectURL(url), 100);
+        }
+      }
     } catch (error) {
       console.error('Error downloading file:', error);
       toast({
@@ -1950,7 +2399,7 @@ const uploadAndSaveAll = async () => {
     }
   };
 
- const handleManualRescan = async () => {
+  const handleManualRescan = async () => {
     if (!currentTemplate || currentTemplateIndex === null) return;
 
     try {
@@ -1965,9 +2414,9 @@ const uploadAndSaveAll = async () => {
           extracted = await extractPlaceholders({ type: 'file', content: file });
         }
       } else {
-        extracted = await extractPlaceholders({ 
-          type: 'text', 
-          content: currentTemplate.content || '' 
+        extracted = await extractPlaceholders({
+          type: 'text',
+          content: currentTemplate.content || ''
         });
       }
 
@@ -2025,7 +2474,7 @@ const uploadAndSaveAll = async () => {
             <Button variant={panelsVisible.right ? 'secondary' : 'ghost'} size="sm" onClick={() => togglePanel('right')}>Placeholders</Button>
           </div>
 
-          <div className="grid grid-cols-12 gap-6 py-4 flex-1 overflow-y-auto">
+          <div className="grid grid-cols-12 gap-6 py-4 flex-1 overflow-y-auto h-[calc(100vh - 150px)]">
             {/* Left Panel */}
             <div className={`${panelClasses.left} flex flex-col gap-6 h-full transition-all duration-300`}>
               <Card>
@@ -2216,124 +2665,133 @@ const uploadAndSaveAll = async () => {
                   <CardContent className="flex-1 overflow-y-auto min-h-[400px]">
                     {currentTemplate?.placeholders?.length > 0 ? (
                       filteredPlaceholders.length > 0 ? (
-                        <Table className="border max-h-[calc(100vh - 300px)]">
-                          <TableHeader className="bg-gray-100"><TableRow>
-                            <TableHead className="border-r font-bold text-gray-700">Field</TableHead>
-                            <TableHead className="border-r font-bold text-gray-700">Type</TableHead>
-                            <TableHead className="border-r font-bold text-gray-700">Entity</TableHead>
-                            <TableHead className="border-r font-bold text-gray-700">Linked Master Field</TableHead>
-                            <TableHead className="border-r font-bold text-gray-700">Default Value</TableHead>
-                            <TableHead className="text-right border-r font-bold text-gray-700">Actions</TableHead>
-                          </TableRow></TableHeader>
-                          <TableBody>
-                            {filteredPlaceholders.map((p) => {
-                              const isChild = !!p.parent_name;
-                              const isBlock = p.is_block_start;
-                              const originalIndex = currentTemplate.placeholders.findIndex(orig => orig.id === p.id);
+                        <div className="h-[950px] overflow-auto">
+                          <Table className="border">
+                            <TableHeader className="bg-gray-100 sticky top-0 z-10"><TableRow>
+                              <TableHead className="border-r font-bold text-gray-700">Field</TableHead>
+                              <TableHead className="border-r font-bold text-gray-700">Display Value</TableHead>
+                              <TableHead className="border-r font-bold text-gray-700">Type</TableHead>
+                              <TableHead className="border-r font-bold text-gray-700">Entity</TableHead>
+                              <TableHead className="border-r font-bold text-gray-700">Linked Master Field</TableHead>
+                              <TableHead className="border-r font-bold text-gray-700">Default Value</TableHead>
+                              <TableHead className="text-right border-r font-bold text-gray-700">Actions</TableHead>
+                            </TableRow></TableHeader>
+                            <TableBody>
+                              {filteredPlaceholders.map((p) => {
+                                const isChild = !!p.parent_name;
+                                const isBlock = p.is_block_start;
+                                const originalIndex = currentTemplate.placeholders.findIndex(orig => orig.id === p.id);
 
-                              return (
-                                <TableRow
-                                  key={p.id}
-                                  className={cn(
-                                    isChild && "bg-muted/10 hover:bg-muted/20",
-                                    isBlock && "bg-blue-50/40 hover:bg-blue-50/60"
-                                  )}
-                                >
-                                  <TableCell className="border-r">
-                                    <div className={cn(
-                                      "flex items-center gap-2 font-mono text-sm",
-                                      isChild && "pl-8 border-l-2 border-blue-200 ml-2"
-                                    )}>
-                                      {isBlock ? (
-                                        <Badge className="bg-blue-600 hover:bg-blue-700 h-5 px-1.5 text-[10px]">ARRAY</Badge>
-                                      ) : isChild ? (
-                                        <Link2 className="h-3 w-3 text-blue-400" />
-                                      ) : (
-                                        <FileText className="h-3.5 w-3.5 text-muted-foreground" />
-                                      )}
-                                      <span className={cn(isBlock && "font-bold text-blue-800")}>
-                                        {isBlock ? `{#${p.name}}` : `{${p.name}}`}
+                                return (
+                                  <TableRow
+                                    key={p.id}
+                                    className={cn(
+                                      isChild && "bg-muted/10 hover:bg-muted/20",
+                                      isBlock && "bg-blue-50/40 hover:bg-blue-50/60"
+                                    )}
+                                  >
+                                    <TableCell className="border-r">
+                                      <div className={cn(
+                                        "flex items-center gap-2 font-mono text-sm",
+                                        isChild && "pl-8 border-l-2 border-blue-200 ml-2"
+                                      )}>
+                                        {isBlock ? (
+                                          <Badge className="bg-blue-600 hover:bg-blue-700 h-5 px-1.5 text-[10px]">ARRAY</Badge>
+                                        ) : isChild ? (
+                                          <Link2 className="h-3 w-3 text-blue-400" />
+                                        ) : (
+                                          <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                                        )}
+                                        <span className={cn(isBlock && "font-bold text-blue-800")}>
+                                          {isBlock ? `{#${p.name}}` : `{${p.name}}`}
+                                        </span>
+                                      </div>
+                                    </TableCell>
+
+                                    <TableCell className="border-r">
+                                      <span className="text-sm text-gray-700">
+                                        {p.display_value || '-'}
                                       </span>
-                                    </div>
-                                  </TableCell>
+                                    </TableCell>
 
-                                  <TableCell className="border-r">
-                                    <Badge variant="outline" className="capitalize text-[10px]">
-                                      {p.type}
-                                    </Badge>
-                                  </TableCell>
+                                    <TableCell className="border-r">
+                                      <Badge variant="outline" className="capitalize text-[10px]">
+                                        {p.type}
+                                      </Badge>
+                                    </TableCell>
 
-                                  <TableCell className="border-r">
-                                    <Badge
-                                      variant="secondary"
-                                      className={cn(
-                                        "capitalize text-[10px]",
-                                        isChild && "bg-blue-100 text-blue-700"
-                                      )}
-                                    >
-                                      {p.entity_type}
-                                    </Badge>
-                                  </TableCell>
+                                    <TableCell className="border-r">
+                                      <Badge
+                                        variant="secondary"
+                                        className={cn(
+                                          "capitalize text-[10px]",
+                                          isChild && "bg-blue-100 text-blue-700"
+                                        )}
+                                      >
+                                        {p.entity_type}
+                                      </Badge>
+                                    </TableCell>
 
-                                  <TableCell className="border-r">
-                                    <div className="space-y-1">
-                                      {p.master_field_ids?.length > 0 && (
-                                        <div className="flex flex-wrap gap-1">
-                                          {p.master_field_ids.map(id => (
-                                            <Badge key={id} variant="outline" className="text-[9px] bg-white">
-                                              {masterFieldMap.get(id) || id}
-                                            </Badge>
-                                          ))}
-                                        </div>
-                                      )}
+                                    <TableCell className="border-r">
+                                      <div className="space-y-1">
+                                        {p.master_field_ids?.length > 0 && (
+                                          <div className="flex flex-wrap gap-1">
+                                            {p.master_field_ids.map(id => (
+                                              <Badge key={id} variant="outline" className="text-[9px] bg-white">
+                                                {masterFieldMap.get(id) || id}
+                                              </Badge>
+                                            ))}
+                                          </div>
+                                        )}
 
-                                      {p.linked_job_question_id && (
-                                        <Badge variant="outline" className="text-[9px] bg-purple-50 text-purple-700 border-purple-200">
-                                          <HelpCircle className="h-3 w-3 mr-1" />
-                                          {jobQuestions.find(q => q.id === p.linked_job_question_id)?.label || p.linked_job_question_id}
-                                        </Badge>
-                                      )}
+                                        {p.linked_job_question_id && (
+                                          <Badge variant="outline" className="text-[9px] bg-purple-50 text-purple-700 border-purple-200">
+                                            <HelpCircle className="h-3 w-3 mr-1" />
+                                            {jobQuestions.find(q => q.id === p.linked_job_question_id)?.label || p.linked_job_question_id}
+                                          </Badge>
+                                        )}
 
-                                      {p.linked_requirement_id && (
-                                        <Badge variant="outline" className="text-[9px] bg-green-50 text-green-700 border-green-200">
-                                          <Database className="h-3 w-3 mr-1" />
-                                          {requirements.find(r => r.id === p.linked_requirement_id)?.label || p.linked_requirement_id}
-                                        </Badge>
-                                      )}
+                                        {p.linked_requirement_id && (
+                                          <Badge variant="outline" className="text-[9px] bg-green-50 text-green-700 border-green-200">
+                                            <Database className="h-3 w-3 mr-1" />
+                                            {requirements.find(r => r.id === p.linked_requirement_id)?.label || p.linked_requirement_id}
+                                          </Badge>
+                                        )}
 
-                                      {!p.master_field_ids?.length && !p.linked_job_question_id && !p.linked_requirement_id && (
-                                        <span className="text-[10px] text-muted-foreground italic">Not Linked</span>
-                                      )}
-                                    </div>
-                                  </TableCell>
+                                        {!p.master_field_ids?.length && !p.linked_job_question_id && !p.linked_requirement_id && (
+                                          <span className="text-[10px] text-muted-foreground italic">Not Linked</span>
+                                        )}
+                                      </div>
+                                    </TableCell>
 
-                                  <TableCell className="border-r">
-                                    <Badge
-                                      variant="secondary"
-                                      className={cn(
-                                        "capitalize text-[10px]",
-                                        isChild && "bg-blue-100 text-blue-700"
-                                      )}
-                                    >
-                                      {p.default_value}
-                                    </Badge>
-                                  </TableCell>
+                                    <TableCell className="border-r">
+                                      <Badge
+                                        variant="secondary"
+                                        className={cn(
+                                          "capitalize text-[10px]",
+                                          isChild && "bg-blue-100 text-blue-700"
+                                        )}
+                                      >
+                                        {p.default_value}
+                                      </Badge>
+                                    </TableCell>
 
-                                  <TableCell className="text-right">
-                                    <div className="flex justify-end gap-1">
-                                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => editPlaceholder(originalIndex)}>
-                                        <Pencil className="h-3.5 w-3.5" />
-                                      </Button>
-                                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => removePlaceholder(originalIndex)}>
-                                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                                      </Button>
-                                    </div>
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })}
-                          </TableBody>
-                        </Table>
+                                    <TableCell className="text-right">
+                                      <div className="flex justify-end gap-1">
+                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => editPlaceholder(originalIndex)}>
+                                          <Pencil className="h-3.5 w-3.5" />
+                                        </Button>
+                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => removePlaceholder(originalIndex)}>
+                                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                                        </Button>
+                                      </div>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </div>
                       ) : (
                         <div className="text-center p-6 h-full flex items-center justify-center"><p className="text-sm text-muted-foreground">No placeholders match your search.</p></div>
                       )
@@ -2373,6 +2831,16 @@ const uploadAndSaveAll = async () => {
                     value={newPlaceholder.name}
                     onChange={(e) => setNewPlaceholder({ ...newPlaceholder, name: e.target.value.replace(/\s+/g, '_') })}
                     className="font-mono text-sm bg-slate-50"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="display_value" className="text-[11px] font-black uppercase text-slate-400">Display Value</Label>
+                  <Input
+                    id="display_value"
+                    placeholder="e.g. Client First Name"
+                    value={newPlaceholder.display_value || ''}
+                    onChange={(e) => setNewPlaceholder({ ...newPlaceholder, display_value: e.target.value })}
+                    className="bg-slate-50"
                   />
                 </div>
                 <div className="space-y-2">
@@ -2489,6 +2957,72 @@ const uploadAndSaveAll = async () => {
                   </div>
                 </div>
               </div>
+
+              {/* Director & Dependant Configuration */}
+              {(newPlaceholder.entity_type?.includes('director') || newPlaceholder.entity_type?.includes('dependant')) && (
+                <div className="bg-purple-50 p-4 rounded-xl border border-purple-100 space-y-4">
+                  <Label className="text-[11px] font-black uppercase text-purple-600">Entity-Specific Configuration</Label>
+
+                  {newPlaceholder.entity_type?.includes('director') && (
+                    <div className="space-y-2">
+                      <Label className="text-[10px] font-bold text-purple-700">Director Type</Label>
+                      <div className="flex gap-2">
+                        {DIRECTOR_TYPES.map((option) => (
+                          <div key={option.value} className="flex items-center space-x-2">
+                            <input
+                              type="radio"
+                              id={`director-${option.value}`}
+                              name="director-type"
+                              value={option.value}
+                              checked={newPlaceholder.director_type === option.value}
+                              onChange={(e) => setNewPlaceholder(prev => ({ ...prev, director_type: e.target.value as DirectorType }))}
+                              className="h-4 w-4 text-purple-600"
+                            />
+                            <Label htmlFor={`director-${option.value}`} className="text-sm text-purple-700">
+                              {option.label}
+                            </Label>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {newPlaceholder.entity_type?.includes('dependant') && (
+                    <div className="space-y-2">
+                      <Label className="text-[10px] font-bold text-purple-700">Dependant Relationships</Label>
+                      <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                        {DEPENDANT_RELATIONSHIPS.map((relationship) => (
+                          <div key={relationship.value} className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              id={`dep-${relationship.value}`}
+                              checked={newPlaceholder.dependant_relationship?.includes(relationship.value) || false}
+                              onChange={(e) => {
+                                const current = newPlaceholder.dependant_relationship || [];
+                                if (e.target.checked) {
+                                  setNewPlaceholder(prev => ({
+                                    ...prev,
+                                    dependant_relationship: [...current, relationship.value]
+                                  }));
+                                } else {
+                                  setNewPlaceholder(prev => ({
+                                    ...prev,
+                                    dependant_relationship: current.filter(r => r !== relationship.value)
+                                  }));
+                                }
+                              }}
+                              className="h-4 w-4 text-purple-600 rounded"
+                            />
+                            <Label htmlFor={`dep-${relationship.value}`} className="text-sm text-purple-700">
+                              {relationship.label}
+                            </Label>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* CONDITIONAL LOGIC BLOCKS */}
               {newPlaceholder.type === 'conditional' && (
@@ -2636,7 +3170,7 @@ const uploadAndSaveAll = async () => {
                             setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
                           }}
                         ><X className="h-3.3 w-3.3" /></Button>
-                                                <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-2 gap-2">
                           <Input placeholder="Tag (e.g. male)" value={cond.tag} onChange={e => {
                             const updated = [...newPlaceholder.boolean_conditions];
                             updated[idx].tag = e.target.value.toLowerCase();
@@ -2648,30 +3182,30 @@ const uploadAndSaveAll = async () => {
                             setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
                           }} className="h-8 text-xs" />
                         </div>
-                          <div className="flex gap-2 items-center bg-slate-50 p-2 rounded">
-                            <Label className="text-[9px] font-bold text-slate-500">IF VALUE</Label>
-                            <Select
-                              value={cond.comparison?.operator || 'equals'}
-                              onValueChange={v => {
-                                const updated = [...newPlaceholder.boolean_conditions];
-                                updated[idx].comparison = { ...updated[idx].comparison, operator: v };
-                                setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
-                              }}
-                            >
-                              <SelectTrigger className="h-6 text-[10px] w-24 bg-white"><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="equals">Equals</SelectItem>
-                                <SelectItem value="not_equals">Not Equals</SelectItem>
-                                <SelectItem value="contains">Contains</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <Input placeholder="Value..." value={cond.comparison?.value} onChange={e => {
+                        <div className="flex gap-2 items-center bg-slate-50 p-2 rounded">
+                          <Label className="text-[9px] font-bold text-slate-500">IF VALUE</Label>
+                          <Select
+                            value={cond.comparison?.operator || 'equals'}
+                            onValueChange={v => {
                               const updated = [...newPlaceholder.boolean_conditions];
-                              updated[idx].comparison = { ...updated[idx].comparison, value: e.target.value };
+                              updated[idx].comparison = { ...updated[idx].comparison, operator: v };
                               setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
-                            }} className="h-6 text-xs bg-white" />
-                          </div>
-                                {/* Master Field Selection */}
+                            }}
+                          >
+                            <SelectTrigger className="h-6 text-[10px] w-24 bg-white"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="equals">Equals</SelectItem>
+                              <SelectItem value="not_equals">Not Equals</SelectItem>
+                              <SelectItem value="contains">Contains</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Input placeholder="Value..." value={cond.comparison?.value} onChange={e => {
+                            const updated = [...newPlaceholder.boolean_conditions];
+                            updated[idx].comparison = { ...updated[idx].comparison, value: e.target.value };
+                            setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
+                          }} className="h-6 text-xs bg-white" />
+                        </div>
+                        {/* Master Field Selection */}
                         <div className="space-y-2">
                           <Label className="text-[10px] font-bold text-blue-600 uppercase flex items-center gap-1.5">
                             <Database className="h-3 w-3" /> Master Field
@@ -2710,11 +3244,11 @@ const uploadAndSaveAll = async () => {
                       </div>
                     ))}
                     <Button variant="outline" size="sm" className="w-full h-8 border-dashed border-purple-300 text-purple-600 hover:bg-purple-100" onClick={() => {
-                      const updated = [...(newPlaceholder.boolean_conditions || []), { 
-                        tag: '', 
-                        label: '', 
+                      const updated = [...(newPlaceholder.boolean_conditions || []), {
+                        tag: '',
+                        label: '',
                         master_field_id: 0,
-                        comparison: { operator: 'equals', value: '' } 
+                        comparison: { operator: 'equals', value: '' }
                       }];
                       setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
                     }}><PlusCircle className="h-3.5 w-3.5 mr-2" /> Add Logic Option</Button>
@@ -2726,49 +3260,249 @@ const uploadAndSaveAll = async () => {
               {newPlaceholder.type === 'document_checklist' && (
                 <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 space-y-4">
                   <div className="flex items-center justify-between">
-                    <Label className="text-[11px] font-black uppercase text-blue-600">Checklist Data Source Mapping</Label>
-                    <Select
-                      value={newPlaceholder.checklist_data_source?.table || 'acc_portal_kyc_uploads'}
-                      onValueChange={(v) => setNewPlaceholder(prev => ({
-                        ...prev,
-                        checklist_data_source: { ...prev.checklist_data_source, table: v }
-                      }))}
-                    >
-                      <SelectTrigger className="w-48 h-7 text-xs bg-white"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="acc_portal_kyc_uploads">KYC Uploads Table</SelectItem>
-                        <SelectItem value="acc_portal_directors_documents">Directors Docs Table</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Label className="text-[11px] font-black uppercase text-blue-600">Document Checklist Configuration</Label>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <Label className="text-[10px] text-slate-500 font-bold">Linking Field (e.g. company_id)</Label>
-                      <Input className="h-8 text-xs bg-white" value={newPlaceholder.checklist_data_source?.linking_variable} onChange={e => setNewPlaceholder(prev => ({
-                        ...prev, checklist_data_source: { ...prev.checklist_data_source, linking_variable: e.target.value }
-                      }))} />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[10px] text-slate-500 font-bold">Doc ID Field (e.g. kyc_document_id)</Label>
-                      <Input className="h-8 text-xs bg-white" value={newPlaceholder.checklist_data_source?.document_id_field} onChange={e => setNewPlaceholder(prev => ({
-                        ...prev, checklist_data_source: { ...prev.checklist_data_source, document_id_field: e.target.value }
-                      }))} />
-                    </div>
-                  </div>
+                  <div className="space-y-4">
+                    {newPlaceholder.checklist_data_sources?.map((dataSource, index) => (
+                      <div key={dataSource.id} className="bg-white p-4 rounded-lg border border-blue-100 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-sm font-medium text-blue-700">Data Source {index + 1}</Label>
+                          {newPlaceholder.checklist_data_sources!.length > 1 && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                const updated = newPlaceholder.checklist_data_sources!.filter(ds => ds.id !== dataSource.id);
+                                setNewPlaceholder(prev => ({ ...prev, checklist_data_sources: updated }));
+                              }}
+                              className="text-red-600 hover:text-red-700"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
 
-                  <div className="space-y-2">
-                    <Label className="text-[10px] text-slate-500 font-bold">Selected Tracking Documents</Label>
-                    <div className="flex flex-wrap gap-2 p-2 bg-white rounded border min-h-[40px]">
-                      {newPlaceholder.linked_document_ids?.map(id => (
-                        <Badge key={id} variant="secondary" className="bg-blue-50 text-blue-700">
-                          {availableDocuments.find(d => d.id === id)?.display_name || id}
-                          <X className="ml-1 h-3 w-3 cursor-pointer" onClick={() => setNewPlaceholder(prev => ({
-                            ...prev, linked_document_ids: prev.linked_document_ids.filter(lid => lid !== id)
-                          }))} />
-                        </Badge>
-                      ))}
-                    </div>
+                        <div className="grid grid-cols-1 gap-4">
+                          <div className="space-y-2">
+                            <Label className="text-xs font-bold text-slate-500">Entity Types</Label>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="outline" className="w-full justify-between border-dashed border-2 hover:border-primary hover:bg-slate-50 transition-all">
+                                  <span className="text-slate-400">
+                                    {dataSource.entity_types?.length > 0
+                                      ? dataSource.entity_types.map(et => ENTITY_TYPES.find(t => t.value === et)?.label || et).join(', ')
+                                      : "Select entity types..."
+                                    }
+                                  </span>
+                                  <ChevronDown className="h-4 w-4 opacity-50" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent className="w-[300px] max-h-[200px] overflow-y-auto">
+                                {ENTITY_TYPES.map(entity => (
+                                  <DropdownMenuCheckboxItem
+                                    key={entity.value}
+                                    checked={dataSource.entity_types?.includes(entity.value) || false}
+                                    onCheckedChange={(checked) => {
+                                      const current = dataSource.entity_types || [];
+                                      const updated = checked
+                                        ? [...current, entity.value]
+                                        : current.filter(et => et !== entity.value);
+                                      const updatedDataSources = newPlaceholder.checklist_data_sources!.map(ds =>
+                                        ds.id === dataSource.id ? { ...ds, entity_types: updated } : ds
+                                      );
+                                      setNewPlaceholder(prev => ({ ...prev, checklist_data_sources: updatedDataSources }));
+                                    }}
+                                  >
+                                    <span className="text-sm">{entity.label}</span>
+                                  </DropdownMenuCheckboxItem>
+                                ))}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label className="text-xs font-bold text-slate-500">Document Links</Label>
+                            <div className="space-y-2">
+                              {dataSource.linked_document_ids?.length > 0 && (
+                                <div className="flex flex-wrap gap-1">
+                                  {dataSource.linked_document_ids.map(docId => {
+                                    const doc = kycDocuments.find(d => String(d.id) === String(docId))
+                                    return doc ? (
+                                      <Badge key={docId} variant="secondary" className="text-xs px-2 py-1">
+                                        {doc.display_name || doc.name}
+                                        <button
+                                          onClick={() => {
+                                            const current = dataSource.linked_document_ids || [];
+                                            const updated = current.filter(id => id !== String(docId));
+                                            const updatedDataSources = newPlaceholder.checklist_data_sources!.map(ds =>
+                                              ds.id === dataSource.id ? { ...ds, linked_document_ids: updated } : ds
+                                            );
+                                            setNewPlaceholder(prev => ({ ...prev, checklist_data_sources: updatedDataSources }));
+                                          }}
+                                          className="ml-1 hover:text-red-600"
+                                        >
+                                          <X className="h-3 w-3" />
+                                        </button>
+                                      </Badge>
+                                    ) : null
+                                  })}
+                                </div>
+                              )}
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button variant="outline" className="w-full justify-between border-dashed border-2 hover:border-primary hover:bg-slate-50 transition-all">
+                                    <span className="text-slate-400">Add document links...</span>
+                                    <Search className="h-4 w-4 opacity-50" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-[450px] p-0" align="start">
+                                  <Command>
+                                    <CommandInput placeholder="Search documents..." />
+                                    <CommandList>
+                                      <CommandGroup className="max-h-[300px] overflow-y-auto">
+                                        {kycDocuments.map(doc => (
+                                          <CommandItem key={doc.id} onSelect={() => {
+                                            const current = dataSource.linked_document_ids || [];
+                                            const updated = current.includes(String(doc.id)) ? current : [...current, String(doc.id)];
+                                            const updatedDataSources = newPlaceholder.checklist_data_sources!.map(ds =>
+                                              ds.id === dataSource.id ? { ...ds, linked_document_ids: updated } : ds
+                                            );
+                                            setNewPlaceholder(prev => ({ ...prev, checklist_data_sources: updatedDataSources }));
+                                          }}>
+                                            <Check className={cn("mr-2 h-4 w-4", dataSource.linked_document_ids?.includes(String(doc.id)) ? "opacity-100" : "opacity-0")} />
+                                            {doc.display_name || doc.name}
+                                          </CommandItem>
+                                        ))}
+                                      </CommandGroup>
+                                    </CommandList>
+                                  </Command>
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label className="text-xs font-bold text-slate-500">Source Table</Label>
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button variant="outline" className="w-full justify-between border-dashed border-2 hover:border-primary hover:bg-slate-50 transition-all">
+                                    <span className="text-slate-400">
+                                      {dataSource.table ? tables.find(t => t.name === dataSource.table)?.label || dataSource.table : "Select source table..."}
+                                    </span>
+                                    <Search className="h-4 w-4 opacity-50" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-[450px] p-0" align="start">
+                                  <Command>
+                                    <CommandInput placeholder="Search tables..." />
+                                    <CommandList>
+                                      {loadingTables ? (
+                                        <div className="px-2 py-4 text-center text-sm text-slate-500">Loading tables...</div>
+                                      ) : tables.length > 0 ? (
+                                        <CommandGroup className="max-h-[300px] overflow-y-auto">
+                                          {tables.map(table => (
+                                            <CommandItem key={table.name} onSelect={() => {
+                                              const updatedDataSources = newPlaceholder.checklist_data_sources!.map(ds =>
+                                                ds.id === dataSource.id ? { ...ds, table: table.name } : ds
+                                              );
+                                              setNewPlaceholder(prev => ({ ...prev, checklist_data_sources: updatedDataSources }));
+                                            }}>
+                                              <Check className={cn("mr-2 h-4 w-4", dataSource.table === table.name ? "opacity-100" : "opacity-0")} />
+                                              {table.label}
+                                            </CommandItem>
+                                          ))}
+                                        </CommandGroup>
+                                      ) : (
+                                        <div className="px-2 py-4 text-center text-sm text-slate-500">No tables available</div>
+                                      )}
+                                    </CommandList>
+                                  </Command>
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+
+                            {dataSource.table && (
+                              <div className="space-y-2">
+                                <Label className="text-xs font-bold text-slate-500">Linking Variable</Label>
+                                <Select value={dataSource.linking_variable || ''} onValueChange={(value) => {
+                                  const updatedDataSources = newPlaceholder.checklist_data_sources!.map(ds =>
+                                    ds.id === dataSource.id ? { ...ds, linking_variable: value } : ds
+                                  );
+                                  setNewPlaceholder(prev => ({ ...prev, checklist_data_sources: updatedDataSources }));
+                                }}>
+                                  <SelectTrigger className="bg-white h-9">
+                                    <SelectValue placeholder="Select linking variable..." />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {LINKING_VARIABLES.map(variable => (
+                                      <SelectItem key={variable.value} value={variable.value}>
+                                        {variable.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            )}
+
+                            <div className="pt-4 border-t">
+                              <div className="space-y-2">
+                                <Label className="text-xs font-bold text-slate-500">Extraction / Computed Function</Label>
+                                <Select value={dataSource.computed_function || 'none'} onValueChange={(v) => {
+                                  const updatedDataSources = newPlaceholder.checklist_data_sources!.map(ds => {
+                                    if (ds.id === dataSource.id) {
+                                      const updates: Partial<any> = { computed_function: v };
+
+                                      if (v === 'none') {
+                                        updates.execution_mode = 'latest';
+                                      } else if (v.includes('Latest')) {
+                                        updates.execution_mode = 'latest';
+                                      } else {
+                                        updates.execution_mode = 'all';
+                                      }
+
+                                      return { ...ds, ...updates };
+                                    }
+                                    return ds;
+                                  });
+                                  setNewPlaceholder(prev => ({ ...prev, checklist_data_sources: updatedDataSources }));
+                                }}>
+                                  <SelectTrigger className="bg-white h-9">
+                                    <SelectValue placeholder="Select extraction function..." />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {COMPUTED_FUNCTIONS.map(fn => (
+                                      <SelectItem key={fn.value} value={fn.value}>
+                                        {fn.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          className="w-full border-dashed py-8 bg-white hover:bg-slate-50"
+                          onClick={() => {
+                            const newDataSource = {
+                              id: `ds_${Date.now()}`,
+                              table: 'acc_portal_kyc_uploads',
+                              linking_variable: 'company_id',
+                              entity_types: ['company'],
+                              computed_function: 'none',
+                              linked_document_ids: []
+                            };
+                            setNewPlaceholder(prev => ({
+                              ...prev,
+                              checklist_data_sources: [...(prev.checklist_data_sources || []), newDataSource]
+                            }));
+                          }}
+                        >
+                          <Plus className="mr-2 h-4 w-4" /> Add Another Data Source
+                        </Button>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -2821,14 +3555,121 @@ const uploadAndSaveAll = async () => {
                 )}
 
                 {newPlaceholder.type === 'image' && (
-                  <div className="grid grid-cols-2 gap-4 p-4 bg-green-50 rounded-xl border border-green-100">
-                    <div className="space-y-2">
-                      <Label className="text-[11px] font-bold text-green-700">Image Width</Label>
-                      <Input className="bg-white" value={newPlaceholder.image_width} onChange={e => setNewPlaceholder({ ...newPlaceholder, image_width: e.target.value })} placeholder="e.g. 200px" />
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4 p-4 bg-green-50 rounded-xl border border-green-100">
+                      <div className="space-y-2">
+                        <Label className="text-[11px] font-bold text-green-700">Image Width</Label>
+                        <Input className="bg-white" value={newPlaceholder.image_width} onChange={e => setNewPlaceholder({ ...newPlaceholder, image_width: e.target.value })} placeholder="e.g. 200px" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px] font-bold text-green-700">Image Height</Label>
+                        <Input className="bg-white" value={newPlaceholder.image_height} onChange={e => setNewPlaceholder({ ...newPlaceholder, image_height: e.target.value })} placeholder="e.g. 150px" />
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <Label className="text-[11px] font-bold text-green-700">Image Height</Label>
-                      <Input className="bg-white" value={newPlaceholder.image_height} onChange={e => setNewPlaceholder({ ...newPlaceholder, image_height: e.target.value })} placeholder="e.g. 150px" />
+
+                    <div className="bg-green-50/50 p-4 rounded-lg border border-green-100 space-y-4">
+                      <div className="flex items-center gap-2">
+                        <Database className="h-4 w-4 text-green-600" />
+                        <Label className="text-sm font-medium text-green-800">Image Data Extraction</Label>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-xs font-bold text-slate-500">Source Table</Label>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button variant="outline" className="w-full justify-between border-dashed border-2 hover:border-primary hover:bg-slate-50 transition-all">
+                              <span className="text-slate-400">
+                                {newPlaceholder.source_table ? tables.find(t => t.name === newPlaceholder.source_table)?.label || newPlaceholder.source_table : "Select source table..."}
+                              </span>
+                              <Search className="h-4 w-4 opacity-50" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[450px] p-0" align="start">
+                            <Command>
+                              <CommandInput placeholder="Search tables..." />
+                              <CommandList>
+                                {loadingTables ? (
+                                  <div className="px-2 py-4 text-center text-sm text-slate-500">Loading tables...</div>
+                                ) : tables.length > 0 ? (
+                                  <CommandGroup className="max-h-[300px] overflow-y-auto">
+                                    {tables.map(table => (
+                                      <CommandItem key={table.name} onSelect={() => {
+                                        setNewPlaceholder(prev => ({ ...prev, source_table: table.name }));
+                                      }}>
+                                        <Check className={cn("mr-2 h-4 w-4", newPlaceholder.source_table === table.name ? "opacity-100" : "opacity-0")} />
+                                        {table.label}
+                                      </CommandItem>
+                                    ))}
+                                  </CommandGroup>
+                                ) : (
+                                  <div className="px-2 py-4 text-center text-sm text-slate-500">No tables available</div>
+                                )}
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+
+                      {newPlaceholder.source_table && (
+                        <div className="space-y-2">
+                          <Label className="text-xs font-bold text-slate-500">Linking Variable</Label>
+                          <Select value={newPlaceholder.linking_variable || ''} onValueChange={(value) => setNewPlaceholder(prev => ({ ...prev, linking_variable: value || null }))}>
+                            <SelectTrigger className="bg-white h-9">
+                              <SelectValue placeholder="Select linking variable..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {LINKING_VARIABLES.map(variable => (
+                                <SelectItem key={variable.value} value={variable.value}>
+                                  {variable.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      <div className="pt-4 border-t">
+                        <div className="space-y-2">
+                          <Label className="text-xs font-bold text-slate-500">Extraction / Computed Function</Label>
+                          <Select value={newPlaceholder.computed_function || 'none'} onValueChange={(v) => {
+                            const updates: Partial<Placeholder> = { computed_function: v };
+
+                            if (v === 'none') {
+                              updates.execution_mode = 'latest';
+                            } else if (v.includes('Latest')) {
+                              updates.execution_mode = 'latest';
+                            } else {
+                              updates.execution_mode = 'all';
+                            }
+
+                            setNewPlaceholder(prev => ({ ...prev, ...updates }));
+                          }}>
+                            <SelectTrigger className="bg-white h-9">
+                              <SelectValue placeholder="Select extraction function..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {COMPUTED_FUNCTIONS.map(fn => (
+                                <SelectItem key={fn.value} value={fn.value}>
+                                  {fn.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="text-[10px] uppercase font-bold text-blue-600">Master Field Sync</Label>
+                        <Select value={newPlaceholder.linked_master_field_id || 'none'} onValueChange={(v) => setNewPlaceholder(prev => ({ ...prev, linked_master_field_id: v === 'none' ? undefined : v }))}>
+                          <SelectTrigger className="h-9"><SelectValue placeholder="Link field..." /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">None</SelectItem>
+                            {masterFields.map(mf => (
+                              <SelectItem key={mf.id} value={String(mf.id)}>{mf.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
                   </div>
                 )}

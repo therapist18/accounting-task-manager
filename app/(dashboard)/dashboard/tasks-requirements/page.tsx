@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState, useMemo, useCallback, useEffect } from "react"
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
@@ -20,7 +20,7 @@ type Department = {
   id: string | number;
   name: string;
   description?: string;
-  specification?: 'company' | 'individual';
+  entity_types?: string[];
   tm_subdepartments?: any[];
   // Add other department properties as needed
 }
@@ -35,10 +35,13 @@ import { EnquiryTable } from "../tasks/components/EnquiryTable"
 import { StageUploadDialog } from "../tasks/components/StageUploadDialog"
 import { fetchDepartments } from "../departments/departments/database"
 import { Badge } from "@/components/ui/badge"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
+import { cn } from "@/lib/utils"
 
 
 export default function TasksPage() {
-  // --- State Management ---
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
+  const sidebarPanelRef = useRef(null)
   const [departments, setDepartments] = useState<Department[]>([]);
   const [tasks, setTasks] = useState<UtilTask[]>([]);
   const [stages, setStages] = useState<any[]>([]);
@@ -61,6 +64,18 @@ export default function TasksPage() {
   const [internalStaff, setInternalStaff] = useState({ users: [], officers: [] });
   const [taskToEdit, setTaskToEdit] = useState<UtilTask | null>(null);
   // --- Data Fetching Callbacks ---
+
+  const handleSidebarToggle = useCallback(() => {
+    const panel = sidebarPanelRef.current
+    if (panel) {
+      if (isSidebarCollapsed) {
+        panel.expand()
+      } else {
+        panel.collapse()
+      }
+    }
+  }, [isSidebarCollapsed])
+
   const loadTasksAndStages = useCallback(async (departmentId: string, subdepartmentId?: string) => {
     if (!departmentId || departments.length === 0) return;
     try {
@@ -159,13 +174,13 @@ export default function TasksPage() {
     const c = sd?.classes?.find(c => String(c.id) === selectedClass);
     const sc = c?.subClasses?.find(sc => String(sc.id) === selectedSubclass);
 
-    // Debug log to check department specification
+    // Debug log to check department entity_types
     if (d) {
       console.log('Department:', {
         id: d.id,
         name: d.name,
-        specification: d.specification,
-        hasSpecification: 'specification' in d
+        entity_types: d.entity_types,
+        hasEntityTypes: 'entity_types' in d
       });
     }
 
@@ -212,9 +227,9 @@ export default function TasksPage() {
       setDeleteDialogOpen(true);
     } else if (action === 'edit') {
       setTaskToEdit(task);
-      // Determine which dialog to open based on department specification
+      // Determine which dialog to open based on department entity_types
       const currentDept = departments.find(d => String(d.id) === String(task.job_level?.department_id));
-      if (currentDept?.specification?.toLowerCase() === 'company') {
+      if (currentDept?.entity_types?.includes('company')) {
         setCompanyInquiryDialogOpen(true);
       } else {
         setEnquiryDialogOpen(true);
@@ -233,25 +248,25 @@ export default function TasksPage() {
     try {
       const { error } = await supabase.from('tm_tasks').delete().eq('id', taskToDelete.id);
       if (error) throw error;
-      
+
       // Update tasks state to remove the deleted task
       setTasks(prev => prev.filter(t => t.id !== taskToDelete.id));
-      
+
       // Show success toast with task details
-      toast({ 
-        title: 'Task Deleted Successfully', 
-        description: `Task "${taskToDelete.name || taskToDelete.title || 'Unknown'}" has been deleted.` 
+      toast({
+        title: 'Task Deleted Successfully',
+        description: `Task "${taskToDelete.name || taskToDelete.title || 'Unknown'}" has been deleted.`
       });
-      
+
       // Close dialog and reset state
       setDeleteDialogOpen(false);
       setTaskToDelete(null);
     } catch (error) {
       console.error('Delete error:', error);
-      toast({ 
-        title: 'Error Deleting Task', 
+      toast({
+        title: 'Error Deleting Task',
         description: error.message || 'Failed to delete task. Please try again.',
-        variant: 'destructive' 
+        variant: 'destructive'
       });
     } finally {
       setIsDeleting(false);
@@ -260,21 +275,33 @@ export default function TasksPage() {
 
   const handleEnquiryCreated = async (newEnquiry: UtilTask | UtilTask[], isEdit = false) => {
     const newEnquiries = Array.isArray(newEnquiry) ? newEnquiry : [newEnquiry];
-    
-    // Show success toast
-    toast({ 
-      title: "Success", 
-      description: `${isEdit ? "Task updated" : "New enquiry/enquiries created"} successfully.` 
+
+    // Show success toast with more specific information
+    toast({
+      title: "Success",
+      description: `${isEdit ? "Task updated" : "New enquiry/enquiries created"} successfully.`
     });
 
     // Refresh tasks and stages to get updated data
     try {
+      console.log('🔹 [handleEnquiryCreated] Refreshing data after submission...');
       await loadTasksAndStages(selectedDepartment, selectedSubdepartment);
+      
+      // Log the updated state for debugging
+      console.log('🔹 [handleEnquiryCreated] Data refreshed successfully', {
+        newEnquiriesCount: newEnquiries.length,
+        isEdit,
+        selectedDepartment,
+        selectedSubdepartment
+      });
+      
     } catch (error) {
       console.error("Failed to refresh data after enquiry creation:", error);
+      
+      // Provide more detailed error feedback
       toast({
         title: "Warning",
-        description: "Task was saved but failed to refresh data. Please refresh the page.",
+        description: "Task was saved but failed to refresh data automatically. Please refresh the page to see the latest updates.",
         variant: "destructive"
       });
     }
@@ -386,10 +413,10 @@ export default function TasksPage() {
       return;
     }
 
-    const specification = (currentDept.specification || 'individual').toLowerCase();
-    console.log('   [handleNewEnquiryClick] Department Specification:', specification);
+    const entityTypes = currentDept.entity_types || [];
+    console.log('   [handleNewEnquiryClick] Department Entity Types:', entityTypes);
 
-    if (specification === 'company') {
+    if (entityTypes.includes('company')) {
       console.log('   [handleNewEnquiryClick] Opening Company Inquiry Dialog');
       setCompanyInquiryDialogOpen(true);
     } else {
@@ -408,173 +435,193 @@ export default function TasksPage() {
   };
 
   return (
-    <div className="flex h-screen bg-slate-50/50">
-      <DepartmentSidebar
+    <div className="h-screen w-full overflow-hidden bg-background">
+      <ResizablePanelGroup direction="horizontal">
+        <ResizablePanel
+          ref={sidebarPanelRef}
+          defaultSize={20}
+          minSize={15}
+          maxSize={25}
+          collapsible={true}
+          onCollapse={() => setIsSidebarCollapsed(true)}
+          onExpand={() => setIsSidebarCollapsed(false)}
+          className={cn(
+            isSidebarCollapsed ? "min-w-[60px] transition-all duration-300" : "transition-all duration-300"
+          )}
+        >
+          <DepartmentSidebar
+            departments={departments}
+            activeDept={selectedDepartment}
+            activeSubdept={selectedSubdepartment}
+            activeClass={selectedClass}
+            activeSubclass={selectedSubclass}
+            onDeptClick={handleDeptClick}
+            onSubdeptClick={handleSubdeptClick}
+            onClassClick={handleClassClick}
+            onSubclassClick={handleSubclassClick}
+            expandedItems={expandedItems}
+            onToggleExpand={(key) => setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }))}
+            // Pass collapsed state props
+            isCollapsed={isSidebarCollapsed}
+            onCollapseToggle={handleSidebarToggle}
+          />
+        </ResizablePanel>
+
+        <ResizableHandle withHandle />
+        <ResizablePanel defaultSize={80}>
+          <main className="h-full flex flex-col overflow-hidden">
+            <div className="h-full overflow-auto p-4 space-y-4">
+              <header className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-3xl font-bold tracking-tight">Task Management</h2>
+                  <p className="text-muted-foreground">
+                    {dept?.name} {subdept && `> ${subdept.name}`} {cls && `> ${cls.name}`} {subcls && `> ${subcls.name}`}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={handleNewEnquiryClick}
+                  disabled={!selectedDepartment}
+                  className="flex items-center gap-2"
+                >
+                  <Plus className="h-4 w-4" />
+                  {(() => {
+                    if (!selectedDepartment) return 'New Enquiry';
+                    const currentDept = departments.find(d => String(d.id) === selectedDepartment || d.id === Number(selectedDepartment));
+                    console.log('🔹 [Button] Current Department:', currentDept);
+                    const entityTypes = currentDept?.entity_types || [];
+                    console.log('🔹 [Button] Department Entity Types:', entityTypes);
+                    return entityTypes.includes('company') ? 'New Company Enquiry' : 'New Individual Enquiry';
+                  })()}
+                </Button>
+              </header>
+
+              {!selectedDepartment ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Task Management Dashboard</CardTitle>
+                    <CardDescription>Select a department from the sidebar to get started</CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-4 text-center py-8">
+                    <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                    <p className="text-muted-foreground">Choose a department to view and manage tasks.</p>
+                  </CardContent>
+                </Card>
+              ) : (enquiryTasks.length > 0 || wipTasks.length > 0 || completedTasks.length > 0) ? (
+                <Tabs defaultValue="enquiries" className="space-y-4">
+                  <TabsList>
+                    <TabsTrigger value="enquiries">
+                      Enquiries
+                      <Badge variant="secondary" className="ml-2">{enquiryTasks.length}</Badge>
+                    </TabsTrigger>
+                    <TabsTrigger value="wip">
+                      Work-in-Progress
+                      <Badge variant="secondary" className="ml-2">{wipTasks.length}</Badge>
+                    </TabsTrigger>
+                    <TabsTrigger value="completed">
+                      Completed
+                      <Badge variant="secondary" className="ml-2">{completedTasks.length}</Badge>
+                    </TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="enquiries">
+                    <RequirementsTable
+                      tasks={enquiryTasks}
+                      loading={false}
+                      error={null}
+                      handleDeleteDocument={handleDeleteDocument}
+                      onTaskAction={handleTaskAction} // ADD THIS
+                    />
+                  </TabsContent>
+                  <TabsContent value="wip">
+                    <RequirementsTable
+                      tasks={wipTasks}
+                      loading={false}
+                      error={null}
+                      handleDeleteDocument={handleDeleteDocument}
+                      onTaskAction={handleTaskAction} // ADD THIS
+                    />
+                  </TabsContent>
+                  <TabsContent value="completed">
+                    <RequirementsTable
+                      tasks={completedTasks}
+                      loading={false}
+                      error={null}
+                      handleDeleteDocument={handleDeleteDocument}
+                      onTaskAction={handleTaskAction} // ADD THIS
+                    />
+                  </TabsContent>
+                </Tabs>
+              ) : (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>{getDisplayTitle()}</CardTitle>
+                    <CardDescription>No tasks found for the current selection. Try selecting a class or subclass from the sidebar.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-4 text-center py-8">
+                    <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                    <p className="text-muted-foreground">No tasks available for the current selection.</p>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Debug logging for props being passed */}
+              {(() => {
+                console.log('🔹 [Parent Component] EnquiryDialog Props:', {
+                  open: enquiryDialogOpen,
+                  departmentsLength: departments?.length,
+                  usersLength: internalStaff.users?.length,
+                  officersLength: internalStaff.officers?.length,
+                  internalStaffState: internalStaff
+                });
+                return null;
+              })()}
+            </div>
+          </main>
+        </ResizablePanel>
+      </ResizablePanelGroup>
+      <DeleteConfirmationDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen} onConfirm={handleDeleteConfirm} loading={isDeleting} />
+      <StageUploadDialog open={stageUploadDialogOpen} onOpenChange={setStageUploadDialogOpen} selectedStageTask={selectedStageTask} />
+
+      <NewCompanyInquiryDialog
+        open={companyInquiryDialogOpen}
+        onOpenChange={(isOpen) => {
+          console.log('🔹 [CompanyInquiryDialog] Open State Changed:', isOpen);
+          setCompanyInquiryDialogOpen(isOpen);
+          if (!isOpen) {
+            // Reset the selected department when dialog is closed
+            setSelectedDepartment('');
+          }
+        }}
+        onEnquiryCreated={(enquiries) => {
+          handleEnquiryCreated(enquiries, false);
+        }}
         departments={departments}
-        activeDept={selectedDepartment}
-        activeSubdept={selectedSubdepartment}
-        activeClass={selectedClass}
-        activeSubclass={selectedSubclass}
-        onDeptClick={handleDeptClick}
-        onSubdeptClick={handleSubdeptClick}
-        onClassClick={handleClassClick}
-        onSubclassClick={handleSubclassClick}
-        expandedItems={expandedItems}
-        onToggleExpand={(key) => setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }))}
+        selectedDepartmentId={selectedDepartment}
+        selectedSubdepartmentId={selectedSubdepartment}
+        selectedClassId={selectedClass}
+        users={[]}
+        officers={[]}
+        key={`company-dialog-${selectedDepartment}-${selectedSubdepartment}-${selectedClass}`} // Force re-render when any selection changes
       />
 
-      <main className="flex-1 overflow-hidden">
-        <div className="h-full overflow-auto p-4 space-y-4">
-          <header className="flex items-center justify-between">
-            <div>
-              <h2 className="text-3xl font-bold tracking-tight">Task Management</h2>
-              <p className="text-muted-foreground">
-                {dept?.name} {subdept && `> ${subdept.name}`} {cls && `> ${cls.name}`} {subcls && `> ${subcls.name}`}
-              </p>
-            </div>
-            <Button
-              size="sm"
-              variant="default"
-              onClick={handleNewEnquiryClick}
-              disabled={!selectedDepartment}
-              className="flex items-center gap-2"
-            >
-              <Plus className="h-4 w-4" />
-              {(() => {
-                if (!selectedDepartment) return 'New Enquiry';
-                const currentDept = departments.find(d => String(d.id) === selectedDepartment || d.id === Number(selectedDepartment));
-                console.log('🔹 [Button] Current Department:', currentDept);
-                const specification = currentDept?.specification?.toLowerCase() || 'individual';
-                console.log('🔹 [Button] Department Specification:', specification);
-                return specification === 'company' ? 'New Company Enquiry' : 'New Individual Enquiry';
-              })()}
-            </Button>
-          </header>
-
-          {!selectedDepartment ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Task Management Dashboard</CardTitle>
-                <CardDescription>Select a department from the sidebar to get started</CardDescription>
-              </CardHeader>
-              <CardContent className="p-4 text-center py-8">
-                <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <p className="text-muted-foreground">Choose a department to view and manage tasks.</p>
-              </CardContent>
-            </Card>
-          ) : (enquiryTasks.length > 0 || wipTasks.length > 0 || completedTasks.length > 0) ? (
-            <Tabs defaultValue="enquiries" className="space-y-4">
-              <TabsList>
-                <TabsTrigger value="enquiries">
-                  Enquiries
-                  <Badge variant="secondary" className="ml-2">{enquiryTasks.length}</Badge>
-                </TabsTrigger>
-                <TabsTrigger value="wip">
-                  Work-in-Progress
-                  <Badge variant="secondary" className="ml-2">{wipTasks.length}</Badge>
-                </TabsTrigger>
-                <TabsTrigger value="completed">
-                  Completed
-                  <Badge variant="secondary" className="ml-2">{completedTasks.length}</Badge>
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="enquiries">
-                <RequirementsTable
-                  tasks={enquiryTasks}
-                  loading={false}
-                  error={null}
-                  handleDeleteDocument={handleDeleteDocument}
-                  onTaskAction={handleTaskAction} // ADD THIS
-                />
-              </TabsContent>
-              <TabsContent value="wip">
-                <RequirementsTable
-                  tasks={wipTasks}
-                  loading={false}
-                  error={null}
-                  handleDeleteDocument={handleDeleteDocument}
-                  onTaskAction={handleTaskAction} // ADD THIS
-                />
-              </TabsContent>
-              <TabsContent value="completed">
-                <RequirementsTable
-                  tasks={completedTasks}
-                  loading={false}
-                  error={null}
-                  handleDeleteDocument={handleDeleteDocument}
-                  onTaskAction={handleTaskAction} // ADD THIS
-                />
-              </TabsContent>
-            </Tabs>
-          ) : (
-            <Card>
-              <CardHeader>
-                <CardTitle>{getDisplayTitle()}</CardTitle>
-                <CardDescription>No tasks found for the current selection. Try selecting a class or subclass from the sidebar.</CardDescription>
-              </CardHeader>
-              <CardContent className="p-4 text-center py-8">
-                <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <p className="text-muted-foreground">No tasks available for the current selection.</p>
-              </CardContent>
-            </Card>
-          )}
-
-          <DeleteConfirmationDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen} onConfirm={handleDeleteConfirm} loading={isDeleting} />
-          <StageUploadDialog open={stageUploadDialogOpen} onOpenChange={setStageUploadDialogOpen} selectedStageTask={selectedStageTask} />
-
-          <NewCompanyInquiryDialog
-            open={companyInquiryDialogOpen}
-            onOpenChange={(isOpen) => {
-              console.log('🔹 [CompanyInquiryDialog] Open State Changed:', isOpen);
-              setCompanyInquiryDialogOpen(isOpen);
-              if (!isOpen) {
-                // Reset the selected department when dialog is closed
-                setSelectedDepartment('');
-              }
-            }}
-            onEnquiryCreated={(enquiries) => {
-              handleEnquiryCreated(enquiries, false);
-            }}
-            departments={departments}
-            selectedDepartmentId={selectedDepartment}
-            selectedSubdepartmentId={selectedSubdepartment}
-            selectedClassId={selectedClass}
-            users={[]}
-            officers={[]}
-            key={`company-dialog-${selectedDepartment}-${selectedSubdepartment}-${selectedClass}`} // Force re-render when any selection changes
-          />
-
-          <EnquiryDialog
-            open={enquiryDialogOpen}
-            onOpenChange={setEnquiryDialogOpen}
-            taskToEdit={taskToEdit} // PASS STATE HERE
-            onEnquiryCreated={(updatedTask) => {
-              handleEnquiryCreated(updatedTask, !!taskToEdit);
-            }}
-            departments={departments}
-            users={internalStaff.users}       // Pass real data
-            officers={internalStaff.officers} // Pass real data
-            selectedDepartment={selectedDepartment}
-            selectedSubdepartment={selectedSubdepartment}
-            selectedClass={selectedClass}
-            selectedSubclass={selectedSubclass}
-            key={`enquiry-dialog-${selectedDepartment}-${selectedSubdepartment}-${selectedClass}`}
-          />
-
-          {/* Debug logging for props being passed */}
-          {(() => {
-            console.log('🔹 [Parent Component] EnquiryDialog Props:', {
-              open: enquiryDialogOpen,
-              departmentsLength: departments?.length,
-              usersLength: internalStaff.users?.length,
-              officersLength: internalStaff.officers?.length,
-              internalStaffState: internalStaff
-            });
-            return null;
-          })()}
-        </div>
-      </main>
+      <EnquiryDialog
+        open={enquiryDialogOpen}
+        onOpenChange={setEnquiryDialogOpen}
+        taskToEdit={taskToEdit} // PASS STATE HERE
+        onEnquiryCreated={(updatedTask) => {
+          handleEnquiryCreated(updatedTask, !!taskToEdit);
+        }}
+        departments={departments}
+        users={internalStaff.users}       // Pass real data
+        officers={internalStaff.officers} // Pass real data
+        selectedDepartment={selectedDepartment}
+        selectedSubdepartment={selectedSubdepartment}
+        selectedClass={selectedClass}
+        selectedSubclass={selectedSubclass}
+        key={`enquiry-dialog-${selectedDepartment}-${selectedSubdepartment}-${selectedClass}`}
+      />
     </div>
   );
 }

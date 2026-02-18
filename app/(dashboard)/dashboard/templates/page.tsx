@@ -1,7 +1,12 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState, useMemo, useEffect } from "react"
+import React, { useState, useMemo, useEffect, useRef, useCallback } from "react"
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup
+} from "@/components/ui/resizable"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { PlusCircle, FileText, Loader2, Settings, ChevronRight, Trash2, Building2, Check, ChevronsUpDown, X, ChevronDown } from "lucide-react"
@@ -57,7 +62,7 @@ export default function LettersPage() {
   const [selectedSubclass, setSelectedSubclass] = useState<string>('');
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
   const [letterTypes, setLetterTypes] = useState<any[]>([]);
- const [selectedLetter, setSelectedLetter] = useState<any | null>(null);
+  const [selectedLetter, setSelectedLetter] = useState<any | null>(null);
   const [selectedBank, setSelectedBank] = useState<any | null>(null); // NEW STATE
   const [isLoading, setIsLoading] = useState(true);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
@@ -65,6 +70,19 @@ export default function LettersPage() {
   const [templateVersion, setTemplateVersion] = useState(0);
   const [isBankDialogOpen, setIsBankDialogOpen] = useState(false);
   const [expandedLetterIds, setExpandedLetterIds] = useState<Record<string, boolean>>({});
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const sidebarPanelRef = useRef(null);
+
+  const handleSidebarToggle = useCallback(() => {
+    const panel = sidebarPanelRef.current;
+    if (panel) {
+      if (isSidebarCollapsed) {
+        panel.expand();
+      } else {
+        panel.collapse();
+      }
+    }
+  }, [isSidebarCollapsed]);
 
   useEffect(() => {
     const performInitialLoad = async () => {
@@ -92,7 +110,7 @@ export default function LettersPage() {
     return null;
   }, [selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
 
-useEffect(() => {
+  useEffect(() => {
     const fetchLetterTypesForClass = async () => {
       // 1. Ensure we have enough data to identify the hierarchy
       if (!jobLevelObject || !selectedClass) {
@@ -108,7 +126,7 @@ useEffect(() => {
         // We select 'requirements' instead of 'documents_and_fields'
         const { data: requirementsData, error: requirementsError } = await supabase
           .from('tm_class_requirements')
-          .select('requirements') 
+          .select('requirements')
           .eq('job_level', JSON.stringify(jobLevelObject))
           .maybeSingle();
 
@@ -154,9 +172,9 @@ useEffect(() => {
     fetchLetterTypesForClass();
   }, [jobLevelObject, selectedClass]);
 
-const handleLetterClick = (letter: any) => {
+  const handleLetterClick = (letter: any) => {
     const hasBanks = letter.banks_applicable && letter.banks_applicable.length > 0;
-    
+
     if (hasBanks) {
       // If it has banks, just toggle expansion
       setExpandedLetterIds(prev => ({
@@ -202,155 +220,180 @@ const handleLetterClick = (letter: any) => {
   };
 
   return (
-    <div className="flex h-[calc(100vh-theme(spacing.16))] bg-slate-50/50">
-      <DepartmentSidebar
-        departments={departments}
-        activeDept={selectedDepartment}
-        activeSubdept={selectedSubdepartment}
-        activeClass={selectedClass}
-        activeSubclass={selectedSubclass}
-        onDeptClick={handleDeptClick}
-        onSubdeptClick={handleSubdeptClick}
-        onClassClick={handleClassClick}
-        onSubclassClick={handleSubclassClick}
-        expandedItems={expandedItems}
-        onToggleExpand={(key) => setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }))}
-      />
+    <div className="h-[calc(100vh-theme(spacing.16))] w-full overflow-hidden bg-background">
+      <ResizablePanelGroup direction="horizontal">
+        {/* SIDEBAR PANEL */}
+        <ResizablePanel
+          ref={sidebarPanelRef}
+          defaultSize={20}
+          minSize={15}
+          maxSize={25}
+          collapsible={true}
+          onCollapse={() => setIsSidebarCollapsed(true)}
+          onExpand={() => setIsSidebarCollapsed(false)}
+          className={cn(
+            "transition-all duration-300 ease-in-out",
+            isSidebarCollapsed ? "min-w-[50px]" : ""
+          )}
+        >
+          <DepartmentSidebar
+            departments={departments}
+            activeDept={selectedDepartment}
+            activeSubdept={selectedSubdepartment}
+            activeClass={selectedClass}
+            activeSubclass={selectedSubclass}
+            onDeptClick={handleDeptClick}
+            onSubdeptClick={handleSubdeptClick}
+            onClassClick={handleClassClick}
+            onSubclassClick={handleSubclassClick}
+            expandedItems={expandedItems}
+            onToggleExpand={(key) => setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }))}
+            // NEW PROPS FOR COLLAPSE
+            isCollapsed={isSidebarCollapsed}
+            onCollapseToggle={handleSidebarToggle}
+          />
+        </ResizablePanel>
 
-      <main className="flex-1 overflow-hidden p-6 space-y-6">
-        <header>
-          <h1 className="text-3xl font-bold tracking-tight">Template Management</h1>
-          <p className="text-muted-foreground">{breadcrumb || 'Select a department to begin'}</p>
-        </header>
+        <ResizableHandle withHandle />
 
-        {isLoading && (!selectedClass && !selectedSubclass) ? (
-          <div className="flex justify-center items-center h-2/3"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>
-        ) : !selectedClass && !selectedSubclass ? (
-          <Card className="mt-8">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>Select a Class</CardTitle>
-                <CardDescription>Choose a class from the sidebar.</CardDescription>
-              </div>
-              {String(selectedDepartment) === "14" && (
-                <Button variant="outline" className="gap-2" onClick={() => setIsBankDialogOpen(true)}>
-                  <Building2 className="h-4 w-4" /> Add Bank Compatibility
-                </Button>
-              )}
-            </CardHeader>
-            <CardContent className="text-center py-12"><FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" /></CardContent>
-          </Card>
-        ) : (
-          <div className="grid grid-cols-12 gap-6 h-[calc(100%-80px)]">
-            <Card className="col-span-4 h-full flex flex-col">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0">
-                <div>
-                  <CardTitle>Template Types</CardTitle>
-                  <CardDescription>Required templates.</CardDescription>
-                </div>
-                {String(selectedDepartment) === "14" && (
-                  <Button variant="outline" size="sm" className="h-8 gap-1" onClick={() => setIsBankDialogOpen(true)}>
-                    <Building2 className="h-4 w-4" /> Add Bank
-                  </Button>
-                )}
-              </CardHeader>
-              
-            <CardContent className="flex-1 overflow-hidden p-2">
-                <ScrollArea className="h-full">
-                  {isLoading ? (
-                    <div className="flex justify-center items-center h-full"><Loader2 className="h-6 w-6 animate-spin" /></div>
-                  ) : letterTypes.length > 0 ? (
-                    <div className="space-y-1">
-                      {letterTypes.filter(letter => letter.has_template === "true").map(letter => {
-                        const hasBanks = letter.banks_applicable && letter.banks_applicable.length > 0;
-                        const isExpanded = expandedLetterIds[letter.id];
-                        // Active if selected and NO bank is involved
-                        const isDocActive = selectedLetter?.id === letter.id && !selectedBank;
+        {/* MAIN CONTENT PANEL */}
+        <ResizablePanel defaultSize={80}>
+          <main className="h-full overflow-hidden p-6 space-y-6 flex flex-col">
+            <header>
+              <h1 className="text-3xl font-bold tracking-tight">Template Management</h1>
+              <p className="text-muted-foreground">{breadcrumb || 'Select a department to begin'}</p>
+            </header>
 
-                        return (
-                          <div key={letter.id} className="flex flex-col">
-                            <div 
-                              className={cn(
-                                "flex items-center w-full rounded-md transition-colors hover:bg-accent group",
-                                isDocActive ? "bg-secondary text-secondary-foreground" : "transparent"
-                              )}
-                            >
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className={cn("h-8 w-8 shrink-0", !hasBanks && "opacity-0 pointer-events-none")}
-                                onClick={(e) => hasBanks && toggleLetterExpansion(e, letter.id)}
-                              >
-                                {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                              </Button>
-
-                              <button
-                                className="flex-1 py-2 pr-3 text-left text-sm font-medium outline-none"
-                                onClick={() => handleLetterClick(letter)}
-                              >
-                                {letter.display_name}
-                              </button>
-                            </div>
-
-                            {/* Expanded Bank List */}
-                            {isExpanded && hasBanks && (
-                              <div className="ml-4 mt-1 mb-2 space-y-1 border-l-2 border-muted pl-4">
-                                {letter.banks_applicable.map(bank => {
-                                  const isBankActive = selectedBank?.bank_id === bank.bank_id;
-                                  return (
-                                    <button
-                                      key={bank.bank_id}
-                                      onClick={() => handleBankClick(letter, bank)}
-                                      className={cn(
-                                        "flex items-center gap-2 w-full text-left px-2 py-1.5 rounded-sm text-xs transition-colors",
-                                        isBankActive 
-                                          ? "bg-primary/10 text-primary font-semibold" 
-                                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                                      )}
-                                    >
-                                      <Building2 className="h-3.5 w-3.5" />
-                                      <span>{bank.bank_name}</span>
-                                      {isBankActive && <Check className="ml-auto h-3 w-3" />}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="text-center py-10 text-sm text-muted-foreground">No template types found.</div>
-                  )}
-                </ScrollArea>
-              </CardContent>
-            </Card>
-
-            <div className="col-span-8 h-full">
-              {selectedLetter ? (
-                 <TemplateDisplayArea
-                  key={`${selectedLetter.id}-${selectedBank?.bank_id || 'none'}-${templateVersion}`}
-                  selectedLetter={selectedLetter}
-                  selectedBank={selectedBank} 
-                  jobLevel={jobLevelObject}
-                  onCreateNew={() => handleCreateNewTemplate()}
-                  onEdit={handleEditTemplate}
-                  templateVersion={templateVersion}
-                />
-              ) : (
-                <Card className="h-full flex items-center justify-center text-muted-foreground">
-                  <div className="text-center">
-                    <FileText className="h-10 w-10 mx-auto mb-2 opacity-20" />
-                    <h3 className="text-lg font-medium">Select a Document or Bank</h3>
-                    <p className="text-sm">Choose an item from the sidebar to view templates.</p>
+            {isLoading && (!selectedClass && !selectedSubclass) ? (
+              <div className="flex justify-center items-center h-2/3"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>
+            ) : !selectedClass && !selectedSubclass ? (
+              <Card className="mt-8">
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <div>
+                    <CardTitle>Select a Class</CardTitle>
+                    <CardDescription>Choose a class from the sidebar.</CardDescription>
                   </div>
+                  {String(selectedDepartment) === "14" && (
+                    <Button variant="outline" className="gap-2" onClick={() => setIsBankDialogOpen(true)}>
+                      <Building2 className="h-4 w-4" /> Add Bank Compatibility
+                    </Button>
+                  )}
+                </CardHeader>
+                <CardContent className="text-center py-12"><FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" /></CardContent>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-12 gap-6 h-[calc(100%-80px)]">
+                <Card className="col-span-4 h-full flex flex-col">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                    <div>
+                      <CardTitle>Template Types</CardTitle>
+                      <CardDescription>Required templates.</CardDescription>
+                    </div>
+                    {String(selectedDepartment) === "14" && (
+                      <Button variant="outline" size="sm" className="h-8 gap-1" onClick={() => setIsBankDialogOpen(true)}>
+                        <Building2 className="h-4 w-4" /> Add Bank
+                      </Button>
+                    )}
+                  </CardHeader>
+
+                  <CardContent className="flex-1 overflow-hidden p-2">
+                    <ScrollArea className="h-full">
+                      {isLoading ? (
+                        <div className="flex justify-center items-center h-full"><Loader2 className="h-6 w-6 animate-spin" /></div>
+                      ) : letterTypes.length > 0 ? (
+                        <div className="space-y-1">
+                          {letterTypes.filter(letter => letter.has_template === "true").map(letter => {
+                            const hasBanks = letter.banks_applicable && letter.banks_applicable.length > 0;
+                            const isExpanded = expandedLetterIds[letter.id];
+                            // Active if selected and NO bank is involved
+                            const isDocActive = selectedLetter?.id === letter.id && !selectedBank;
+
+                            return (
+                              <div key={letter.id} className="flex flex-col">
+                                <div
+                                  className={cn(
+                                    "flex items-center w-full rounded-md transition-colors hover:bg-accent group",
+                                    isDocActive ? "bg-secondary text-secondary-foreground" : "transparent"
+                                  )}
+                                >
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className={cn("h-8 w-8 shrink-0", !hasBanks && "opacity-0 pointer-events-none")}
+                                    onClick={(e) => hasBanks && toggleLetterExpansion(e, letter.id)}
+                                  >
+                                    {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                                  </Button>
+
+                                  <button
+                                    className="flex-1 py-2 pr-3 text-left text-sm font-medium outline-none"
+                                    onClick={() => handleLetterClick(letter)}
+                                  >
+                                    {letter.display_name}
+                                  </button>
+                                </div>
+
+                                {/* Expanded Bank List */}
+                                {isExpanded && hasBanks && (
+                                  <div className="ml-4 mt-1 mb-2 space-y-1 border-l-2 border-muted pl-4">
+                                    {letter.banks_applicable.map(bank => {
+                                      const isBankActive = selectedBank?.bank_id === bank.bank_id;
+                                      return (
+                                        <button
+                                          key={bank.bank_id}
+                                          onClick={() => handleBankClick(letter, bank)}
+                                          className={cn(
+                                            "flex items-center gap-2 w-full text-left px-2 py-1.5 rounded-sm text-xs transition-colors",
+                                            isBankActive
+                                              ? "bg-primary/10 text-primary font-semibold"
+                                              : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                                          )}
+                                        >
+                                          <Building2 className="h-3.5 w-3.5" />
+                                          <span>{bank.bank_name}</span>
+                                          {isBankActive && <Check className="ml-auto h-3 w-3" />}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-center py-10 text-sm text-muted-foreground">No template types found.</div>
+                      )}
+                    </ScrollArea>
+                  </CardContent>
                 </Card>
-              )}
-            </div>
-          </div>
-        )}
-      </main>
+
+                <div className="col-span-8 h-full">
+                  {selectedLetter ? (
+                    <TemplateDisplayArea
+                      key={`${selectedLetter.id}-${selectedBank?.bank_id || 'none'}-${templateVersion}`}
+                      selectedLetter={selectedLetter}
+                      selectedBank={selectedBank}
+                      jobLevel={jobLevelObject}
+                      onCreateNew={() => handleCreateNewTemplate()}
+                      onEdit={handleEditTemplate}
+                      templateVersion={templateVersion}
+                    />
+                  ) : (
+                    <Card className="h-full flex items-center justify-center text-muted-foreground">
+                      <div className="text-center">
+                        <FileText className="h-10 w-10 mx-auto mb-2 opacity-20" />
+                        <h3 className="text-lg font-medium">Select a Document or Bank</h3>
+                        <p className="text-sm">Choose an item from the sidebar to view templates.</p>
+                      </div>
+                    </Card>
+                  )}
+                </div>
+              </div>
+            )}
+          </main>
+        </ResizablePanel>
+      </ResizablePanelGroup>
       {selectedLetter && (
         <DocumentTemplateManager
           document={selectedLetter}
@@ -358,7 +401,7 @@ const handleLetterClick = (letter: any) => {
           onClose={closeTemplateDialog}
           onTemplateUpdate={handleTemplateUpdate}
           jobLevel={jobLevelObject}
-          selectedBank={selectedBank} 
+          selectedBank={selectedBank}
           initialTemplates={editingTemplate ? [editingTemplate] : []}
         />
       )}
@@ -610,13 +653,13 @@ function TemplateCard({ template, onEdit, onDelete }) {
           <div className="flex">
             {template.entity_types && template.entity_types.length > 0
               ? template.entity_types.map(et => {
-                  const entityConfig = ENTITY_TYPES.find(entityType => entityType.value === et);
-                  return (
-                    <Badge key={et} variant="outline">
-                      {entityConfig?.label || et}
-                    </Badge>
-                  );
-                })
+                const entityConfig = ENTITY_TYPES.find(entityType => entityType.value === et);
+                return (
+                  <Badge key={et} variant="outline">
+                    {entityConfig?.label || et}
+                  </Badge>
+                );
+              })
               : <Badge variant="outline">Uncategorized</Badge>
             }
           </div>
@@ -631,42 +674,42 @@ function TemplateDisplayArea({ selectedLetter, selectedBank, onCreateNew, onEdit
   const [allTemplates, setAllTemplates] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-// Inside TemplateDisplayArea component in LettersPage.tsx
+  // Inside TemplateDisplayArea component in LettersPage.tsx
 
-useEffect(() => {
-  const fetchTemplates = async () => {
-    if (!selectedLetter) return;
-    setIsLoading(true);
-    try {
-      let query = supabase
-        .from('acc_portal_templates')
-        .select('*')
-        .eq('document_id', selectedLetter.id);
+  useEffect(() => {
+    const fetchTemplates = async () => {
+      if (!selectedLetter) return;
+      setIsLoading(true);
+      try {
+        let query = supabase
+          .from('acc_portal_templates')
+          .select('*')
+          .eq('document_id', selectedLetter.id);
 
-      if (selectedBank) {
-        // We use .filter with 'cs' (contains) and manually stringify the JSON.
-        // This ensures Supabase sends a JSON string "[...]" instead of an Array string "{...}"
-        const jsonFilter = JSON.stringify([{ bank_id: selectedBank.bank_id }]);
-        query = query.filter('banks_associated', 'cs', jsonFilter);
-      } else {
-        // Fetch generic templates (where column is null or an empty JSON array)
-        // Note: For JSONB, .eq.'[]' is the correct way to check for an empty array
-        query = query.or('banks_associated.is.null,banks_associated.eq.[]');
+        if (selectedBank) {
+          // We use .filter with 'cs' (contains) and manually stringify the JSON.
+          // This ensures Supabase sends a JSON string "[...]" instead of an Array string "{...}"
+          const jsonFilter = JSON.stringify([{ bank_id: selectedBank.bank_id }]);
+          query = query.filter('banks_associated', 'cs', jsonFilter);
+        } else {
+          // Fetch generic templates (where column is null or an empty JSON array)
+          // Note: For JSONB, .eq.'[]' is the correct way to check for an empty array
+          query = query.or('banks_associated.is.null,banks_associated.eq.[]');
+        }
+
+        const { data, error } = await query.order('file_name', { ascending: true });
+
+        if (error) throw error;
+        setAllTemplates(data || []);
+      } catch (error) {
+        console.error(`Error fetching templates:`, error);
+        toast({ title: "Error", description: "Could not fetch templates.", variant: "destructive" });
+      } finally {
+        setIsLoading(false);
       }
-
-      const { data, error } = await query.order('file_name', { ascending: true });
-
-      if (error) throw error;
-      setAllTemplates(data || []);
-    } catch (error) {
-      console.error(`Error fetching templates:`, error);
-      toast({ title: "Error", description: "Could not fetch templates.", variant: "destructive" });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-  fetchTemplates();
-}, [selectedLetter, selectedBank, templateVersion]);
+    };
+    fetchTemplates();
+  }, [selectedLetter, selectedBank, templateVersion]);
 
   const filteredTemplates = useMemo(() => {
     if (!jobLevel) return allTemplates;
@@ -719,7 +762,7 @@ useEffect(() => {
   }, [filteredTemplates]);
 
   return (
-     <Card className="h-full flex flex-col">
+    <Card className="h-full flex flex-col">
       <CardHeader className="flex-row items-center justify-between">
         <div>
           <CardTitle className="flex items-center gap-2">
@@ -732,8 +775,8 @@ useEffect(() => {
             )}
           </CardTitle>
           <CardDescription>
-            {selectedBank 
-              ? `Templates specific to ${selectedBank.bank_name}` 
+            {selectedBank
+              ? `Templates specific to ${selectedBank.bank_name}`
               : "Generic templates for this document type."}
           </CardDescription>
         </div>

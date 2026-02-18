@@ -2797,36 +2797,54 @@ export default function TemplateGenerationDialog({
             if (current?.file_path && current?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
                 if (!docxTemplateBuffer.current) {
                     setIsPreviewLoading(true);
-                    const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${current.file_path}`;
+                    
+                    // Fix: Handle both old and new storage path structures
+                    let publicUrl;
+                    if (current.file_path.startsWith('kyc-templates/')) {
+                        // New structure: use signed URL for private bucket
+                        const { data, error } = await supabase.storage
+                            .from('templates')
+                            .createSignedUrl(current.file_path, 3600); // 1 hour expiry
+                        
+                        if (error) {
+                            console.error('Error creating signed URL:', error);
+                            setIsPreviewLoading(false);
+                            return;
+                        }
+                        publicUrl = data.signedUrl;
+                    } else {
+                        // Old structure: use public URL
+                        publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${current.file_path}`;
+                    }
 
-                    setDocPreviewUrl(`https://docs.google.com/viewer?url=${encodeURIComponent(publicUrl)}&embedded=true`);
+                    // Don't use Google Docs viewer - it's unreliable. Instead, we'll show the rendered preview.
+                    // setDocPreviewUrl(`https://docs.google.com/viewer?url=${encodeURIComponent(publicUrl)}&embedded=true`);
 
                     try {
                         const res = await fetch(publicUrl);
+                        if (!res.ok) throw new Error(`Failed to fetch template: ${res.statusText}`);
                         const arrayBuffer = await res.arrayBuffer();
                         docxTemplateBuffer.current = arrayBuffer;
-
-                        const { headers, footers } = await extractHeadersFooters(arrayBuffer);
-                        if (headers.length > 0) {
-                            setHeaderContent(headers[0].html);
-                        }
-                        if (footers.length > 0) {
-                            setFooterContent(footers[0].html);
-                        }
-                        await new Promise(resolve => setTimeout(resolve, 100));
-
+                        
+                        // Update preview after loading
+                        setTimeout(() => {
+                            updateWordPreview(formData, imageStyles);
+                        }, 100);
                     } catch (error) {
                         console.error('Error loading template:', error);
-                        return;
+                        toast({
+                            title: "Template Loading Error",
+                            description: "Could not load the Word document template",
+                            variant: "destructive"
+                        });
                     } finally {
                         setIsPreviewLoading(false);
                     }
-                }
-                if (headerContent || footerContent) {
+                } else {
                     updateWordPreview(formData, imageStyles);
                 }
             } else {
-                // FIX: Use prepareRenderData to get Base64 for the live preview
+                // HTML template
                 setIsPreviewLoading(true);
                 try {
                     const base64Data = await prepareRenderData(formData);
@@ -3642,7 +3660,7 @@ export default function TemplateGenerationDialog({
                     getImage: (tag) => {
                         if (!tag) return null;
                         try {
-                            // Check if the tag is already Base64 (from prepareRenderData)
+                            // Check if tag is already Base64 (from prepareRenderData)
                             if (tag.startsWith('data:image')) {
                                 const base64Data = tag.split('base64,')[1];
                                 const binaryStr = atob(base64Data);

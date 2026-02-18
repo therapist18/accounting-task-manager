@@ -134,13 +134,13 @@ export function NewCompanyInquiryDialog({
         try {
             const { data: logoDoc } = await supabase
                 .from('acc_portal_kyc_uploads')
-                .select('document_url')
+                .select('file_path')
                 .eq('company_id', companyId)
                 .eq('document_id', COMPANY_LOGO_ID)
                 .maybeSingle();
 
-            if (logoDoc?.document_url) {
-                const imageUrl = getSupabaseImageUrl(logoDoc.document_url);
+            if (logoDoc?.file_path) {
+                const imageUrl = getSupabaseImageUrl(logoDoc.file_path);
                 if (imageUrl) {
                     setCompanyLogo(imageUrl);
                 }
@@ -553,9 +553,28 @@ export function NewCompanyInquiryDialog({
             }
 
             if (result.error) throw result.error;
-            toast({ title: 'Success', description: `Enquiry ${isEditMode ? 'updated' : 'created'}` });
+            
+            // Ensure we have valid data before proceeding
+            if (!result.data || result.data.length === 0) {
+                throw new Error('No data returned from database operation');
+            }
+
+            // Show success toast with more specific information
+            toast({ 
+                title: 'Success', 
+                description: `Enquiry ${isEditMode ? 'updated' : 'created'} successfully` 
+            });
+            
+            // Call the parent callback with the newly created/updated data
             onEnquiryCreated(result.data);
+            
+            // Close the dialog
             onOpenChange(false);
+            
+            // Reset form after successful submission
+            if (!isEditMode) {
+                resetForm();
+            }
         } catch (error) {
             toast({ title: 'Error', description: error.message, variant: 'destructive' });
         } finally {

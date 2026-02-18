@@ -58,3 +58,10 @@ export const REQUIREMENT_CATEGORIES: { value: RequirementCategory; label: string
   { value: 'issuance', label: 'Issuance', description: 'Documents for issuance purposes' },
   { value: 'job-specific', label: 'Job Specific', description: 'Job-specific document requirements' }
 ];
+
+export type DirectorType = 'all' | 'primary';
+
+export const DIRECTOR_TYPES: { value: DirectorType; label: string }[] = [
+  { value: 'all', label: 'All Directors' },
+  { value: 'primary', label: 'Primary Director Only' }
+];

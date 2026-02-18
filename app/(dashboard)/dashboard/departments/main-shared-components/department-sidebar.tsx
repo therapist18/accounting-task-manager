@@ -1,7 +1,7 @@
 'use client'
 
 import { cn } from "@/lib/utils"
-import { ChevronDown, ChevronRight, Layers, Search, ChevronsUpDown, Eye, EyeOff, Star, RotateCcw, Settings } from "lucide-react"
+import { ChevronDown, ChevronRight, Layers, Search, ChevronsUpDown, Eye, EyeOff, Star, RotateCcw, Settings, ChevronLeft } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -58,19 +58,20 @@ interface DepartmentSidebarProps {
   onSubclassClick?: (deptId: string, subdeptId: string, classId: string, subclassId: string) => void;
   onToggleExpand?: (key: string) => void;
   expandedItems?: Record<string, boolean>;
-  // New props for default display functionality
+  isCollapsed?: boolean;
+  onCollapseToggle?: () => void;
   showDefaultDisplayOnly?: boolean;
   onToggleDefaultDisplay?: () => void;
 }
 
 // Helper component to render index with level-based colors
-const IndexBadge = ({ 
-  index, 
-  isActive, 
+const IndexBadge = ({
+  index,
+  isActive,
   level = 'department',
   isDefault = false
-}: { 
-  index: string; 
+}: {
+  index: string;
   isActive: boolean;
   level?: 'department' | 'subdepartment' | 'class' | 'subclass';
   isDefault?: boolean;
@@ -124,14 +125,14 @@ const IndexBadge = ({
 }
 
 // Helper component for truncated text with tooltip and level-based styling
-const TruncatedText = ({ 
-  text, 
-  className = "", 
+const TruncatedText = ({
+  text,
+  className = "",
   level = 'department',
   isActive = false,
   isDefault = false
-}: { 
-  text: string; 
+}: {
+  text: string;
   className?: string;
   level?: 'department' | 'subdepartment' | 'class' | 'subclass';
   isActive?: boolean;
@@ -168,7 +169,7 @@ const TruncatedText = ({
       <Tooltip>
         <TooltipTrigger asChild>
           <div className="flex items-center gap-1 min-w-0">
-            <span className={`truncate block ${textColor} ${className}`}>
+            <span className={`block whitespace-nowrap ${textColor} ${className}`}>
               {text}
             </span>
           </div>
@@ -201,32 +202,34 @@ export function DepartmentSidebar({
   activeSubclass = '',
   onDeptClick,
   onSubdeptClick,
-  onClassClick = () => {},
-  onSubclassClick = () => {},
-  onToggleExpand = () => {},
+  onClassClick = () => { },
+  onSubclassClick = () => { },
+  onToggleExpand = () => { },
   expandedItems = {},
   showDefaultDisplayOnly = false,
-  onToggleDefaultDisplay = () => {},
+  onToggleDefaultDisplay = () => { },
+  isCollapsed = false,
+  onCollapseToggle,
 }: DepartmentSidebarProps) {
   const [searchQuery, setSearchQuery] = React.useState('')
   const [isAllCollapsed, setIsAllCollapsed] = React.useState(false)
-  
+
   const toggleAll = () => {
     const newState = !isAllCollapsed
     setIsAllCollapsed(newState)
-    
+
     // Get all department and subdepartment keys
     const allKeys = departments.flatMap(dept => {
       const deptKey = `dept-${dept.id}`
       const subKeys = (dept.subdepartments || []).map(
         subdept => `subdept-${dept.id}-${subdept.id}`
       )
-      const classKeys = (dept.subdepartments || []).flatMap(subdept => 
+      const classKeys = (dept.subdepartments || []).flatMap(subdept =>
         (subdept.classes || []).map(cls => `class-${dept.id}-${subdept.id}-${cls.id}`)
       )
       return [deptKey, ...subKeys, ...classKeys]
     })
-    
+
     // Collapse or expand all
     allKeys.forEach(key => onToggleExpand(key))
   }
@@ -235,19 +238,19 @@ export function DepartmentSidebar({
   const defaultDisplayCounts = React.useMemo(() => {
     let totalDefault = 0
     let totalItems = 0
-    
+
     departments.forEach(dept => {
       totalItems++
       if (dept.default_display) totalDefault++
-      
+
       dept.subdepartments?.forEach(subdept => {
         totalItems++
         if (subdept.default_display) totalDefault++
-        
+
         subdept.classes?.forEach(cls => {
           totalItems++
           if (cls.default_display) totalDefault++
-          
+
           cls.subClasses?.forEach(subcls => {
             totalItems++
             if (subcls.default_display) totalDefault++
@@ -255,14 +258,14 @@ export function DepartmentSidebar({
         })
       })
     })
-    
+
     return { totalDefault, totalItems }
   }, [departments])
-  
+
   const filteredDepartments = React.useMemo(() => {
     let depts = departments
-    
-    // Apply ordering to all levels first
+
+    // 1. Apply ordering to all levels
     depts = depts.map(dept => ({
       ...dept,
       subdepartments: (dept.subdepartments || [])
@@ -278,8 +281,8 @@ export function DepartmentSidebar({
             }))
         }))
     }))
-    
-    // Apply default display filter first
+
+    // 2. Apply default display filter
     if (showDefaultDisplayOnly) {
       depts = depts.map(dept => ({
         ...dept,
@@ -295,49 +298,91 @@ export function DepartmentSidebar({
                   .filter(subcls => shouldShowItem(subcls, showDefaultDisplayOnly))
               }))
           }))
-      })).filter(dept => 
-        shouldShowItem(dept, showDefaultDisplayOnly) || 
+      })).filter(dept =>
+        shouldShowItem(dept, showDefaultDisplayOnly) ||
         (dept.subdepartments && dept.subdepartments.length > 0)
       )
     }
-    
-    // Apply search filter
+
+    // 3. Apply search filter (Updated logic)
     if (!searchQuery.trim()) return depts
-    
+
     const query = searchQuery.toLowerCase()
+
     return depts.map(dept => {
+      const deptMatches = dept.name.toLowerCase().includes(query);
+
       const filteredSubdepts = (dept.subdepartments || []).map(subdept => {
-        const filteredClasses = (subdept.classes || []).map(cls => ({
-          ...cls,
-          subClasses: (cls.subClasses || []).filter(
-            subClass => subClass.name.toLowerCase().includes(query)
-          )
-        })).filter(cls => 
-          cls.name.toLowerCase().includes(query) || 
-          cls.subClasses.length > 0
-        )
-        
-        return {
-          ...subdept,
-          classes: filteredClasses
-        }
-      }).filter(subdept => 
-        subdept.name.toLowerCase().includes(query) || 
-        subdept.classes.length > 0
-      )
-      
-      return {
-        ...dept,
-        subdepartments: filteredSubdepts
-      }
-    }).filter(dept => 
-      dept.name.toLowerCase().includes(query) || 
-      dept.subdepartments.length > 0
-    )
+        // A subdept is considered a match if its parent matched OR its own name matches
+        const subdeptMatches = deptMatches || subdept.name.toLowerCase().includes(query);
+
+        const filteredClasses = (subdept.classes || []).map(cls => {
+          // A class is considered a match if its parent matched OR its own name matches
+          const classMatches = subdeptMatches || cls.name.toLowerCase().includes(query);
+
+          const filteredSubClasses = (cls.subClasses || []).filter(subClass =>
+            // Include if path matches OR subclass name matches
+            classMatches || subClass.name.toLowerCase().includes(query)
+          );
+
+          return { ...cls, subClasses: filteredSubClasses };
+        }).filter(cls =>
+          // Keep class if: path matches OR its own name matches OR it has matching children
+          subdeptMatches || cls.name.toLowerCase().includes(query) || cls.subClasses.length > 0
+        );
+
+        return { ...subdept, classes: filteredClasses };
+      }).filter(subdept =>
+        // Keep subdept if: path matches OR its own name matches OR it has matching children
+        deptMatches || subdept.name.toLowerCase().includes(query) || subdept.classes.length > 0
+      );
+
+      return { ...dept, subdepartments: filteredSubdepts };
+    }).filter(dept =>
+      // Keep dept if: its own name matches OR it has matching children
+      dept.name.toLowerCase().includes(query) || dept.subdepartments.length > 0
+    );
   }, [departments, searchQuery, showDefaultDisplayOnly])
 
+  if (isCollapsed) {
+    return (
+      <div className="w-full h-full flex flex-col bg-white dark:bg-gray-950 border-r border-gray-200 dark:border-gray-800 py-4 items-center">
+        <TooltipProvider delayDuration={0}>
+          <div className="flex flex-col items-center gap-4 w-full px-2">
+            <Button variant="ghost" size="icon" onClick={onCollapseToggle} className="h-8 w-8 text-gray-400">
+              <ChevronRight size={18} />
+            </Button>
+            <Separator className="w-8" />
+            {filteredDepartments.map((dept) => (
+              <Tooltip key={dept.id}>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={activeDept === dept.id ? "secondary" : "ghost"}
+                    size="icon"
+                    onClick={() => onDeptClick(dept.id)}
+                    className={cn(
+                      "h-10 w-10 rounded-xl shrink-0 transition-all",
+                      activeDept === dept.id
+                        ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300"
+                        : "text-gray-500 hover:bg-gray-100"
+                    )}
+                  >
+                    <Layers size={20} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  <p className="font-medium">{dept.name}</p>
+                </TooltipContent>
+              </Tooltip>
+            ))}
+          </div>
+        </TooltipProvider>
+      </div>
+    )
+  }
+
   return (
-    <div className="w-72 h-full flex flex-col bg-white dark:bg-gray-950 border-r border-gray-200 dark:border-gray-800">
+    <div className="w-full h-full flex flex-col bg-white dark:bg-gray-950 border-r border-gray-200 dark:border-gray-800 shadow-[4px_0_24px_-12px_rgba(0,0,0,0.1)]">
       {/* Header */}
       <div className="p-4 border-b border-gray-100 dark:border-gray-800">
         <div className="flex items-center justify-between mb-4">
@@ -347,9 +392,18 @@ export function DepartmentSidebar({
             </div>
             <h3 className="font-semibold text-gray-900 dark:text-gray-100 text-sm">Departments</h3>
           </div>
-          
-          {/* Controls */}
+
           <div className="flex items-center gap-1">
+            {/* Add Collapse Toggle Button */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onCollapseToggle}
+              className="h-8 w-8 text-gray-400 hover:text-gray-700"
+            >
+              <ChevronLeft size={18} />
+            </Button>
+
             {/* Default Display Toggle */}
             <TooltipProvider>
               <Tooltip>
@@ -359,8 +413,8 @@ export function DepartmentSidebar({
                     size="sm"
                     className={cn(
                       "h-8 px-2 text-xs",
-                      showDefaultDisplayOnly 
-                        ? "bg-blue-600 hover:bg-blue-700 text-white" 
+                      showDefaultDisplayOnly
+                        ? "bg-blue-600 hover:bg-blue-700 text-white"
                         : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                     )}
                     onClick={onToggleDefaultDisplay}
@@ -437,9 +491,9 @@ export function DepartmentSidebar({
                       </div>
                     </div>
                   </div>
-                  
+
                   <Separator />
-                  
+
                   <div>
                     <p className="text-xs text-gray-500">
                       Items marked with ★ are set as default display. Use the eye icon to toggle between showing all items or only default items.
@@ -450,7 +504,7 @@ export function DepartmentSidebar({
             </Popover>
           </div>
         </div>
-        
+
         {/* Search Input */}
         <div className="relative mb-3">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -481,7 +535,7 @@ export function DepartmentSidebar({
           </div>
         )}
       </div>
-      
+
       {/* Scrollable Content */}
       <div className="flex-1 overflow-y-auto p-2">
         {filteredDepartments.length === 0 ? (
@@ -495,9 +549,9 @@ export function DepartmentSidebar({
               <div>
                 <Star className="h-8 w-8 mx-auto mb-2 text-gray-300" />
                 <p>No default display items found</p>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
+                <Button
+                  variant="ghost"
+                  size="sm"
                   className="mt-2 text-xs"
                   onClick={onToggleDefaultDisplay}
                 >
@@ -519,8 +573,8 @@ export function DepartmentSidebar({
 
             return (
               <div key={dept.id} className="space-y-1">
-                <Collapsible 
-                  open={isDeptExpanded} 
+                <Collapsible
+                  open={isDeptExpanded}
                   onOpenChange={() => onToggleExpand(deptKey)}
                 >
                   <CollapsibleTrigger asChild>
@@ -545,13 +599,13 @@ export function DepartmentSidebar({
                           )}
                         />
                         <div className="flex items-center">
-                          <IndexBadge 
-                            index={`${deptIndex + 1}`} 
+                          <IndexBadge
+                            index={`${deptIndex + 1}`}
                             isActive={activeDept === dept.id && !activeSubdept && !activeClass && !activeSubclass}
                             isDefault={dept.default_display === true}
                             level="department"
                           />
-                          <TruncatedText 
+                          <TruncatedText
                             text={dept.name}
                             className="max-w-[120px] font-medium text-sm"
                             level="department"
@@ -577,8 +631,8 @@ export function DepartmentSidebar({
 
                       return (
                         <div key={subdept.id} className="space-y-1">
-                          <Collapsible 
-                            open={isSubdeptExpanded} 
+                          <Collapsible
+                            open={isSubdeptExpanded}
                             onOpenChange={() => onToggleExpand(subdeptKey)}
                           >
                             <CollapsibleTrigger asChild>
@@ -593,8 +647,8 @@ export function DepartmentSidebar({
                                       ? "shadow-sm"
                                       : "shadow-sm",
                                   "before:absolute before:left-4 before:top-1/2 before:-translate-y-1/2 before:w-1.5 before:h-1.5 before:rounded-full",
-                                  isActive 
-                                    ? "before:bg-emerald-500 before:ring-2 before:ring-emerald-200 dark:before:ring-emerald-900/50" 
+                                  isActive
+                                    ? "before:bg-emerald-500 before:ring-2 before:ring-emerald-200 dark:before:ring-emerald-900/50"
                                     : subdept.default_display
                                       ? "before:bg-emerald-400 dark:before:bg-emerald-500"
                                       : "before:bg-gray-300 dark:before:bg-gray-600"
@@ -615,15 +669,15 @@ export function DepartmentSidebar({
                                     <div className="w-3.5 flex-shrink-0" />
                                   )}
                                   <div className="flex items-center">
-                                    <IndexBadge 
-                                      index={`${deptIndex + 1}.${subdeptIndex + 1}`} 
+                                    <IndexBadge
+                                      index={`${deptIndex + 1}.${subdeptIndex + 1}`}
                                       isActive={isActive && !activeClass && !activeSubclass}
                                       isDefault={subdept.default_display === true}
                                       level="subdepartment"
                                     />
-                                    <TruncatedText 
-                                      text={subdept.name} 
-                                      className="max-w-[100px]" 
+                                    <TruncatedText
+                                      text={subdept.name}
+                                      className="max-w-[100px]"
                                       level="subdepartment"
                                       isActive={isActive && !activeClass && !activeSubclass}
                                       isDefault={subdept.default_display === true}
@@ -646,8 +700,8 @@ export function DepartmentSidebar({
 
                                 return (
                                   <div key={cls.id} className="space-y-1">
-                                    <Collapsible 
-                                      open={isClassExpanded} 
+                                    <Collapsible
+                                      open={isClassExpanded}
                                       onOpenChange={() => onToggleExpand(classKey)}
                                     >
                                       <CollapsibleTrigger asChild>
@@ -684,15 +738,15 @@ export function DepartmentSidebar({
                                               <div className="w-3 flex-shrink-0" />
                                             )}
                                             <div className="flex items-center">
-                                              <IndexBadge 
-                                                index={`${deptIndex + 1}.${subdeptIndex + 1}.${classIndex + 1}`} 
+                                              <IndexBadge
+                                                index={`${deptIndex + 1}.${subdeptIndex + 1}.${classIndex + 1}`}
                                                 isActive={activeClass === cls.id.toString() && !activeSubclass}
                                                 isDefault={cls.default_display === true}
                                                 level="class"
                                               />
-                                              <TruncatedText 
-                                                text={cls.name} 
-                                                className="max-w-[80px]" 
+                                              <TruncatedText
+                                                text={cls.name}
+                                                className="max-w-[80px]"
                                                 level="class"
                                                 isActive={activeClass === cls.id.toString() && !activeSubclass}
                                                 isDefault={cls.default_display === true}
@@ -730,23 +784,23 @@ export function DepartmentSidebar({
                                             onClick={(e) => {
                                               e.stopPropagation()
                                               onSubclassClick(
-                                                dept.id, 
-                                                subdept.id.toString(), 
-                                                cls.id.toString(), 
+                                                dept.id,
+                                                subdept.id.toString(),
+                                                cls.id.toString(),
                                                 subClass.id.toString()
                                               )
                                             }}
                                           >
                                             <div className="flex items-center">
-                                              <IndexBadge 
-                                                index={`${deptIndex + 1}.${subdeptIndex + 1}.${classIndex + 1}.${subclassIndex + 1}`} 
+                                              <IndexBadge
+                                                index={`${deptIndex + 1}.${subdeptIndex + 1}.${classIndex + 1}.${subclassIndex + 1}`}
                                                 isActive={activeSubclass === subClass.id.toString()}
                                                 isDefault={subClass.default_display === true}
                                                 level="subclass"
                                               />
-                                              <TruncatedText 
-                                                text={subClass.name} 
-                                                className="max-w-[70px]" 
+                                              <TruncatedText
+                                                text={subClass.name}
+                                                className="max-w-[70px]"
                                                 level="subclass"
                                                 isActive={activeSubclass === subClass.id.toString()}
                                                 isDefault={subClass.default_display === true}
