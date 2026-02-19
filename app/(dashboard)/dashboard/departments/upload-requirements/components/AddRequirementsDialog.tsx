@@ -55,7 +55,7 @@ export interface RequirementForm {
   inputType?: QuestionType
   linkedMasterFieldId?: string
   options?: string[]
-  defaultValue?: string 
+  defaultValue?: string
   executionMode?: 'all' | 'latest'
   computedFunction?: string
   nationality?: NationalityType
@@ -124,22 +124,22 @@ const APPLICANT_OPTIONS = ENTITY_TYPES;
 
 export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmitting, context }: AddRequirementsDialogProps) {
   const [activeSection, setActiveSection] = useState<RequirementCategory>('processing')
-  
+
   // State for all categories including general
   const [generalReqs, setGeneralReqs] = useState<RequirementForm[]>([DEFAULT_REQUIREMENT('general')])
   const [processingReqs, setProcessingReqs] = useState<RequirementForm[]>([DEFAULT_REQUIREMENT('processing')])
   const [issuanceReqs, setIssuanceReqs] = useState<RequirementForm[]>([DEFAULT_REQUIREMENT('issuance')])
   const [jobSpecificReqs, setJobSpecificReqs] = useState<RequirementForm[]>([DEFAULT_REQUIREMENT('job-specific')])
-  
+
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
-  
+
   // Bulk inputs
   const [generalBulkInput, setGeneralBulkInput] = useState('')
   const [processingBulkInput, setProcessingBulkInput] = useState('')
   const [issuanceBulkInput, setIssuanceBulkInput] = useState('')
   const [jobSpecificBulkInput, setJobSpecificBulkInput] = useState('')
-  
+
   const [automationTypes, setAutomationTypes] = useState<any[]>([])
   const [masterFields, setMasterFields] = useState<any[]>([])
   const [templates, setTemplates] = useState<any[]>([])
@@ -179,7 +179,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
       setTemplates([]);
       return;
     }
-    
+
     setLoadingTemplates(true);
     try {
       const entityTypeMap: Record<string, string> = {
@@ -192,10 +192,10 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
         'understudy': 'understudy'
       };
 
-      const entityTypes = [...new Set(entityTypes.map(type => entityTypeMap[type] || 'principal'))];
-      
-      const entityFilters = entityTypes.map(et => `entity_types.cs.["${et}"]`).join(',');
-      
+      const mappedEntityTypes = [...new Set(entityTypes.map(type => entityTypeMap[type] || 'principal'))];
+
+      const entityFilters = mappedEntityTypes.map(et => `entity_types.cs.["${et}"]`).join(',');
+
       let query = supabase
         .from('acc_portal_templates')
         .select('*')
@@ -217,15 +217,15 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
   // Fetch templates when hasTemplate or documentIds change
   useEffect(() => {
     if (!isOpen) return;
-    
+
     const allDocIds = [...generalReqs, ...processingReqs, ...issuanceReqs, ...jobSpecificReqs]
       .filter(req => req.hasTemplate && req.documentIds.length > 0)
       .flatMap(req => req.documentIds);
-    
+
     const allEntityTypes = [...generalReqs, ...processingReqs, ...issuanceReqs, ...jobSpecificReqs]
       .filter(req => req.hasTemplate)
       .flatMap(req => req.entityTypes || ['principal']);
-    
+
     if (allDocIds.length > 0) {
       fetchTemplates(allDocIds, allEntityTypes);
     } else {
@@ -235,7 +235,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
 
   const handleSubmit = async () => {
     if (!context) return;
-    
+
     let source: RequirementForm[] = [];
     switch (activeSection) {
       case 'general': source = generalReqs; break;
@@ -244,7 +244,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
       case 'job-specific': source = jobSpecificReqs; break;
       default: source = [];
     }
-    
+
     const validItems = source.filter(req => req.name.trim() !== '');
 
     if (validItems.length === 0) return;
@@ -272,11 +272,11 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
         .eq('job_level', JSON.stringify(jobLevelObj))
         .maybeSingle();
 
-      let payload: any = { 
-        job_level: jobLevelObj, 
-        type: context.type, 
-        updated_at: new Date().toISOString(), 
-        id: existingRecord?.id 
+      let payload: any = {
+        job_level: jobLevelObj,
+        type: context.type,
+        updated_at: new Date().toISOString(),
+        id: existingRecord?.id
       };
 
       // Update tm_automations table for any web form automations
@@ -294,7 +294,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
           );
         }
       }
-      
+
       if (automationUpdates.length > 0) {
         await Promise.all(automationUpdates);
       }
@@ -371,12 +371,12 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
       setProcessingReqs([DEFAULT_REQUIREMENT('processing')])
       setIssuanceReqs([DEFAULT_REQUIREMENT('issuance')])
       setJobSpecificReqs([DEFAULT_REQUIREMENT('job-specific')])
-      
+
       setGeneralBulkInput('')
       setProcessingBulkInput('')
       setIssuanceBulkInput('')
       setJobSpecificBulkInput('')
-      
+
       setActiveSection('processing')
     }
     onOpenChange(false)
@@ -405,7 +405,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
 
   const handleBulkInputChange = (section: RequirementCategory, value: string) => {
     const lines = value.split('\n').filter(l => l.trim())
-    
+
     switch (section) {
       case 'general':
         setGeneralBulkInput(value)
@@ -506,17 +506,17 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                 <div className="bg-slate-50 px-4 py-3 border-b flex justify-between items-center">
                   <div className="flex items-center gap-3">
                     <Badge variant="outline" className="bg-white">Item {idx + 1}</Badge>
-                    <Input 
-                      value={req.name} 
-                      onChange={e => updateCurrentReq(idx, { name: e.target.value })} 
-                      className="h-8 bg-transparent border-none font-bold text-slate-700 w-[300px] focus-visible:ring-0" 
-                      placeholder="Question label..." 
+                    <Input
+                      value={req.name}
+                      onChange={e => updateCurrentReq(idx, { name: e.target.value })}
+                      className="h-8 bg-transparent border-none font-bold text-slate-700 w-[300px] focus-visible:ring-0"
+                      placeholder="Question label..."
                     />
                   </div>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-8 w-8 text-red-400" 
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-red-400"
                     onClick={() => {
                       const updated = currentReqs.filter((_, i) => i !== idx);
                       if (activeSection === 'general') setGeneralReqs(updated);
@@ -549,8 +549,8 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                               {APPLICANT_OPTIONS.map((opt) => (
                                 <CommandItem key={opt.value} onSelect={() => {
                                   const current = req.entityTypes;
-                                  const updated = current.includes(opt.value as EntityType) 
-                                    ? current.filter(t => t !== opt.value) 
+                                  const updated = current.includes(opt.value as EntityType)
+                                    ? current.filter(t => t !== opt.value)
                                     : [...current, opt.value as EntityType];
                                   updateCurrentReq(idx, { entityTypes: updated });
                                 }}>
@@ -572,11 +572,11 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                           <Label className="text-[10px] uppercase font-bold text-blue-600 flex items-center gap-1">
                             <Folder className="h-3 w-3" /> Section Category
                           </Label>
-                          <Input 
-                            value={req.category_name} 
-                            onChange={e => updateCurrentReq(idx, { category_name: e.target.value })} 
-                            placeholder="e.g. Arrival Details" 
-                            className="h-9" 
+                          <Input
+                            value={req.category_name}
+                            onChange={e => updateCurrentReq(idx, { category_name: e.target.value })}
+                            placeholder="e.g. Arrival Details"
+                            className="h-9"
                           />
                         </div>
 
@@ -597,10 +597,10 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
 
                         <div className="space-y-1.5">
                           <Label className="text-[10px] uppercase font-bold text-slate-400">Default Value</Label>
-                          <Input 
-                            value={req.defaultValue} 
-                            onChange={e => updateCurrentReq(idx, { defaultValue: e.target.value })} 
-                            className="h-9" 
+                          <Input
+                            value={req.defaultValue}
+                            onChange={e => updateCurrentReq(idx, { defaultValue: e.target.value })}
+                            className="h-9"
                             placeholder="Optional..."
                           />
                         </div>
@@ -608,9 +608,9 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                         <div className="space-y-1.5">
                           <Label className="text-[10px] uppercase font-bold text-slate-400">Mandatory</Label>
                           <div className="flex items-center h-9 gap-2 px-3 border rounded-md">
-                            <Checkbox 
-                              checked={req.isRequired} 
-                              onCheckedChange={c => updateCurrentReq(idx, { isRequired: !!c })} 
+                            <Checkbox
+                              checked={req.isRequired}
+                              onCheckedChange={c => updateCurrentReq(idx, { isRequired: !!c })}
                             />
                             <span className="text-xs">Required</span>
                           </div>
@@ -621,9 +621,9 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                         <div className="space-y-2">
                           <div className="flex justify-between items-center">
                             <Label className="text-[10px] uppercase font-bold text-blue-600">Dropdown Options</Label>
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
+                            <Button
+                              variant="outline"
+                              size="sm"
                               className="h-7 text-xs"
                               onClick={() => {
                                 const currentOptions = Array.isArray(req.options) ? [...req.options] : [];
@@ -692,10 +692,10 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                         <div className="grid grid-cols-3 gap-4">
                           <div className="space-y-1">
                             <Label className="text-[10px] text-amber-700 font-bold">Show if this question...</Label>
-                            <Select 
-                              value={req.dependsOnQuestionId || "always"} 
-                              onValueChange={v => updateCurrentReq(idx, { 
-                                dependsOnQuestionId: v === "always" ? undefined : v 
+                            <Select
+                              value={req.dependsOnQuestionId || "always"}
+                              onValueChange={v => updateCurrentReq(idx, {
+                                dependsOnQuestionId: v === "always" ? undefined : v
                               })}
                             >
                               <SelectTrigger className="bg-white border-amber-200 h-9">
@@ -716,8 +716,8 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                             <>
                               <div className="space-y-1">
                                 <Label className="text-[10px] text-amber-700 font-bold">Operator</Label>
-                                <Select 
-                                  value={req.dependsOnOperator} 
+                                <Select
+                                  value={req.dependsOnOperator}
                                   onValueChange={v => updateCurrentReq(idx, { dependsOnOperator: v as LogicOperator })}
                                 >
                                   <SelectTrigger className="bg-white border-amber-200 h-9">
@@ -734,11 +734,11 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                               {(req.dependsOnOperator === 'equals' || req.dependsOnOperator === 'not_equals') && (
                                 <div className="space-y-1">
                                   <Label className="text-[10px] text-amber-700 font-bold">Value</Label>
-                                  <Input 
-                                    placeholder="e.g. Arriving by Air" 
-                                    value={req.dependsOnValue} 
-                                    onChange={e => updateCurrentReq(idx, { dependsOnValue: e.target.value })} 
-                                    className="bg-white border-amber-200 h-9" 
+                                  <Input
+                                    placeholder="e.g. Arriving by Air"
+                                    value={req.dependsOnValue}
+                                    onChange={e => updateCurrentReq(idx, { dependsOnValue: e.target.value })}
+                                    className="bg-white border-amber-200 h-9"
                                   />
                                 </div>
                               )}
@@ -790,8 +790,8 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                                       {kycDocuments.map(doc => (
                                         <CommandItem key={doc.id} onSelect={() => {
                                           const current = req.documentIds;
-                                          const updated = current.includes(String(doc.id)) 
-                                            ? current.filter(id => id !== String(doc.id)) 
+                                          const updated = current.includes(String(doc.id))
+                                            ? current.filter(id => id !== String(doc.id))
                                             : [...current, String(doc.id)];
                                           updateCurrentReq(idx, { documentIds: updated });
                                         }}>
@@ -867,7 +867,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                             <Label className="text-xs font-bold text-slate-500">Extraction / Computed Function</Label>
                             <Select value={req.computedFunction || 'none'} onValueChange={(v) => {
                               const updates: Partial<RequirementForm> = { computedFunction: v };
-                              
+
                               if (v === 'none') {
                                 updates.executionMode = '';
                               } else if (v.includes('Latest')) {
@@ -875,7 +875,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                               } else {
                                 updates.executionMode = 'all';
                               }
-                              
+
                               updateCurrentReq(idx, updates);
                             }}>
                               <SelectTrigger className="bg-slate-50 border-slate-200 h-10">
@@ -932,7 +932,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                               <Label className="text-sm font-medium text-orange-800">Template Selection</Label>
                               {loadingTemplates && <Loader2 className="h-4 w-4 animate-spin text-orange-600" />}
                             </div>
-                            
+
                             {templates.length > 0 ? (
                               <div className="space-y-2">
                                 <p className="text-xs text-slate-600">Available templates for selected documents:</p>
@@ -951,9 +951,9 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                                         variant="outline"
                                         className="h-7 text-xs"
                                         onClick={() => {
-                                          updateCurrentReq(idx, { 
+                                          updateCurrentReq(idx, {
                                             selectedTemplateId: template.id,
-                                            selectedTemplate: template 
+                                            selectedTemplate: template
                                           });
                                           toast({
                                             title: "Template Selected",
@@ -983,9 +983,9 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
               </Card>
             ))}
 
-            <Button 
-              variant="outline" 
-              className="w-full border-dashed py-8 bg-white hover:bg-slate-50" 
+            <Button
+              variant="outline"
+              className="w-full border-dashed py-8 bg-white hover:bg-slate-50"
               onClick={() => {
                 const newItem = DEFAULT_REQUIREMENT(activeSection);
                 if (activeSection === 'general') setGeneralReqs([...generalReqs, newItem]);
@@ -1004,7 +1004,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
           <Button onClick={handleSubmit} disabled={isSubmitting} className="min-w-[150px]">
             {isSubmitting ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> 
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Saving...
               </>
             ) : (

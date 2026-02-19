@@ -66,6 +66,13 @@ export function NewCompanyInquiryDialog({
 }: NewCompanyInquiryDialogProps) {
     const isEditMode = !!initialData;
 
+    // DEBUG: Log initial data reception
+    useEffect(() => {
+        console.log(' NewCompanyInquiryDialog - initialData:', initialData);
+        console.log(' NewCompanyInquiryDialog - isEditMode:', isEditMode);
+        console.log(' NewCompanyInquiryDialog - open:', open);
+    }, [initialData, isEditMode, open]);
+
     const [companies, setCompanies] = useState<Company[]>([])
     const [selectedCompany, setSelectedCompany] = useState<Company | null>(null)
     const [officials, setOfficials] = useState<Official[]>([])
@@ -154,7 +161,11 @@ export function NewCompanyInquiryDialog({
 
     // Populate form on Edit Mode
     useEffect(() => {
+        console.log('🔍 Form population useEffect triggered:', { open, hasInitialData: !!initialData });
+
         if (open && initialData) {
+            console.log('🔍 Populating form with initialData:', initialData);
+
             setFormData({
                 job_description: initialData.job_description || '',
                 department_id: initialData.department_id?.toString() || '',
@@ -174,18 +185,72 @@ export function NewCompanyInquiryDialog({
                 }
             });
             setTaskType(initialData.renewal_status || 'new');
-            setSelectedCompany({
-                id: initialData.company_id,
-                company_name: initialData.applicant_name
-            });
 
-            if (initialData.directors_details) {
-                const ids = initialData.directors_details.map((d: any) => d.id);
-                setSelectedOfficialIds(new Set(ids));
-                const primary = initialData.directors_details.find((d: any) => d.is_primary);
-                if (primary) setPrimaryDirectorId(primary.id);
+            // FIX: Use applicant_details for company info instead of company_id
+            const companyInfo = initialData.applicant_details || initialData.company_details;
+            if (companyInfo) {
+                setSelectedCompany({
+                    id: companyInfo.id,
+                    company_name: companyInfo.name
+                });
+                console.log('🔍 Set selected company from applicant_details:', { id: companyInfo.id, name: companyInfo.name });
+            } else {
+                console.warn('🔍 No company info found in applicant_details or company_details');
+            }
+
+            // FIX: Look for directors in participants_details instead of directors_details
+            const participants = initialData.participants_details || [];
+            console.log('🔍 Processing participants_details:', participants);
+
+            const directors = participants.filter((p: any) =>
+                p.type === 'individual' &&
+                (p.role.includes('Director') || p.role.includes('director'))
+            );
+
+            if (directors.length > 0) {
+                console.log('🔍 Found directors in participants:', directors);
+                const directorIds = directors.map((d: any) => d.id);
+                setSelectedOfficialIds(new Set(directorIds));
+                const primary = directors.find((d: any) => d.is_primary);
+                if (primary) {
+                    console.log('🔍 Set primary director:', primary);
+                    setPrimaryDirectorId(primary.id);
+                }
+            } else {
+                console.log('🔍 No directors found in participants_details');
+            }
+
+            // FIX: Process other participants and set form fields
+            const officer = participants.find((p: any) =>
+                p.type === 'individual' && p.role.includes('officer')
+            );
+            const taskManager = participants.find((p: any) =>
+                p.type === 'individual' && p.role.includes('task_manager')
+            );
+            const taskAssistant = participants.find((p: any) =>
+                p.type === 'individual' && p.role.includes('task_assistant')
+            );
+
+            if (officer) {
+                console.log('🔍 Found officer:', officer);
+                setFormData(prev => ({ ...prev, officer_id: officer.id.toString() }));
+            }
+            if (taskManager) {
+                console.log('🔍 Found task manager:', taskManager);
+                setFormData(prev => ({ ...prev, task_manager_id: taskManager.id.toString() }));
+            }
+            if (taskAssistant) {
+                console.log('🔍 Found task assistant:', taskAssistant);
+                setFormData(prev => ({ ...prev, task_assistant_id: taskAssistant.id.toString() }));
+            }
+
+            // FIX: Populate job specific answers from initial data
+            if (initialData.job_specific_answers) {
+                console.log('🔍 Populating job specific answers:', initialData.job_specific_answers);
+                setJobAnswers(initialData.job_specific_answers);
             }
         } else if (open && !initialData) {
+            console.log('🔍 Resetting form (new mode)');
             resetForm();
         }
     }, [open, initialData]);
@@ -237,6 +302,15 @@ export function NewCompanyInquiryDialog({
     const fetchOfficials = useCallback(async (companyId: number) => {
         setLoadingOfficials(true);
         try {
+            console.log('🔍 fetchOfficials called with companyId:', companyId);
+
+            // Skip fetching if companyId is null or undefined
+            if (!companyId) {
+                console.warn('🔍 fetchOfficials: No companyId provided, skipping fetch');
+                setOfficials([]);
+                return;
+            }
+
             const { data, error } = await supabase
                 .from('registry_individuals')
                 .select('id, full_name, employment_data')
@@ -268,6 +342,7 @@ export function NewCompanyInquiryDialog({
             });
 
             const uniqueOfficials = Array.from(associatedMap.values());
+            console.log('🔍 fetchOfficials found officials:', uniqueOfficials);
 
             // Fetch photos for each official
             const officialsWithPhotos = await Promise.all(
@@ -542,7 +617,8 @@ export function NewCompanyInquiryDialog({
                     name: selectedCompany.company_name,
                     type: "company"
                 },
-                participants_details: participants_details
+                participants_details: participants_details,
+                job_specific_answers: jobAnswers // FIX: Add job specific answers to payload
             };
 
             let result;
@@ -553,24 +629,24 @@ export function NewCompanyInquiryDialog({
             }
 
             if (result.error) throw result.error;
-            
+
             // Ensure we have valid data before proceeding
             if (!result.data || result.data.length === 0) {
                 throw new Error('No data returned from database operation');
             }
 
             // Show success toast with more specific information
-            toast({ 
-                title: 'Success', 
-                description: `Enquiry ${isEditMode ? 'updated' : 'created'} successfully` 
+            toast({
+                title: 'Success',
+                description: `Enquiry ${isEditMode ? 'updated' : 'created'} successfully`
             });
-            
+
             // Call the parent callback with the newly created/updated data
             onEnquiryCreated(result.data);
-            
+
             // Close the dialog
             onOpenChange(false);
-            
+
             // Reset form after successful submission
             if (!isEditMode) {
                 resetForm();

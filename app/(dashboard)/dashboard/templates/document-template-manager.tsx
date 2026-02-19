@@ -103,13 +103,14 @@ type ConditionalCondition = {
 };
 
 type BooleanCondition = {
-  tag: string;              // e.g., 'is_male', 'daily_frequency'
-  label: string;            // Display text: 'Male', 'Daily'
-  master_field_id: number; // Required - for DB-driven fields
-  comparison?: {            // For DB fields
-    field: string;          // e.g., 'gender'
+  tag: string;
+  label: string;
+  master_field_id?: number; // Optional
+  linked_job_question_id?: string; // Add this
+  comparison?: {
+    field?: string;
     operator: 'equals' | 'not_equals' | 'contains';
-    value: string;          // e.g., 'Male'
+    value: string;
   };
 };
 
@@ -989,16 +990,7 @@ export default function DocumentTemplateManager({
     entity_type: [],
     default_value: '',
     array_direction: 'vertical',
-    checklist_data_sources: [
-      {
-        id: 'default',
-        table: 'acc_portal_kyc_uploads',
-        linking_variable: 'company_id',
-        entity_types: ['company'],
-        computed_function: 'none',
-        linked_document_ids: []
-      }
-    ],
+    checklist_data_sources: [],
     image_width: '',
     image_height: '',
     linked_job_question_id: undefined,
@@ -2075,14 +2067,7 @@ export default function DocumentTemplateManager({
       ...(newPlaceholder.type === 'document_checklist' && {
         linked_document_ids: newPlaceholder.linked_document_ids || [],
         checklist_display_format: newPlaceholder.checklist_display_format || 'checkboxes',
-        checklist_data_sources: newPlaceholder.checklist_data_sources || [
-          {
-            id: 'default',
-            table: 'acc_portal_kyc_uploads',
-            linking_variable: 'company_id',
-            document_id_field: 'kyc_document_id'
-          }
-        ],
+        checklist_data_sources: newPlaceholder.checklist_data_sources || [],
       }),
       // Include default_value field
       default_value: newPlaceholder.default_value || ''
@@ -2115,10 +2100,8 @@ export default function DocumentTemplateManager({
       required: false,
       entity_type: [],
       default_value: '',
-      conditions: [],
-      boolean_conditions: [],
-      boolean_type: 'single',
       array_direction: 'vertical',
+      checklist_data_sources: [],
       image_width: '',
       image_height: '',
       linked_job_question_id: undefined,
@@ -2130,16 +2113,6 @@ export default function DocumentTemplateManager({
       source_table: '',
       linking_variable: null,
       linked_master_field_id: undefined,
-      checklist_data_sources: [
-        {
-          id: 'default',
-          table: 'acc_portal_kyc_uploads',
-          linking_variable: 'company_id',
-          entity_types: ['company'],
-          computed_function: 'none',
-          linked_document_ids: []
-        }
-      ],
     });
 
     setDirectorType('all');
@@ -2162,7 +2135,7 @@ export default function DocumentTemplateManager({
       conditions: placeholder.conditions || [],
       boolean_conditions: placeholder.boolean_conditions || [],
       boolean_type: placeholder.boolean_type || 'single',
-      is_ai_generated: placeholder.is_ai_generated || false, // Add this
+      is_ai_generated: placeholder.is_ai_generated || false,
       ai_prompt: placeholder.ai_prompt || '',
       default_value: placeholder.default_value || '',
       display_value: placeholder.display_value || '',
@@ -2173,16 +2146,7 @@ export default function DocumentTemplateManager({
       source_table: placeholder.source_table || '',
       linking_variable: placeholder.linking_variable || null,
       linked_master_field_id: placeholder.linked_master_field_id || undefined,
-      checklist_data_sources: placeholder.checklist_data_sources || [
-        {
-          id: 'default',
-          table: 'acc_portal_kyc_uploads',
-          linking_variable: 'company_id',
-          entity_types: ['company'],
-          computed_function: 'none',
-          linked_document_ids: []
-        }
-      ],
+      checklist_data_sources: placeholder.checklist_data_sources || [],
     });
 
     // Set director type if applicable
@@ -3205,41 +3169,67 @@ export default function DocumentTemplateManager({
                             setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
                           }} className="h-6 text-xs bg-white" />
                         </div>
-                        {/* Master Field Selection */}
+                        {/* Source Selection */}
                         <div className="space-y-2">
-                          <Label className="text-[10px] font-bold text-blue-600 uppercase flex items-center gap-1.5">
-                            <Database className="h-3 w-3" /> Master Field
+                          <Label className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
+                            Source for Comparison
                           </Label>
-                          <Select
-                            value={cond.master_field_id?.toString() || ''}
-                            onValueChange={(value) => {
-                              const updated = [...newPlaceholder.boolean_conditions];
-                              const selectedField = masterFields.find(f => f.id === parseInt(value));
-                              if (selectedField) {
-                                updated[idx] = {
-                                  ...updated[idx],
-                                  master_field_id: parseInt(value),
-                                  comparison: {
-                                    field: selectedField.field_key,
-                                    operator: 'equals',
-                                    value: ''
-                                  }
-                                };
-                                setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
-                              }
-                            }}
-                          >
-                            <SelectTrigger className="h-8 text-xs">
-                              <SelectValue placeholder="Select master field..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {masterFields.map(field => (
-                                <SelectItem key={field.id} value={field.id.toString()}>
-                                  {field.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <div className="grid grid-cols-2 gap-2">
+                            {/* Master Field Picker */}
+                            <div className="space-y-1">
+                              <Label className="text-[9px] text-blue-600 font-bold">Database Field</Label>
+                              <Select
+                                value={cond.master_field_id?.toString() || ''}
+                                onValueChange={(value) => {
+                                  const updated = [...newPlaceholder.boolean_conditions];
+                                  const selectedField = masterFields.find(f => f.id === parseInt(value));
+                                  updated[idx] = {
+                                    ...updated[idx],
+                                    master_field_id: parseInt(value),
+                                    linked_job_question_id: undefined, // Clear the other one
+                                    comparison: { field: selectedField?.field_key, operator: 'equals', value: cond.comparison?.value || '' }
+                                  };
+                                  setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
+                                }}
+                              >
+                                <SelectTrigger className="h-8 text-xs bg-white">
+                                  <SelectValue placeholder="Select DB field..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {masterFields.map(field => (
+                                    <SelectItem key={field.id} value={field.id.toString()}>{field.label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            {/* Job Question Picker */}
+                            <div className="space-y-1">
+                              <Label className="text-[9px] text-purple-600 font-bold">Job Question</Label>
+                              <Select
+                                value={cond.linked_job_question_id || ''}
+                                onValueChange={(value) => {
+                                  const updated = [...newPlaceholder.boolean_conditions];
+                                  updated[idx] = {
+                                    ...updated[idx],
+                                    linked_job_question_id: value,
+                                    master_field_id: undefined, // Clear the other one
+                                    comparison: { operator: 'equals', value: cond.comparison?.value || '' }
+                                  };
+                                  setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
+                                }}
+                              >
+                                <SelectTrigger className="h-8 text-xs bg-white">
+                                  <SelectValue placeholder="Select Question..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {jobQuestions.map(q => (
+                                    <SelectItem key={q.id} value={q.id}>{q.label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -3247,7 +3237,8 @@ export default function DocumentTemplateManager({
                       const updated = [...(newPlaceholder.boolean_conditions || []), {
                         tag: '',
                         label: '',
-                        master_field_id: 0,
+                        master_field_id: undefined,
+                        linked_job_question_id: undefined,
                         comparison: { operator: 'equals', value: '' }
                       }];
                       setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));

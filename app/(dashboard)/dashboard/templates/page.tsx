@@ -94,43 +94,75 @@ export default function LettersPage() {
     performInitialLoad();
   }, []);
 
-  const jobLevelObject = useMemo(() => {
-    const parseId = (id: string) => {
-      if (!id) return null;
-      const num = Number(id);
-      return isNaN(num) ? id : num;
-    };
-    const deptId = parseId(selectedDepartment);
-    const subDeptId = parseId(selectedSubdepartment);
-    const classId = parseId(selectedClass);
-    const subclassId = parseId(selectedSubclass);
+ // Inside LettersPage component
+const jobLevelObject = useMemo(() => {
+  const parseId = (id: string) => {
+    if (!id) return null;
+    const num = Number(id);
+    return isNaN(num) ? id : num;
+  };
+  
+  const deptId = parseId(selectedDepartment);
+  const subDeptId = parseId(selectedSubdepartment);
+  const classId = parseId(selectedClass);
+  const subclassId = parseId(selectedSubclass);
 
-    if (subclassId) return { level: 4, department_id: deptId, subdepartment_id: subDeptId, class_id: classId, subclass_id: subclassId };
-    if (classId) return { level: 3, department_id: deptId, subdepartment_id: subDeptId, class_id: classId, subclass_id: null };
-    return null;
-  }, [selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
+  // Find the actual objects in the departments tree to check for children
+  const d = departments.find(item => String(item.id) === selectedDepartment);
+  const sd = d?.tm_subdepartments?.find(item => String(item.id) === selectedSubdepartment);
+  const c = sd?.classes?.find(item => String(item.id) === selectedClass);
 
-  useEffect(() => {
-    const fetchLetterTypesForClass = async () => {
-      // 1. Ensure we have enough data to identify the hierarchy
-      if (!jobLevelObject || !selectedClass) {
-        setLetterTypes([]);
-        setSelectedLetter(null);
-        setSelectedBank(null);
-        return;
-      }
+  // 1. Level 4: Subclass is selected (Always a leaf)
+  if (subclassId) {
+    return { level: 4, department_id: deptId, subdepartment_id: subDeptId, class_id: classId, subclass_id: subclassId };
+  }
 
-      setIsLoading(true);
-      try {
-        // 2. Fetch requirements using exact JSON match on job_level
-        // We select 'requirements' instead of 'documents_and_fields'
-        const { data: requirementsData, error: requirementsError } = await supabase
-          .from('tm_class_requirements')
-          .select('requirements')
-          .eq('job_level', JSON.stringify(jobLevelObject))
-          .maybeSingle();
+  // 2. Level 3: Class is selected. 
+  // If it has no subclasses, or we just want to treat Class as the terminal level for templates.
+  if (classId) {
+    return { level: 3, department_id: deptId, subdepartment_id: subDeptId, class_id: classId, subclass_id: null };
+  }
 
-        if (requirementsError) throw requirementsError;
+  // 3. Level 2: Subdepartment is selected.
+  // NEW: Check if this subdepartment has NO classes. If so, it's a leaf node.
+  if (subDeptId) {
+    const hasClasses = sd?.classes && sd.classes.length > 0;
+    if (!hasClasses) {
+      return { level: 2, department_id: deptId, subdepartment_id: subDeptId, class_id: null, subclass_id: null };
+    }
+  }
+
+  // 4. Level 1: Department is selected.
+  // NEW: Check if this department has NO subdepartments. If so, it's a leaf node.
+  if (deptId) {
+    const hasSubDepts = d?.tm_subdepartments && d.tm_subdepartments.length > 0;
+    if (!hasSubDepts) {
+      return { level: 1, department_id: deptId, subdepartment_id: null, class_id: null, subclass_id: null };
+    }
+  }
+
+  return null;
+}, [departments, selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
+ 
+useEffect(() => {
+  const fetchLetterTypesForClass = async () => {
+    // Stop if no valid terminal level (leaf) is selected
+    if (!jobLevelObject) {
+      setLetterTypes([]);
+      setSelectedLetter(null);
+      setSelectedBank(null);
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const { data: requirementsData, error: requirementsError } = await supabase
+        .from('tm_class_requirements')
+        .select('requirements')
+        .eq('job_level', JSON.stringify(jobLevelObject))
+        .maybeSingle();
+
+      if (requirementsError) throw requirementsError; 
 
         if (!requirementsData?.requirements || !Array.isArray(requirementsData.requirements)) {
           setLetterTypes([]);
@@ -170,7 +202,7 @@ export default function LettersPage() {
     };
 
     fetchLetterTypesForClass();
-  }, [jobLevelObject, selectedClass]);
+  }, [jobLevelObject]);
 
   const handleLetterClick = (letter: any) => {
     const hasBanks = letter.banks_applicable && letter.banks_applicable.length > 0;
@@ -259,29 +291,33 @@ export default function LettersPage() {
         {/* MAIN CONTENT PANEL */}
         <ResizablePanel defaultSize={80}>
           <main className="h-full overflow-hidden p-6 space-y-6 flex flex-col">
-            <header>
-              <h1 className="text-3xl font-bold tracking-tight">Template Management</h1>
-              <p className="text-muted-foreground">{breadcrumb || 'Select a department to begin'}</p>
-            </header>
-
-            {isLoading && (!selectedClass && !selectedSubclass) ? (
-              <div className="flex justify-center items-center h-2/3"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>
-            ) : !selectedClass && !selectedSubclass ? (
-              <Card className="mt-8">
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <div>
-                    <CardTitle>Select a Class</CardTitle>
-                    <CardDescription>Choose a class from the sidebar.</CardDescription>
-                  </div>
-                  {String(selectedDepartment) === "14" && (
-                    <Button variant="outline" className="gap-2" onClick={() => setIsBankDialogOpen(true)}>
-                      <Building2 className="h-4 w-4" /> Add Bank Compatibility
-                    </Button>
-                  )}
-                </CardHeader>
-                <CardContent className="text-center py-12"><FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" /></CardContent>
-              </Card>
-            ) : (
+          <header>
+  <h1 className="text-3xl font-bold tracking-tight">Template Management</h1>
+  <p className="text-muted-foreground">{breadcrumb || 'Select a department to begin'}</p>
+</header>
+          {isLoading && !jobLevelObject ? (
+  <div className="flex justify-center items-center h-2/3">
+    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+  </div>
+) : !jobLevelObject ? ( 
+  /* CHANGE 2: Show this card ONLY if no valid leaf node is selected */
+  <Card className="mt-8">
+    <CardHeader className="flex flex-row items-center justify-between">
+      <div>
+        <CardTitle>Select an Item</CardTitle>
+        <CardDescription>Choose a department, subdepartment, or class from the sidebar.</CardDescription>
+      </div>
+      {String(selectedDepartment) === "14" && (
+        <Button variant="outline" className="gap-2" onClick={() => setIsBankDialogOpen(true)}>
+          <Building2 className="h-4 w-4" /> Add Bank Compatibility
+        </Button>
+      )}
+    </CardHeader>
+    <CardContent className="text-center py-12">
+      <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+    </CardContent>
+  </Card>
+) : (
               <div className="grid grid-cols-12 gap-6 h-[calc(100%-80px)]">
                 <Card className="col-span-4 h-full flex flex-col">
                   <CardHeader className="flex flex-row items-center justify-between space-y-0">

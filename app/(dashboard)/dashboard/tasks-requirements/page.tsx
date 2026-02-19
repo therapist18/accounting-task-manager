@@ -289,7 +289,7 @@ export default function TasksPage() {
     try {
       console.log('🔹 [handleEnquiryCreated] Refreshing data after submission...');
       await loadTasksAndStages(selectedDepartment, selectedSubdepartment);
-      
+
       // Log the updated state for debugging
       console.log('🔹 [handleEnquiryCreated] Data refreshed successfully', {
         newEnquiriesCount: newEnquiries.length,
@@ -297,10 +297,10 @@ export default function TasksPage() {
         selectedDepartment,
         selectedSubdepartment
       });
-      
+
     } catch (error) {
       console.error("Failed to refresh data after enquiry creation:", error);
-      
+
       // Provide more detailed error feedback
       toast({
         title: "Warning",
@@ -590,15 +590,19 @@ export default function TasksPage() {
       <NewCompanyInquiryDialog
         open={companyInquiryDialogOpen}
         onOpenChange={(isOpen) => {
-          console.log('🔹 [CompanyInquiryDialog] Open State Changed:', isOpen);
+          console.log(' [CompanyInquiryDialog] Open State Changed:', isOpen);
           setCompanyInquiryDialogOpen(isOpen);
           if (!isOpen) {
-            // Reset the selected department when dialog is closed
-            setSelectedDepartment('');
+            // FIX: Don't reset department selection when dialog closes after edit
+            // Only reset if we're not in edit mode
+            if (!taskToEdit) {
+              setSelectedDepartment('');
+            }
+            setTaskToEdit(null); // Reset taskToEdit when closing
           }
         }}
         onEnquiryCreated={(enquiries) => {
-          handleEnquiryCreated(enquiries, false);
+          handleEnquiryCreated(enquiries, !!taskToEdit);
         }}
         departments={departments}
         selectedDepartmentId={selectedDepartment}
@@ -606,7 +610,8 @@ export default function TasksPage() {
         selectedClassId={selectedClass}
         users={[]}
         officers={[]}
-        key={`company-dialog-${selectedDepartment}-${selectedSubdepartment}-${selectedClass}`} // Force re-render when any selection changes
+        initialData={taskToEdit} // PASS THE EDIT DATA HERE
+        key={`company-dialog-${selectedDepartment}-${selectedSubdepartment}-${selectedClass}-${taskToEdit?.id}`} // Include task ID in key
       />
 
       <EnquiryDialog

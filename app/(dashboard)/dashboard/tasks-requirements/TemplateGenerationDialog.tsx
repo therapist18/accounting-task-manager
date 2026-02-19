@@ -22,7 +22,7 @@ import ImageModule from 'docxtemplater-image-module-free';
 import * as mammoth from "mammoth";
 import { Checkbox } from '@/components/ui/checkbox';
 import { EntityType, ENTITY_TYPES, DEPENDANT_RELATIONSHIPS } from "@/lib/constants/entity-types";
-import { cn } from '@/lib/utils';   
+import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 // Around line 30
@@ -157,26 +157,16 @@ const fetchImageAsBase64 = async (url) => {
 const parseJsonValue = (data, path) => {
     if (!path || !data) return '';
     try {
-        console.log(`[PARSE JSON DEBUG] Input path:`, path);
-        console.log(`[PARSE JSON DEBUG] Input data:`, data);
-        
         let currentValue = data;
         const normalizedPath = path.replace(/->>/g, '->').replace(/'/g, '');
-        console.log(`[PARSE JSON DEBUG] Normalized path:`, normalizedPath);
-        
+
         const parts = normalizedPath.split(/->|\./);
-        console.log(`[PARSE JSON DEBUG] Path parts:`, parts);
 
         for (let i = 0; i < parts.length; i++) {
             const key = parts[i].trim();
-            console.log(`[PARSE JSON DEBUG] Processing key ${i}: "${key}"`);
             if (!key) continue;
-
-            // Only switch to .current if we're specifically looking for 'current' key
-            // or if the current value is a special wrapper object that should be unwrapped
             if (currentValue && currentValue.current !== undefined && key === 'current') {
                 currentValue = currentValue.current;
-                console.log(`[PARSE JSON DEBUG] Switched to .current for key "${key}"`);
             }
 
             if (Array.isArray(currentValue)) {
@@ -184,32 +174,25 @@ const parseJsonValue = (data, path) => {
             }
 
             if (currentValue && typeof currentValue === 'object') {
-                console.log(`[PARSE JSON DEBUG] Current value keys:`, Object.keys(currentValue));
                 if (currentValue[key] !== undefined) {
                     currentValue = currentValue[key];
-                    console.log(`[PARSE JSON DEBUG] Found direct match for key "${key}":`, currentValue);
                 } else {
                     const lowerKey = key.toLowerCase();
                     const foundKey = Object.keys(currentValue).find(k => k.toLowerCase() === lowerKey);
                     if (foundKey) {
                         currentValue = currentValue[foundKey];
-                        console.log(`[PARSE JSON DEBUG] Found case-insensitive match "${foundKey}" for key "${key}":`, currentValue);
                     } else {
-                        console.log(`[PARSE JSON DEBUG] No match found for key "${key}" in`, Object.keys(currentValue));
                         currentValue = undefined;
                     }
                 }
             } else if (i < parts.length - 1) {
-                console.log(`[PARSE JSON DEBUG] Current value is not object and not at end of path`);
                 return '';
             }
         }
 
         const finalValue = currentValue !== undefined && currentValue !== null ? String(currentValue) : '';
-        console.log(`[PARSE JSON DEBUG] Final value:`, finalValue);
         return finalValue;
     } catch (error) {
-        console.log(`[PARSE JSON DEBUG] Error:`, error);
         return '';
     }
 };
@@ -270,7 +253,7 @@ const checkDocumentStatus = (
     const config = dataSourceConfig || {
         table: 'acc_portal_kyc_uploads',
         linking_variable: entityType === 'company' ? 'company_id' : 'individual_id',
-        document_id_field: 'kyc_document_id'
+        document_id_field: 'document_id'
     };
     const uploads = sourceDataCache[config.table] || {};
     const documentFound = Object.values(uploads).some(upload => {
@@ -352,9 +335,9 @@ const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourc
     }
 
     if (normType === 'sponsor') {
-        console.log(`[GET TARGET ENTITY] Sponsor entity detected:`, { 
-            entityIdMap: entityIdMap, 
-            sponsorId: entityIdMap?.sponsor, 
+        console.log(`[GET TARGET ENTITY] Sponsor entity detected:`, {
+            entityIdMap: entityIdMap,
+            sponsorId: entityIdMap?.sponsor,
             relationshipDataSponsor: relationshipData?.sponsor ? { id: relationshipData.sponsor.id, type: typeof relationshipData.sponsor } : null
         });
         if (entityIdMap?.sponsor) {
@@ -454,7 +437,7 @@ const processConditionalField = (placeholder, targetEntity, combinedCache, maste
                             ? source.document_id
                             : [source.document_id];
                         records = records.filter(r =>
-                            requiredIds.includes(r.document_id || r.kyc_document_id)
+                            requiredIds.includes(r.document_id || r.document_id)
                         );
                     }
 
@@ -484,17 +467,33 @@ const processConditionalField = (placeholder, targetEntity, combinedCache, maste
     return { value: '', source: null };
 };
 
-const processBooleanField = (placeholder, targetEntity, combinedCache, masterFields) => {
-    if (!placeholder.boolean_conditions) {
-        return { value: [], source: null };
-    }
+const processBooleanField = (placeholder, targetEntity, combinedCache, masterFields, task) => {
+    if (!placeholder.boolean_conditions) return { value: [], source: null };
 
-    const targetId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id);
+    // FIX: Define targetId at the top of the function so it's available for comparison
+    const targetId = targetEntity ? String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id) : null;
+
+    const taskRecord = (combinedCache?.['tm_tasks'] && Object.values(combinedCache['tm_tasks'])[0]) || task;
+    const jobAnswers = taskRecord?.job_specific_answers || {};
 
     const results = placeholder.boolean_conditions.map(condition => {
         let isChecked = false;
 
-        if (condition.master_field_id) {
+        // 1. Resolve via Job Question (Your Case: less_than_ten, etc.)
+        const qId = condition.linked_job_question_id || placeholder.linked_job_question_id;
+        if (qId && jobAnswers[qId]) {
+            const actualAnswer = String(jobAnswers[qId]);
+            const targetValue = condition.comparison?.value;
+
+            if (condition.comparison?.operator === 'equals') {
+                isChecked = actualAnswer.trim() === String(targetValue).trim();
+            } else if (condition.comparison?.operator === 'contains') {
+                isChecked = actualAnswer.trim().includes(String(targetValue).trim());
+            }
+        }
+
+        // 2. Resolve via Master Field (Standard Logic)
+        else if (condition.master_field_id && targetId) {
             const mf = masterFields.get(parseInt(condition.master_field_id, 10));
             if (mf?.sources) {
                 for (const source of mf.sources) {
@@ -506,46 +505,24 @@ const processBooleanField = (placeholder, targetEntity, combinedCache, masterFie
                     );
 
                     if (record) {
-                        // Get the field value - use the comparison field if specified, otherwise use the tag
                         const fieldValue = source.path
                             ? parseJsonValue(record, source.path)
                             : record[condition.comparison?.field || condition.tag];
 
-                        // Handle comparison logic
                         if (condition.comparison) {
                             const { operator, value } = condition.comparison;
                             const strFieldValue = String(fieldValue || '').toLowerCase();
                             let compareValue = String(value || '').toLowerCase();
-                            
-                            // Fallback: if comparison value is empty, try to infer from label
-                            if (!compareValue && condition.label) {
-                                const labelLower = condition.label.toLowerCase();
-                                if (labelLower.includes('mr') || labelLower.includes('master') || labelLower.includes('sir')) {
-                                    compareValue = 'male';
-                                } else if (labelLower.includes('mrs') || labelLower.includes('miss') || labelLower.includes('ms') || labelLower.includes('madam')) {
-                                    compareValue = 'female';
-                                }
-                            }
 
                             switch (operator) {
-                                case 'equals':
-                                    isChecked = strFieldValue === compareValue;
-                                    break;
-                                case 'not_equals':
-                                    isChecked = strFieldValue !== compareValue;
-                                    break;
-                                case 'contains':
-                                    isChecked = strFieldValue.includes(compareValue);
-                                    break;
-                                default:
-                                    // Fallback for boolean fields
-                                    isChecked = Boolean(fieldValue);
+                                case 'equals': isChecked = strFieldValue === compareValue; break;
+                                case 'not_equals': isChecked = strFieldValue !== compareValue; break;
+                                case 'contains': isChecked = strFieldValue.includes(compareValue); break;
+                                default: isChecked = Boolean(fieldValue);
                             }
                         } else {
-                            // Fallback for simple boolean fields without comparison
                             isChecked = Boolean(fieldValue);
                         }
-
                         if (isChecked) break;
                     }
                 }
@@ -553,18 +530,15 @@ const processBooleanField = (placeholder, targetEntity, combinedCache, masterFie
         }
 
         return {
-            tag: condition.tag,
-            label: condition.label,
+            ...condition,
             checked: isChecked,
-            hasDbLink: Boolean(condition.master_field_id),
-            master_field_id: condition.master_field_id,
-            comparison: condition.comparison
+            hasDbLink: !!(qId || condition.master_field_id)
         };
     });
 
     return {
         value: results,
-        source: results.some(r => r.hasDbLink) ? 'Boolean (DB)' : 'Boolean (User Input)'
+        source: results.some(r => r.checked) ? 'Logic Resolved' : null
     };
 };
 
@@ -593,7 +567,7 @@ const processImageField = (placeholder, targetEntity, combinedCache, masterField
                 : [source.document_id];
 
             const match = Object.values(tableData).find(d => {
-                const docIdMatch = reqDocIds.includes(d.document_id || d.kyc_document_id);
+                const docIdMatch = reqDocIds.includes(d.document_id || d.document_id);
                 const entityIdMatch = String(d[linkingVar] || d.id) === searchId;
                 return docIdMatch && entityIdMatch;
             });
@@ -611,31 +585,22 @@ const processImageField = (placeholder, targetEntity, combinedCache, masterField
 
 const processTextField = (placeholder, targetEntity, combinedCache, masterFields) => {
     if (!placeholder.master_field_ids?.length) {
-        console.log(`[TEXT FIELD DEBUG] No master field IDs for placeholder: ${placeholder.name}`);
         return { value: '', source: null };
     }
 
     const searchId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id);
-    console.log(`[TEXT FIELD DEBUG] Processing ${placeholder.name} - Search ID: ${searchId}, Target entity type:`, targetEntity.constructor.name);
-    
+
     const allValues = [];
     const allSources = [];
 
     // Iterate through ALL master field IDs
     for (const id of placeholder.master_field_ids) {
         const mf = masterFields.get(parseInt(id, 10));
-        console.log(`[TEXT FIELD DEBUG] Master field ${id}:`, mf ? { field_key: mf.field_key, sources_count: mf.sources?.length } : 'NOT FOUND');
-        
         if (!mf?.sources) continue;
 
         for (const source of mf.sources) {
-            console.log(`[TEXT FIELD DEBUG] Processing source:`, { table: source.table, path: source.path, linking_variable: source.linking_variable });
-            
             const tableData = combinedCache[source.table];
-            console.log(`[TEXT FIELD DEBUG] Table ${source.table} has ${Object.keys(tableData || {}).length} records`);
-            
             if (!tableData) {
-                console.log(`[TEXT FIELD DEBUG] ERROR: Table '${source.table}' not found in combinedCache. Available tables:`, Object.keys(combinedCache));
                 continue;
             }
 
@@ -643,18 +608,6 @@ const processTextField = (placeholder, targetEntity, combinedCache, masterFields
             const record = Object.values(tableData).find(r => {
                 const recordId = String(r[linkingVar] || r.id);
                 const matches = recordId === searchId;
-                if (matches) {
-                    console.log(`[TEXT FIELD DEBUG] Found matching record:`, { 
-                        recordId, 
-                        searchId, 
-                        linkingVar,
-                        record: { 
-                            id: r.id, 
-                            [linkingVar]: r[linkingVar],
-                            postal_address: r.postal_address_details?.postal_address || r.postal_address
-                        }
-                    });
-                }
                 return matches;
             });
 
@@ -662,149 +615,93 @@ const processTextField = (placeholder, targetEntity, combinedCache, masterFields
                 const val = source.path
                     ? parseJsonValue(record, source.path)
                     : (record[mf.field_key] || record[placeholder.name]);
-
-                console.log(`[TEXT FIELD DEBUG] Extracted value:`, val, `from path:`, source.path || `field: ${mf.field_key || placeholder.name}`);
-                
                 if (val) {
                     allValues.push(val);
                     allSources.push(`DB: ${source.table}`);
-                } else {
-                    console.log(`[TEXT FIELD DEBUG] Value is null/empty from record`);
                 }
             } else {
-                console.log(`[TEXT FIELD DEBUG] No matching record found for search ID ${searchId} in table ${source.table}`);
-                // Log some sample IDs from the table for debugging
                 const sampleIds = Object.values(tableData).slice(0, 3).map(r => String(r[linkingVar] || r.id));
-                console.log(`[TEXT FIELD DEBUG] Sample IDs in ${source.table}:`, sampleIds);
             }
         }
     }
-    
+
     if (allValues.length > 0) {
         const combinedValue = allValues.join(' ');
-        // Prioritize sources that actually returned data over just the first source
         const successfulSourceIndex = allSources.findIndex(source => source.includes('registry_individuals'));
         const combinedSource = successfulSourceIndex >= 0 ? allSources[successfulSourceIndex] : allSources[0];
-        console.log(`[TEXT FIELD DEBUG] Returning combined value:`, combinedValue, `from:`, combinedSource);
         return {
             value: combinedValue,
             source: combinedSource
         };
     }
-
-    console.log(`[TEXT FIELD DEBUG] No values found, returning empty`);
     return { value: '', source: null };
 };
 
 const isValidValue = (val: any, placeholderType?: string): boolean => {
     if (val === null || val === undefined) return false;
-
-    // For boolean fields, valid if it's an array with any checked items
     if (placeholderType === 'boolean' && Array.isArray(val)) {
         return val.length > 0;
     }
-
-    // For arrays (non-boolean), check if it has content
     if (Array.isArray(val)) {
         return val.length > 0;
     }
-
-    // For strings, check if it's not empty and not an error message
     if (typeof val === 'string') {
         if (val === '') return false;
         const errorStrings = ['Missing', 'Missing Config', 'No Source', 'Computing...', 'Document Not Found', 'Field Not Found'];
         return !errorStrings.includes(val);
     }
-
-    // For other types (numbers, objects), check if they have meaningful content
     return Boolean(val);
 };
 
 const processPlaceholderValue = (placeholder, relationshipData, combinedCache, masterFields, entityIdMap = null, extractedData, companyData, arrayIndex = null, sourceArray = null, task = null) => {
-    console.log(`[PLACEHOLDER DEBUG] Processing placeholder: ${placeholder.name} (type: ${placeholder.type})`);
-    console.log(`[PLACEHOLDER DEBUG] Entity types:`, placeholder.entity_type);
-    console.log(`[PLACEHOLDER DEBUG] Master field IDs:`, placeholder.master_field_ids);
-    console.log(`[PLACEHOLDER DEBUG] Boolean conditions:`, placeholder.boolean_conditions);
-    
     const logic = placeholder.source_logic || 'priority';
     const collectedValues: string[] = [];
     const sourceMetadata: string[] = [];
-
-    // 1. Resolve Target Entity for this placeholder context
     const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData);
     const targetId = targetEntity ? String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id) : null;
-    
-    console.log(`[PLACEHOLDER DEBUG] Target entity:`, targetEntity ? { id: targetEntity.id, type: typeof targetEntity } : null);
-    console.log(`[PLACEHOLDER DEBUG] Target ID:`, targetId);
-
-    // --- STEP 1: DATABASE FIELDS (master_field_ids) ---
     if (placeholder.master_field_ids?.length > 0 && targetEntity) {
-        console.log(`[PLACEHOLDER DEBUG] Processing ${placeholder.master_field_ids.length} master field IDs`);
         for (const mid of placeholder.master_field_ids) {
             let result = { value: '', source: null };
-
-            // Check if this master field has useCurrentDate configuration
             const mf = masterFields.get(parseInt(mid, 10));
             if (mf?.date_config?.useCurrentDate) {
                 result = processCurrentDateField({ ...placeholder, master_field_ids: [mid] }, masterFields);
-                console.log(`[PLACEHOLDER DEBUG] Current date result for ${placeholder.name}:`, result);
             } else {
-                // Specialized resolution based on type
                 if (placeholder.type === 'ordinal') {
                     result = processOrdinalField(placeholder, arrayIndex);
                 } else if (placeholder.type === 'image') {
                     result = processImageField({ ...placeholder, master_field_ids: [mid] }, targetEntity, combinedCache, masterFields);
                 } else if (placeholder.type === 'boolean') {
                     result = processBooleanField({ ...placeholder, master_field_ids: [mid] }, targetEntity, combinedCache, masterFields);
-                    console.log(`[PLACEHOLDER DEBUG] Boolean result for ${placeholder.name}:`, result);
                 } else {
                     result = processTextField({ ...placeholder, master_field_ids: [mid] }, targetEntity, combinedCache, masterFields);
                 }
             }
-
-            console.log(`[PLACEHOLDER DEBUG] Master field ${mid} result:`, result);
-            console.log(`[PLACEHOLDER DEBUG] Is valid value:`, isValidValue(result.value, placeholder.type));
-
             if (isValidValue(result.value, placeholder.type)) {
                 if (logic === 'priority') {
-                    console.log(`[PLACEHOLDER DEBUG] Priority logic - returning result:`, result);
                     return result;
                 }
                 collectedValues.push(String(result.value));
                 sourceMetadata.push(result.source || 'DB');
             }
         }
-    } else {
-        console.log(`[PLACEHOLDER DEBUG] No master field IDs or no target entity`);
     }
-
-    // --- STEP 1.5: BOOLEAN CONDITIONS (for boolean placeholders with no master_field_ids) ---
     if (placeholder.type === 'boolean' && placeholder.boolean_conditions?.length > 0 && targetEntity) {
-        console.log(`[PLACEHOLDER DEBUG] Processing ${placeholder.boolean_conditions.length} boolean conditions`);
         const result = processBooleanField(placeholder, targetEntity, combinedCache, masterFields);
-        console.log(`[PLACEHOLDER DEBUG] Boolean conditions result for ${placeholder.name}:`, result);
-        console.log(`[PLACEHOLDER DEBUG] Is valid value:`, isValidValue(result.value, placeholder.type));
-
         if (isValidValue(result.value, placeholder.type)) {
             if (logic === 'priority') {
-                console.log(`[PLACEHOLDER DEBUG] Priority logic - returning boolean result:`, result);
                 return result;
             }
             collectedValues.push(String(result.value));
             sourceMetadata.push(result.source || 'Boolean (DB)');
         }
     }
-
-    // --- STEP 2: JOB QUESTIONS (linked_job_question_ids) ---
     const qIds = placeholder.linked_job_question_ids || (placeholder.linked_job_question_id ? [placeholder.linked_job_question_id] : []);
     if (qIds.length > 0) {
-        console.log(`[PLACEHOLDER DEBUG] Processing ${qIds.length} job question IDs:`, qIds);
         const taskRecord = (combinedCache?.['tm_tasks'] && Object.values(combinedCache['tm_tasks'])[0]) || task;
         const answers = taskRecord?.job_specific_answers || {};
 
         for (const qId of qIds) {
             const answer = answers[String(qId)] ?? answers[Number(qId)];
-            console.log(`[PLACEHOLDER DEBUG] Job question ${qId} answer:`, answer);
             if (isValidValue(answer)) {
                 if (logic === 'priority') return { value: String(answer), source: 'Job Question' };
                 collectedValues.push(String(answer));
@@ -812,16 +709,10 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
             }
         }
     }
-
-    // --- STEP 3: REQUIREMENTS (linked_requirement_ids) ---
     const reqIds = placeholder.linked_requirement_ids || [];
     if (reqIds.length > 0 && targetId) {
-        console.log(`[PLACEHOLDER DEBUG] Processing ${reqIds.length} requirement IDs:`, reqIds);
-        // Requirements usually check for document presence or specific extracted flags
         for (const rId of reqIds) {
-            // Check if document exists for this entity
             const isFound = checkDocumentStatus(rId, targetId, placeholder.entity_type?.[0] || 'company', combinedCache);
-            console.log(`[PLACEHOLDER DEBUG] Requirement ${rId} found:`, isFound);
             if (isFound) {
                 const val = "✓ Submitted";
                 if (logic === 'priority') return { value: val, source: 'Requirement' };
@@ -830,26 +721,19 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
             }
         }
     }
-
-    // --- FINALIZE LOGIC ---
     if (logic === 'all' && collectedValues.length > 0) {
         const finalResult = {
             value: collectedValues.join(' '),
             source: `Merged (${sourceMetadata[0]})`
         };
-        console.log(`[PLACEHOLDER DEBUG] All logic - returning:`, finalResult);
         return finalResult;
     }
-
-    // Fallback to default_value
     if (placeholder.default_value) {
         const defaultResult = { value: placeholder.default_value, source: 'Default' };
-        console.log(`[PLACEHOLDER DEBUG] Using default value:`, defaultResult);
         return defaultResult;
     }
 
     const emptyResult = { value: '', source: null };
-    console.log(`[PLACEHOLDER DEBUG] No value found - returning empty:`, emptyResult);
     return emptyResult;
 };
 
@@ -973,7 +857,7 @@ const UpdateProfileDialog = ({ open, onOpenChange, changedFields, onSave, isSavi
                                 <div className="flex items-start justify-between mb-3">
                                     <div>
                                         <Label className="font-semibold text-sm">
-                                            {field.placeholder.name.replace(/_/g, ' ').toUpperCase()}
+                                            {field.placeholder.display_value || field.placeholder.name.replace(/_/g, ' ').toUpperCase()}
                                         </Label>
                                         <div className="flex gap-2 mt-1">
                                             <Badge variant="outline" className="text-[9px]">
@@ -1135,7 +1019,7 @@ const PlaceholderInput = ({
             <div className="space-y-1 animate-in fade-in zoom-in-95 duration-200">
                 {showLabel && (
                     <Label className="text-[10px] font-bold text-blue-600 uppercase tracking-tight flex items-center gap-1">
-                        <Edit3 className="h-2.5 w-2.5" /> Editing {editingSource.label}
+                        <Edit3 className="h-2.5 w-2.5" /> Editing {placeholder.display_value || placeholder.name.replace(/_/g, ' ')}
                     </Label>
                 )}
                 <div className="flex items-center gap-2">
@@ -1164,7 +1048,7 @@ const PlaceholderInput = ({
     if (totalSources > 1 && placeholder.type !== 'image' && placeholder.type !== 'boolean') {
         return (
             <div className="space-y-1">
-                {showLabel && <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">{placeholder.name.replace(/_/g, ' ')}</Label>}
+                {showLabel && <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">{placeholder.display_value || placeholder.name.replace(/_/g, ' ')}</Label>}
                 <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
                     <PopoverTrigger asChild>
                         <div className={cn(
@@ -1245,7 +1129,7 @@ const PlaceholderInput = ({
             <div className="flex items-center justify-between mb-1.5">
                 {showLabel && (
                     <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">
-                        {placeholder.name.replace(/_/g, ' ')}
+                        {placeholder.display_value || placeholder.name.replace(/_/g, ' ')}
                     </Label>
                 )}
                 <div className="flex items-center gap-2 ml-auto">
@@ -1297,7 +1181,7 @@ const PlaceholderInput = ({
                             <Button size="sm" variant="destructive" className="h-7 text-[10px]" onClick={() => onChange('')}>Remove</Button>
                         </div>
                     </div>
-                ) : <div className="text-xs italic border-2 border-dashed rounded p-4 text-center">Upload {placeholder.name}</div>}
+                ) : <div className="text-xs italic border-2 border-dashed rounded p-4 text-center">Upload {placeholder.display_value || placeholder.name}</div>}
                 <input id={`file-${fieldKey}`} type="file" className="hidden" accept="image/*" onChange={onFileChange} />
                 {value && onImageStyleChange && (
                     <ImagePlaceholderControls
@@ -1455,19 +1339,30 @@ export default function TemplateGenerationDialog({
 
     const groupedPlaceholders = useMemo(() => {
         if (!selectedTemplate?.placeholders) return { topLevel: [], blocks: {} };
+
         const topLevel = [];
         const blocks = {};
+        const seenDisplayValues = new Set();
+
         selectedTemplate.placeholders.forEach(p => {
             if (p.is_block_start) {
                 blocks[p.name] = { config: p, children: [] };
             } else if (p.parent_name && blocks[p.parent_name]) {
                 blocks[p.parent_name].children.push(p);
             } else if (!p.parent_name) {
+                const qId = p.boolean_conditions?.[0]?.linked_job_question_id;
+                const uniqueKey = qId ? `q_${qId}` : p.display_value || p.name;
+
+                if (seenDisplayValues.has(uniqueKey) && p.type === 'boolean') {
+                    return;
+                }
+
+                seenDisplayValues.add(uniqueKey);
                 topLevel.push(p);
             }
         });
         return { topLevel, blocks };
-    }, [selectedTemplate, masterFields]);
+    }, [selectedTemplate]);
 
     const resolveSpecificSourceValue = useCallback((type, id, placeholder, arrayIndex = null) => {
         if (!isOpen) return '';
@@ -1549,7 +1444,7 @@ export default function TemplateGenerationDialog({
         return {
             table: isCompany ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents',
             idColumn: isCompany ? 'company_id' : 'director_id',
-            docIdColumn: isCompany ? 'kyc_document_id' : 'document_id',
+            docIdColumn: isCompany ? 'document_id' : 'document_id',
             entityId: id
         };
     }, [activeEntityType, activeEntityId]);
@@ -1906,17 +1801,17 @@ export default function TemplateGenerationDialog({
         });
     }, [formData, groupedPlaceholders, relationshipData, combinedCache, masterFields, entityIdMap, extractedData, companyData]);
 
-  const fetchMissingDataSources = useCallback(async () => {
+    const fetchMissingDataSources = useCallback(async () => {
         if (!isOpen || !selectedTemplate || !masterFields) return;
 
         const allIds = new Set();
-        
+
         // --- FIX START: robustly collect all entity IDs ---
         // 1. Core Map IDs
         if (entityIdMap.company) allIds.add(String(entityIdMap.company));
         if (entityIdMap.principal) allIds.add(String(entityIdMap.principal));
         if (entityIdMap.sponsor) allIds.add(String(entityIdMap.sponsor));
-        
+
         // 2. Arrays from Entity Map
         const dirIds = Array.isArray(entityIdMap.directors) ? entityIdMap.directors : (entityIdMap.director ? [entityIdMap.director] : []);
         dirIds.forEach(id => id && allIds.add(String(id)));
@@ -1931,17 +1826,17 @@ export default function TemplateGenerationDialog({
             const id = typeof d === 'object' ? (d.id || d.individual_id) : d;
             if (id) allIds.add(String(id));
         });
-        
+
         if (relationshipData?.principal) {
-             const p = relationshipData.principal;
-             const pid = typeof p === 'object' ? (p.id || p.individual_id) : p;
-             if(pid) allIds.add(String(pid));
+            const p = relationshipData.principal;
+            const pid = typeof p === 'object' ? (p.id || p.individual_id) : p;
+            if (pid) allIds.add(String(pid));
         }
-        
+
         if (relationshipData?.sponsor) {
-             const s = relationshipData.sponsor;
-             const sid = typeof s === 'object' ? (s.id || s.individual_id) : s;
-             if(sid) allIds.add(String(sid));
+            const s = relationshipData.sponsor;
+            const sid = typeof s === 'object' ? (s.id || s.individual_id) : s;
+            if (sid) allIds.add(String(sid));
         }
 
         const idList = Array.from(allIds).filter(Boolean);
@@ -2274,6 +2169,30 @@ export default function TemplateGenerationDialog({
         setFormData(prev => {
             const newState = { ...prev, [name]: val };
 
+            // DEDUPLICATION SYNC: 
+            // If 'val' is a boolean array (the checkboxes), check if other 
+            // placeholders need to be updated based on this selection.
+            if (Array.isArray(val) && val[0]?.linked_job_question_id) {
+                const selectedTag = val.find(opt => opt.checked)?.tag;
+
+                // Look for other placeholders in the template linked to the same question
+                selectedTemplate.placeholders.forEach(otherPh => {
+                    if (otherPh.name === name) return; // skip self
+
+                    const otherQId = otherPh.boolean_conditions?.[0]?.linked_job_question_id;
+                    const masterQId = val[0].linked_job_question_id;
+
+                    if (otherQId === masterQId) {
+                        // This other placeholder (e.g. between_10_99p) is part of the same group.
+                        // We set its formData value to '✔' or '' based on the selection.
+                        const isMatch = otherPh.boolean_conditions[0].tag === selectedTag;
+                        // Note: Generation logic usually expects the boolean array or the processed string
+                        // For document generation, we update its individual state
+                        newState[otherPh.name] = isMatch ? val : val.map(v => ({ ...v, checked: false }));
+                    }
+                });
+            }
+
             if (docxTemplateBuffer.current) {
                 updateWordPreview(newState, imageStyles);
             } else {
@@ -2394,31 +2313,27 @@ export default function TemplateGenerationDialog({
     const renderArrayInputs = (blockName, blockData) => {
         const rows = Array.isArray(formData[blockName]) ? formData[blockName] : [];
         const isHorizontal = blockData?.config?.array_direction === 'horizontal';
+        const children = blockData.children || [];
 
-        return (
-            <div className="space-y-4 mt-2 border-l-2 border-blue-200 pl-4 py-2 bg-blue-50/20 rounded-r-lg">
-                <div className="flex items-center justify-between px-1">
-                    <Badge className={cn("uppercase text-[9px] tracking-tighter", isHorizontal ? "bg-orange-600" : "bg-blue-600")}>
-                        {blockName} {isHorizontal && '(Horizontal)'}
+        if (isHorizontal) {
+            // Keep existing horizontal digit-split rendering
+            return (
+                <div className="space-y-4 mt-2 border-l-2 border-blue-200 pl-4 py-2 bg-blue-50/20 rounded-r-lg">
+                    <Badge className="bg-orange-600 uppercase text-[9px] tracking-tighter">
+                        {blockName} (Horizontal)
                     </Badge>
-                </div>
-
-                {rows.length === 0 ? (
-                    <div className="p-3 bg-white border rounded shadow-sm italic text-xs text-muted-foreground">No items in {blockName}</div>
-                ) : (
-                    rows.map((row, idx) => (
-                        <div key={idx} className="p-3 bg-white border rounded shadow-sm relative group mb-2">
-                            <Button variant="ghost" size="icon" className="absolute -right-2 -top-2 h-5 w-5 rounded-full bg-white border shadow-sm text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => {
-                                const newRows = rows.filter((_, i) => i !== idx);
-                                setFormData(prev => ({ ...prev, [blockName]: newRows }));
-                            }}><X className="h-3 w-3" /></Button>
-
-                            <div className="space-y-3">
-                                {blockData.children.map(child => {
+                    {rows.length === 0 ? (
+                        <div className="p-3 bg-white border rounded shadow-sm italic text-xs text-muted-foreground">
+                            No items in {blockName}
+                        </div>
+                    ) : (
+                        rows.map((row, idx) => (
+                            <div key={idx} className="p-3 bg-white border rounded shadow-sm space-y-3">
+                                {children.map(child => {
                                     let resolvedOptions = [];
                                     if (child.master_field_ids?.length > 0) {
                                         const mf = masterFields.get(parseInt(child.master_field_ids[0]));
-                                        if (mf?.type === 'select') { resolvedOptions = getDependentDropdownOptions(child, mf, row); }
+                                        if (mf?.type === 'select') resolvedOptions = getDependentDropdownOptions(child, mf, row);
                                     }
                                     return (
                                         <PlaceholderInput
@@ -2429,30 +2344,157 @@ export default function TemplateGenerationDialog({
                                             onChange={(val) => handleArrayInputChange(blockName, idx, child.name, val)}
                                             onSaveToDb={saveFieldToDatabase}
                                             resolvedOptions={resolvedOptions}
-                                            onFileChange={(e) => {
-                                                const file = e.target.files[0];
-                                                if (file) {
-                                                    const r = new FileReader();
-                                                    r.onloadend = () => handleArrayInputChange(blockName, idx, child.name, r.result);
-                                                    r.readAsDataURL(file);
-                                                }
-                                            }}
                                             masterFields={masterFields}
                                             imageStyles={imageStyles}
                                             onImageStyleChange={handleImageStyleChange}
                                             isArrayItem={true}
                                             arrayIndex={idx}
-                                            requirementJobQuestions={requirementJobQuestions}
-                                            task={task}
-                                            formData={formData}
                                             blockName={blockName}
-                                            resolveSourceValue={resolveSpecificSourceValue} // <--- Passed Here
+                                            resolveSourceValue={resolveSpecificSourceValue}
                                         />
                                     );
                                 })}
                             </div>
-                        </div>
-                    ))
+                        ))
+                    )}
+                </div>
+            );
+        }
+
+        // --- TRANSPOSED TABLE LAYOUT ---
+        // Columns: [Field Label] [Entity 1] [Entity 2] [Entity 3] ...
+        const entityLabel = blockData?.config?.entity_type?.[0] || blockData?.config?.entity_type || blockName;
+        const colCount = rows.length + 1; // +1 for the field label column
+
+        return (
+            <div className="mt-2 space-y-2">
+                <div className="flex items-center justify-between">
+                    <Badge className="bg-blue-600 uppercase text-[9px] tracking-tighter">
+                        {blockName} — {rows.length} {String(entityLabel).toLowerCase()}(s)
+                    </Badge>
+                    <div className="flex gap-1">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 text-[10px] px-2 text-blue-600 border-blue-200"
+                            onClick={() => {
+                                const emptyRow = children.reduce((acc, child) => ({ ...acc, [child.name]: '' }), {});
+                                setFormData(prev => ({ ...prev, [blockName]: [...(prev[blockName] || []), emptyRow] }));
+                            }}
+                        >
+                            + Add Row
+                        </Button>
+                    </div>
+                </div>
+
+                {rows.length === 0 ? (
+                    <div className="p-4 bg-white border-2 border-dashed rounded text-xs text-muted-foreground italic text-center">
+                        No {String(entityLabel).toLowerCase()}s found for {blockName}
+                    </div>
+                ) : (
+                    <div className="overflow-x-auto rounded-lg border border-slate-200 shadow-sm">
+                        <table className="w-full text-xs border-collapse">
+                            <thead>
+                                <tr className="bg-slate-50 border-b border-slate-200">
+                                    {/* Field column header */}
+                                    <th className="text-left px-3 py-2 font-bold text-slate-500 uppercase tracking-wider text-[10px] w-[140px] border-r border-slate-200 sticky left-0 bg-slate-50 z-10">
+                                        Field
+                                    </th>
+                                    {rows.map((_, idx) => (
+                                        <th key={idx} className="px-3 py-2 text-center border-r border-slate-200 last:border-r-0 min-w-[180px]">
+                                            <div className="flex items-center justify-between gap-1">
+                                                <span className="font-bold text-blue-700 text-[10px] uppercase tracking-tight">
+                                                    {String(entityLabel).charAt(0).toUpperCase() + String(entityLabel).slice(1)} {idx + 1}
+                                                </span>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-4 w-4 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full shrink-0"
+                                                    onClick={() => {
+                                                        const newRows = rows.filter((_, i) => i !== idx);
+                                                        setFormData(prev => ({ ...prev, [blockName]: newRows }));
+                                                    }}
+                                                >
+                                                    <X className="h-2.5 w-2.5" />
+                                                </Button>
+                                            </div>
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {children.map((child, childIdx) => {
+                                    const isEvenRow = childIdx % 2 === 0;
+                                    return (
+                                        <tr
+                                            key={child.id || child.name}
+                                            className={cn(
+                                                "border-b border-slate-100 last:border-b-0 hover:bg-blue-50/30 transition-colors",
+                                                isEvenRow ? "bg-white" : "bg-slate-50/50"
+                                            )}
+                                        >
+                                            {/* Field Label Cell */}
+                                            <td className={cn(
+                                                "px-3 py-2 border-r border-slate-200 sticky left-0 z-10 align-middle",
+                                                isEvenRow ? "bg-white" : "bg-slate-50/50"
+                                            )}>
+                                                <Label className="font-semibold text-slate-600 text-[10px] uppercase tracking-tight leading-tight block">
+                                                    {child.name.replace(/_/g, ' ')}
+                                                </Label>
+                                                {child.master_field_ids?.length > 0 && (
+                                                    <span className="text-[8px] text-blue-400 font-normal">DB linked</span>
+                                                )}
+                                            </td>
+
+                                            {/* One input cell per entity/row */}
+                                            {rows.map((row, rowIdx) => {
+                                                let resolvedOptions = [];
+                                                if (child.master_field_ids?.length > 0) {
+                                                    const mf = masterFields.get(parseInt(child.master_field_ids[0]));
+                                                    if (mf?.type === 'select') resolvedOptions = getDependentDropdownOptions(child, mf, row);
+                                                }
+                                                return (
+                                                    <td
+                                                        key={rowIdx}
+                                                        className="px-2 py-1.5 border-r border-slate-100 last:border-r-0 align-middle"
+                                                    >
+                                                        <PlaceholderInput
+                                                            placeholder={child}
+                                                            value={row[child.name]}
+                                                            originalValue={originalFormData[blockName]?.[rowIdx]?.[child.name]}
+                                                            onChange={(val) => handleArrayInputChange(blockName, rowIdx, child.name, val)}
+                                                            onSaveToDb={saveFieldToDatabase}
+                                                            resolvedOptions={resolvedOptions}
+                                                            onFileChange={(e) => {
+                                                                const file = e.target.files[0];
+                                                                if (file) {
+                                                                    const r = new FileReader();
+                                                                    r.onloadend = () => handleArrayInputChange(blockName, rowIdx, child.name, r.result);
+                                                                    r.readAsDataURL(file);
+                                                                }
+                                                            }}
+                                                            masterFields={masterFields}
+                                                            imageStyles={imageStyles}
+                                                            onImageStyleChange={handleImageStyleChange}
+                                                            isArrayItem={true}
+                                                            arrayIndex={rowIdx}
+                                                            blockName={blockName}
+                                                            requirementJobQuestions={requirementJobQuestions}
+                                                            task={task}
+                                                            formData={formData}
+                                                            showLabel={false}
+                                                            resolveSourceValue={resolveSpecificSourceValue}
+                                                            isSaving={isSavingProfile}
+                                                        />
+                                                    </td>
+                                                );
+                                            })}
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
                 )}
             </div>
         );
@@ -2613,21 +2655,22 @@ export default function TemplateGenerationDialog({
         for (const blockName of Object.keys(groupedPlaceholders.blocks)) {
             const block = groupedPlaceholders.blocks[blockName];
             const rows = JSON.parse(JSON.stringify(data[blockName] || []));
+            for (const row of rows) {
+                for (const child of block.children) {
+                    // Use raw value for images
+                    const displayValue = child.type === 'image' && typeof row[child.name] === 'string'
+                        ? row[child.name]  // ✅ Preserve raw string
+                        : extractDisplayValue(row[child.name]);
 
-            for (const child of block.children) {
-                // Use raw value for images
-                const displayValue = child.type === 'image' && typeof row[child.name] === 'string'
-                    ? row[child.name]  // ✅ Preserve raw string
-                    : extractDisplayValue(row[child.name]);
+                    row[child.name] = displayValue;
 
-                row[child.name] = displayValue;
-
-                if (child.type === 'image' && displayValue && displayValue.startsWith('http')) {
-                    const promise = fetchImageAsBase64(displayValue).then(b64 => {
-                        if (b64) {
-                            row[child.name] = b64;
-                        }
-                    });
+                    if (child.type === 'image' && displayValue && displayValue.startsWith('http')) {
+                        const promise = fetchImageAsBase64(displayValue).then(b64 => {
+                            if (b64) {
+                                row[child.name] = b64;
+                            }
+                        });
+                    }
                 }
             }
             renderData[blockName] = rows;
@@ -2797,7 +2840,7 @@ export default function TemplateGenerationDialog({
             if (current?.file_path && current?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
                 if (!docxTemplateBuffer.current) {
                     setIsPreviewLoading(true);
-                    
+
                     // Fix: Handle both old and new storage path structures
                     let publicUrl;
                     if (current.file_path.startsWith('kyc-templates/')) {
@@ -2805,7 +2848,7 @@ export default function TemplateGenerationDialog({
                         const { data, error } = await supabase.storage
                             .from('templates')
                             .createSignedUrl(current.file_path, 3600); // 1 hour expiry
-                        
+
                         if (error) {
                             console.error('Error creating signed URL:', error);
                             setIsPreviewLoading(false);
@@ -2817,15 +2860,15 @@ export default function TemplateGenerationDialog({
                         publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${current.file_path}`;
                     }
 
-                    // Don't use Google Docs viewer - it's unreliable. Instead, we'll show the rendered preview.
-                    // setDocPreviewUrl(`https://docs.google.com/viewer?url=${encodeURIComponent(publicUrl)}&embedded=true`);
+                    // Use Microsoft Office Online Viewer for consistent preview
+                    setDocPreviewUrl(`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(publicUrl)}`);
 
                     try {
                         const res = await fetch(publicUrl);
                         if (!res.ok) throw new Error(`Failed to fetch template: ${res.statusText}`);
                         const arrayBuffer = await res.arrayBuffer();
                         docxTemplateBuffer.current = arrayBuffer;
-                        
+
                         // Update preview after loading
                         setTimeout(() => {
                             updateWordPreview(formData, imageStyles);
@@ -3075,7 +3118,7 @@ export default function TemplateGenerationDialog({
         return obj;
     };
 
- const saveFieldToDatabase = async (placeholder, newValue, specificSource = null, arrayIndex = null) => {
+    const saveFieldToDatabase = async (placeholder, newValue, specificSource = null, arrayIndex = null) => {
         setIsSavingProfile(true);
         try {
             let table, path, linkVar, entId, sourceLabel = "Profile";
@@ -3114,19 +3157,19 @@ export default function TemplateGenerationDialog({
             // ---------------------------------------------------------
             // 2. Determine Database Metadata (Table, Path, Linking Var)
             // ---------------------------------------------------------
-            
+
             // CASE A: User selected a specific database source from the UI
             if (specificSource?.type === 'db') {
                 const mf = masterFields.get(parseInt(specificSource.id));
-                
+
                 // Try to find the source matching the specific table requested
                 // If not found, fall back to smart type matching
                 let src = mf?.sources?.find(s => s.table === specificSource.table);
 
                 if (!src) {
-                     const pEnt = Array.isArray(placeholder.entity_type) ? placeholder.entity_type[0] : (placeholder.entity_type || 'company');
-                     const targetType = (pEnt === 'company') ? 'company' : 'individual';
-                     src = mf?.sources?.find(s => s.source_type === targetType) || mf?.sources?.[0];
+                    const pEnt = Array.isArray(placeholder.entity_type) ? placeholder.entity_type[0] : (placeholder.entity_type || 'company');
+                    const targetType = (pEnt === 'company') ? 'company' : 'individual';
+                    src = mf?.sources?.find(s => s.source_type === targetType) || mf?.sources?.[0];
                 }
 
                 if (!src) throw new Error(`Source configuration not found for Master Field ${specificSource.id}`);
@@ -3155,9 +3198,9 @@ export default function TemplateGenerationDialog({
                 // --- SMART SOURCE SELECTION ---
                 // 1. Determine the effective type of the target entity
                 let targetType = 'individual'; // Default to individual (Director, Sponsor, Principal, Dependant)
-                
+
                 const pTypes = Array.isArray(placeholder.entity_type) ? placeholder.entity_type : [placeholder.entity_type];
-                
+
                 if (pTypes.includes('company')) {
                     targetType = 'company';
                 } else if (targetEntity && (targetEntity.company_name || targetEntity.registration_number)) {
@@ -3169,15 +3212,15 @@ export default function TemplateGenerationDialog({
 
                 // 2. Find the source definition that matches this type
                 // Note: Database usually uses 'company' or 'individual' as source_type
-                const src = mf.sources.find(s => s.source_type === targetType) 
-                         || mf.sources[0]; // Fallback to first if no specific match
+                const src = mf.sources.find(s => s.source_type === targetType)
+                    || mf.sources[0]; // Fallback to first if no specific match
 
                 if (!src) throw new Error(`No database source found for type '${targetType}'`);
 
                 table = src.table;
                 path = src.path;
                 linkVar = src.linking_variable || 'id';
-                
+
                 // Double check for Sponsor/Individual mismatch
                 // If we are saving an Individual but the table is a Company table, try to find an alternative
                 if (targetType === 'individual' && table.includes('acc_portal_company')) {
@@ -3202,10 +3245,10 @@ export default function TemplateGenerationDialog({
             console.log(`[SAVE EXECUTING] Updating ${table} where ${linkVar}=${entId}. Path: ${path}`);
 
             const { data: existing, error: findError } = await supabase.from(table).select('*').eq(linkVar, entId).maybeSingle();
-            
+
             if (findError) {
-                 console.error("Error finding record:", findError);
-                 // Don't throw here, sometimes maybeSingle returns null without error, but if error exists we should know
+                console.error("Error finding record:", findError);
+                // Don't throw here, sometimes maybeSingle returns null without error, but if error exists we should know
             }
 
             let updatePayload = {};
@@ -3215,10 +3258,10 @@ export default function TemplateGenerationDialog({
                 const pathParts = path.split(/->>|->|\./).map(p => p.trim().replace(/['"]/g, '')).filter(Boolean);
                 const column = pathParts[0];
                 const nestedPath = pathParts.slice(1);
-                
+
                 // Get existing JSON or empty object
                 const existingJson = existing ? { ...(existing[column] || {}) } : {};
-                
+
                 // Helper to set deep value safely
                 const setDeepValue = (obj, parts, val) => {
                     let current = obj;
@@ -3267,14 +3310,14 @@ export default function TemplateGenerationDialog({
             }));
 
             // Create a temporary cache object for immediate resolution
-            const updatedCombinedCache = { 
-                ...combinedCache, 
+            const updatedCombinedCache = {
+                ...combinedCache,
                 ...additionalCache, // include existing additional cache
-                [table]: { 
-                    ...(combinedCache[table] || {}), 
+                [table]: {
+                    ...(combinedCache[table] || {}),
                     ...(additionalCache[table] || {}),
-                    [entId]: refreshedRecord 
-                } 
+                    [entId]: refreshedRecord
+                }
             };
 
             const match = processPlaceholderValue(
@@ -3321,7 +3364,7 @@ export default function TemplateGenerationDialog({
             setIsSavingProfile(false);
         }
     };
-    
+
     const refineFieldWithAI = async (placeholder, allFormData) => {
         if (!placeholder.ai_prompt) return null;
         const regex = /\{([^}]+)\}/g;
@@ -3803,7 +3846,7 @@ export default function TemplateGenerationDialog({
                                     <DialogDescription className="text-sm">Auto-populate and generate</DialogDescription>
                                     {loadedDraft && (
                                         <div className="flex items-center gap-2 mt-2">
-                                            <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 flex items-center gap-1">
+                                            <Badge variant="outline" className="ml-2 text-[8px] bg-amber-50 text-amber-700 border-amber-200">
                                                 <FileText className="h-3 w-3" />
                                                 <span className="font-medium">Draft in Progress</span>
                                             </Badge>
