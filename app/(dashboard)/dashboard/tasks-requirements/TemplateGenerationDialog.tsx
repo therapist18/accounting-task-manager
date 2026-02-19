@@ -1019,7 +1019,7 @@ const PlaceholderInput = ({
             <div className="space-y-1 animate-in fade-in zoom-in-95 duration-200">
                 {showLabel && (
                     <Label className="text-[10px] font-bold text-blue-600 uppercase tracking-tight flex items-center gap-1">
-                        <Edit3 className="h-2.5 w-2.5" /> Editing {placeholder.display_value || placeholder.name.replace(/_/g, ' ')}
+                        <Edit3 className="h-2.5 w-2.5" /> Editing {editingSource.label}
                     </Label>
                 )}
                 <div className="flex items-center gap-2">
