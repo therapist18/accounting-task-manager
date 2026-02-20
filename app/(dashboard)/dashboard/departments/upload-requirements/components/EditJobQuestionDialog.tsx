@@ -10,12 +10,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
-import { Check, ChevronsUpDown, Database, X, Split, ArrowDownRight, Folder, Users } from "lucide-react"
+import { Check, ChevronsUpDown, Database, X, Split, ArrowDownRight, Folder, Users, Hash, Plus, Trash2, LayoutList } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { 
-  NATIONALITY_TYPES, 
-  AGE_RANGE_TYPES, 
+import {
+  NATIONALITY_TYPES,
+  AGE_RANGE_TYPES,
   type NationalityType,
   type AgeRangeType,
   ENTITY_TYPES,
@@ -24,11 +24,19 @@ import {
 
 export type LogicOperator = 'equals' | 'not_equals' | 'is_not_empty' | 'is_empty';
 
+interface SubQuestion {
+  id: string
+  label: string
+  type: 'text' | 'number' | 'date' | 'email' | 'phone' | 'select'
+  required: boolean
+  options?: string[]
+}
+
 interface JobQuestion {
   id: string
   label: string
-  category?: string 
-  type: string
+  category?: string
+  type: string // Added 'field_group'
   required: boolean
   options?: string[]
   linked_field_id?: string
@@ -36,6 +44,8 @@ interface JobQuestion {
   default_value?: string
   nationality?: NationalityType
   ageRange?: AgeRangeType
+  input_count?: number
+  sub_questions?: SubQuestion[] // New field
   order: number
   depends_on?: {
     id: string
@@ -43,33 +53,34 @@ interface JobQuestion {
     value: string
   } | null
 }
-
 interface EditJobQuestionDialogProps {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
   question: JobQuestion | null
-  allQuestions?: JobQuestion[] 
+  allQuestions?: JobQuestion[]
   onSave: (question: JobQuestion) => Promise<void>
   isSubmitting: boolean
   masterFields: any[]
 }
 
-export function EditJobQuestionDialog({ 
-  isOpen, 
-  onOpenChange, 
-  question, 
-  allQuestions = [], 
-  onSave, 
+export function EditJobQuestionDialog({
+  isOpen,
+  onOpenChange,
+  question,
+  allQuestions = [],
+  onSave,
   isSubmitting,
-  masterFields 
+  masterFields
 }: EditJobQuestionDialogProps) {
   const [formData, setFormData] = useState<Partial<JobQuestion>>({})
   const [manualOptions, setManualOptions] = useState("")
 
   useEffect(() => {
     if (isOpen && question) {
-      setFormData({ 
+      setFormData({
         ...question,
+        input_count: question.input_count || 1,
+        sub_questions: question.sub_questions || [],
         depends_on_id: question.depends_on?.id,
         depends_on_operator: question.depends_on?.operator || 'equals',
         depends_on_value: question.depends_on?.value || ''
@@ -90,7 +101,6 @@ export function EditJobQuestionDialog({
       } : null
     }
 
-    // Clean up temporary flat fields used for UI state
     delete updatedQuestion.depends_on_id;
     delete updatedQuestion.depends_on_operator;
     delete updatedQuestion.depends_on_value;
@@ -102,8 +112,27 @@ export function EditJobQuestionDialog({
     setFormData(prev => ({ ...prev, [key]: value }))
   }
 
-  // Only show questions that are NOT the current one and have a label.
-  // We also sort them by order to make the dropdown logical.
+  const addSubQuestion = () => {
+    const current = formData.sub_questions || [];
+    const newSub: SubQuestion = {
+      id: crypto.randomUUID(),
+      label: "",
+      type: "text",
+      required: true
+    };
+    updateField('sub_questions', [...current, newSub]);
+  }
+
+  const updateSubQuestion = (id: string, updates: Partial<SubQuestion>) => {
+    const current = formData.sub_questions || [];
+    updateField('sub_questions', current.map(sq => sq.id === id ? { ...sq, ...updates } : sq));
+  }
+
+  const removeSubQuestion = (id: string) => {
+    const current = formData.sub_questions || [];
+    updateField('sub_questions', current.filter(sq => sq.id !== id));
+  }
+
   const availableParents = (allQuestions || [])
     .filter(q => q.id !== question?.id && q.label)
     .sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -186,11 +215,11 @@ export function EditJobQuestionDialog({
             </Popover>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label className="text-[10px] font-bold uppercase text-slate-500">Input Type</Label>
               <Select value={formData.type} onValueChange={(v) => updateField('type', v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="text">Text Input</SelectItem>
                   <SelectItem value="number">Number</SelectItem>
@@ -198,14 +227,90 @@ export function EditJobQuestionDialog({
                   <SelectItem value="select">Dropdown (Single)</SelectItem>
                   <SelectItem value="multiselect">Dropdown (Multi)</SelectItem>
                   <SelectItem value="boolean">Yes/No</SelectItem>
+                  <SelectItem value="field_group" className="font-bold text-blue-600">Grouped Sub-Fields</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+
+            {(formData.type === 'text' || formData.type === 'number') && (
+              <div className="space-y-2 animate-in zoom-in-95 duration-200">
+                <Label className="flex items-center gap-2 text-[10px] font-bold uppercase text-blue-600">
+                  <Hash className="h-3 w-3" /> Number of Inputs
+                </Label>
+                <Select value={String(formData.input_count || 1)} onValueChange={(v) => updateField('input_count', parseInt(v))}>
+                  <SelectTrigger className="border-blue-200 bg-blue-50/30"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {[1, 2, 3, 4, 5].map(num => <SelectItem key={num} value={String(num)}>{num} Fields</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             <div className="space-y-2">
-                <Label className="text-[10px] font-bold uppercase text-slate-500">Default Answer Value</Label>
-                <Input value={formData.default_value || ''} onChange={e => updateField('default_value', e.target.value)} placeholder="None" />
+              <Label className="text-[10px] font-bold uppercase text-slate-500">Default Answer Value</Label>
+              <Input value={formData.default_value || ''} onChange={e => updateField('default_value', e.target.value)} placeholder="None" className="bg-white" />
             </div>
           </div>
+
+          {/* SUB-QUESTIONS MANAGEMENT (The logic you requested) */}
+          {formData.type === 'field_group' && (
+            <div className="space-y-4 bg-blue-50/30 border border-blue-100 p-6 rounded-xl animate-in slide-in-from-top-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-bold text-blue-900">Sub-questions / Fields</h4>
+                  <p className="text-[11px] text-blue-600">Define the specific fields required under this main question.</p>
+                </div>
+                <Button size="sm" onClick={addSubQuestion} className="bg-blue-600 hover:bg-blue-700">
+                  <Plus className="h-4 w-4 mr-1" /> Add Field
+                </Button>
+              </div>
+
+              <div className="space-y-3">
+                {formData.sub_questions?.map((sq, index) => (
+                  <div key={sq.id} className="flex gap-3 items-end bg-white p-3 rounded-lg border shadow-sm">
+                    <div className="flex-1 space-y-1.5">
+                      <Label className="text-[9px] uppercase font-bold text-slate-400">Field Label</Label>
+                      <Input
+                        placeholder="e.g. Email Address"
+                        value={sq.label}
+                        onChange={e => updateSubQuestion(sq.id, { label: e.target.value })}
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                    <div className="w-[140px] space-y-1.5">
+                      <Label className="text-[9px] uppercase font-bold text-slate-400">Field Type</Label>
+                      <Select value={sq.type} onValueChange={v => updateSubQuestion(sq.id, { type: v })}>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="text">Text</SelectItem>
+                          <SelectItem value="email">Email</SelectItem>
+                          <SelectItem value="phone">Phone</SelectItem>
+                          <SelectItem value="number">Number</SelectItem>
+                          <SelectItem value="date">Date</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex flex-col items-center gap-2 mb-2 px-2">
+                      <Label className="text-[9px] uppercase font-bold text-slate-400">Req.</Label>
+                      <Checkbox
+                        checked={sq.required}
+                        onCheckedChange={c => updateSubQuestion(sq.id, { required: !!c })}
+                      />
+                    </div>
+                    <Button variant="ghost" size="icon" onClick={() => removeSubQuestion(sq.id)} className="h-8 w-8 text-red-400 hover:text-red-600 hover:bg-red-50">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+                {(!formData.sub_questions || formData.sub_questions.length === 0) && (
+                  <div className="text-center py-8 border-2 border-dashed rounded-lg text-slate-400 text-sm">
+                    No sub-fields added yet. Click "Add Field" to start.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
 
           {/* VISIBILITY & DEPENDENCY LOGIC SECTION */}
           <div className="bg-amber-50/50 border border-amber-200 rounded-xl p-5 space-y-4">

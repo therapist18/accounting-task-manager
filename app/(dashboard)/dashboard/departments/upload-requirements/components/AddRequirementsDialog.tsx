@@ -301,26 +301,50 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
 
       if (activeSection === 'job-specific') {
         const existingQuestions = existingRecord?.job_specific_questions || [];
-        payload.job_specific_questions = [...existingQuestions, ...validItems.map((req, index) => {
-          const options = Array.isArray(req.options) ? req.options.filter(opt => opt.trim() !== '') : [];
-          return {
-            id: crypto.randomUUID(),
-            category: req.category_name || 'General',
-            label: req.name.trim(),
-            type: req.inputType || 'text',
-            required: req.isRequired,
-            default_value: req.defaultValue || '',
-            options: options,
-            linked_field_id: req.linkedMasterFieldId || null,
-            entityTypes: req.entityTypes,
-            depends_on: req.dependsOnQuestionId ? {
-              id: req.dependsOnQuestionId,
-              operator: req.dependsOnOperator,
-              value: req.dependsOnValue
-            } : null,
-            order: existingQuestions.length + index
-          };
-        })];
+
+        // 1. First, assign a fresh UUID to every NEW question in the current form
+        // we do this before mapping so we have a lookup table for dependencies
+        const itemsWithIds = validItems.map(req => ({
+          ...req,
+          tempId: crypto.randomUUID()
+        }));
+
+        // 2. Create a lookup map: Label -> ID
+        // Include existing questions from DB so new questions can depend on old ones
+        const labelToIdMap = new Map<string, string>();
+        existingQuestions.forEach((q: any) => labelToIdMap.set(q.label, q.id));
+        itemsWithIds.forEach(item => labelToIdMap.set(item.name.trim(), item.tempId));
+
+        // 3. Construct the final payload using the resolved IDs
+        payload.job_specific_questions = [
+          ...existingQuestions,
+          ...itemsWithIds.map((req, index) => {
+            const options = Array.isArray(req.options) ? req.options.filter(opt => opt.trim() !== '') : [];
+
+            // Resolve the parent label to its ID using our map
+            const resolvedParentId = req.dependsOnQuestionId
+              ? labelToIdMap.get(req.dependsOnQuestionId)
+              : null;
+
+            return {
+              id: req.tempId,
+              category: req.category_name || 'General',
+              label: req.name.trim(),
+              type: req.inputType || 'text',
+              required: req.isRequired,
+              default_value: req.defaultValue || '',
+              options: options,
+              linked_field_id: req.linkedMasterFieldId || null,
+              entityTypes: req.entityTypes,
+              depends_on: resolvedParentId ? {
+                id: resolvedParentId,
+                operator: req.dependsOnOperator,
+                value: req.dependsOnValue
+              } : null,
+              order: existingQuestions.length + index
+            };
+          })
+        ];
       } else {
         const existingReqs = existingRecord?.requirements || [];
         payload.requirements = [...existingReqs, ...validItems.map((req, index) => {
@@ -703,8 +727,8 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="always">Always Visible</SelectItem>
-                                {currentReqs.slice(0, idx).filter(q => q.name.trim()).map(prev => (
-                                  <SelectItem key={prev.name + idx} value={prev.name}>
+                                {currentReqs.slice(0, idx).filter(q => q.name.trim()).map((prev, pIdx) => (
+                                  <SelectItem key={`${prev.name}-${pIdx}`} value={prev.name.trim()}>
                                     {prev.name || 'Untitled'}
                                   </SelectItem>
                                 ))}

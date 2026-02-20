@@ -1208,7 +1208,12 @@ const PlaceholderInput = ({
                                 } else { if (!newOpts[idx].hasDbLink) newOpts[idx].checked = checked; }
                                 onChange(newOpts);
                             }} />
-                            <Label className="text-xs flex-1">{opt.label || opt.tag}</Label>
+                            <Label className="text-xs flex-1">
+                                {opt.label && opt.label !== '✔' ? opt.label :
+                                    opt.comparison?.value ? opt.comparison.value :
+                                        opt.tag ? opt.tag.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) :
+                                            'Option'}
+                            </Label>
                         </div>
                     ))}
                 </div>
@@ -2433,18 +2438,6 @@ export default function TemplateGenerationDialog({
                                                 isEvenRow ? "bg-white" : "bg-slate-50/50"
                                             )}
                                         >
-                                            {/* Field Label Cell */}
-                                            <td className={cn(
-                                                "px-3 py-2 border-r border-slate-200 sticky left-0 z-10 align-middle",
-                                                isEvenRow ? "bg-white" : "bg-slate-50/50"
-                                            )}>
-                                                <Label className="font-semibold text-slate-600 text-[10px] uppercase tracking-tight leading-tight block">
-                                                    {child.name.replace(/_/g, ' ')}
-                                                </Label>
-                                                {child.master_field_ids?.length > 0 && (
-                                                    <span className="text-[8px] text-blue-400 font-normal">DB linked</span>
-                                                )}
-                                            </td>
 
                                             {/* One input cell per entity/row */}
                                             {rows.map((row, rowIdx) => {
@@ -2570,7 +2563,7 @@ export default function TemplateGenerationDialog({
                                 </div>`;
                                     rowHtml = rowHtml.replace(childRegex, imageHtml);
                                 } else {
-                                    rowHtml = rowHtml.replace(childRegex, `<span style="color:#ccc; font-size: 8px;">[Empty Image: ${child.name}]</span>`);
+                                    rowHtml = rowHtml.replace(childRegex, `<span style="color:#ccc; font-size: 8px;">[Empty Image: ${child.display_value || child.name}]</span>`);
                                 }
                             } else {
                                 // Standard text inside block
@@ -2623,7 +2616,7 @@ export default function TemplateGenerationDialog({
 
                     universalReplace(regex, imageHtml);
                 } else {
-                    universalReplace(regex, `<div style="border:1px dashed #cbd5e1; padding:10px; text-align:center; color:#94a3b8; font-size:10px; border-radius:4px;">[Upload Image: ${placeholder.name}]</div>`);
+                    universalReplace(regex, `<div style="border:1px dashed #cbd5e1; padding:10px; text-align:center; color:#94a3b8; font-size:10px; border-radius:4px;">[Upload Image: ${placeholder.display_value || placeholder.name}]</div>`);
                 }
             } else {
                 const value = extractDisplayValue(rawValue);
@@ -2631,7 +2624,7 @@ export default function TemplateGenerationDialog({
                 const formattedValue = formatWhitespace(value);
 
                 const replacement = formattedValue ||
-                    `<span style="background-color: #fef9c3; color: #854d0e; padding: 0 2px; border-radius: 2px;">[${placeholder.name}]</span>`;
+                    `<span style="background-color: #fef9c3; color: #854d0e; padding: 0 2px; border-radius: 2px;">[${placeholder.display_value || placeholder.name}]</span>`;
 
                 universalReplace(regex, replacement);
             }

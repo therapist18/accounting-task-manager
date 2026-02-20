@@ -307,6 +307,60 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     } catch (error) { setDepartments([]) }
   }
 
+  const handleMoveItem = async (
+    type: 'requirement' | 'question',
+    currentIndex: number,
+    direction: 'up' | 'down',
+    context: EditingContext
+  ) => {
+    try {
+      setIsSubmitting(true);
+      const jobLevel = {
+        department_id: Number(context.departmentId),
+        subdepartment_id: Number(context.subdepartmentId),
+        class_id: context.classId ? Number(context.classId) : null,
+        subclass_id: context.subclassId ? Number(context.subclassId) : null,
+        level: context.type === 'subdepartment' ? 2 : context.type === 'class' ? 3 : 4
+      };
+
+      const { data: existing } = await supabase
+        .from('tm_class_requirements')
+        .select('*')
+        .eq('job_level', JSON.stringify(jobLevel))
+        .maybeSingle();
+
+      if (!existing) return;
+
+      // Determine which array we are working with
+      const fieldName = type === 'requirement' ? 'requirements' : 'job_specific_questions';
+      let items = [...(existing[fieldName] || [])];
+
+      // Swap Logic
+      const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+      if (targetIndex < 0 || targetIndex >= items.length) return;
+
+      // Swap elements
+      [items[currentIndex], items[targetIndex]] = [items[targetIndex], items[currentIndex]];
+
+      // Re-assign order property based on new array index
+      const reorderedItems = items.map((item, idx) => ({ ...item, order: idx }));
+
+      const { error } = await supabase
+        .from('tm_class_requirements')
+        .update({ [fieldName]: reorderedItems, updated_at: new Date().toISOString() })
+        .eq('id', existing.id);
+
+      if (error) throw error;
+
+      await refreshDepartments();
+      toast({ title: "Order Updated" });
+    } catch (error) {
+      console.error(error);
+      toast({ title: "Error", description: "Failed to update order", variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   useEffect(() => { refreshDepartments() }, [])
 
@@ -385,7 +439,6 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       acc[cat].push(q);
       return acc;
     }, {} as Record<string, JobQuestion[]>);
-
     return (
       <div className="border rounded-lg overflow-hidden bg-white shadow-sm">
         <div className="overflow-auto max-h-[600px]">
@@ -410,6 +463,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                     const linkedMasterField = q.linked_field_id
                       ? masterFields.find(mf => String(mf.id) === String(q.linked_field_id))
                       : null;
+                    const absoluteIndex = questions.findIndex(item => item.id === q.id);
                     return (
                       <TableRow key={q.id} className="hover:bg-blue-50/30">
                         <TableCell className="text-center font-mono text-xs text-muted-foreground border-r">{idx + 1}</TableCell>
@@ -456,6 +510,25 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
+                            <Button
+                              variant="ghost" size="icon" className="h-8 w-8 text-slate-400"
+                              disabled={absoluteIndex === 0 || isSubmitting}
+                              onClick={() => handleMoveItem('question', absoluteIndex, 'up', context)}
+                            >
+                              <ArrowUp className="h-3.5 w-3.5" />
+                            </Button>
+
+                            {/* MOVE DOWN */}
+                            <Button
+                              variant="ghost" size="icon" className="h-8 w-8 text-slate-400"
+                              disabled={absoluteIndex === questions.length - 1 || isSubmitting}
+                              onClick={() => handleMoveItem('question', absoluteIndex, 'down', context)}
+                            >
+                              <ArrowDown className="h-3.5 w-3.5" />
+                            </Button>
+
+                            <Separator orientation="vertical" className="h-4 mx-1 my-auto" />
+
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600" onClick={() => {
                               setEditingQuestion(q);
                               setEditingContext(context);
@@ -507,6 +580,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                 requirements.map((req, idx) => {
                   const hasWebData = req.webdata && req.webdata.length > 0;
                   const isExpanded = expandedWebDataRows.has(req.id || `temp-${idx}`);
+                  const absoluteIndex = reqs.findIndex(item => item.id === req.id);
 
                   return (
                     <React.Fragment key={req.id || idx}>
@@ -540,6 +614,22 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                         <TableCell className="border-r">{getAutomationDisplay(req)}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
+                            <Button
+                              variant="ghost" size="icon" className="h-8 w-8 text-slate-400"
+                              disabled={absoluteIndex === 0 || isSubmitting}
+                              onClick={() => handleMoveItem('requirement', absoluteIndex, 'up', context)}
+                            >
+                              <ArrowUp className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost" size="icon" className="h-8 w-8 text-slate-400"
+                              disabled={absoluteIndex === reqs.length - 1 || isSubmitting}
+                              onClick={() => handleMoveItem('requirement', absoluteIndex, 'down', context)}
+                            >
+                              <ArrowDown className="h-3.5 w-3.5" />
+                            </Button>
+
+                            <Separator orientation="vertical" className="h-4 mx-1 my-auto" />
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600" onClick={() => {
                               setEditingRequirement(req);
                               setEditingContext({

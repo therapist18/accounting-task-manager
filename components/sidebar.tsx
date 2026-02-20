@@ -129,7 +129,7 @@ const navItems = [
   },
     {
     title: "Letters",
-    href: "/dashboard/letters-james",
+    href: "/dashboard/letters",
     icon: FileText,
   },
   {
