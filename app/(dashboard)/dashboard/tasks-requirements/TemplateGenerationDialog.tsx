@@ -24,6 +24,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { EntityType, ENTITY_TYPES, DEPENDANT_RELATIONSHIPS } from "@/lib/constants/entity-types";
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { executeComputedField } from '../tasks/utils/automationComputedFunctions';
 
 // Around line 30
 const EDITOR_PREVIEW_STYLES = `
@@ -335,19 +336,12 @@ const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourc
     }
 
     if (normType === 'sponsor') {
-        console.log(`[GET TARGET ENTITY] Sponsor entity detected:`, {
-            entityIdMap: entityIdMap,
-            sponsorId: entityIdMap?.sponsor,
-            relationshipDataSponsor: relationshipData?.sponsor ? { id: relationshipData.sponsor.id, type: typeof relationshipData.sponsor } : null
-        });
         if (entityIdMap?.sponsor) {
             if (relationshipData?.sponsor && String(relationshipData.sponsor.id) === String(entityIdMap.sponsor)) {
-                console.log(`[GET TARGET ENTITY] Sponsor entity matched via ID, returning:`, relationshipData.sponsor);
                 return relationshipData.sponsor;
             }
         }
         const sponsorResult = relationshipData?.sponsor || null;
-        console.log(`[GET TARGET ENTITY] Sponsor entity fallback result:`, sponsorResult);
         return sponsorResult;
     }
 
@@ -415,84 +409,66 @@ const processCurrentDateField = (placeholder, masterFields) => {
 };
 
 const processConditionalField = (placeholder, targetEntity, combinedCache, masterFields) => {
-    if (!placeholder.conditions || !targetEntity) {
-        return { value: '', source: null };
-    }
+    if (!placeholder.conditions || !targetEntity) return { value: '', source: null };
 
-    const targetId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id);
+    const targetId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id);
 
     for (const condition of placeholder.conditions) {
-        const tag = condition.tag;
-        if (condition.master_field_id && masterFields) {
-            const mf = masterFields.get(parseInt(condition.master_field_id, 10));
-            if (mf?.sources) {
-                for (const source of mf.sources) {
-                    const tableData = combinedCache[source.table];
-                    if (!tableData) continue;
+        if (!condition.master_field_id) continue;
 
-                    let records = Object.values(tableData);
+        const mf = masterFields.get(parseInt(condition.master_field_id, 10));
+        if (!mf?.sources) continue;
 
-                    if (source.document_id) {
-                        const requiredIds = Array.isArray(source.document_id)
-                            ? source.document_id
-                            : [source.document_id];
-                        records = records.filter(r =>
-                            requiredIds.includes(r.document_id || r.document_id)
-                        );
-                    }
+        for (const source of mf.sources) {
+            const tableData = combinedCache[source.table];
+            if (!tableData) continue;
 
-                    const linkingVar = source.linking_variable || 'id';
+            const linkingVar = source.linking_variable || 'id';
+            const record = Object.values(tableData).find(rec =>
+                String(rec[linkingVar] || rec.id) === targetId
+            );
 
-                    const record = records.find(rec => {
-                        const recId = String(rec[linkingVar] || rec.id || rec.individual_id || rec.director_id);
-                        return recId === targetId || recId.startsWith(targetId + ' ');
-                    });
+            if (record) {
+                let rawVal = source.path
+                    ? parseJsonValue(record, source.path)
+                    : record[condition.tag || mf.field_key];
 
-                    if (record) {
-                        const rawVal = source.path
-                            ? parseJsonValue(record, source.path)
-                            : record[tag];
-                        if (rawVal) {
-                            return {
-                                value: `${condition.label || ''}${rawVal}`,
-                                source: `DB: ${mf.label || source.table}`
-                            };
-                        }
-                    }
+                // FIX: If rawVal is an object (common in JSONB columns), try to get a string value
+                if (rawVal && typeof rawVal === 'object') {
+                    rawVal = rawVal.number || rawVal.value || rawVal.name || JSON.stringify(rawVal);
+                }
+
+                if (rawVal && String(rawVal).trim() !== '' && String(rawVal) !== '[object Object]') {
+                    return {
+                        value: `${condition.label || ''}${rawVal}`,
+                        source: `Conditional: ${mf.label || source.table}`
+                    };
                 }
             }
         }
     }
-
     return { value: '', source: null };
 };
 
 const processBooleanField = (placeholder, targetEntity, combinedCache, masterFields, task) => {
     if (!placeholder.boolean_conditions) return { value: [], source: null };
 
-    // FIX: Define targetId at the top of the function so it's available for comparison
     const targetId = targetEntity ? String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id) : null;
-
     const taskRecord = (combinedCache?.['tm_tasks'] && Object.values(combinedCache['tm_tasks'])[0]) || task;
     const jobAnswers = taskRecord?.job_specific_answers || {};
 
     const results = placeholder.boolean_conditions.map(condition => {
         let isChecked = false;
 
-        // 1. Resolve via Job Question (Your Case: less_than_ten, etc.)
+        // 1. Job Questions (Keep existing)
         const qId = condition.linked_job_question_id || placeholder.linked_job_question_id;
         if (qId && jobAnswers[qId]) {
-            const actualAnswer = String(jobAnswers[qId]);
-            const targetValue = condition.comparison?.value;
-
-            if (condition.comparison?.operator === 'equals') {
-                isChecked = actualAnswer.trim() === String(targetValue).trim();
-            } else if (condition.comparison?.operator === 'contains') {
-                isChecked = actualAnswer.trim().includes(String(targetValue).trim());
-            }
+            const actualAnswer = String(jobAnswers[qId]).trim().toLowerCase();
+            const targetValue = String(condition.comparison?.value || '').trim().toLowerCase();
+            if (condition.comparison?.operator === 'equals') isChecked = actualAnswer === targetValue;
+            else if (condition.comparison?.operator === 'contains') isChecked = actualAnswer.includes(targetValue);
         }
-
-        // 2. Resolve via Master Field (Standard Logic)
+        // 2. Master Field Logic
         else if (condition.master_field_id && targetId) {
             const mf = masterFields.get(parseInt(condition.master_field_id, 10));
             if (mf?.sources) {
@@ -500,28 +476,33 @@ const processBooleanField = (placeholder, targetEntity, combinedCache, masterFie
                     const tableData = combinedCache[source.table];
                     if (!tableData) continue;
 
+                    // Improved record lookup
                     const record = Object.values(tableData).find(r =>
-                        String(r[source.linking_variable || 'id']) === targetId
+                        String(r[source.linking_variable || 'id']) === targetId ||
+                        String(r.id) === targetId ||
+                        String(r.individual_id) === targetId
                     );
 
                     if (record) {
                         const fieldValue = source.path
                             ? parseJsonValue(record, source.path)
-                            : record[condition.comparison?.field || condition.tag];
+                            : record[condition.comparison?.field || mf.field_key || condition.tag];
 
-                        if (condition.comparison) {
-                            const { operator, value } = condition.comparison;
-                            const strFieldValue = String(fieldValue || '').toLowerCase();
-                            let compareValue = String(value || '').toLowerCase();
+                        if (fieldValue !== undefined && fieldValue !== null) {
+                            if (condition.comparison) {
+                                const { operator, value } = condition.comparison;
+                                const strFieldValue = String(fieldValue).trim().toLowerCase();
+                                const compareValue = String(value || '').trim().toLowerCase();
 
-                            switch (operator) {
-                                case 'equals': isChecked = strFieldValue === compareValue; break;
-                                case 'not_equals': isChecked = strFieldValue !== compareValue; break;
-                                case 'contains': isChecked = strFieldValue.includes(compareValue); break;
-                                default: isChecked = Boolean(fieldValue);
+                                switch (operator) {
+                                    case 'equals': isChecked = strFieldValue === compareValue; break;
+                                    case 'not_equals': isChecked = strFieldValue !== compareValue; break;
+                                    case 'contains': isChecked = strFieldValue.includes(compareValue); break;
+                                    default: isChecked = Boolean(fieldValue);
+                                }
+                            } else {
+                                isChecked = Boolean(fieldValue);
                             }
-                        } else {
-                            isChecked = Boolean(fieldValue);
                         }
                         if (isChecked) break;
                     }
@@ -583,65 +564,115 @@ const processImageField = (placeholder, targetEntity, combinedCache, masterField
     return { value: '', source: null };
 };
 
-const processTextField = (placeholder, targetEntity, combinedCache, masterFields) => {
+
+const processTextField = (placeholder, targetEntity, combinedCache, masterFields, computedFieldCache) => {
     if (!placeholder.master_field_ids?.length) {
         return { value: '', source: null };
     }
 
-    const searchId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id);
+    const searchId = String(
+        targetEntity.id || targetEntity.director_id ||
+        targetEntity.individual_id || targetEntity.company_id
+    );
 
     const allValues = [];
     const allSources = [];
 
-    // Iterate through ALL master field IDs
     for (const id of placeholder.master_field_ids) {
         const mf = masterFields.get(parseInt(id, 10));
         if (!mf?.sources) continue;
 
-        for (const source of mf.sources) {
-            const tableData = combinedCache[source.table];
-            if (!tableData) {
+        // Sort sources by priority
+        const sortedSources = [...mf.sources].sort((a, b) => (a.priority || 999) - (b.priority || 999));
+
+        for (const source of sortedSources) {
+            // ── COMPUTED SOURCE HANDLING (NEW) ──
+            if (source.is_computed) {
+                const extractionMode = 'latest';
+                const cacheKey = `${mf.id}_${searchId}_${extractionMode}`;
+
+                if (!computedFieldCache) continue;
+                const computedVal = computedFieldCache[cacheKey];
+
+                if (computedVal === undefined) {
+                    // Still loading — skip this source and try next
+                    continue;
+                }
+
+                // Validate computed value (mirror AutomationMappingDialog logic)
+                const errorStrings = [
+                    'Document Not Found', 'Missing Document', 'No Document Specified',
+                    'Field Not Found', 'Number Not Found', 'Missing', 'No Source', null, undefined, ''
+                ];
+
+                if (!errorStrings.includes(computedVal) && computedVal !== null) {
+                    let finalVal = computedVal;
+
+                    // Handle object results — extract the relevant sub-field if path indicates one
+                    if (typeof computedVal === 'object' && computedVal !== null && source.path) {
+                        const pathMatch = source.path.match(/['"]([\w_]+)['"]$/);
+                        const fieldName = pathMatch ? pathMatch[1] : null;
+                        if (fieldName && computedVal[fieldName]) {
+                            finalVal = String(computedVal[fieldName]);
+                        } else if (typeof computedVal === 'object') {
+                            finalVal = computedVal.en || computedVal.name || computedVal.title ||
+                                String(Object.values(computedVal)[0] || '');
+                        }
+                    }
+
+                    if (finalVal && String(finalVal).trim() !== '') {
+                        allValues.push(String(finalVal));
+                        allSources.push(`Computed: ${mf.label || source.table}`);
+                        break; // Found a valid computed value for this master field, move on
+                    }
+                }
+
+                // Computed returned an error — fall through to next source
                 continue;
             }
+
+            // ── STANDARD DB SOURCE HANDLING (EXISTING) ──
+            const tableData = combinedCache[source.table];
+            if (!tableData) continue;
 
             const linkingVar = source.linking_variable || 'id';
             const record = Object.values(tableData).find(r => {
                 const recordId = String(r[linkingVar] || r.id);
-                const matches = recordId === searchId;
-                return matches;
+                return recordId === searchId;
             });
 
             if (record) {
                 const val = source.path
                     ? parseJsonValue(record, source.path)
                     : (record[mf.field_key] || record[placeholder.name]);
-                if (val) {
+
+                if (val && String(val).trim() !== '') {
                     allValues.push(val);
                     allSources.push(`DB: ${source.table}`);
+                    break; // Found value from this master field, move on
                 }
-            } else {
-                const sampleIds = Object.values(tableData).slice(0, 3).map(r => String(r[linkingVar] || r.id));
             }
         }
     }
 
     if (allValues.length > 0) {
-        const combinedValue = allValues.join(' ');
-        const successfulSourceIndex = allSources.findIndex(source => source.includes('registry_individuals'));
-        const combinedSource = successfulSourceIndex >= 0 ? allSources[successfulSourceIndex] : allSources[0];
         return {
-            value: combinedValue,
-            source: combinedSource
+            value: allValues.join(' '),
+            source: allSources[0]
         };
     }
+
     return { value: '', source: null };
 };
 
 const isValidValue = (val: any, placeholderType?: string): boolean => {
     if (val === null || val === undefined) return false;
+
+    // FIX: For booleans, an array of options is only valid if one is checked
     if (placeholderType === 'boolean' && Array.isArray(val)) {
-        return val.length > 0;
+        return val.some(opt => opt && opt.checked === true);
     }
+
     if (Array.isArray(val)) {
         return val.length > 0;
     }
@@ -653,12 +684,15 @@ const isValidValue = (val: any, placeholderType?: string): boolean => {
     return Boolean(val);
 };
 
-const processPlaceholderValue = (placeholder, relationshipData, combinedCache, masterFields, entityIdMap = null, extractedData, companyData, arrayIndex = null, sourceArray = null, task = null) => {
+const processPlaceholderValue = (placeholder, relationshipData, combinedCache, masterFields, entityIdMap = null, extractedData, companyData, arrayIndex = null, sourceArray = null, task = null, computedFieldCache = null) => {
     const logic = placeholder.source_logic || 'priority';
     const collectedValues: string[] = [];
     const sourceMetadata: string[] = [];
     const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData);
     const targetId = targetEntity ? String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id) : null;
+    console.group(`[FIELD PROCESS] ${placeholder.name}`);
+    console.log("Target Entity ID:", targetId);
+    console.log("Master Fields Linked:", placeholder.master_field_ids);
     if (placeholder.master_field_ids?.length > 0 && targetEntity) {
         for (const mid of placeholder.master_field_ids) {
             let result = { value: '', source: null };
@@ -673,11 +707,13 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
                 } else if (placeholder.type === 'boolean') {
                     result = processBooleanField({ ...placeholder, master_field_ids: [mid] }, targetEntity, combinedCache, masterFields);
                 } else {
-                    result = processTextField({ ...placeholder, master_field_ids: [mid] }, targetEntity, combinedCache, masterFields);
+                    result = processTextField({ ...placeholder, master_field_ids: [mid] }, targetEntity, combinedCache, masterFields, computedFieldCache);
                 }
             }
             if (isValidValue(result.value, placeholder.type)) {
+                console.log(`✅ Found Value: "${result.value}" from Source: ${result.source}`);
                 if (logic === 'priority') {
+                    console.groupEnd();
                     return result;
                 }
                 collectedValues.push(String(result.value));
@@ -686,15 +722,29 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
         }
     }
     if (placeholder.type === 'boolean' && placeholder.boolean_conditions?.length > 0 && targetEntity) {
-        const result = processBooleanField(placeholder, targetEntity, combinedCache, masterFields);
+        const result = processBooleanField(placeholder, targetEntity, combinedCache, masterFields, task);
         if (isValidValue(result.value, placeholder.type)) {
-            if (logic === 'priority') {
-                return result;
-            }
-            collectedValues.push(String(result.value));
+            const matchedLabel = result.value.find(v => v.checked)?.label;
+            console.log(`✅ Found Boolean Match: "${matchedLabel}"`);
+            if (logic === 'priority') { console.groupEnd(); return result; }
+            collectedValues.push(result.value);
             sourceMetadata.push(result.source || 'Boolean (DB)');
+        } else {
+            console.log(`❌ No Boolean Match found for ${placeholder.name}`);
         }
     }
+
+    // 3. ADDED: Handle Conditional logic (e.g. sponsor_r_number)
+    if (placeholder.type === 'conditional' && placeholder.conditions?.length > 0 && targetEntity) {
+        const result = processConditionalField(placeholder, targetEntity, combinedCache, masterFields);
+        if (isValidValue(result.value)) {
+            console.log(`✅ Found Conditional Match: "${result.value}"`);
+            if (logic === 'priority') { console.groupEnd(); return result; }
+            collectedValues.push(String(result.value));
+            sourceMetadata.push(result.source || 'Conditional (DB)');
+        }
+    }
+
     const qIds = placeholder.linked_job_question_ids || (placeholder.linked_job_question_id ? [placeholder.linked_job_question_id] : []);
     if (qIds.length > 0) {
         const taskRecord = (combinedCache?.['tm_tasks'] && Object.values(combinedCache['tm_tasks'])[0]) || task;
@@ -738,42 +788,23 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
 };
 
 const extractDisplayValue = (value) => {
-    if (value === null || value === undefined) {
-        return '';
-    }
+    if (value === null || value === undefined) return '';
 
     if (Array.isArray(value)) {
-        return value
-            .filter(opt => opt && opt.checked)
-            .map(opt => {
-                if (!opt) return '';
-                if (typeof opt === 'string') return opt;
+        // If it's a list of condition objects (like prefix/possessive)
+        const checkedItems = value.filter(opt => opt && opt.checked);
 
-                const possibleProps = ['label', 'display', 'text', 'value', 'name', 'title'];
-                for (const prop of possibleProps) {
-                    if (opt[prop] && typeof opt[prop] === 'string') {
-                        return opt[prop];
-                    }
-                }
-
-                if (opt.label && typeof opt.label === 'object') {
-                    if (opt.label.label) return opt.label.label;
-                    if (opt.label.display) return opt.label.display;
-                }
-
-                return opt.tag || '';
-            })
-            .filter(Boolean)
-            .join(', ');
+        if (checkedItems.length > 0) {
+            return checkedItems.map(opt => {
+                // Return label ("Mr") or the tag or the raw value
+                return opt.label || opt.tag || opt.value || '';
+            }).join(', ');
+        }
+        return '';
     }
 
     if (typeof value === 'object') {
-        if (value.value !== undefined) {
-            return String(value.value);
-        }
-
-        console.warn('Unexpected object value in extractDisplayValue:', value, 'for placeholder name check');
-        return '';
+        return value.value !== undefined ? String(value.value) : '';
     }
 
     return String(value);
@@ -831,138 +862,6 @@ const ImagePlaceholderControls = ({ styles, onStyleChange }) => {
                 </div>
             </div>
         </div>
-    );
-};
-
-const UpdateProfileDialog = ({ open, onOpenChange, changedFields, onSave, isSaving }) => {
-    if (!changedFields || changedFields.length === 0) return null;
-
-    return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-3xl max-h-[85vh]">
-                <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2">
-                        <Save className="h-5 w-5 text-blue-600" />
-                        Update Profile Data
-                    </DialogTitle>
-                    <DialogDescription>
-                        Review and confirm {changedFields.length} change{changedFields.length > 1 ? 's' : ''} to be saved to the database
-                    </DialogDescription>
-                </DialogHeader>
-
-                <ScrollArea className="max-h-[55vh] pr-4">
-                    <div className="space-y-4">
-                        {changedFields.map((field, idx) => (
-                            <div key={idx} className="p-4 border rounded-lg bg-slate-50">
-                                <div className="flex items-start justify-between mb-3">
-                                    <div>
-                                        <Label className="font-semibold text-sm">
-                                            {field.placeholder.display_value || field.placeholder.name.replace(/_/g, ' ').toUpperCase()}
-                                        </Label>
-                                        <div className="flex gap-2 mt-1">
-                                            <Badge variant="outline" className="text-[9px]">
-                                                {field.placeholder.entity_type || 'general'}
-                                            </Badge>
-                                            {field.placeholder.director_type === 'primary' && (
-                                                <Badge className="text-[9px] bg-purple-100 text-purple-700">
-                                                    Primary Director
-                                                </Badge>
-                                            )}
-                                        </div>
-                                    </div>
-                                    {field.source && (
-                                        <Badge variant="secondary" className="text-[9px]">
-                                            {field.source}
-                                        </Badge>
-                                    )}
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="space-y-1">
-                                        <span className="text-xs font-medium text-muted-foreground">Original:</span>
-                                        <div className="p-2 bg-red-50 border border-red-200 rounded text-xs min-h-[40px] flex items-center">
-                                            {field.oldValue ? (
-                                                typeof field.oldValue === 'object' ? (
-                                                    <pre className="text-xs whitespace-pre-wrap break-words">
-                                                        {JSON.stringify(field.oldValue, null, 2)}
-                                                    </pre>
-                                                ) : (
-                                                    <span>{String(field.oldValue)}</span>
-                                                )
-                                            ) : (
-                                                <span className="italic text-gray-400">Empty</span>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <div className="space-y-1">
-                                        <span className="text-xs font-medium text-muted-foreground">New:</span>
-                                        <div className="p-2 bg-green-50 border border-green-200 rounded text-xs font-medium min-h-[40px] flex items-center">
-                                            {field.newValue ? (
-                                                typeof field.newValue === 'object' ? (
-                                                    <pre className="text-xs whitespace-pre-wrap break-words">
-                                                        {JSON.stringify(field.newValue, null, 2)}
-                                                    </pre>
-                                                ) : (
-                                                    <span>{String(field.newValue)}</span>
-                                                )
-                                            ) : (
-                                                <span className="italic text-gray-400">Empty</span>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {field.targetInfo && (
-                                    <div className="mt-3 p-2 bg-blue-50 border border-blue-200 rounded">
-                                        <div className="text-[10px] text-blue-800 space-y-1">
-                                            <div className="flex items-center gap-2">
-                                                <span className="font-semibold">Table:</span>
-                                                <code className="bg-white px-1.5 py-0.5 rounded">{field.targetInfo.table}</code>
-                                            </div>
-                                            {field.targetInfo.path && (
-                                                <div className="flex items-center gap-2">
-                                                    <span className="font-semibold">Path:</span>
-                                                    <code className="bg-white px-1.5 py-0.5 rounded">{field.targetInfo.path}</code>
-                                                </div>
-                                            )}
-                                            {field.targetInfo.entityId && (
-                                                <div className="flex items-center gap-2">
-                                                    <span className="font-semibold">Entity ID:</span>
-                                                    <code className="bg-white px-1.5 py-0.5 rounded">{field.targetInfo.entityId}</code>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        ))}
-                    </div>
-                </ScrollArea>
-
-                <DialogFooter className="gap-2">
-                    <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
-                        Cancel
-                    </Button>
-                    <Button
-                        onClick={onSave}
-                        disabled={isSaving}
-                        className="bg-green-600 hover:bg-green-700"
-                    >
-                        {isSaving ? (
-                            <>
-                                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                                Saving...
-                            </>
-                        ) : (
-                            <>
-                                <Save className="h-4 w-4 mr-2" />
-                                Save {changedFields.length} Change{changedFields.length > 1 ? 's' : ''}
-                            </>
-                        )}
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
     );
 };
 
@@ -1294,7 +1193,6 @@ export default function TemplateGenerationDialog({
     const [selectedTemplate, setSelectedTemplate] = useState(template);
     const [uploadedFiles, setUploadedFiles] = useState({});
     const [imageStyles, setImageStyles] = useState({});
-    const [showUpdateDialog, setShowUpdateDialog] = useState(false);
     const [isSavingProfile, setIsSavingProfile] = useState(false);
     const [additionalCache, setAdditionalCache] = useState({});
     const [fetchingTables, setFetchingTables] = useState(new Set());
@@ -1309,6 +1207,7 @@ export default function TemplateGenerationDialog({
     const [showConflictBanner, setShowConflictBanner] = useState(false);
     const togglePanel = (panel) => setPanelsVisible(prev => ({ ...prev, [panel]: !prev[panel] }));
     const [requirementJobQuestions, setRequirementJobQuestions] = useState<any[]>([]);
+    const [computedFieldCache, setComputedFieldCache] = useState<Record<string, any>>({});
 
     useEffect(() => {
         const fetchJobQuestions = async () => {
@@ -1342,6 +1241,44 @@ export default function TemplateGenerationDialog({
         fetchJobQuestions();
     }, [task?.job_level, isOpen]);
 
+    useEffect(() => {
+        if (!selectedTemplate?.placeholders) return;
+
+        const defaultStyles = {};
+
+        selectedTemplate.placeholders.forEach(placeholder => {
+            if (placeholder.type === 'image') {
+                const style = {};
+
+                // Apply default values from placeholder configuration
+                if (placeholder.image_width) {
+                    // Extract numeric value from "150px" format
+                    const widthValue = parseInt(placeholder.image_width.replace('px', ''));
+                    if (!isNaN(widthValue)) {
+                        style.imageWidth = widthValue;
+                    }
+                }
+
+                if (placeholder.image_height) {
+                    // Extract numeric value from "150px" format  
+                    const heightValue = parseInt(placeholder.image_height.replace('px', ''));
+                    if (!isNaN(heightValue)) {
+                        style.imageHeight = heightValue;
+                    }
+                }
+
+                // Only set if we have default values and no existing custom style
+                if ((style.imageWidth || style.imageHeight) && !imageStyles[placeholder.name]) {
+                    defaultStyles[placeholder.name] = style;
+                }
+            }
+        });
+
+        if (Object.keys(defaultStyles).length > 0) {
+            setImageStyles(prev => ({ ...prev, ...defaultStyles }));
+        }
+    }, [selectedTemplate]);
+
     const groupedPlaceholders = useMemo(() => {
         if (!selectedTemplate?.placeholders) return { topLevel: [], blocks: {} };
 
@@ -1369,7 +1306,7 @@ export default function TemplateGenerationDialog({
         return { topLevel, blocks };
     }, [selectedTemplate]);
 
-    const resolveSpecificSourceValue = useCallback((type, id, placeholder, arrayIndex = null) => {
+    const resolveSpecificSourceValue = useCallback((type, id, placeholder, arrayIndex = null, computedFieldCache = null) => {
         if (!isOpen) return '';
 
         // 1. Resolve Target Entity Logic
@@ -1418,7 +1355,7 @@ export default function TemplateGenerationDialog({
 
             // Construct a temp placeholder to use the existing resolver logic for a single field
             const tempPlaceholder = { ...placeholder, master_field_ids: [id] };
-            const result = processTextField(tempPlaceholder, targetEntity, combinedCacheWithAdditional, masterFields);
+            const result = processTextField(tempPlaceholder, targetEntity, combinedCacheWithAdditional, masterFields, computedFieldCache);
             return result.value || '';
         }
 
@@ -1632,7 +1569,10 @@ export default function TemplateGenerationDialog({
                             entityIdMap,
                             extractedData,
                             companyData,
-                            task
+                            task,
+                            null,
+                            null,
+                            computedFieldCache
                         );
 
                         let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
@@ -1665,13 +1605,15 @@ export default function TemplateGenerationDialog({
                             relationshipData,
                             extractedData,
                             companyData,
-                            task
+                            task,
+                            computedFieldCache
                         );
 
                         if (resolvedArray.length > 0) {
                             liveData[blockName] = resolvedArray;
                         }
                     });
+
                     const conflicts = await detectDataConflicts(draftFormData, liveData);
                     setFormData(draftFormData);
                     setOriginalFormData(JSON.parse(JSON.stringify(draftFormData)));
@@ -1783,7 +1725,10 @@ export default function TemplateGenerationDialog({
                 entityIdMap,
                 extractedData,
                 companyData,
-                task
+                task,
+                null,
+                null,
+                computedFieldCache
             );
 
             let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
@@ -1849,7 +1794,14 @@ export default function TemplateGenerationDialog({
 
         const tableConfigs = new Map();
         selectedTemplate.placeholders?.forEach(p => {
-            p.master_field_ids?.forEach(mId => {
+            // --- UPDATED: Collect IDs from all possible locations ---
+            const allLinkedMasterIds = new Set([
+                ...(p.master_field_ids || []),
+                ...(p.conditions?.map(c => c.master_field_id).filter(Boolean) || []),
+                ...(p.boolean_conditions?.map(c => c.master_field_id).filter(Boolean) || [])
+            ]);
+
+            allLinkedMasterIds.forEach(mId => {
                 const masterField = masterFields.get(parseInt(mId));
                 masterField?.sources?.forEach(source => {
                     if (!source.table) return;
@@ -1942,11 +1894,168 @@ export default function TemplateGenerationDialog({
         }
     }, [isOpen, selectedTemplate?.id, entityIdMap, relationshipData, masterFields]);
 
+    const resolveComputedFields = useCallback(async (updatedCache: Record<string, any>) => {
+        if (!selectedTemplate?.placeholders || !masterFields) return;
+
+        // 1. Collect all entity IDs we need to resolve for
+        const allEntityIds = new Set<string>();
+
+        if (entityIdMap?.company) allEntityIds.add(String(entityIdMap.company));
+        if (entityIdMap?.principal) allEntityIds.add(String(entityIdMap.principal));
+        if (entityIdMap?.sponsor) allEntityIds.add(String(entityIdMap.sponsor));
+
+        const dirIds = Array.isArray(entityIdMap?.directors) ? entityIdMap.directors : (entityIdMap?.director ? [entityIdMap.director] : []);
+        dirIds.forEach(id => id && allEntityIds.add(String(id)));
+
+        relationshipData?.directors?.forEach(d => {
+            const id = d.id || d.director_id;
+            if (id) allEntityIds.add(String(id));
+        });
+        relationshipData?.dependants?.forEach(d => {
+            const id = typeof d === 'object' ? (d.id || d.individual_id) : d;
+            if (id) allEntityIds.add(String(id));
+        });
+        if (relationshipData?.principal) {
+            const p = relationshipData.principal;
+            const pid = typeof p === 'object' ? (p.id || p.individual_id) : p;
+            if (pid) allEntityIds.add(String(pid));
+        }
+        if (relationshipData?.sponsor) {
+            const s = relationshipData.sponsor;
+            const sid = typeof s === 'object' ? (s.id || s.individual_id) : s;
+            if (sid) allEntityIds.add(String(sid));
+        }
+
+        // 2. Find all master fields that have is_computed sources
+        const computedJobs: Array<{
+            fieldId: number;
+            entityId: string;
+            extractionMode: string;
+            computedSource: any;
+            cacheKey: string;
+        }> = [];
+
+        const allLinkedMasterIds = new Set<number>();
+        selectedTemplate.placeholders.forEach(p => {
+            (p.master_field_ids || []).forEach(id => allLinkedMasterIds.add(parseInt(id)));
+        });
+
+        // Build a document cache for computed functions
+        // Collect all document IDs we need from computed sources
+        const neededDocumentIds = new Set<string>();
+        const neededEntityIds = new Set<string>();
+
+        allLinkedMasterIds.forEach(mfId => {
+            const mf = masterFields.get(mfId);
+            if (!mf?.sources) return;
+
+            mf.sources.forEach(source => {
+                if (!source.is_computed) return;
+                const docIds = Array.isArray(source.document_id) ? source.document_id : (source.document_id ? [source.document_id] : []);
+                docIds.forEach(id => neededDocumentIds.add(id));
+                allEntityIds.forEach(eid => neededEntityIds.add(eid));
+            });
+        });
+
+        if (neededDocumentIds.size === 0) return; // No computed fields to resolve
+
+        // 3. Fetch documents needed for computed fields
+        let documentCache = { documents: [], docTypes: [] };
+        try {
+            const [docsResult, docTypesResult] = await Promise.all([
+                supabase
+                    .from('acc_portal_directors_documents')
+                    .select('*')
+                    .in('director_id', Array.from(neededEntityIds))
+                    .in('document_id', Array.from(neededDocumentIds))
+                    .neq('status', 'deleted'),
+                supabase
+                    .from('acc_portal_kyc')
+                    .select('*')
+                    .in('id', Array.from(neededDocumentIds))
+            ]);
+
+            documentCache = {
+                documents: docsResult.data || [],
+                docTypes: docTypesResult.data || []
+            };
+        } catch (err) {
+            console.error('[resolveComputedFields] Failed to fetch documents:', err);
+            return;
+        }
+
+        // 4. Build compute jobs for each master field × entity combination
+        allLinkedMasterIds.forEach(mfId => {
+            const mf = masterFields.get(mfId);
+            if (!mf?.sources) return;
+
+            mf.sources.forEach(source => {
+                if (!source.is_computed) return;
+
+                allEntityIds.forEach(entityId => {
+                    const extractionMode = 'latest'; // Default, can be extended
+                    const cacheKey = `${mfId}_${entityId}_${extractionMode}`;
+
+                    computedJobs.push({
+                        fieldId: mfId,
+                        entityId,
+                        extractionMode,
+                        computedSource: source,
+                        cacheKey
+                    });
+                }); 
+            });
+        });
+
+        if (computedJobs.length === 0) return;
+
+        // 5. Execute all computed fields
+        const newComputedCache: Record<string, any> = {};
+
+        await Promise.all(
+            computedJobs.map(async ({ fieldId, entityId, extractionMode, computedSource, cacheKey }) => {
+                try {
+                    let functionToCall = computedSource.computed_function || 'extractFieldFromLatestDocument';
+                    // Normalize function name (same logic as AutomationMappingDialog)
+                    if (functionToCall === 'getLatestDocument' && computedSource.path) {
+                        functionToCall = 'extractFieldFromLatestDocument';
+                    }
+
+                    const val = await executeComputedField(
+                        functionToCall,
+                        entityId,
+                        computedSource.document_id || [],
+                        computedSource.path,
+                        extractionMode,
+                        documentCache,
+                        computedSource.computed_config
+                    );
+
+                    newComputedCache[cacheKey] = val;
+                } catch (err) {
+                    console.warn(`[resolveComputedFields] Failed for key ${cacheKey}:`, err);
+                    newComputedCache[cacheKey] = null;
+                }
+            })
+        );
+
+        setComputedFieldCache(prev => ({ ...prev, ...newComputedCache }));
+    }, [selectedTemplate, masterFields, entityIdMap, relationshipData]);
+
     useEffect(() => {
         if (isOpen && selectedTemplate?.id) {
-            fetchMissingDataSources();
+            fetchMissingDataSources().then(() => {
+                // After DB data is loaded, resolve computed fields
+                resolveComputedFields(combinedCache);
+            });
         }
     }, [isOpen, selectedTemplate?.id, fetchMissingDataSources]);
+
+    useEffect(() => {
+        if (isOpen && selectedTemplate?.id && masterFields && Object.keys(combinedCache).length > 0) {
+            resolveComputedFields(combinedCache);
+        }
+    }, [isOpen, selectedTemplate?.id, Object.keys(combinedCache).length]);
 
     useEffect(() => {
         if (!isOpen || !selectedTemplate) return;
@@ -2012,7 +2121,7 @@ export default function TemplateGenerationDialog({
             setOriginalFormData(JSON.parse(JSON.stringify(init)));
             setAutoPopulatedFields(autoMap);
         }
-    }, [isOpen, selectedTemplate?.id, combinedCache, loadedDraft, fetchingTables, task]);
+    }, [isOpen, selectedTemplate?.id, combinedCache, loadedDraft, fetchingTables, task, computedFieldCache]);
 
     useEffect(() => {
         const fetchAvailableDocuments = async () => {
@@ -2551,13 +2660,21 @@ export default function TemplateGenerationDialog({
                                 if (value && (value.startsWith('http') || value.startsWith('data:image'))) {
                                     const styleKey = `${blockName}_${rowIndex}_${child.name}`;
                                     const style = styles[styleKey] || styles[child.name] || {};
-                                    const imgWidth = style.imageWidth ? `${style.imageWidth}px` : "120px";
+
+                                    // Use custom style if available, otherwise use default values from placeholder configuration
+                                    let imgWidth = "120px"; // default fallback for blocks
+                                    if (style.imageWidth) {
+                                        imgWidth = `${style.imageWidth}px`;
+                                    } else if (child.image_width) {
+                                        imgWidth = child.image_width;
+                                    }
+
                                     const textAlign = style.textAlign || 'center';
 
                                     const imageHtml = `<div style="text-align:${textAlign};">
                                     <img src="${value}" style="width:${imgWidth}; height:auto; display:block; margin:${textAlign === 'center' ? '0 auto' : '0'}; border-radius: 2px;" 
                                          onerror="console.error('[HTML IMAGE DEBUG] Failed to load image:', '${value}'); this.style.display='none'; this.nextElementSibling.style.display='block';" />
-                                    <div style="display:none; color:red; font-size:10px; border:1px solid red; padding:5px; margin:5px 0;">
+                                    <div style="display:none; color:red; font-size:10px; border:1px solid red; margin:5px 0;">
                                         ❌ Failed to load: ${value.substring(0, 50)}...
                                     </div>
                                 </div>`;
@@ -2603,7 +2720,15 @@ export default function TemplateGenerationDialog({
                 const regex = new RegExp(`\\{+\\s*%?\\s*${cleanName}\\s*\\}+`, 'gi');
                 if (value && (value.startsWith('http') || value.startsWith('data:image'))) {
                     const style = styles[placeholder.name] || {};
-                    const imgWidth = style.imageWidth ? `${style.imageWidth}px` : "200px";
+
+                    // Use custom style if available, otherwise use default values from placeholder configuration
+                    let imgWidth = "200px"; // default fallback
+                    if (style.imageWidth) {
+                        imgWidth = `${style.imageWidth}px`;
+                    } else if (placeholder.image_width) {
+                        imgWidth = placeholder.image_width;
+                    }
+
                     const textAlign = style.textAlign || 'center';
 
                     const imageHtml = `<div style="text-align:${textAlign};">
@@ -2770,7 +2895,21 @@ export default function TemplateGenerationDialog({
                 },
                 getSize: (img, tag, name) => {
                     const s = styles[name];
-                    return s ? [s.imageWidth || 300, s.imageHeight || 200] : [300, 200];
+
+                    // Use custom style if available, otherwise try to get default from placeholder configuration
+                    if (s && (s.imageWidth || s.imageHeight)) {
+                        return [s.imageWidth || 300, s.imageHeight || 200];
+                    }
+
+                    // Try to find the placeholder and use its default values
+                    const placeholder = selectedTemplate?.placeholders?.find(p => p.name === name && p.type === 'image');
+                    if (placeholder) {
+                        const defaultWidth = placeholder.image_width ? parseInt(placeholder.image_width.replace('px', '')) : 300;
+                        const defaultHeight = placeholder.image_height ? parseInt(placeholder.image_height.replace('px', '')) : 200;
+                        return [defaultWidth, defaultHeight];
+                    }
+
+                    return [300, 200];
                 },
             });
 
@@ -3084,7 +3223,6 @@ export default function TemplateGenerationDialog({
                 });
                 setOriginalFormData(JSON.parse(JSON.stringify(formData)));
                 setManuallyEditedFields(new Set());
-                setShowUpdateDialog(false);
             }
         } catch (error) {
             console.error('[Update Profile] Error:', error);
@@ -3674,10 +3812,7 @@ export default function TemplateGenerationDialog({
         setIsGenerating(true);
         try {
             const fileName = `${documentName.replace(/[^\w\s-]/g, '_')}_${formatDate(new Date(), 'YYYYMMDD')}`;
-
             const renderData = await prepareRenderData(formData);
-
-            // 2. Handle Word-based Templates
             if (isWordTemplate) {
                 let templateBuffer = docxTemplateBuffer.current;
                 if (templateBuffer && typeof templateBuffer.then === 'function') {
@@ -3690,13 +3825,11 @@ export default function TemplateGenerationDialog({
 
                 const zip = new PizZip(templateBuffer);
 
-                // Configure Image Module for Word
                 const imageModule = new ImageModule({
                     centered: false,
                     getImage: (tag) => {
                         if (!tag) return null;
                         try {
-                            // Check if tag is already Base64 (from prepareRenderData)
                             if (tag.startsWith('data:image')) {
                                 const base64Data = tag.split('base64,')[1];
                                 const binaryStr = atob(base64Data);
@@ -3709,7 +3842,6 @@ export default function TemplateGenerationDialog({
                             }
                             return null;
                         } catch (error) {
-                            console.error('Error processing image for Word:', error);
                             return null;
                         }
                     },
@@ -3764,59 +3896,57 @@ export default function TemplateGenerationDialog({
                         .save();
                 }
             }
-
-            // 3. Handle HTML-based Templates
             else {
-                const renderData = await prepareRenderData(formData);
-
-                const pdfHtmlContent = populateHtmlContent(
-                    renderData, // This ensures Base64 is used
+                const htmlContent = populateHtmlContent(
+                    renderData,
                     selectedTemplate?.placeholders || [],
                     imageStyles
                 );
 
-                const element = document.createElement('div');
-                element.innerHTML = pdfHtmlContent;
-                element.className = EDITOR_PREVIEW_STYLES + 'bg-white';
-                element.style.whiteSpace = 'pre-wrap';
-                element.style.width = '800px';
+                if (type === 'word') {
+                    const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' " +
+                        "xmlns:w='urn:schemas-microsoft-com:office:word' " +
+                        "xmlns='http://www.w3.org/TR/REC-html40'>" +
+                        "<head><meta charset='utf-8'><title>Export</title></head><body>";
+                    const footer = "</body></html>";
+                    const sourceHTML = header + htmlContent + footer;
 
-                element.style.margin = '0';
-                element.style.padding = '0';
-                document.body.appendChild(element); // Briefly add to DOM for html2pdf to see it
+                    const blob = new Blob(['\ufeff', sourceHTML], {
+                        type: 'application/msword'
+                    });
+                    saveAs(blob, `${fileName}.doc`);
+                    toast({ title: "Success", description: `Document downloaded as ${fileName}.doc` });
+                } else {
+                    const element = document.createElement('div');
+                    element.innerHTML = htmlContent;
+                    element.className = EDITOR_PREVIEW_STYLES + ' bg-white';
+                    element.style.whiteSpace = 'pre-wrap';
+                    element.style.width = '800px';
+                    element.style.padding = '20px';
 
-                const html2pdf = (await import('html2pdf.js')).default;
+                    document.body.appendChild(element);
 
-                await html2pdf()
-                    .set({
-                        margin: 10,
-                        filename: `${fileName}.pdf`,
-                        image: { type: 'jpeg', quality: 0.98 },
-                        html2canvas: {
-                            scale: 2,
-                            useCORS: true,
-                            letterRendering: true,
-                            allowTaint: false, // Prevents tainted canvas errors
-                        },
-                        jsPDF: {
-                            unit: 'mm',
-                            format: 'a4',
-                            orientation: 'portrait'
-                        }
-                    })
-                    .from(element)
-                    .save();
+                    const html2pdf = (await import('html2pdf.js')).default;
+                    await html2pdf()
+                        .set({
+                            margin: 10,
+                            filename: `${fileName}.pdf`,
+                            image: { type: 'jpeg', quality: 0.98 },
+                            html2canvas: { scale: 2, useCORS: true, letterRendering: true },
+                            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                        })
+                        .from(element)
+                        .save();
 
-                document.body.removeChild(element); // Clean up
-
-                toast({ title: "Success", description: `Document downloaded as ${fileName}.pdf` });
+                    document.body.removeChild(element);
+                    toast({ title: "Success", description: `Document downloaded as ${fileName}.pdf` });
+                }
             }
         } catch (e) {
-            const errorMessage = e instanceof Error ? e.message : String(e);
             console.error('[generateAndDownload] Error:', e);
             toast({
                 title: "Error",
-                description: errorMessage,
+                description: e instanceof Error ? e.message : String(e),
                 variant: "destructive"
             });
         } finally {
@@ -3871,17 +4001,6 @@ export default function TemplateGenerationDialog({
                                 <Label>{documentName}</Label>
                             </div>
                             <div className="flex items-center gap-2">
-                                {changedFields.length > 0 && (
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => setShowUpdateDialog(true)}
-                                        className="border-green-200 text-green-700 hover:bg-green-50"
-                                    >
-                                        <Save className="h-4 w-4 mr-2" />
-                                        Update Profile ({changedFields.length})
-                                    </Button>
-                                )}
                                 <Button
                                     variant="outline"
                                     size="sm"
@@ -4185,14 +4304,6 @@ export default function TemplateGenerationDialog({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
-
-            <UpdateProfileDialog
-                open={showUpdateDialog}
-                onOpenChange={setShowUpdateDialog}
-                changedFields={changedFields}
-                onSave={handleUpdateProfile}
-                isSaving={isSavingProfile}
-            />
         </>
     );
 }

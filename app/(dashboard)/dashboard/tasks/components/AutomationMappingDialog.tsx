@@ -573,7 +573,7 @@ export const AutomationMappingDialog = ({
   const resolveVariableValue = useCallback((fieldDef: any, targetEntityId: string) => {
     const logic = fieldDef.sourceLogic || 'priority';
     const masterIds = fieldDef.linkedMasterFields || [];
-    const questionIds = fieldDef.linkedJobQuestionIds || (fieldDef.linkedJobQuestionId ? [fieldDef.linkedJobQuestionId] : []);
+    const questionIds = fieldDef.linkedJobQuestionIds || [];
     const extractionMode = fieldDef.extractionMode || 'latest';
 
     const collectedValues: string[] = [];
@@ -664,7 +664,8 @@ export const AutomationMappingDialog = ({
       const fieldsToProcess = activeAutomation?.fields || [];
       const computedMasterFields: any[] = [];
       fieldsToProcess.forEach((field: any) => {
-        if (field.linkedJobQuestionId) { if (taskId) addToQueue('tm_tasks', 'id', String(taskId)); return; }
+        const questionIds = field.linkedJobQuestionIds || [];
+        if (questionIds.length > 0) { if (taskId) addToQueue('tm_tasks', 'id', String(taskId)); return; }
         const isArray = field.fieldType === 'array';
         const cols = isArray ? (field.arrayItems || []) : [{ linkedMasterFieldId: field.linkedMasterFields?.[0] || field.masterFieldIds?.[0] }];
         let entityIds: string[] = [];
@@ -735,7 +736,7 @@ export const AutomationMappingDialog = ({
     const activeAuto = webData.find(w => w.automationId === selectedAutomationId);
     const fieldDef = activeAuto?.fields?.find(f => f.variableName === fieldIdOrVariable || String(f.id) === String(fieldIdOrVariable));
 
-    const jobQuestionIds = fieldDef?.linkedJobQuestionIds || (fieldDef?.linkedJobQuestionId ? [fieldDef.linkedJobQuestionId] : []);
+    const jobQuestionIds = fieldDef?.linkedJobQuestionIds || [];
 
     if (jobQuestionIds.length > 0) {
       const taskRecord = sourceData['tm_tasks']?.[String(taskId)];
@@ -970,20 +971,20 @@ export const AutomationMappingDialog = ({
               // Clean object properties, excluding system fields
               const cleanedItem: Record<string, any> = {};
               let hasMeaningfulData = false;
-              
+
               for (const [itemKey, itemValue] of Object.entries(item)) {
                 // Skip system fields that don't represent meaningful data
                 if (['entityId', 'index', 'id'].includes(itemKey)) {
                   cleanedItem[itemKey] = itemValue;
                   continue;
                 }
-                
+
                 if (itemValue !== null && itemValue !== undefined && itemValue !== '' && itemValue !== 'Missing') {
                   cleanedItem[itemKey] = itemValue;
                   hasMeaningfulData = true;
                 }
               }
-              
+
               // Only keep the item if it has meaningful data beyond system fields
               return hasMeaningfulData ? cleanedItem : null;
             }
@@ -999,20 +1000,20 @@ export const AutomationMappingDialog = ({
         // Process objects
         const cleanedObj: Record<string, any> = {};
         let hasMeaningfulData = false;
-        
+
         for (const [objKey, objValue] of Object.entries(value)) {
           // Skip system fields that don't represent meaningful data
           if (['entityId', 'index', 'id'].includes(objKey)) {
             cleanedObj[objKey] = objValue;
             continue;
           }
-          
+
           if (objValue !== null && objValue !== undefined && objValue !== '' && objValue !== 'Missing') {
             cleanedObj[objKey] = objValue;
             hasMeaningfulData = true;
           }
         }
-        
+
         // Only include object if it has meaningful data beyond system fields
         if (hasMeaningfulData) {
           cleaned[key] = cleanedObj;
@@ -1365,7 +1366,7 @@ export const AutomationMappingDialog = ({
 
                             // Determine editing persistence for array items
                             const firstMasterId = colItem.linkedMasterFields?.[0];
-                            const firstQId = colItem.linkedJobQuestionIds?.[0] || colItem.linkedJobQuestionId;
+                            const firstQId = colItem.linkedJobQuestionIds?.[0];
                             let arrayPersist = null;
                             let arrayEditId = row.entityId;
 
@@ -1436,7 +1437,7 @@ export const AutomationMappingDialog = ({
                                   ) : (
                                     (() => {
                                       const mIds = colItem.linkedMasterFields || [];
-                                      const qIds = colItem.linkedJobQuestionIds || (colItem.linkedJobQuestionId ? [colItem.linkedJobQuestionId] : []);
+                                      const qIds = colItem.linkedJobQuestionIds || [];
                                       const totalSources = mIds.length + qIds.length;
 
                                       if (totalSources > 1) {
@@ -1574,7 +1575,7 @@ export const AutomationMappingDialog = ({
                   // =========================================================
                   const isValueMissing = field.isMissing;
                   const mIds = field.linkedMasterFields || [];
-                  const qIds = field.linkedJobQuestionIds || (field.linkedJobQuestionId ? [field.linkedJobQuestionId] : []);
+                  const qIds = field.linkedJobQuestionIds || [];
 
                   // Logic for editing: We map the "Edit" action to the highest priority source
                   let persistenceSource = null;

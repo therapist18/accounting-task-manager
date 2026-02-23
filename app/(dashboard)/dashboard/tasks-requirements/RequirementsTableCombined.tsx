@@ -1674,6 +1674,53 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                     {docs.length > 1 && (
                                       <span className="text-[9px] text-green-600 font-bold">{docs.length}</span>
                                     )}
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 w-6 p-0 text-blue-600 hover:bg-blue-50"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+
+                                        // Get a better person name
+                                        let personName = col.label;
+                                        if (!personName || personName === 'Unknown Person') {
+                                          personName = individualNames[col.task?.individual_id] ||
+                                            individualNames[col.task?.applicant_details?.id] ||
+                                            col.task?.applicant_details?.name ||
+                                            'Individual';
+                                        }
+
+                                        // Get document name with comprehensive fallbacks
+                                        let documentName = docMetadata?.display_name ||
+                                          docMetadata?.name ||
+                                          docMetadata?.document_name ||
+                                          docMetadata?.main_category ||
+                                          docMetadata?.sub_category ||
+                                          docMetadata?.id ||
+                                          'Document';
+
+                                        // Trigger upload for this specific document type
+                                        setSelectedDocForUpload({
+                                          doc: {
+                                            ...docMetadata,
+                                            display_name: documentName // Ensure we have a display_name
+                                          },
+                                          fields: docMetadata.fields,
+                                          person: {
+                                            full_name: personName,
+                                            id: col.id,  // This is the director ID!
+                                            type: 'individual'
+                                          },
+                                          task: col.task,
+                                          columnType: col.type,
+                                          columnId: col.id
+                                        });
+                                        setShowUploadModal(true);
+                                      }}
+                                      title={`Upload additional ${docMetadata.display_name || docMetadata.name}`}
+                                    >
+                                      <UploadCloud className="h-3 w-3" />
+                                    </Button>
                                   </div>
 
                                   {/* Document Status Badge */}
@@ -2047,6 +2094,56 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                               {docs.length > 1 && (
                                 <span className="text-[9px] text-green-600 font-bold">{docs.length}</span>
                               )}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0 text-blue-600 hover:bg-blue-50"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+
+                                  console.log('DEBUG: Composite Sub-Doc Upload Clicked', {
+                                    parentRequirement: reqItem.name,
+                                    targetDocMetadata: docMetadata,
+                                    docId: docId
+                                  });
+
+                                  let personName = col.label;
+                                  if (!personName || personName === 'Unknown Person') {
+                                    personName = individualNames[col.task?.individual_id] ||
+                                      individualNames[col.task?.applicant_details?.id] ||
+                                      col.task?.applicant_details?.name ||
+                                      'Individual';
+                                  }
+
+                                  let documentName = docMetadata?.display_name ||
+                                    docMetadata?.name ||
+                                    docMetadata?.document_name ||
+                                    docMetadata?.main_category ||
+                                    docMetadata?.sub_category ||
+                                    docMetadata?.id ||
+                                    'Document';
+
+                                  setSelectedDocForUpload({
+                                    doc: {
+                                      ...docMetadata,
+                                      display_name: documentName
+                                    },
+                                    fields: docMetadata?.fields || [],
+                                    person: {
+                                      full_name: personName,
+                                      id: col.id,
+                                      type: isCompanyType(col.type) ? 'company' : 'individual'
+                                    },
+                                    task: col.task,
+                                    columnType: col.type,
+                                    columnId: col.id
+                                  });
+                                  setShowUploadModal(true);
+                                }}
+                                title={`Upload additional ${docMetadata?.display_name || docMetadata?.name || 'Document'}`}
+                              >
+                                <UploadCloud className="h-3 w-3" />
+                              </Button>
                             </div>
                             {(() => {
                               const personId = isCompanyType(col.type) ? col.task.company_id :
@@ -2066,41 +2163,41 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                             })()}
                           </div>
                         ) : (
-                         <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 w-6 p-0 text-amber-600 hover:bg-amber-50"
-          onClick={(e) => {
-            e.stopPropagation();
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 text-amber-600 hover:bg-amber-50"
+                            onClick={(e) => {
+                              e.stopPropagation();
 
-            console.log('DEBUG: Composite Sub-Doc Upload Clicked', {
-              parentRequirement: reqItem.name,
-              targetDocMetadata: docMetadata,
-              docId: docId
-            });
+                              console.log('DEBUG: Composite Sub-Doc Upload Clicked', {
+                                parentRequirement: reqItem.name,
+                                targetDocMetadata: docMetadata,
+                                docId: docId
+                              });
 
-            let personName = col.label;
-            // ... (name resolution logic)
+                              let personName = col.label;
+                              // ... (name resolution logic)
 
-            setSelectedDocForUpload({
-              // CRITICAL: We pass docMetadata which contains the specific fields/config for THIS doc type
-              doc: docMetadata, 
-              fields: docMetadata?.fields || [],
-              person: {
-                full_name: personName,
-                id: col.id,
-                type: isCompanyType(col.type) ? 'company' : 'individual'
-              },
-              task: col.task,
-              columnType: col.type,
-              columnId: col.id
-            });
-            setShowUploadModal(true);
-          }}
-          title={`Upload ${docMetadata?.display_name || 'Document'}`}
-        >
-          <UploadCloud className="h-3 w-3" />
-        </Button>
+                              setSelectedDocForUpload({
+                                // CRITICAL: We pass docMetadata which contains the specific fields/config for THIS doc type
+                                doc: docMetadata,
+                                fields: docMetadata?.fields || [],
+                                person: {
+                                  full_name: personName,
+                                  id: col.id,
+                                  type: isCompanyType(col.type) ? 'company' : 'individual'
+                                },
+                                task: col.task,
+                                columnType: col.type,
+                                columnId: col.id
+                              });
+                              setShowUploadModal(true);
+                            }}
+                            title={`Upload ${docMetadata?.display_name || 'Document'}`}
+                          >
+                            <UploadCloud className="h-3 w-3" />
+                          </Button>
                         )}
                       </div>
                     </TableCell>
@@ -2165,7 +2262,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         idFieldName={selectedDocForUpload?.person?.type === 'company' ? 'company_id' : 'director_id'}
         documentIdFieldName='document_id'
         isCompanyUpload={selectedDocForUpload?.person?.type === 'company'}
-        
+
         onBeforeUpload={async (recordData) => {
 
           // Custom handling before upload if needed

@@ -114,7 +114,7 @@ export function RequirementsTable({
 
   const [isLetterDialogOpen, setIsLetterDialogOpen] = useState(false);
   const [selectedLetterData, setSelectedLetterData] = useState(null);
-  const [isAutomationDialogOpen, setIsAutomationDialogOpen] = useState(false);
+  const [isAutomationDialogOpen, setIsAutomationDialogOpen] = useState(false);    
   const [selectedAutomationData, setSelectedAutomationData] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -168,7 +168,7 @@ export function RequirementsTable({
     });
     return Array.from(ids);
   }, [taskClassRequirements]);
-  
+
   // OPTIMIZED: Batch fetch individual documents
   const fetchAllIndividualData = useCallback(async (tasksToFetch: any[], requiredKycIds: string[]) => {
     const startTime = performance.now();
@@ -308,24 +308,24 @@ export function RequirementsTable({
     console.log('[RequirementsTable] Manual refresh triggered');
     setIsRefreshing(true);
     const toastId = toast.loading("Refreshing data...");
-    
+
     try {
       if (filteredTasks.length > 0) {
         const requiredKycIds = getRequiredKycIds();
         console.log('[RequirementsTable] Manual refresh for', filteredTasks.length, 'tasks');
-        
+
         // Re-fetch everything
         await Promise.all([
           fetchAllIndividualData(filteredTasks, requiredKycIds),
           fetchAllCompanyDocuments(filteredTasks, requiredKycIds),
           fetchCompanyData(filteredTasks)
         ]);
-        
+
         // Force re-render
         setDocuments(prev => [...prev]);
         setAllIndividualDocuments(prev => ({ ...prev }));
         setAllCompanyDocuments(prev => ({ ...prev }));
-        
+
         console.log('[RequirementsTable] Manual refresh completed successfully');
         toast.success("Data refreshed successfully", { id: toastId });
       } else {
@@ -338,7 +338,7 @@ export function RequirementsTable({
       setIsRefreshing(false);
     }
   }, [filteredTasks, getRequiredKycIds, fetchAllIndividualData, fetchAllCompanyDocuments, fetchCompanyData]);
-  
+
   useEffect(() => {
     let isMounted = true;
     const loadData = async () => {
@@ -585,27 +585,27 @@ export function RequirementsTable({
     if (!groupToDelete) return;
     const taskIds = groupToDelete.tasks.map(t => t.id);
     if (taskIds.length === 0) return;
-    
+
     const toastId = toast.loading(`Deleting ${taskIds.length} task(s)...`);
     try {
       const { error } = await supabase.from('tm_tasks').delete().in('id', taskIds);
       if (error) throw error;
-      
+
       // Show success toast with details
       toast.success(
-        `Successfully deleted ${taskIds.length} task(s) for ${groupToDelete.applicantName}`, 
+        `Successfully deleted ${taskIds.length} task(s) for ${groupToDelete.applicantName}`,
         { id: toastId, description: "All selected tasks have been removed." }
       );
-      
+
       // Update states - clear selected applicant if it was the deleted one
       if (selectedApplicant === groupToDelete.applicantName) {
         setSelectedApplicant(null);
       }
-      
+
       // Close dialog and reset state
       setDeleteConfirmOpen(false);
       setGroupToDelete(null);
-      
+
       // Trigger data refresh if callback is available
       if (onTaskAction) {
         onTaskAction('delete', groupToDelete.tasks[0]);
@@ -613,7 +613,7 @@ export function RequirementsTable({
     } catch (error) {
       console.error('Delete error:', error);
       toast.error(
-        `Failed to delete tasks: ${error.message || 'Unknown error occurred'}`, 
+        `Failed to delete tasks: ${error.message || 'Unknown error occurred'}`,
         { id: toastId }
       );
     }
@@ -623,13 +623,13 @@ export function RequirementsTable({
 
   const handleUploadAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number) => {
     let personName = individualNames[applicantId || task.individual_id] || 'Unknown Person';
-  if (applicantId && task.participants_details) {
-    const participant = task.participants_details.find(p => p.id === applicantId);
-    if (participant && participant.name) personName = participant.name;
-  }
-  if (!personName || personName === 'Unknown Person') {
-    personName = individualNames[task.applicant_details?.id] || task.applicant_details?.name || 'Individual';
-  }
+    if (applicantId && task.participants_details) {
+      const participant = task.participants_details.find(p => p.id === applicantId);
+      if (participant && participant.name) personName = participant.name;
+    }
+    if (!personName || personName === 'Unknown Person') {
+      personName = individualNames[task.applicant_details?.id] || task.applicant_details?.name || 'Individual';
+    }
     if (applicantId && task.participants_details) {
       const participant = task.participants_details.find(p => p.id === applicantId);
       if (participant && participant.name) personName = participant.name;
@@ -710,47 +710,47 @@ export function RequirementsTable({
     }
   }, [documents, allIndividualDocuments, allCompanyDocuments]);
 
-const handleUploadComplete = useCallback(async () => {
-  console.log('[RequirementsTable] handleUploadComplete called');
-  setShowUploadModal(false);
-  const toastId = toast.loading("Refreshing document status...");
-  
-  try {
-    // Use parent refresh like deletion does - this reloads the entire tasks structure
-    if (onTaskAction) {
-      console.log('[RequirementsTable] Triggering parent refresh via onTaskAction');
-      onTaskAction('refresh');
-      toast.success("Requirements updated", { id: toastId });
-    } else {
-      console.log('[RequirementsTable] No onTaskAction callback, falling back to local refresh');
-      // Fallback to local refresh if parent callback not available
-      if (filteredTasks.length > 0) {
-        const requiredKycIds = getRequiredKycIds();
-        console.log('[RequirementsTable] Starting local data refresh for', filteredTasks.length, 'tasks');
-        
-        await Promise.all([
-          fetchAllIndividualData(filteredTasks, requiredKycIds),
-          fetchAllCompanyDocuments(filteredTasks, requiredKycIds),
-          fetchCompanyData(filteredTasks)
-        ]);
-        
-        // Force re-render
-        setDocuments(prev => [...prev]);
-        setAllIndividualDocuments(prev => ({ ...prev }));
-        setAllCompanyDocuments(prev => ({ ...prev }));
-        
-        console.log('[RequirementsTable] Local data refresh completed successfully');
+  const handleUploadComplete = useCallback(async () => {
+    console.log('[RequirementsTable] handleUploadComplete called');
+    setShowUploadModal(false);
+    const toastId = toast.loading("Refreshing document status...");
+
+    try {
+      // Use parent refresh like deletion does - this reloads the entire tasks structure
+      if (onTaskAction) {
+        console.log('[RequirementsTable] Triggering parent refresh via onTaskAction');
+        onTaskAction('refresh');
         toast.success("Requirements updated", { id: toastId });
       } else {
-        console.log('[RequirementsTable] No filtered tasks to refresh');
-        toast.info("No data to refresh", { id: toastId });
+        console.log('[RequirementsTable] No onTaskAction callback, falling back to local refresh');
+        // Fallback to local refresh if parent callback not available
+        if (filteredTasks.length > 0) {
+          const requiredKycIds = getRequiredKycIds();
+          console.log('[RequirementsTable] Starting local data refresh for', filteredTasks.length, 'tasks');
+
+          await Promise.all([
+            fetchAllIndividualData(filteredTasks, requiredKycIds),
+            fetchAllCompanyDocuments(filteredTasks, requiredKycIds),
+            fetchCompanyData(filteredTasks)
+          ]);
+
+          // Force re-render
+          setDocuments(prev => [...prev]);
+          setAllIndividualDocuments(prev => ({ ...prev }));
+          setAllCompanyDocuments(prev => ({ ...prev }));
+
+          console.log('[RequirementsTable] Local data refresh completed successfully');
+          toast.success("Requirements updated", { id: toastId });
+        } else {
+          console.log('[RequirementsTable] No filtered tasks to refresh');
+          toast.info("No data to refresh", { id: toastId });
+        }
       }
+    } catch (error) {
+      console.error('Error during upload completion refresh:', error);
+      toast.error("Failed to refresh data", { id: toastId });
     }
-  } catch (error) {
-    console.error('Error during upload completion refresh:', error);
-    toast.error("Failed to refresh data", { id: toastId });
-  }
-}, [filteredTasks, getRequiredKycIds, fetchAllIndividualData, fetchAllCompanyDocuments, fetchCompanyData, onTaskAction]);
+  }, [filteredTasks, getRequiredKycIds, fetchAllIndividualData, fetchAllCompanyDocuments, fetchCompanyData, onTaskAction]);
 
   const handleDocumentUploadSuccess = (uploadedDocument: any) => {
     toast.success('Document uploaded successfully!');
@@ -849,25 +849,25 @@ const handleUploadComplete = useCallback(async () => {
     });
   }, []);
 
-const renderDocumentStatus = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number, relationshipData?: any) => {
-  const status = getDocumentStatusForColumn(task, item, columnType, applicantId);
-  const isLetter = item.main_category === 'Letters';
+  const renderDocumentStatus = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number, relationshipData?: any) => {
+    const status = getDocumentStatusForColumn(task, item, columnType, applicantId);
+    const isLetter = item.main_category === 'Letters';
 
-  // Find the actual KYC Document Type definition for this requirement
-  // This ensures we pass fields and metadata, not just the requirement name
-  const docId = item.document_id || (item.document_ids && item.document_ids[0]);
-  const docDefinition = documents.find(d => d.id === docId);
+    // Find the actual KYC Document Type definition for this requirement
+    // This ensures we pass fields and metadata, not just the requirement name
+    const docId = item.document_id || (item.document_ids && item.document_ids[0]);
+    const docDefinition = documents.find(d => d.id === docId);
 
-  const handleUploadClick = () => {
-    console.log('DEBUG: Requirement Upload Clicked', {
-      requirementName: item.name || item.display_name,
-      resolvedDocDefinition: docDefinition,
-      docId: docId
-    });
+    const handleUploadClick = () => {
+      console.log('DEBUG: Requirement Upload Clicked', {
+        requirementName: item.name || item.display_name,
+        resolvedDocDefinition: docDefinition,
+        docId: docId
+      });
 
-    // Pass the actual document definition (docDefinition) instead of the requirement (item)
-    handleUploadAction(task, docDefinition || item, columnType, applicantId);
-  };
+      // Pass the actual document definition (docDefinition) instead of the requirement (item)
+      handleUploadAction(task, docDefinition || item, columnType, applicantId);
+    };
     const handleViewClick = async () => {
       if (status.documents.length === 0) return;
 
@@ -973,17 +973,17 @@ const renderDocumentStatus = useCallback((task: any, item: any, columnType: Appl
           </Button>
         )}
 
-        {!item.web_automation?.automationId && !isLetter && (
-        <Button 
-          variant="ghost" 
-          size="sm" 
-          className="h-8 w-8 p-0 text-amber-600 hover:bg-amber-50" 
-          onClick={handleUploadClick} 
-          title={`Upload ${docDefinition?.display_name || item.display_name}`}
-        >
-          <UploadCloud className="h-4 w-4" />
-        </Button>
-      )}
+        {!item.web_automation?.automationId && !isLetter && status.type === 'upload' && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0 text-amber-600 hover:bg-amber-50"
+            onClick={handleUploadClick}
+            title={`Upload ${docDefinition?.display_name || item.display_name}`}
+          >
+            <UploadCloud className="h-4 w-4" />
+          </Button>
+        )}
 
         {status.type === 'view' && (
           <div className="flex items-center gap-1">
@@ -1144,8 +1144,8 @@ const renderDocumentStatus = useCallback((task: any, item: any, columnType: Appl
               <Input placeholder="Search requirements..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
             </div>
             <div className="flex justify-end gap-2">
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={handleManualRefresh}
                 disabled={isRefreshing}
                 className="flex items-center gap-2"
@@ -1249,9 +1249,9 @@ const renderDocumentStatus = useCallback((task: any, item: any, columnType: Appl
       <UploadModal
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
-       onUpload={handleUploadComplete} // This is called on start of process
-  onSuccess={handleUploadComplete} 
-            documentName={selectedDocForUpload?.doc?.display_name || selectedDocForUpload?.doc?.name || selectedDocForUpload?.doc?.document_name || 'Document'}
+        onUpload={handleUploadComplete} // This is called on start of process
+        onSuccess={handleUploadComplete}
+        documentName={selectedDocForUpload?.doc?.display_name || selectedDocForUpload?.doc?.name || selectedDocForUpload?.doc?.document_name || 'Document'}
         documentFields={selectedDocForUpload?.fields}
         entityName={selectedDocForUpload?.person?.full_name}
         selectedDoc={selectedDocForUpload?.doc}
@@ -1267,7 +1267,7 @@ const renderDocumentStatus = useCallback((task: any, item: any, columnType: Appl
         idFieldName={selectedDocForUpload?.person?.type === 'company' ? 'company_id' : 'director_id'}
         documentIdFieldName='document_id'
         isCompanyUpload={selectedDocForUpload?.person?.type === 'company'}
-               onBeforeUpload={async (recordData) => {
+        onBeforeUpload={async (recordData) => {
           return null;
         }}
       />
@@ -1310,7 +1310,7 @@ const renderDocumentStatus = useCallback((task: any, item: any, columnType: Appl
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100">
                 <AlertCircle className="h-5 w-5 text-red-600" />
-              </div> 
+              </div>
               <div>
                 <DialogTitle className="text-lg font-semibold">Delete Tasks</DialogTitle>
                 <DialogDescription className="text-sm text-muted-foreground">

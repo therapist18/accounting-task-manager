@@ -1,390 +1,206 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { toast } from 'sonner';
 import supabase from '@/lib/supabase/client';
+import { saveAs } from 'file-saver';
+import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, UnderlineType } from 'docx';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
+
+// Shadcn Components
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent } from "@/components/ui/card";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandList, CommandItem } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
+
+// Icons
 import {
-    Building2,
-    User,
-    FileText,
-    Search,
-    ChevronDown,
-    Check,
-    Calendar,
-    Printer,
-    Copy,
-    Mail,
-    Phone,
-    MapPin
+    FileText, ChevronDown, Check,
+    Calendar, Printer, Download,
+    Briefcase, User, Type, Search
 } from "lucide-react";
 
 const SIGNATURE_DOC_TYPE_ID = "67d9f93a-6b2b-4e19-86a3-ea7925c3d6ab";
 const VALEDICTIONS = ['Yours faithfully,', 'Yours sincerely,', 'Kind regards,', 'Respectfully yours,'];
 const todayStr = () => new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 
-const css = `
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IM+Fell+English&display=swap');
-  .lgm *, .lgm *::before, .lgm *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  .lgm {
-    font-family: 'Inter', sans-serif;
-    background: #f4f4f5;
-    min-height: 100vh;
-    display: grid;
-    grid-template-columns: 272px 1fr;
-  }
+// Helper function to construct Supabase storage URL
+const getSupabaseImageUrl = (filePath: string | null): string | null => {
+    if (!filePath) return null;
 
-  /* SIDEBAR */
-  .s {
-    background: #fff;
-    border-right: 1px solid #e4e4e7;
-    padding: 20px 16px;
-    display: flex; flex-direction: column; gap: 16px;
-    overflow-y: auto;
-  }
-  .s-title { font-size: 14px; font-weight: 600; color: #18181b; padding-bottom: 14px; border-bottom: 1px solid #e4e4e7; }
-  .s-label { font-size: 10px; font-weight: 600; color: #a1a1aa; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 5px; }
-  .s-select, .s-input {
-    font-family: 'Inter', sans-serif; font-size: 13px;
-    border: 1px solid #e4e4e7; border-radius: 6px;
-    padding: 7px 9px; color: #18181b; background: #fff; width: 100%; outline: none;
-  }
-  .s-select:focus, .s-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,0.12); }
-  .s-tabs { display: flex; border: 1px solid #e4e4e7; border-radius: 6px; overflow: hidden; }
-  .s-tab { flex: 1; padding: 7px 4px; border: none; background: transparent; font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 500; color: #71717a; cursor: pointer; }
-  .s-tab.on { background: #18181b; color: #fff; }
-  .s-pills { display: flex; gap: 6px; }
-  .s-pill { flex: 1; padding: 8px 4px; border: 1px solid #e4e4e7; border-radius: 6px; background: #fff; font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 500; color: #71717a; cursor: pointer; text-align: center; }
-  .s-pill.on { border-color: #3b82f6; background: #eff6ff; color: #1d4ed8; }
-  .s-hr { height: 1px; background: #e4e4e7; }
-  .sig-card { border: 1px solid #e4e4e7; border-radius: 6px; padding: 10px 12px; background: #fafafa; }
-  .sig-name { font-size: 13px; font-weight: 600; color: #18181b; }
-  .sig-pos { font-size: 11px; color: #71717a; margin-top: 1px; }
-  .sig-thumb { margin-top: 8px; height: 34px; border: 1px dashed #d4d4d8; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #a1a1aa; }
-  .s-btn { width: 100%; padding: 9px; border-radius: 6px; border: none; font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; }
-  .s-btn-dark { background: #18181b; color: #fff; }
-  .s-btn-dark:hover { background: #27272a; }
-  .s-btn-out { background: #fff; color: #18181b; border: 1px solid #e4e4e7; margin-top: 6px; }
-  .s-btn-out:hover { border-color: #71717a; }
+    // If it's already a full URL, return as is
+    if (filePath.startsWith('http')) return filePath;
 
-  /* PREVIEW */
-  .pv { padding: 28px; display: flex; flex-direction: column; align-items: center; gap: 12px; overflow-y: auto; }
-  .pv-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 60vh; color: #a1a1aa; gap: 10px; }
-  .pv-empty-icon { font-size: 36px; opacity: 0.35; }
-  .pv-empty-text { font-size: 13px; }
-
-  /* PAPER */
-  .paper {
-    background: #fff; width: 100%; max-width: 720px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.07), 0 8px 24px rgba(0,0,0,0.05);
-    border-radius: 3px; border: 1px solid #e4e4e7; overflow: hidden;
-  }
-
-  /* KRA header */
-  .kra-h { background: #1e3a5f; padding: 22px 32px 16px; border-bottom: 3px solid #c4972a; }
-  .kra-name { font-family: 'IM Fell English', serif; font-size: 20px; color: #fff; margin-bottom: 5px; }
-  .kra-meta { font-size: 11px; color: rgba(255,255,255,0.65); display: flex; gap: 14px; flex-wrap: wrap; }
-
-  /* General header */
-  .gen-h { padding: 26px 32px 18px; border-bottom: 2px solid #18181b; display: flex; justify-content: space-between; align-items: flex-start; }
-  .gen-name { font-family: 'IM Fell English', serif; font-size: 20px; color: #18181b; }
-  .gen-meta { font-size: 11px; color: #71717a; line-height: 1.85; text-align: right; }
-
-  /* Ind header */
-  .ind-h { padding: 22px 32px 16px; border-bottom: 2px solid #18181b; }
-  .ind-name { font-family: 'IM Fell English', serif; font-size: 20px; color: #18181b; }
-  .ind-sub { font-size: 11px; color: #71717a; margin-top: 3px; display: flex; gap: 14px; }
-
-  /* Body */
-  .lb { padding: 24px 32px; }
-  .l-date { font-size: 12px; color: #71717a; margin-bottom: 18px; }
-  .l-ref { font-size: 13px; margin-bottom: 4px; }
-  .l-ref b { font-weight: 600; }
-  .l-to-label { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
-  .l-subj { font-size: 13px; font-weight: 700; text-decoration: underline; text-transform: uppercase; color: #18181b; margin-bottom: 22px; letter-spacing: 0.2px; }
-  .l-content {
-    font-size: 13px; line-height: 1.9; color: #18181b; min-height: 150px;
-    outline: none; border-bottom: 1px dashed #d4d4d8; padding-bottom: 10px;
-  }
-  .l-content:empty::before { content: 'Type body here...'; color: #d4d4d8; }
-
-  /* editable inline */
-  .ed { border-bottom: 1px dashed #c4972a; display: inline-block; min-width: 28px; outline: none; padding: 0 2px; }
-  .ed:empty::before { content: attr(data-p); color: #d4d4d8; font-style: italic; }
-  .ed:focus { background: rgba(196,151,42,0.06); }
-  .ed-block { display: block; min-height: 44px; white-space: pre-wrap; }
-
-  /* Signoff */
-  .so { padding: 6px 32px 32px; }
-  .val-sel {
-    font-family: 'Inter', sans-serif; font-size: 13px;
-    border: none; border-bottom: 1px dashed #c4972a;
-    background: transparent; color: #18181b; cursor: pointer;
-    padding: 1px 3px; outline: none; margin-bottom: 36px; display: block;
-  }
-  .sig-line { border-bottom: 1px solid #18181b; width: 190px; height: 40px; position: relative; margin-bottom: 5px; display: flex; align-items: flex-end; }
-  .sig-dots { font-size: 14px; color: #b4b4b4; letter-spacing: 2px; padding-bottom: 4px; }
-  .sig-person-name { font-size: 13px; font-weight: 600; color: #18181b; }
-  .sig-person-pos { font-size: 12px; color: #71717a; }
-
-  /* Footer */
-  .pfoot { background: #fafafa; border-top: 1px solid #e4e4e7; padding: 9px 32px; font-size: 10px; color: #a1a1aa; text-align: center; letter-spacing: 0.3px; }
-
-  @media print {
-    .s, .no-print { display: none !important; }
-    .lgm { grid-template-columns: 1fr; }
-    .pv { padding: 0; }
-    .paper { box-shadow: none; border: none; max-width: 100%; }
-  }
-`;
+    // Otherwise, construct the Supabase storage URL
+    const bucketName = 'kyc-documents';
+    const fullPath = filePath.startsWith(bucketName) ? filePath : `${bucketName}/${filePath}`;
+    return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${fullPath}`;
+};
 
 export default function LetterGenerationModule() {
+    const paperRef = useRef(null);
     const [tab, setTab] = useState('companies');
-    const [type, setType] = useState('kra');
+    const [letterType, setLetterType] = useState('kra');
+
+    // Selection IDs
     const [companyId, setCompanyId] = useState('');
-    const [directorId, setDirectorId] = useState('');
     const [individualId, setIndividualId] = useState('');
+    const [signatoryId, setSignatoryId] = useState('');
+
+    // UI States
     const [valediction, setValediction] = useState('Yours faithfully,');
     const [letterDate, setLetterDate] = useState(todayStr());
-    const [directors, setDirectors] = useState([]);
+    const [openCompany, setOpenCompany] = useState(false);
+    const [openIndividual, setOpenIndividual] = useState(false);
+    const [openSignatory, setOpenSignatory] = useState(false);
 
-    // Popover states for searchable selects
-    const [companyPopoverOpen, setCompanyPopoverOpen] = useState(false);
-    const [signatoryPopoverOpen, setSignatoryPopoverOpen] = useState(false);
-    const [individualPopoverOpen, setIndividualPopoverOpen] = useState(false);
-
-    // Data fetching states
+    // Data states
     const [companies, setCompanies] = useState([]);
     const [individuals, setIndividuals] = useState([]);
-    const [directorDocuments, setDirectorDocuments] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [signatures, setSignatures] = useState([]);
 
-    // Fetch data from Supabase
+    // --- Data Fetching ---
     useEffect(() => {
         const fetchData = async () => {
-            setLoading(true);
             try {
-                // Fetch companies
-                const { data: companiesData, error: companiesError } = await supabase
-                    .from('acc_portal_company_duplicate')
-                    .select('*')
-                    .order('company_name');
+                const { data: cos } = await supabase.from('acc_portal_company_duplicate').select('*').order('company_name');
+                const { data: inds } = await supabase.from('registry_individuals').select('*').order('full_name');
+                const { data: sigs } = await supabase.from('acc_portal_directors_documents').select('*').eq('document_id', SIGNATURE_DOC_TYPE_ID);
 
-                if (companiesError) throw companiesError;
-
-                // Fetch individuals
-                const { data: individualsData, error: individualsError } = await supabase
-                    .from('registry_individuals')
-                    .select('id, full_name, employment_data')
-                    .order('full_name');
-
-                if (individualsError) throw individualsError;
-
-                // Fetch director documents (signatures)
-                const { data: documentsData, error: documentsError } = await supabase
-                    .from('acc_portal_directors_documents')
-                    .select('*')
-                    .eq('document_type_id', SIGNATURE_DOC_TYPE_ID);
-
-                if (documentsError) throw documentsError;
-
-                setCompanies(companiesData || []);
-                setIndividuals(individualsData || []);
-                setDirectorDocuments(documentsData || []);
-            } catch (error) {
-                console.error('Error fetching data:', error);
-                toast.error('Failed to load data');
-            } finally {
-                setLoading(false);
+                setCompanies(cos || []);
+                setIndividuals(inds || []);
+                setSignatures(sigs || []);
+            } catch (e) {
+                toast.error("Failed to fetch data");
             }
         };
-
         fetchData();
     }, []);
 
-    // Filter individuals linked to selected company (only directors and shareholders)
+    // --- Signatory Logic (Filtering Directors, Shareholders only) ---
     const availableSignatories = useMemo(() => {
-        if (!companyId) return [];
+        if (!companyId || tab !== 'companies') return [];
+
+        const validRoles = ["Director", "Shareholder"];
+
         return individuals.filter(ind => {
             const associations = ind.employment_data?.associations || [];
             return associations.some(a =>
-                a.company_id &&
-                a.company_id.toString() === companyId.toString() &&
-                (a.individual_type === "Director" || a.individual_type === "Shareholder")
+                a.company_id?.toString() === companyId.toString() &&
+                validRoles.includes(a.individual_type)
             );
+        }).map(ind => {
+            const assoc = ind.employment_data.associations.find(a => a.company_id?.toString() === companyId.toString() && ["Director", "Shareholder"].includes(a.individual_type));
+            const sigDoc = signatures.find(s => s.director_id === ind.id);
+
+            return {
+                id: ind.id,
+                name: ind.full_name,
+                position: assoc?.individual_type || 'Director',
+                signatureUrl: sigDoc ? getSupabaseImageUrl(sigDoc.file_path) : null
+            };
         });
-    }, [individuals, companyId]);
+    }, [companyId, individuals, signatures, tab]);
 
-    // Update directors when company changes
     useEffect(() => {
-        if (companyId) {
-            const signatories = availableSignatories.map(ind => {
-                const assoc = ind.employment_data?.associations?.find(
-                    a => a.company_id &&
-                        a.company_id.toString() === companyId.toString() &&
-                        (a.individual_type === "Director" || a.individual_type === "Shareholder")
-                );
+        if (availableSignatories.length > 0) setSignatoryId(availableSignatories[0].id);
+        else setSignatoryId('');
+    }, [availableSignatories]);
 
-                // Find signature for this individual
-                const signatureDoc = directorDocuments.find(doc =>
-                    doc.individual_id === ind.id &&
-                    doc.document_type_id === SIGNATURE_DOC_TYPE_ID
-                );
+    // --- Derived Data Helper ---
+    const selectedCompany = companies.find(c => c.id.toString() === companyId);
+    const selectedIndividual = individuals.find(i => i.id === individualId);
+    const activeSignatory = availableSignatories.find(s => s.id === signatoryId);
 
-                return {
-                    individual_id: ind.id,
-                    name: ind.full_name,
-                    position: assoc?.individual_type || "Director",
-                    signature_url: signatureDoc?.document_url || null
-                };
-            });
-            setDirectors(signatories);
-            setDirectorId(signatories[0]?.individual_id || '');
-        } else {
-            setDirectors([]);
-            setDirectorId('');
-        }
-    }, [companyId, availableSignatories, directorDocuments]);
+    const isReady = tab === 'companies' ? !!selectedCompany : !!selectedIndividual;
 
-    const company = companies.find(c => c.id.toString() === companyId) || null;
-    const director = directors.find(d => d.individual_id === directorId) || null;
-    const individual = individuals.find(i => i.id === individualId) || null;
+    // Company Detail Helpers
+    const getContactInfo = () => {
+        if (!selectedCompany) return {};
+        const contact = selectedCompany.contact_details?.[0] || {};
+        const postal = selectedCompany.postal_address_details?.[0] || {};
 
-    const ready = tab === 'companies' ? !!company : !!individual;
-    const signName = tab === 'companies' ? director?.name : individual?.full_name;
-    const signPos = tab === 'companies' ? (director?.position || '') : 'Individual';
-
-    const renderHeader = () => {
-        if (tab === 'companies' && company) {
-            if (type === 'kra') return (
-                <div className="kra-h">
-                    <div className="kra-name">{company.company_name}</div>
-                    <div className="kra-meta">
-                        <span>EMAIL: {company.kra_email_address || '---'} M NO: {company.contact_details?.[0]?.office_phone_number || '---'}</span>
-                        <span>P.O. BOX - {company.postal_address_details?.[0]?.full_postal_address || '---'}</span>
-                    </div>
-                </div>
-            );
-            return (
-                <div className="gen-h">
-                    <div className="gen-name">{company.company_name}</div>
-                    <div className="gen-meta">
-                        <div>EMAIL: {company.contact_details?.[0]?.current_communication_email || company.kra_email_address || '---'} M NO: {company.contact_details?.[0]?.office_phone_number || '---'}</div>
-                        <div>P.O. BOX - {company.postal_address_details?.[0]?.full_postal_address || '---'}, {company.postal_address_details?.[0]?.postal_town || 'NAIROBI'}, {company.postal_address_details?.[0]?.postal_country || 'KENYA'}</div>
-                        <div>Physical Address: {company.physical_address_details?.[0]?.full_physical_address || '---'}, {company.physical_address_details?.[0]?.physical_town || 'NAIROBI'}, {company.physical_address_details?.[0]?.physical_country || 'KENYA'}</div>
-                    </div>
-                </div>
-            );
-        }
-        if (tab === 'individuals' && individual) return (
-            <div className="ind-h">
-                <div className="ind-name">{individual.full_name}</div>
-                <div className="ind-sub">
-                    {individual.id_number && <span>ID: {individual.id_number}</span>}
-                    {individual.kra_pin && <span>KRA PIN: {individual.kra_pin}</span>}
-                </div>
-            </div>
-        );
-        return null;
+        return {
+            phone: contact.office_phone_number || '---',
+            email: letterType === 'kra'
+                ? (selectedCompany.kra_email_address || '---')
+                : (contact.current_communication_email || '---'),
+            address: postal.full_postal_address || '---',
+            town: postal.postal_town || '---',
+            pin: selectedCompany.kra_pin || '---'
+        };
     };
 
-    const footerText = () => {
-        if (company) return [company.contact_details?.[0]?.current_communication_email, company.contact_details?.[0]?.office_phone_number && `Tel: ${company.contact_details[0].office_phone_number}`, company.postal_address_details?.[0]?.full_postal_address && `P.O. Box ${company.postal_address_details[0].full_postal_address}`].filter(Boolean).join('  ·  ');
-        if (individual) return [individual.full_name, individual.kra_pin && `KRA PIN: ${individual.kra_pin}`].filter(Boolean).join('  ·  ');
-        return '';
+    const details = getContactInfo();
+
+    const exportToPDF = async () => {
+        if (!paperRef.current) return;
+        const canvas = await html2canvas(paperRef.current, { scale: 2, useCORS: true });
+        const imgData = canvas.toDataURL('image/png');
+        const pdf = new jsPDF('p', 'mm', 'a4');
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+        pdf.save(`${tab === 'companies' ? selectedCompany.company_name : selectedIndividual.full_name}_Letter.pdf`);
     };
 
     return (
-        <>
-            <style>{css}</style>
-            <div className="lgm">
+        <div className="flex h-screen bg-zinc-100 overflow-hidden font-sans text-zinc-900 print:bg-white">
+            {/* --- SIDEBAR --- */}
+            <aside className="w-[380px] bg-white border-r flex flex-col shadow-xl z-10 print:hidden">
+                <div className="p-6 border-b bg-zinc-900 text-white">
+                    <div className="flex items-center gap-2 mb-1">
+                        <div className="h-8 w-8 bg-blue-500 rounded flex items-center justify-center">
+                            <FileText size={18} />
+                        </div>
+                        <h1 className="font-bold text-lg tracking-tight">Letter Hub</h1>
+                    </div>
+                </div>
 
-                {/* ── SIDEBAR ── */}
-                <Card className="s border-0 shadow-lg">
-                    <CardContent className="p-6">
-                        <div className="flex items-center gap-3 mb-6">
-                            <FileText className="text-blue-600 h-6 w-6" />
-                            <h2 className="text-xl font-bold">Letter Generator</h2>
+                <ScrollArea className="flex-1">
+                    <div className="p-6 space-y-8">
+                        {/* 1. Template Toggle */}
+                        <div className="space-y-3">
+                            <Label className="text-[11px] uppercase font-bold text-zinc-400">Template Style</Label>
+                            <div className="grid grid-cols-2 gap-2 p-1 bg-zinc-100 rounded-lg">
+                                <button onClick={() => setLetterType('kra')} className={cn("py-2 text-xs font-medium rounded-md transition-all", letterType === 'kra' ? "bg-white shadow-sm text-blue-600" : "text-zinc-500")}>KRA Template</button>
+                                <button onClick={() => setLetterType('general')} className={cn("py-2 text-xs font-medium rounded-md transition-all", letterType === 'general' ? "bg-white shadow-sm text-blue-600" : "text-zinc-500")}>General</button>
+                            </div>
                         </div>
 
+                        {/* 2. Entity Selector */}
                         <Tabs value={tab} onValueChange={setTab} className="w-full">
-                            <TabsList className="grid w-full grid-cols-2 mb-6">
-                                <TabsTrigger value="companies" className="flex items-center gap-2">
-                                    <Building2 className="h-4 w-4" />
-                                    Companies
-                                </TabsTrigger>
-                                <TabsTrigger value="individuals" className="flex items-center gap-2">
-                                    <User className="h-4 w-4" />
-                                    Individuals
-                                </TabsTrigger>
+                            <TabsList className="grid w-full grid-cols-2 mb-4">
+                                <TabsTrigger value="companies" className="text-xs">Company</TabsTrigger>
+                                <TabsTrigger value="individuals" className="text-xs">Personal</TabsTrigger>
                             </TabsList>
 
                             <TabsContent value="companies" className="space-y-4">
-                                <div>
-                                    <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Letter Type</Label>
-                                    <div className="flex gap-2">
-                                        <Button
-                                            variant={type === 'kra' ? 'default' : 'outline'}
-                                            className="flex-1"
-                                            onClick={() => setType('kra')}
-                                        >
-                                            🏛 KRA
-                                        </Button>
-                                        <Button
-                                            variant={type === 'general' ? 'default' : 'outline'}
-                                            className="flex-1"
-                                            onClick={() => setType('general')}
-                                        >
-                                            📝 General
-                                        </Button>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Company</Label>
-                                    <Popover open={companyPopoverOpen} onOpenChange={setCompanyPopoverOpen}>
+                                <div className="space-y-2">
+                                    <Label className="text-[11px] uppercase font-bold text-zinc-400">Search Company</Label>
+                                    <Popover open={openCompany} onOpenChange={setOpenCompany}>
                                         <PopoverTrigger asChild>
-                                            <Button
-                                                variant="outline"
-                                                role="combobox"
-                                                className="w-full justify-between"
-                                            >
-                                                {companyId
-                                                    ? companies.find((c) => c.id.toString() === companyId)?.company_name
-                                                    : "Search companies..."}
-                                                <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                            <Button variant="outline" className="w-full justify-between h-10 text-xs">
+                                                <span className="truncate">{selectedCompany?.company_name || "Select..."}</span>
+                                                <Search className="h-3 w-3 opacity-50" />
                                             </Button>
                                         </PopoverTrigger>
-                                        <PopoverContent className="w-full p-0">
+                                        <PopoverContent className="w-[330px] p-0" align="start">
                                             <Command>
-                                                <CommandInput placeholder="Search companies..." />
-                                                <CommandEmpty>No company found.</CommandEmpty>
+                                                <CommandInput placeholder="Type company name..." />
                                                 <CommandList>
+                                                    <CommandEmpty>No company found.</CommandEmpty>
                                                     <CommandGroup>
                                                         {companies.map((c) => (
-                                                            <CommandItem
-                                                                key={c.id}
-                                                                value={c.company_name}
-                                                                onSelect={() => {
-                                                                    setCompanyId(c.id.toString());
-                                                                    setCompanyPopoverOpen(false);
-                                                                }}
-                                                            >
-                                                                <Check
-                                                                    className={cn(
-                                                                        "mr-2 h-4 w-4",
-                                                                        companyId === c.id.toString() ? "opacity-100" : "opacity-0"
-                                                                    )}
-                                                                />
+                                                            <CommandItem key={c.id} onSelect={() => { setCompanyId(c.id.toString()); setOpenCompany(false); }}>
+                                                                <Check className={cn("mr-2 h-4 w-4", companyId === c.id.toString() ? "opacity-100" : "opacity-0")} />
                                                                 {c.company_name}
                                                             </CommandItem>
                                                         ))}
@@ -395,233 +211,240 @@ export default function LetterGenerationModule() {
                                     </Popover>
                                 </div>
 
-                                {company && (
-                                    <>
-                                        <div>
-                                            <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Signatory</Label>
-                                            <Popover open={signatoryPopoverOpen} onOpenChange={setSignatoryPopoverOpen}>
-                                                <PopoverTrigger asChild>
-                                                    <Button
-                                                        variant="outline"
-                                                        role="combobox"
-                                                        className="w-full justify-between"
-                                                    >
-                                                        {directorId
-                                                            ? directors.find((d) => d.individual_id === directorId)?.name
-                                                            : "Search signatories..."}
-                                                        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                                    </Button>
-                                                </PopoverTrigger>
-                                                <PopoverContent className="w-full p-0">
-                                                    <Command>
-                                                        <CommandInput placeholder="Search signatories..." />
-                                                        <CommandEmpty>No signatory found.</CommandEmpty>
-                                                        <CommandList>
-                                                            <CommandGroup>
-                                                                {directors.map((d) => (
-                                                                    <CommandItem
-                                                                        key={d.individual_id}
-                                                                        value={d.name}
-                                                                        onSelect={() => {
-                                                                            setDirectorId(d.individual_id);
-                                                                            setSignatoryPopoverOpen(false);
-                                                                        }}
-                                                                    >
-                                                                        <Check
-                                                                            className={cn(
-                                                                                "mr-2 h-4 w-4",
-                                                                                directorId === d.individual_id ? "opacity-100" : "opacity-0"
-                                                                            )}
-                                                                        />
-                                                                        <div className="flex flex-col">
-                                                                            <span>{d.name}</span>
-                                                                            <span className="text-xs text-muted-foreground capitalize">
-                                                                                {d.position}
-                                                                            </span>
-                                                                        </div>
-                                                                    </CommandItem>
-                                                                ))}
-                                                            </CommandGroup>
-                                                        </CommandList>
-                                                    </Command>
-                                                </PopoverContent>
-                                            </Popover>
-                                        </div>
-
-                                        {director && (
-                                            <Card className="border bg-gray-50">
-                                                <CardContent className="p-4">
-                                                    <div className="font-semibold text-sm">{director.name}</div>
-                                                    <div className="text-xs text-gray-600 mt-1">{director.position}</div>
-                                                    <div className="mt-3 h-8 border border-dashed border-gray-300 rounded flex items-center justify-center">
-                                                        {director.signature_url ? (
-                                                            <img
-                                                                src={director.signature_url}
-                                                                alt={`${director.name}'s signature`}
-                                                                className="max-h-full max-w-full object-contain"
-                                                            />
-                                                        ) : (
-                                                            <span className="text-xs text-gray-500">No signature on file</span>
-                                                        )}
-                                                    </div>
-                                                </CardContent>
-                                            </Card>
-                                        )}
-                                    </>
+                                {selectedCompany && (
+                                    <div className="space-y-2 pt-2 animate-in fade-in slide-in-from-top-1">
+                                        <Label className="text-[11px] uppercase font-bold text-zinc-400">Authorized Signatory</Label>
+                                        <Popover open={openSignatory} onOpenChange={setOpenSignatory}>
+                                            <PopoverTrigger asChild>
+                                                <Button variant="outline" className="w-full justify-between h-10 text-xs">
+                                                    <span className="truncate font-medium">{activeSignatory?.name || "Select Signatory"}</span>
+                                                    <ChevronDown className="h-4 w-4 opacity-50" />
+                                                </Button>
+                                            </PopoverTrigger>
+                                            <PopoverContent className="w-[330px] p-0" align="start">
+                                                <Command>
+                                                    <CommandInput placeholder="Search officials..." />
+                                                    <CommandList>
+                                                        <CommandEmpty>No directors or shareholders found.</CommandEmpty>
+                                                        <CommandGroup>
+                                                            {availableSignatories.map((s) => (
+                                                                <CommandItem key={s.id} onSelect={() => { setSignatoryId(s.id); setOpenSignatory(false); }}>
+                                                                    <div className="flex flex-col">
+                                                                        <span>{s.name}</span>
+                                                                        <span className="text-[10px] text-zinc-400 uppercase">{s.position}</span>
+                                                                    </div>
+                                                                </CommandItem>
+                                                            ))}
+                                                        </CommandGroup>
+                                                    </CommandList>
+                                                </Command>
+                                            </PopoverContent>
+                                        </Popover>
+                                    </div>
                                 )}
                             </TabsContent>
 
                             <TabsContent value="individuals" className="space-y-4">
-                                <div>
-                                    <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Letter Type</Label>
-                                    <div className="flex gap-2">
-                                        <Button
-                                            variant={type === 'kra' ? 'default' : 'outline'}
-                                            className="flex-1"
-                                            onClick={() => setType('kra')}
-                                        >
-                                            🏛 KRA
+                                <Label className="text-[11px] uppercase font-bold text-zinc-400">Search Individual</Label>
+                                <Popover open={openIndividual} onOpenChange={setOpenIndividual}>
+                                    <PopoverTrigger asChild>
+                                        <Button variant="outline" className="w-full justify-between h-10 text-xs">
+                                            <span className="truncate">{selectedIndividual?.full_name || "Select name..."}</span>
+                                            <Search className="h-3 w-3 opacity-50" />
                                         </Button>
-                                        <Button
-                                            variant={type === 'general' ? 'default' : 'outline'}
-                                            className="flex-1"
-                                            onClick={() => setType('general')}
-                                        >
-                                            📝 General
-                                        </Button>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Individual</Label>
-                                    <Popover open={individualPopoverOpen} onOpenChange={setIndividualPopoverOpen}>
-                                        <PopoverTrigger asChild>
-                                            <Button
-                                                variant="outline"
-                                                role="combobox"
-                                                className="w-full justify-between"
-                                            >
-                                                {individualId
-                                                    ? individuals.find((i) => i.id === individualId)?.full_name
-                                                    : "Search individuals..."}
-                                                <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                            </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-full p-0">
-                                            <Command>
-                                                <CommandInput placeholder="Search individuals..." />
-                                                <CommandEmpty>No individual found.</CommandEmpty>
-                                                <CommandList>
-                                                    <CommandGroup>
-                                                        {individuals.map((i) => (
-                                                            <CommandItem
-                                                                key={i.id}
-                                                                value={i.full_name}
-                                                                onSelect={() => {
-                                                                    setIndividualId(i.id);
-                                                                    setIndividualPopoverOpen(false);
-                                                                }}
-                                                            >
-                                                                <Check
-                                                                    className={cn(
-                                                                        "mr-2 h-4 w-4",
-                                                                        individualId === i.id ? "opacity-100" : "opacity-0"
-                                                                    )}
-                                                                />
-                                                                {i.full_name}
-                                                            </CommandItem>
-                                                        ))}
-                                                    </CommandGroup>
-                                                </CommandList>
-                                            </Command>
-                                        </PopoverContent>
-                                    </Popover>
-                                </div>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-[330px] p-0" align="start">
+                                        <Command>
+                                            <CommandInput placeholder="Search people..." />
+                                            <CommandList>
+                                                <CommandEmpty>No results.</CommandEmpty>
+                                                <CommandGroup>
+                                                    {individuals.map((i) => (
+                                                        <CommandItem key={i.id} onSelect={() => { setIndividualId(i.id); setOpenIndividual(false); }}>
+                                                            {i.full_name}
+                                                        </CommandItem>
+                                                    ))}
+                                                </CommandGroup>
+                                            </CommandList>
+                                        </Command>
+                                    </PopoverContent>
+                                </Popover>
                             </TabsContent>
                         </Tabs>
 
-                        {ready && (
-                            <>
-                                <div className="border-t pt-4">
-                                    <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Date</Label>
-                                    <div className="relative">
-                                        <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                                        <Input
-                                            value={letterDate}
-                                            onChange={(e) => setLetterDate(e.target.value)}
-                                            placeholder="Select date"
-                                            className="pl-10"
-                                        />
+                        <Separator />
+
+                        <div className="space-y-4">
+                            <div className="space-y-2">
+                                <Label className="text-[11px] uppercase font-bold text-zinc-400">Valediction</Label>
+                                <select className="w-full h-10 px-3 rounded-md border text-xs outline-none" value={valediction} onChange={(e) => setValediction(e.target.value)}>
+                                    {VALEDICTIONS.map(v => <option key={v} value={v}>{v}</option>)}
+                                </select>
+                            </div>
+                            <div className="space-y-2">
+                                <Label className="text-[11px] uppercase font-bold text-zinc-400">Letter Date</Label>
+                                <Input className="h-10 text-xs" value={letterDate} onChange={e => setLetterDate(e.target.value)} />
+                            </div>
+                        </div>
+                    </div>
+                </ScrollArea>
+
+                <div className="p-6 border-t bg-zinc-50 space-y-2">
+                    <Button className="w-full bg-blue-600 hover:bg-blue-700 shadow-lg text-xs" disabled={!isReady} onClick={exportToPDF}>
+                        <Download className="mr-2 h-4 w-4" /> Download PDF
+                    </Button>
+                    <Button variant="outline" className="w-full text-xs" disabled={!isReady} onClick={() => window.print()}>
+                        <Printer className="mr-2 h-4 w-4" /> Print Document
+                    </Button>
+                </div>
+            </aside>
+
+            {/* --- MAIN CANVAS --- */}
+            <main className="flex-1 overflow-y-auto p-12 flex flex-col items-center print:p-0 print:bg-white print:overflow-visible">
+                {isReady ? (
+                    <div className="flex flex-col items-center">
+                        <div className="mb-6 bg-blue-600 text-white px-5 py-2 rounded-full shadow-lg flex gap-4 items-center print:hidden">
+                            <span className="text-xs font-medium flex items-center gap-2">
+                                <Type size={14} /> Click any text to edit directly
+                            </span>
+                        </div>
+
+                        {/* A4 Paper Component */}
+                        <div
+                            ref={paperRef}
+                            className={cn(
+                                "w-[210mm] min-h-[297mm] bg-white p-[25mm] flex flex-col relative transition-all",
+                                "shadow-[0_0_50px_rgba(0,0,0,0.08)] print:shadow-none print:w-full print:m-0 print:p-[20mm]"
+                            )}
+                        >
+                            {/* --- HEADER LOGIC --- */}
+                            {tab === 'companies' ? (
+                                letterType === 'kra' ? (
+                                    <div className="text-center border-b-[3px] border-zinc-900 pb-6 mb-10">
+                                        <h2 className="text-2xl font-serif font-black text-zinc-900 uppercase tracking-tight mb-2">
+                                            {selectedCompany.company_name}
+                                        </h2>
+                                        <div className="text-[11px] font-bold text-zinc-700 space-y-1 uppercase tracking-wider leading-relaxed">
+                                            <p>EMAIL: {details.email} &nbsp;&nbsp;|&nbsp;&nbsp; MOBILE NO: {details.phone}</p>
+                                            <p>P.O. BOX - {details.address}, {details.town}, KENYA</p>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex justify-between items-start border-b-2 border-zinc-100 pb-8 mb-10">
+                                        <div className="max-w-[65%]">
+                                            <h2 className="text-2xl font-serif font-bold text-zinc-900 leading-tight uppercase">
+                                                {selectedCompany.company_name}
+                                            </h2>
+                                            <div className="mt-2 text-[11px] font-bold text-zinc-500 uppercase">
+                                                PIN: {details.pin}
+                                            </div>
+                                        </div>
+                                        <div className="text-right text-[10px] text-zinc-500 uppercase leading-relaxed font-medium">
+                                            <p>P.O. Box {details.address}</p>
+                                            <p>{details.town}, KENYA</p>
+                                            <p>Tel: {details.phone}</p>
+                                            <p className="lowercase font-bold text-zinc-800">{details.email}</p>
+                                        </div>
+                                    </div>
+                                )
+                            ) : (
+                                <div className="border-b-2 border-zinc-900 pb-6 mb-10 flex justify-between items-end">
+                                    <div>
+                                        <h2 className="text-2xl font-serif font-bold text-zinc-900">{selectedIndividual.full_name}</h2>
+                                        <p className="text-[10px] text-zinc-500 font-bold uppercase mt-1 tracking-widest">Personal Account</p>
+                                    </div>
+                                    <div className="text-right text-[11px] font-bold text-zinc-600 uppercase space-y-1">
+                                        <p>ID: {selectedIndividual.id_number || '---'}</p>
+                                        <p>PIN: {selectedIndividual.kra_pin || '---'}</p>
                                     </div>
                                 </div>
-                            </>
-                        )}
+                            )}
 
-                        <div className="flex-1" />
+                            {/* --- CONTENT --- */}
+                            <div className="flex-1 font-serif text-[15px] leading-relaxed text-zinc-800">
+                                <div className="mb-8 font-medium">{letterDate}</div>
 
-                        {ready && (
-                            <div className="space-y-2 border-t pt-4">
-                                <Button className="w-full" onClick={() => window.print()}>
-                                    <Printer className="mr-2 h-4 w-4" />
-                                    Print / Save PDF
-                                </Button>
-                                <Button variant="outline" className="w-full" onClick={() => navigator.clipboard.writeText(document.getElementById('the-paper')?.innerText || '')}>
-                                    <Copy className="mr-2 h-4 w-4" />
-                                    Copy Text
-                                </Button>
+                                <div className="mb-6 flex gap-2 group justify-end">
+                                    Your Ref:<span className="font-bold min-w-[150px] outline-none border-b border-transparent focus:border-blue-200 focus:bg-blue-50/30 px-1 transition-all" contentEditable suppressContentEditableWarning>
+                                        {letterType === 'kra' ? `PIN ${details.pin}` : 'GEN/FIN/2026/102'}
+                                    </span>
+                                </div>
+
+                                <div className="mb-8">
+                                    <div className="text-[9px] font-black text-zinc-300 uppercase mb-2 tracking-widest print:hidden">Recipient:</div>
+                                    <div className="whitespace-pre-wrap outline-none focus:bg-zinc-50 p-2 -m-2 rounded transition-colors" contentEditable suppressContentEditableWarning>
+                                        {letterType === 'kra' ?
+                                            "Kenya Revenue Authority,\nNairobi, Kenya." :
+                                            "The Branch Manager,\nSelect Bank Ltd,\nIndustrial Area Branch,\nNairobi."
+                                        }
+                                    </div>
+                                </div>
+
+                                <div className="mb-8 uppercase font-bold underline decoration-zinc-900 underline-offset-[6px] decoration-1">
+                                    RE: <span className="outline-none focus:bg-blue-50 px-1" contentEditable suppressContentEditableWarning>
+                                        {letterType === 'kra' ? 'Application for Tax Compliance Certificate' : 'Request for Bank Statement'}
+                                    </span>
+                                </div>
+
+                                <div className="min-h-[350px] whitespace-pre-wrap outline-none focus:bg-zinc-50 py-2 leading-relaxed" contentEditable suppressContentEditableWarning>
+                                    Dear Sir/Madam,{"\n\n"}
+                                    I am writing on behalf of the company to request for...{"\n\n"}
+                                    Your prompt assistance in this matter will be highly appreciated.
+                                </div>
+
+                                {/* --- SIGN-OFF --- */}
+                                <div className="mt-12 space-y-10">
+                                    <div className="outline-none" contentEditable suppressContentEditableWarning>{valediction}</div>
+
+                                    <div className="space-y-1">
+                                        {/* Signature Rendering */}
+                                        <div className="w-56 border-b border-zinc-900 relative h-20 flex items-end mb-2">
+                                            {tab === 'companies' && activeSignatory?.signatureUrl ? (
+                                                <img
+                                                    src={activeSignatory.signatureUrl}
+                                                    alt="Official Signature"
+                                                    className="absolute bottom-1 left-0 h-24 object-contain mix-blend-multiply grayscale print:grayscale transition-all hover:grayscale-0"
+                                                />
+                                            ) : (
+                                                <div className="text-[10px] text-zinc-200 italic pb-1 no-print">Signatory scan appears here</div>
+                                            )}
+                                            <div className="absolute -bottom-[2px] w-full border-b border-zinc-400 border-dotted print:hidden" />
+                                        </div>
+
+                                        <div className="font-bold uppercase tracking-tight">
+                                            {tab === 'companies' ? (activeSignatory?.name || '____________________') : selectedIndividual?.full_name}
+                                        </div>
+                                        <div className="text-sm text-zinc-500 italic">
+                                            {tab === 'companies' ? (activeSignatory?.position || 'Director') : 'Individual'}
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
-                        )}
-                    </CardContent>
-                </Card>
 
-                {/* ── PREVIEW ── */}
-                <div className="pv">
-                    {!ready ? (
-                        <div className="pv-empty">
-                            <div className="pv-empty-icon">📄</div>
-                            <div className="pv-empty-text">Select a {tab === 'companies' ? 'company' : 'individual'} to preview</div>
+                            {/* --- FOOTER --- */}
+                            <div className="mt-16 pt-6 border-t border-zinc-100 flex justify-between items-center">
+                                <p className="text-[8px] text-zinc-400 uppercase tracking-[0.3em] font-medium">
+                                    Generated via Registry Portal &bull; {new Date().getFullYear()}
+                                </p>
+                                <div className="flex gap-4">
+                                    <span className="text-[8px] text-zinc-400 font-mono">DOC-ID: {Math.random().toString(36).substr(2, 9).toUpperCase()}</span>
+                                    <span className="text-[8px] text-zinc-400 font-mono uppercase">Original Copy</span>
+                                </div>
+                            </div>
                         </div>
-                    ) : (
-                        <div className="paper" id="the-paper">
-                            {renderHeader()}
-
-                            <div className="lb">
-                                <div className="l-date">{letterDate}</div>
-
-                                <div className="l-ref" style={{ marginBottom: 4 }}>
-                                    <b>REF: </b>
-                                    <span className="ed" contentEditable suppressContentEditableWarning data-p="e.g. ABC/KRA/001/2026" />
-                                </div>
-
-                                <div style={{ marginBottom: 18 }}>
-                                    <div className="l-to-label">TO:</div>
-                                    <div className="ed ed-block" contentEditable suppressContentEditableWarning data-p={type === 'kra' ? 'The Commissioner,\nKenya Revenue Authority,\nNairobi.' : 'Recipient name / address'} />
-                                </div>
-
-                                <div className="l-subj">
-                                    RE: <span className="ed" contentEditable suppressContentEditableWarning data-p="Enter subject" />
-                                </div>
-
-                                <div className="l-content" contentEditable suppressContentEditableWarning />
+                    </div>
+                ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-zinc-400 animate-in fade-in duration-700">
+                        <div className="bg-white p-12 rounded-3xl shadow-sm border border-zinc-200/50 flex flex-col items-center">
+                            <div className="h-20 w-20 bg-zinc-50 rounded-full flex items-center justify-center mb-6">
+                                <FileText size={40} className="opacity-20" />
                             </div>
-
-                            <div className="so">
-                                <select className="val-sel" value={valediction} onChange={e => setValediction(e.target.value)}>
-                                    {VALEDICTIONS.map(v => <option key={v}>{v}</option>)}
-                                </select>
-                                <div className="sig-line">
-                                    <div className="sig-dots">……………………………</div>
-                                </div>
-                                <div className="sig-person-name">{signName || '—'}</div>
-                                <div className="sig-person-pos">{signPos}</div>
-                            </div>
-
-                            <div className="pfoot">{footerText()}</div>
+                            <h3 className="text-xl font-bold text-zinc-800">Ready to Generate</h3>
+                            <p className="text-sm max-w-[250px] text-center mt-2 leading-relaxed">Select a company or individual record from the sidebar to populate the letterhead.</p>
                         </div>
-                    )}
-                </div>
-
-            </div>
-        </>
+                    </div>
+                )}
+            </main>
+        </div>
     );
 }
