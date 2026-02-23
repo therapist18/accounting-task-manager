@@ -115,7 +115,6 @@ interface WebDataGroup {
     linkedMasterFields?: number[];
     linkedKycDocuments?: string[];
     sourceLogic?: 'all' | 'priority';
-    linkedJobQuestionId?: string;
     linkedJobQuestionIds?: string[];
     documentLogic?: 'merge' | 'fallback';
     dateFormat?: 'iso' | 'object_split' | 'dd_mm_yyyy';
@@ -125,7 +124,6 @@ interface WebDataGroup {
     directorType?: 'all' | 'primary';
   }>;
   linkedMasterFields: number[];
-  linkedJobQuestionId?: string;
   linkedJobQuestionIds?: string[];
   sourceLogic?: 'all' | 'priority';
   kycDocumentId?: string; // Legacy support
@@ -579,7 +577,7 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, jobQuestions, on
                   <TableBody>
                     {items.map((item, i) => {
                       const totalSources = (item.linkedMasterFields?.length || 0) + (item.linkedJobQuestionIds?.length || 0);
-                      
+
                       return (
                         <TableRow key={i} className="hover:bg-slate-50 border-b border-slate-100">
                           <TableCell className="p-3">
@@ -609,21 +607,21 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, jobQuestions, on
                           </TableCell>
                           <TableCell className="p-3">
                             {item.type === 'document' ? (
-                               <div className="space-y-2">
-                                  <div className="flex flex-wrap gap-1.5 mb-1">
-                                    {item.linkedKycDocuments?.map(docId => (
-                                      <Badge key={docId} variant="secondary" className="bg-amber-50 text-amber-700 h-6 border-amber-200">
-                                        {kycDocuments.find(d => d.id === docId)?.display_name || docId}
-                                        <X className="h-3 w-3 ml-1.5 cursor-pointer" onClick={() => unlinkDocument(i, docId)} />
-                                      </Badge>
-                                    ))}
-                                  </div>
-                                  <MultiDocumentPicker
-                                    availableDocuments={kycDocuments}
-                                    linkedDocumentIds={item.linkedKycDocuments || []}
-                                    onSelect={(doc) => linkDocument(i, doc.id)}
-                                  />
-                               </div>
+                              <div className="space-y-2">
+                                <div className="flex flex-wrap gap-1.5 mb-1">
+                                  {item.linkedKycDocuments?.map(docId => (
+                                    <Badge key={docId} variant="secondary" className="bg-amber-50 text-amber-700 h-6 border-amber-200">
+                                      {kycDocuments.find(d => d.id === docId)?.display_name || docId}
+                                      <X className="h-3 w-3 ml-1.5 cursor-pointer" onClick={() => unlinkDocument(i, docId)} />
+                                    </Badge>
+                                  ))}
+                                </div>
+                                <MultiDocumentPicker
+                                  availableDocuments={kycDocuments}
+                                  linkedDocumentIds={item.linkedKycDocuments || []}
+                                  onSelect={(doc) => linkDocument(i, doc.id)}
+                                />
+                              </div>
                             ) : (
                               <div className="space-y-2">
                                 <div className="flex items-center justify-between p-2 bg-slate-100/50 rounded-lg border border-slate-200 min-h-[44px]">
@@ -652,8 +650,8 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, jobQuestions, on
                                         <div className="space-y-4">
                                           <div className="flex items-center justify-between border-b pb-2">
                                             <Label className="text-xs font-bold uppercase text-slate-500 tracking-wider">Multi-Source Logic</Label>
-                                            <Select 
-                                              value={item.sourceLogic || 'priority'} 
+                                            <Select
+                                              value={item.sourceLogic || 'priority'}
                                               onValueChange={(v) => handleItemChange(i, 'sourceLogic', v)}
                                             >
                                               <SelectTrigger className="h-7 w-[140px] text-[10px] bg-white">
@@ -665,7 +663,7 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, jobQuestions, on
                                               </SelectContent>
                                             </Select>
                                           </div>
-                                          
+
                                           <SourcePriorityManager
                                             linkedMasterFields={item.linkedMasterFields || []}
                                             linkedJobQuestionIds={item.linkedJobQuestionIds || []}
@@ -727,7 +725,7 @@ function ArrayConfigurator({ group, masterFields, kycDocuments, jobQuestions, on
           </div>
         </DialogContent>
       </Dialog>
-      
+
       {/* Delete Confirmation Alert Stays same as provided */}
       <AlertDialog open={deleteItemDialogOpen} onOpenChange={setDeleteItemDialogOpen}>
         <AlertDialogContent>
@@ -793,26 +791,26 @@ function SourcePriorityManager({
             {linkedMasterFields.map((id, idx) => {
               const field = masterFields.find(f => f.id === id);
               return (
-                <div 
-                  key={`db-${id}`} 
+                <div
+                  key={`db-${id}`}
                   className="flex items-center gap-2 bg-white p-3 rounded-lg border border-slate-200 shadow-sm hover:shadow-md transition-shadow group"
                 >
                   {sourceLogic === 'priority' && (
                     <div className="flex flex-col gap-0.5 border-r pr-2 mr-1">
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="h-5 w-5 hover:text-blue-600 hover:bg-blue-50" 
-                        onClick={() => onMoveItem('linkedMasterFields', idx, 'up')} 
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 hover:text-blue-600 hover:bg-blue-50"
+                        onClick={() => onMoveItem('linkedMasterFields', idx, 'up')}
                         disabled={idx === 0}
                       >
                         <ArrowUp className="h-3.5 w-3.5" />
                       </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="h-5 w-5 hover:text-blue-600 hover:bg-blue-50" 
-                        onClick={() => onMoveItem('linkedMasterFields', idx, 'down')} 
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 hover:text-blue-600 hover:bg-blue-50"
+                        onClick={() => onMoveItem('linkedMasterFields', idx, 'down')}
                         disabled={idx === linkedMasterFields.length - 1}
                       >
                         <ArrowDown className="h-3.5 w-3.5" />
@@ -823,10 +821,10 @@ function SourcePriorityManager({
                     <div className="text-sm font-semibold text-slate-800 truncate">{field?.label || `Field #${id}`}</div>
                     <div className="text-[10px] text-slate-400 font-mono">ID: {id}</div>
                   </div>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-7 w-7 text-slate-300 hover:text-red-600 hover:bg-red-50" 
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-slate-300 hover:text-red-600 hover:bg-red-50"
                     onClick={() => onUnlinkMaster(id)}
                   >
                     <X className="h-4 w-4" />
@@ -851,26 +849,26 @@ function SourcePriorityManager({
             {linkedJobQuestionIds.map((id, idx) => {
               const q = jobQuestions.find(q => q.id === id);
               return (
-                <div 
-                  key={`job-${id}`} 
+                <div
+                  key={`job-${id}`}
                   className="flex items-center gap-2 bg-white p-3 rounded-lg border border-slate-200 shadow-sm hover:shadow-md transition-shadow group"
                 >
                   {sourceLogic === 'priority' && (
                     <div className="flex flex-col gap-0.5 border-r pr-2 mr-1">
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="h-5 w-5 hover:text-purple-600 hover:bg-purple-50" 
-                        onClick={() => onMoveItem('linkedJobQuestionIds', idx, 'up')} 
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 hover:text-purple-600 hover:bg-purple-50"
+                        onClick={() => onMoveItem('linkedJobQuestionIds', idx, 'up')}
                         disabled={idx === 0}
                       >
                         <ArrowUp className="h-3.5 w-3.5" />
                       </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="h-5 w-5 hover:text-purple-600 hover:bg-purple-50" 
-                        onClick={() => onMoveItem('linkedJobQuestionIds', idx, 'down')} 
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 hover:text-purple-600 hover:bg-purple-50"
+                        onClick={() => onMoveItem('linkedJobQuestionIds', idx, 'down')}
                         disabled={idx === linkedJobQuestionIds.length - 1}
                       >
                         <ArrowDown className="h-3.5 w-3.5" />
@@ -881,10 +879,10 @@ function SourcePriorityManager({
                     <div className="text-sm font-semibold text-slate-800 truncate">{q?.label || `Question ${id}`}</div>
                     <div className="text-[10px] text-slate-400 font-mono">{id}</div>
                   </div>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-7 w-7 text-slate-300 hover:text-red-600 hover:bg-red-50" 
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-slate-300 hover:text-red-600 hover:bg-red-50"
                     onClick={() => onUnlinkQuestion(id)}
                   >
                     <X className="h-4 w-4" />
@@ -986,7 +984,7 @@ function WebDataGroupEditDialog({
         ...group,
         linkedKycDocuments: initialDocuments,
         documentLogic: group.documentLogic || 'merge',
-        linkedJobQuestionIds: group.linkedJobQuestionIds || (group.linkedJobQuestionId ? [group.linkedJobQuestionId] : []),
+        linkedJobQuestionIds: group.linkedJobQuestionIds || [],
         sourceLogic: group.sourceLogic || 'priority'
       });
     }
@@ -1185,13 +1183,13 @@ function WebDataGroupEditDialog({
                       <div className="bg-white rounded-lg border p-2 space-y-1.5">
                         {editingGroup.linkedKycDocuments?.map((docId, index) => (
                           <div key={docId} className="flex items-center gap-2 p-1.5 rounded bg-slate-50 border text-sm">
-                             <div className="flex flex-col">
-                                <Button variant="ghost" size="icon" className="h-3 w-3" onClick={() => moveDocument(index, 'up')} disabled={index === 0}><ArrowUp className="h-2 w-2"/></Button>
-                                <Button variant="ghost" size="icon" className="h-3 w-3" onClick={() => moveDocument(index, 'down')} disabled={index === editingGroup.linkedKycDocuments.length -1}><ArrowDown className="h-2 w-2"/></Button>
-                             </div>
-                             <FileText className="h-3.5 w-3.5 text-amber-500" />
-                             <span className="flex-1 truncate">{kycDocuments.find(d => d.id === docId)?.display_name || docId}</span>
-                             <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400" onClick={() => removeDocument(docId)}><X className="h-3.5 w-3.5" /></Button>
+                            <div className="flex flex-col">
+                              <Button variant="ghost" size="icon" className="h-3 w-3" onClick={() => moveDocument(index, 'up')} disabled={index === 0}><ArrowUp className="h-2 w-2" /></Button>
+                              <Button variant="ghost" size="icon" className="h-3 w-3" onClick={() => moveDocument(index, 'down')} disabled={index === editingGroup.linkedKycDocuments.length - 1}><ArrowDown className="h-2 w-2" /></Button>
+                            </div>
+                            <FileText className="h-3.5 w-3.5 text-amber-500" />
+                            <span className="flex-1 truncate">{kycDocuments.find(d => d.id === docId)?.display_name || docId}</span>
+                            <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400" onClick={() => removeDocument(docId)}><X className="h-3.5 w-3.5" /></Button>
                           </div>
                         ))}
                         <Popover open={addDocOpen} onOpenChange={setAddDocOpen}>
@@ -1248,13 +1246,13 @@ function WebDataGroupEditDialog({
                     <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-200">
                       <div className="space-y-2">
                         <Label className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
-                           <Database className="h-3 w-3" /> Add DB Field
+                          <Database className="h-3 w-3" /> Add DB Field
                         </Label>
                         <MasterFieldPicker availableFields={masterFields} onSelect={linkMasterField} />
                       </div>
                       <div className="space-y-2">
                         <Label className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
-                           <HelpCircle className="h-3 w-3" /> Add Question
+                          <HelpCircle className="h-3 w-3" /> Add Question
                         </Label>
                         <MultiJobQuestionPicker
                           availableQuestions={jobQuestions}
@@ -2570,7 +2568,7 @@ export function AutomationDialog({
         fieldType: 'text',
         entityTypes: ['principal'],
         linkedMasterFields: [data.id],
-        linkedJobQuestionId: data.id
+        linkedJobQuestionIds: [data.id]
       }]);
     } else if (type === 'document' && data) {
       setWebDataGroups(prev => [...prev, {
@@ -2583,7 +2581,7 @@ export function AutomationDialog({
         kycDocumentId: data.id,
         linkedKycDocuments: [data.id], // Initialize array
         documentLogic: 'merge',
-        linkedJobQuestionId: data.label
+        linkedJobQuestionIds: [data.label]
       }]);
     } else if (type === 'job_question' && data) {
       setWebDataGroups(prev => [...prev, {
@@ -2593,7 +2591,7 @@ export function AutomationDialog({
         fieldType: 'text',
         entityTypes: ['principal'],
         linkedMasterFields: [],
-        linkedJobQuestionId: data.id
+        linkedJobQuestionIds: [data.id]
       }]);
     } else if (type === 'requirement' && data) {
       setWebDataGroups(prev => [...prev, {
@@ -2605,7 +2603,7 @@ export function AutomationDialog({
         linkedMasterFields: [],
         linkedKycDocuments: data.document_ids || [],
         documentLogic: 'merge',
-        linkedJobQuestionId: data.id
+        linkedJobQuestionIds: [data.id]
       }]);
     } else {
       const newRow: WebDataGroup = {
@@ -3068,11 +3066,11 @@ export function AutomationDialog({
                                     </TableCell>
 
                                     <TableCell className="p-3 border-r border-slate-100 align-middle">
-                                      {group.linkedJobQuestionId ? (
+                                      {group.linkedJobQuestionIds && group.linkedJobQuestionIds.length > 0 ? (
                                         <div className="flex items-center gap-2">
                                           <HelpCircle className="h-3.5 w-3.5 text-purple-600" />
                                           <span className="text-sm font-medium text-purple-700 truncate max-w-[200px]">
-                                            {group.linkedJobQuestionId}
+                                            {group.linkedJobQuestionIds.join(', ')}
                                           </span>
                                           <Badge variant="outline" className={cn(
                                             "text-[9px] ml-auto",

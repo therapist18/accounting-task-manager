@@ -1079,8 +1079,45 @@ export const AutomationMappingDialog = ({
       };
       const res = await fetch(automation.webhook_url, { method: automation.webhook_method || 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (!res.ok) throw new Error("Trigger failed: " + res.status);
-      toast({ title: 'Success', description: 'Automation process initiated successfully' });
-    } catch (e) { console.error("Automation Error:", e); toast({ title: 'Automation Error', description: e.message, variant: 'destructive' }); } finally { setIsAutomationRunning(false); }
+
+      const response = await res.json();
+
+      if (response.success) {
+        // Handle successful automation completion
+        if (response.screenshot) {
+          // Create a downloadable link for the screenshot
+          const screenshotDataUrl = `data:image/png;base64,${response.screenshot}`;
+          const screenshotLink = document.createElement('a');
+          screenshotLink.href = screenshotDataUrl;
+          screenshotLink.download = `eta-confirmation-${Date.now()}.png`;
+          screenshotLink.click();
+        }
+
+        toast({
+          title: 'Automation Completed Successfully!',
+          description: response.message || 'Please check your email for payment instructions.',
+          action: response.screenshot ? (
+            <div className="mt-2">
+              <p className="text-sm text-green-600 mb-1">Screenshot downloaded successfully</p>
+              <p className="text-xs text-gray-600">Status: {response.status || 'payment_required'}</p>
+              <p className="text-xs text-gray-600">Next: {response.nextStep || 'Check email for payment instructions'}</p>
+            </div>
+          ) : undefined
+        });
+
+        // Optionally refresh data or update UI state
+        if (refreshDocuments) {
+          refreshDocuments();
+        }
+      } else {
+        throw new Error(response.message || 'Automation failed');
+      }
+    } catch (e) {
+      console.error("Automation Error:", e);
+      toast({ title: 'Automation Error', description: e.message, variant: 'destructive' });
+    } finally {
+      setIsAutomationRunning(false);
+    }
   };
 
   const cancelEditing = () => { setEditingCell(null); setEditValue(''); };
