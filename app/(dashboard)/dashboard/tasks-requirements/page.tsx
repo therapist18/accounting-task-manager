@@ -593,12 +593,8 @@ export default function TasksPage() {
           console.log(' [CompanyInquiryDialog] Open State Changed:', isOpen);
           setCompanyInquiryDialogOpen(isOpen);
           if (!isOpen) {
-            // FIX: Don't reset department selection when dialog closes after edit
-            // Only reset if we're not in edit mode
-            if (!taskToEdit) {
-              setSelectedDepartment('');
-            }
-            setTaskToEdit(null); // Reset taskToEdit when closing
+            // Reset taskToEdit when closing
+            setTaskToEdit(null);
           }
         }}
         onEnquiryCreated={(enquiries) => {

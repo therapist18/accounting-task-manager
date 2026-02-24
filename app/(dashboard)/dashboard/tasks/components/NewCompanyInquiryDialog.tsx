@@ -386,7 +386,14 @@ export function NewCompanyInquiryDialog({
                 // Set defaults
                 const initial: any = {}
                 data.job_specific_questions.forEach((q: any) => {
-                    if (q.default_value) initial[q.id] = q.default_value
+                    if (q.default_value) {
+                        // For multiselect, ensure default value is an array
+                        if (q.type === 'multiselect') {
+                            initial[q.id] = Array.isArray(q.default_value) ? q.default_value : [q.default_value]
+                        } else {
+                            initial[q.id] = q.default_value
+                        }
+                    }
                 })
                 setJobAnswers(initial)
             } else {
@@ -420,6 +427,8 @@ export function NewCompanyInquiryDialog({
             case 'equals':
                 return String(parentVal) === String(targetVal);
             case 'not_equals':
+                // Only show if parent value exists and is not equal to target
+                if (parentVal === undefined || parentVal === null || parentVal === '') return false;
                 return String(parentVal) !== String(targetVal);
             case 'is_not_empty':
                 if (Array.isArray(parentVal)) return parentVal.length > 0;
@@ -1115,61 +1124,179 @@ export function NewCompanyInquiryDialog({
 
                                                                 {(q.type === 'select' || q.type === 'multiselect') && (
                                                                     <div className="space-y-2">
-                                                                        <Popover>
-                                                                            <PopoverTrigger asChild>
-                                                                                <Button variant="outline" className="w-full justify-between h-11 bg-white border-slate-200">
-                                                                                    <span className="truncate">
-                                                                                        {q.type === 'multiselect'
-                                                                                            ? (jobAnswers[q.id]?.length > 0 ? `${jobAnswers[q.id].length} Selected` : "Choose multiple...")
-                                                                                            : (jobAnswers[q.id] || "Select option...")}
-                                                                                    </span>
-                                                                                    <ChevronsUpDown className="h-4 w-4 opacity-30" />
+                                                                        <div className="flex gap-2">
+                                                                            <Popover>
+                                                                                <PopoverTrigger asChild>
+                                                                                    <Button variant="outline" className="flex-1 justify-between h-11 bg-white border-slate-200">
+                                                                                        <span className="truncate">
+                                                                                            {q.type === 'multiselect'
+                                                                                                ? (Array.isArray(jobAnswers[q.id]) && jobAnswers[q.id].length > 0 ? `${jobAnswers[q.id].length} Selected` : "Choose multiple...")
+                                                                                                : (jobAnswers[q.id] || "Select option...")}
+                                                                                        </span>
+                                                                                        <ChevronsUpDown className="h-4 w-4 opacity-30" />
+                                                                                    </Button>
+                                                                                </PopoverTrigger>
+                                                                                <PopoverContent className="w-[400px] p-0">
+                                                                                    <Command>
+                                                                                        <CommandInput placeholder="Filter..." />
+                                                                                        <CommandList className="max-h-[250px] overflow-y-auto">
+                                                                                            <CommandGroup>
+                                                                                                {q.options?.map(opt => (
+                                                                                                    <CommandItem key={opt} onSelect={() => {
+                                                                                                        if (q.type === 'multiselect') {
+                                                                                                            const current = jobAnswers[q.id] || [];
+                                                                                                            const next = current.includes(opt) ? current.filter(x => x !== opt) : [...current, opt];
+                                                                                                            setJobAnswers(prev => ({ ...prev, [q.id]: next }));
+                                                                                                        } else {
+                                                                                                            setJobAnswers(prev => ({ ...prev, [q.id]: opt }));
+                                                                                                        }
+                                                                                                    }}>
+                                                                                                        <Check className={cn(
+                                                                                                            "mr-2 h-4 w-4 text-indigo-600",
+                                                                                                            q.type === 'multiselect'
+                                                                                                                ? jobAnswers[q.id]?.includes(opt) ? "opacity-100" : "opacity-0"
+                                                                                                                : jobAnswers[q.id] === opt ? "opacity-100" : "opacity-0"
+                                                                                                        )} />
+                                                                                                        {opt}
+                                                                                                    </CommandItem>
+                                                                                                ))}
+                                                                                            </CommandGroup>
+                                                                                        </CommandList>
+                                                                                    </Command>
+                                                                                </PopoverContent>
+                                                                            </Popover>
+                                                                            {q.type === 'multiselect' && Array.isArray(jobAnswers[q.id]) && jobAnswers[q.id].length > 0 && (
+                                                                                <Button
+                                                                                    variant="outline"
+                                                                                    size="sm"
+                                                                                    onClick={() => setJobAnswers(prev => ({ ...prev, [q.id]: [] }))}
+                                                                                    className="h-11 px-3 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                                                                                >
+                                                                                    <X className="h-3.5 w-3.5" />
                                                                                 </Button>
-                                                                            </PopoverTrigger>
-                                                                            <PopoverContent className="w-[400px] p-0">
-                                                                                <Command>
-                                                                                    <CommandInput placeholder="Filter..." />
-                                                                                    <CommandList className="max-h-[250px] overflow-y-auto">
-                                                                                        <CommandGroup>
-                                                                                            {q.options?.map(opt => (
-                                                                                                <CommandItem key={opt} onSelect={() => {
-                                                                                                    if (q.type === 'multiselect') {
-                                                                                                        const current = jobAnswers[q.id] || [];
-                                                                                                        const next = current.includes(opt) ? current.filter(x => x !== opt) : [...current, opt];
-                                                                                                        setJobAnswers(prev => ({ ...prev, [q.id]: next }));
-                                                                                                    } else {
-                                                                                                        setJobAnswers(prev => ({ ...prev, [q.id]: opt }));
-                                                                                                    }
-                                                                                                }}>
-                                                                                                    <Check className={cn(
-                                                                                                        "mr-2 h-4 w-4 text-indigo-600",
-                                                                                                        q.type === 'multiselect'
-                                                                                                            ? jobAnswers[q.id]?.includes(opt) ? "opacity-100" : "opacity-0"
-                                                                                                            : jobAnswers[q.id] === opt ? "opacity-100" : "opacity-0"
-                                                                                                    )} />
-                                                                                                    {opt}
-                                                                                                </CommandItem>
-                                                                                            ))}
-                                                                                        </CommandGroup>
-                                                                                    </CommandList>
-                                                                                </Command>
-                                                                            </PopoverContent>
-                                                                        </Popover>
+                                                                            )}
+                                                                        </div>
 
                                                                         {/* Multiselect Badges */}
-                                                                        {q.type === 'multiselect' && jobAnswers[q.id]?.length > 0 && (
+                                                                        {q.type === 'multiselect' && Array.isArray(jobAnswers[q.id]) && jobAnswers[q.id].length > 0 && (
                                                                             <div className="flex flex-wrap gap-1.5">
                                                                                 {jobAnswers[q.id].map(val => (
                                                                                     <Badge key={val} variant="secondary" className="text-xs py-1 px-2 bg-indigo-50 text-indigo-600 border-indigo-100 flex items-center gap-1">
                                                                                         {val}
                                                                                         <X
                                                                                             className="h-3 w-3 cursor-pointer hover:text-indigo-800"
-                                                                                            onClick={() => setJobAnswers(prev => ({ ...prev, [q.id]: prev[q.id].filter(x => x !== val) }))}
+                                                                                            onClick={() => setJobAnswers(prev => ({ ...prev, [q.id]: Array.isArray(prev[q.id]) ? prev[q.id].filter(x => x !== val) : [] }))}
                                                                                         />
                                                                                     </Badge>
                                                                                 ))}
                                                                             </div>
                                                                         )}
+                                                                    </div>
+                                                                )}
+
+                                                                {q.type === 'field_group' && q.sub_questions && (
+                                                                    <div className="space-y-3 bg-slate-50 p-4 rounded-lg border border-slate-200">
+                                                                        {q.sub_questions.map((subQ: any) => (
+                                                                            <div key={subQ.id} className="space-y-1.5">
+                                                                                <Label className="text-xs font-semibold text-slate-700">
+                                                                                    {subQ.label}
+                                                                                    {subQ.required && <span className="text-red-500 ml-1">*</span>}
+                                                                                </Label>
+                                                                                {subQ.type === 'text' && (
+                                                                                    <Input
+                                                                                        value={jobAnswers[subQ.id] || ''}
+                                                                                        onChange={e => setJobAnswers(prev => ({ ...prev, [subQ.id]: e.target.value }))}
+                                                                                        className="h-10 bg-white border-slate-200"
+                                                                                        required={subQ.required}
+                                                                                    />
+                                                                                )}
+                                                                                {subQ.type === 'boolean' && (
+                                                                                    <RadioGroup
+                                                                                        value={jobAnswers[subQ.id] === undefined ? "" : String(jobAnswers[subQ.id])}
+                                                                                        onValueChange={v => setJobAnswers(prev => ({ ...prev, [subQ.id]: v === 'true' }))}
+                                                                                        className="flex gap-3"
+                                                                                    >
+                                                                                        <div className="flex items-center space-x-2 bg-white px-3 py-1.5 rounded-md border border-slate-200">
+                                                                                            <RadioGroupItem value="true" id={`subq-yes-${subQ.id}`} />
+                                                                                            <Label htmlFor={`subq-yes-${subQ.id}`} className="text-xs cursor-pointer">Yes</Label>
+                                                                                        </div>
+                                                                                        <div className="flex items-center space-x-2 bg-white px-3 py-1.5 rounded-md border border-slate-200">
+                                                                                            <RadioGroupItem value="false" id={`subq-no-${subQ.id}`} />
+                                                                                            <Label htmlFor={`subq-no-${subQ.id}`} className="text-xs cursor-pointer">No</Label>
+                                                                                        </div>
+                                                                                    </RadioGroup>
+                                                                                )}
+                                                                                {(subQ.type === 'select' || subQ.type === 'multiselect') && (
+                                                                                    <div className="space-y-2">
+                                                                                        <div className="flex gap-2">
+                                                                                            <Popover>
+                                                                                                <PopoverTrigger asChild>
+                                                                                                    <Button variant="outline" className="flex-1 justify-between h-10 bg-white border-slate-200">
+                                                                                                        <span className="truncate text-xs">
+                                                                                                            {subQ.type === 'multiselect'
+                                                                                                                ? (Array.isArray(jobAnswers[subQ.id]) && jobAnswers[subQ.id].length > 0 ? `${jobAnswers[subQ.id].length} Selected` : "Choose multiple...")
+                                                                                                                : (jobAnswers[subQ.id] || "Select option...")}
+                                                                                                        </span>
+                                                                                                        <ChevronsUpDown className="h-3 w-3 opacity-30" />
+                                                                                                    </Button>
+                                                                                                </PopoverTrigger>
+                                                                                                <PopoverContent className="w-[300px] p-0">
+                                                                                                    <Command>
+                                                                                                        <CommandInput placeholder="Filter..." />
+                                                                                                        <CommandList className="max-h-[200px] overflow-y-auto">
+                                                                                                            <CommandGroup>
+                                                                                                                {subQ.options?.map(opt => (
+                                                                                                                    <CommandItem key={opt} onSelect={() => {
+                                                                                                                        if (subQ.type === 'multiselect') {
+                                                                                                                            const current = jobAnswers[subQ.id] || [];
+                                                                                                                            const next = current.includes(opt) ? current.filter(x => x !== opt) : [...current, opt];
+                                                                                                                            setJobAnswers(prev => ({ ...prev, [subQ.id]: next }));
+                                                                                                                        } else {
+                                                                                                                            setJobAnswers(prev => ({ ...prev, [subQ.id]: opt }));
+                                                                                                                        }
+                                                                                                                    }}>
+                                                                                                                        <Check className={cn(
+                                                                                                                            "mr-2 h-3 w-3 text-indigo-600",
+                                                                                                                            subQ.type === 'multiselect'
+                                                                                                                                ? jobAnswers[subQ.id]?.includes(opt) ? "opacity-100" : "opacity-0"
+                                                                                                                                : jobAnswers[subQ.id] === opt ? "opacity-100" : "opacity-0"
+                                                                                                                        )} />
+                                                                                                                        {opt}
+                                                                                                                    </CommandItem>
+                                                                                                                ))}
+                                                                                                            </CommandGroup>
+                                                                                                        </CommandList>
+                                                                                                    </Command>
+                                                                                                </PopoverContent>
+                                                                                            </Popover>
+                                                                                            {subQ.type === 'multiselect' && Array.isArray(jobAnswers[subQ.id]) && jobAnswers[subQ.id].length > 0 && (
+                                                                                                <Button
+                                                                                                    variant="outline"
+                                                                                                    size="sm"
+                                                                                                    onClick={() => setJobAnswers(prev => ({ ...prev, [subQ.id]: [] }))}
+                                                                                                    className="h-10 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                                                                                                >
+                                                                                                    <X className="h-3 w-3" />
+                                                                                                </Button>
+                                                                                            )}
+                                                                                        </div>
+                                                                                        {subQ.type === 'multiselect' && Array.isArray(jobAnswers[subQ.id]) && jobAnswers[subQ.id].length > 0 && (
+                                                                                            <div className="flex flex-wrap gap-1">
+                                                                                                {jobAnswers[subQ.id].map(val => (
+                                                                                                    <Badge key={val} variant="secondary" className="text-xs py-0.5 px-1.5 bg-indigo-50 text-indigo-600 border-indigo-100 flex items-center gap-1">
+                                                                                                        {val}
+                                                                                                        <X
+                                                                                                            className="h-2.5 w-2.5 cursor-pointer hover:text-indigo-800"
+                                                                                                            onClick={() => setJobAnswers(prev => ({ ...prev, [subQ.id]: Array.isArray(prev[subQ.id]) ? prev[subQ.id].filter(x => x !== val) : [] }))}
+                                                                                                        />
+                                                                                                    </Badge>
+                                                                                                ))}
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                        ))}
                                                                     </div>
                                                                 )}
                                                             </TableRow>

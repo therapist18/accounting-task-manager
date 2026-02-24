@@ -52,6 +52,12 @@ interface JobQuestion {
   id: string;
   label: string;
   type: string;
+  sub_questions?: Array<{
+    id: string;
+    type: string;
+    label: string;
+    required?: boolean;
+  }>;
 }
 
 interface Requirement {
@@ -90,6 +96,7 @@ const PLACEHOLDER_TYPES = [
   { value: 'select', label: 'Dropdown' },
   { value: 'array', label: 'Array/List' },
   { value: 'conditional', label: 'Conditional' },
+  { value: 'if', label: 'If Statement' },
   { value: 'boolean', label: 'Boolean/Checkbox' },
   { value: 'image', label: 'Image' },
   { value: 'document_checklist', label: 'Document Checklist' }, // NEW
@@ -97,9 +104,15 @@ const PLACEHOLDER_TYPES = [
 
 // Update the Placeholder type to handle hierarchy
 type ConditionalCondition = {
-  tag: string;           // e.g., 'child_kenyan_id_no'
-  label: string;         // e.g., 'Kenyan ID No: '
+  tag: string;           // e.g., 'child_kenyan_id_no', 'country_check'
+  label: string;         // e.g., 'Kenyan ID No: ', 'Country Check'
   master_field_id?: number; // The specific master field for this condition
+  // NEW: Support comparison logic for conditions like "country not equals Kenya"
+  comparison?: {
+    field?: string;           // e.g., 'country_of_residence'
+    operator: 'equals' | 'not_equals' | 'contains';
+    value: string;           // e.g., 'Kenya'
+  };
 };
 
 type BooleanCondition = {
@@ -114,15 +127,58 @@ type BooleanCondition = {
   };
 };
 
+type IfStatement = {
+  condition: {
+    field: string;           // e.g., 'country_of_residence'
+    operator: 'equals' | 'not_equals' | 'contains';
+    value: string;           // e.g., 'Kenya'
+  };
+  then_value: string;       // Value to display if condition is true
+  else_value?: string;      // Optional value to display if condition is false
+};
+
+// Base interface for shared media functionality
+interface BaseMediaConfig {
+  source_table?: string;
+  linking_variable?: "id" | "individual_id" | "director_id" | "document_id" | "company_id" | null;
+  entity_types?: EntityType[];
+  computed_function?: string;
+  execution_mode?: 'all' | 'latest';
+  document_type_ids?: string[]; // NEW: Specific document types to filter by
+}
+
+// Document checklist specific configuration
+interface DocumentChecklistConfig extends BaseMediaConfig {
+  checklist_data_sources?: Array<{
+    table: 'acc_portal_kyc_uploads' | 'acc_portal_directors_documents';
+    linking_variable: string; // e.g., 'company_id', 'director_id', 'individual_id'
+    id: string; // unique identifier for this mapping
+    entity_types: EntityType[]; // entity context for this specific data source
+    computed_function?: string; // computed function for this data source
+    linked_document_ids?: string[]; // documents linked to this data source
+  }>;
+  checklist_display_format?: 'bullets' | 'checkboxes' | 'table';
+}
+
+// Image specific configuration  
+interface ImageConfig extends BaseMediaConfig {
+  image_width?: string;
+  image_height?: string;
+  is_ai_generated?: boolean;
+  ai_prompt?: string;
+  linked_master_field_id?: string;
+}
+
 type Placeholder = {
   id: string;
   name: string;
   description?: string;
   display_value?: string;
-  type: 'text' | 'number' | 'date' | 'select' | 'array' | 'conditional' | 'image' | 'boolean' | 'ordinal' | 'document_checklist';
+  type: 'text' | 'number' | 'date' | 'select' | 'array' | 'conditional' | 'if' | 'image' | 'boolean' | 'ordinal' | 'document_checklist';
   array_direction?: 'horizontal' | 'vertical';
   boolean_conditions?: BooleanCondition[];
   boolean_type?: 'single' | 'multiple';
+  if_statement?: IfStatement;  // NEW: For if statement logic
   required: boolean;
   options?: string[];
   entity_type: EntityType[];
@@ -135,61 +191,431 @@ type Placeholder = {
   custom_ordinal_format?: string;
   source_logic?: 'all' | 'priority'
   linked_document_ids?: string[];
-  checklist_display_format?: 'bullets' | 'checkboxes' | 'table';
-  // NEW: Data source configuration - now supports multiple sources with entity contexts
-  checklist_data_sources?: Array<{
-    table: 'acc_portal_kyc_uploads' | 'acc_portal_directors_documents';
-    linking_variable: string; // e.g., 'company_id', 'director_id', 'individual_id'
-    id: string; // unique identifier for this mapping
-    entity_types: EntityType[]; // entity context for this specific data source
-    computed_function?: string; // computed function for this data source
-    linked_document_ids?: string[]; // documents linked to this data source
-  }>;
-  // NEW: Image size properties
-  image_width?: string;
-  image_height?: string;
-  is_ai_generated?: boolean;
-  ai_prompt?: string;
+  
+  // Document Checklist Configuration (using DocumentChecklistConfig)
+  document_checklist_config?: DocumentChecklistConfig;
+  
+  // Image Configuration (using ImageConfig)
+  image_config?: ImageConfig;
+  
+  // Shared Media Configuration (using BaseMediaConfig)
+  media_config?: BaseMediaConfig;
+  
+  // Other existing fields
   master_field_ids?: number[];
   linked_job_question_ids?: string[]; // Plural
   linked_requirement_ids?: string[];
   default_value?: string;
-  computed_function?: string;
-  execution_mode?: 'all' | 'latest';
-  // NEW: Image-specific fields for data extraction
-  source_table?: string;
-  linking_variable?: "id" | "individual_id" | "director_id" | "document_id" | "company_id" | null;
-  linked_master_field_id?: string;
 };
 
 const getCleanText = (str: string) => str.replace(/<[^>]+>/g, '');
+
+// Helper function to render job questions with sub_questions support
+function renderJobQuestionOptions(jobQuestions: JobQuestion[], searchQuery?: string) {
+  // If no search query, render all questions normally
+  if (!searchQuery?.trim()) {
+    return jobQuestions.map(q => {
+      if (q.type === 'field_group' && q.sub_questions?.length) {
+        return (
+          <React.Fragment key={q.id}>
+            <SelectItem value={q.id} className="font-semibold text-purple-700">
+              📁 {q.label}
+            </SelectItem>
+            {q.sub_questions.map(sub => (
+              <SelectItem key={sub.id} value={sub.id} className="pl-6 text-sm text-slate-600">
+                📄 {sub.label}
+              </SelectItem>
+            ))}
+          </React.Fragment>
+        );
+      }
+      return (
+        <SelectItem key={q.id} value={q.id}>
+          {q.label}
+        </SelectItem>
+      );
+    });
+  }
+
+  // With search query, filter and show matching field groups with their matching sub-questions
+  const searchLower = searchQuery.toLowerCase();
+  
+  return jobQuestions.map(q => {
+    if (q.type === 'field_group' && q.sub_questions?.length) {
+      const groupMatches = q.label.toLowerCase().includes(searchLower);
+      const matchingSubQuestions = q.sub_questions.filter(sub => 
+        sub.label.toLowerCase().includes(searchLower)
+      );
+      
+      // Show field group if group name matches OR has matching sub-questions
+      if (groupMatches || matchingSubQuestions.length > 0) {
+        return (
+          <React.Fragment key={q.id}>
+            <SelectItem value={q.id} className="font-semibold text-purple-700">
+              📁 {q.label}
+            </SelectItem>
+            {/* Show only matching sub-questions, or all if group matches */}
+            {(groupMatches ? q.sub_questions : matchingSubQuestions).map(sub => (
+              <SelectItem key={sub.id} value={sub.id} className="pl-6 text-sm text-slate-600">
+                📄 {sub.label}
+              </SelectItem>
+            ))}
+          </React.Fragment>
+        );
+      }
+      
+      // Don't show field group if no matches
+      return null;
+    }
+    
+    // Regular questions - show only if they match
+    const matches = q.label.toLowerCase().includes(searchLower);
+    return matches ? (
+      <SelectItem key={q.id} value={q.id}>
+        {q.label}
+      </SelectItem>
+    ) : null;
+  }).filter(Boolean);
+}
+
+// Shared Media Data Source Component for common functionality
+function MediaDataSource({
+  config,
+  onChange,
+  tables,
+  loadingTables,
+  documentTypes,
+  masterFields,
+  showEntityTypes = true,
+  showDocumentLinks = false,
+  showComputedFunction = true,
+  showDimensions = false,
+  showAI = false,
+  showMasterFieldSync = false,
+  title = "Data Source Configuration"
+}: {
+  config: BaseMediaConfig;
+  onChange: (updates: Partial<BaseMediaConfig>) => void;
+  tables: TableOption[];
+  loadingTables: boolean;
+  documentTypes: any[];
+  masterFields: JobField[];
+  showEntityTypes?: boolean;
+  showDocumentLinks?: boolean;
+  showComputedFunction?: boolean;
+  showDimensions?: boolean;
+  showAI?: boolean;
+  showMasterFieldSync?: boolean;
+  title?: string;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <Database className="h-4 w-4 text-blue-600" />
+        <Label className="text-sm font-medium text-blue-800">{title}</Label>
+      </div>
+
+      {/* Source Table Selection */}
+      <div className="space-y-2">
+        <Label className="text-xs font-bold text-slate-500">Source Table</Label>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button variant="outline" className="w-full justify-between border-dashed border-2 hover:border-primary hover:bg-slate-50 transition-all">
+              <span className="text-slate-400">
+                {config.source_table ? tables.find(t => t.name === config.source_table)?.label || config.source_table : "Select source table..."}
+              </span>
+              <Search className="h-4 w-4 opacity-50" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-[450px] p-0" align="start">
+            <Command>
+              <CommandInput placeholder="Search tables..." />
+              <CommandList>
+                {loadingTables ? (
+                  <div className="px-2 py-4 text-center text-sm text-slate-500">Loading tables...</div>
+                ) : tables.length > 0 ? (
+                  <CommandGroup className="max-h-[300px] overflow-y-auto">
+                    {tables.map(table => (
+                      <CommandItem key={table.name} onSelect={() => onChange({ source_table: table.name })}>
+                        <Check className={cn("mr-2 h-4 w-4", config.source_table === table.name ? "opacity-100" : "opacity-0")} />
+                        {table.label}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                ) : (
+                  <div className="px-2 py-4 text-center text-sm text-slate-500">No tables available</div>
+                )}
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      {/* Linking Variable */}
+      {config.source_table && (
+        <div className="space-y-2">
+          <Label className="text-xs font-bold text-slate-500">Linking Variable</Label>
+          <Select value={config.linking_variable || ''} onValueChange={(value) => onChange({ linking_variable: value || null })}>
+            <SelectTrigger className="bg-white h-9">
+              <SelectValue placeholder="Select linking variable..." />
+            </SelectTrigger>
+            <SelectContent>
+              {LINKING_VARIABLES.map(variable => (
+                <SelectItem key={variable.value} value={variable.value}>
+                  {variable.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      {/* Document Types */}
+      <div className="space-y-2">
+        <Label className="text-xs font-bold text-slate-500">Document Types</Label>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" className="w-full justify-between border-dashed border-2 hover:border-primary hover:bg-slate-50 transition-all">
+              <span className="text-slate-400">
+                {config.document_type_ids?.length > 0
+                  ? `${config.document_type_ids.length} document type${config.document_type_ids.length > 1 ? 's' : ''} selected`
+                  : "Select document types..."
+                }
+              </span>
+              <ChevronDown className="h-4 w-4 opacity-50" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="w-[350px] max-h-[250px] overflow-y-auto">
+            {documentTypes.map(docType => (
+              <DropdownMenuCheckboxItem
+                key={docType.id}
+                checked={config.document_type_ids?.includes(docType.id) || false}
+                onCheckedChange={(checked) => {
+                  const current = config.document_type_ids || [];
+                  const updated = checked
+                    ? [...current, docType.id]
+                    : current.filter(id => id !== docType.id);
+                  onChange({ document_type_ids: updated });
+                }}
+              >
+                <div className="flex items-center gap-2">
+                  <FileText className="h-3 w-3 text-slate-400" />
+                  <span className="text-sm">{docType.display_name || docType.name}</span>
+                  {docType.description && (
+                    <span className="text-xs text-slate-400 ml-1">({docType.description})</span>
+                  )}
+                </div>
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {config.document_type_ids && config.document_type_ids.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-2">
+            {config.document_type_ids.map(typeId => {
+              const docType = documentTypes.find(dt => dt.id === typeId);
+              return docType ? (
+                <Badge key={typeId} variant="secondary" className="text-xs px-2 py-1 bg-amber-50 text-amber-700 border-amber-200">
+                  <FileText className="h-3 w-3 mr-1" />
+                  {docType.display_name || docType.name}
+                  <button
+                    onClick={() => {
+                      const updated = config.document_type_ids?.filter(id => id !== typeId) || [];
+                      onChange({ document_type_ids: updated });
+                    }}
+                    className="ml-1 hover:text-red-600"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              ) : null;
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Entity Types */}
+      {showEntityTypes && (
+        <div className="space-y-2">
+          <Label className="text-xs font-bold text-slate-500">Entity Types</Label>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="w-full justify-between border-dashed border-2 hover:border-primary hover:bg-slate-50 transition-all">
+                <span className="text-slate-400">
+                  {config.entity_types?.length > 0
+                    ? config.entity_types.map(et => ENTITY_TYPES.find(t => t.value === et)?.label || et).join(', ')
+                    : "Select entity types..."
+                  }
+                </span>
+                <ChevronDown className="h-4 w-4 opacity-50" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-[300px] max-h-[200px] overflow-y-auto">
+              {ENTITY_TYPES.map(entity => (
+                <DropdownMenuCheckboxItem
+                  key={entity.value}
+                  checked={config.entity_types?.includes(entity.value) || false}
+                  onCheckedChange={(checked) => {
+                    const current = config.entity_types || [];
+                    const updated = checked
+                      ? [...current, entity.value]
+                      : current.filter(et => et !== entity.value);
+                    onChange({ entity_types: updated });
+                  }}
+                >
+                  <span className="text-sm">{entity.label}</span>
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
+
+      {/* Computed Function */}
+      {showComputedFunction && (
+        <div className="pt-4 border-t">
+          <div className="space-y-2">
+            <Label className="text-xs font-bold text-slate-500">Extraction / Computed Function</Label>
+            <Select value={config.computed_function || 'none'} onValueChange={(v) => {
+              const updates: Partial<BaseMediaConfig> = { computed_function: v };
+
+              if (v === 'none') {
+                updates.execution_mode = 'latest';
+              } else if (v.includes('Latest')) {
+                updates.execution_mode = 'latest';
+              } else {
+                updates.execution_mode = 'all';
+              }
+
+              onChange(updates);
+            }}>
+              <SelectTrigger className="bg-white h-9">
+                <SelectValue placeholder="Select extraction function..." />
+              </SelectTrigger>
+              <SelectContent>
+                {COMPUTED_FUNCTIONS.map(fn => (
+                  <SelectItem key={fn.value} value={fn.value}>
+                    {fn.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      )}
+
+      {/* Image Dimensions */}
+      {showDimensions && (
+        <div className="grid grid-cols-2 gap-4 p-4 bg-green-50 rounded-xl border border-green-100">
+          <div className="space-y-2">
+            <Label className="text-[11px] font-bold text-green-700">Image Width</Label>
+            <Input className="bg-white" placeholder="e.g. 200px" />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-[11px] font-bold text-green-700">Image Height</Label>
+            <Input className="bg-white" placeholder="e.g. 150px" />
+          </div>
+        </div>
+      )}
+
+      {/* AI Refinement */}
+      {showAI && (
+        <div className="space-y-4 border-t pt-4">
+          <div className="flex items-center space-x-2">
+            <Checkbox id="is_ai" />
+            <Label htmlFor="is_ai" className="text-purple-700 font-bold flex items-center gap-2 uppercase text-[11px] tracking-wider">
+              <Sparkles className="h-4 w-4" /> Enable AI Refinement
+            </Label>
+          </div>
+          <Textarea
+            className="bg-purple-50/30 border-purple-100"
+            placeholder="Prompt: Rewrite the source data to be more professional..."
+          />
+        </div>
+      )}
+
+      {/* Master Field Sync */}
+      {showMasterFieldSync && (
+        <div className="space-y-1.5">
+          <Label className="text-[10px] uppercase font-bold text-blue-600">Master Field Sync</Label>
+          <Select value="none" onValueChange={() => {}}>
+            <SelectTrigger className="h-9"><SelectValue placeholder="Link field..." /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">None</SelectItem>
+              {masterFields.map(mf => (
+                <SelectItem key={mf.id} value={String(mf.id)}>{mf.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Centralized Master Database Field Picker Component
 function MasterFieldPicker({
   masterFields,
+  allowMultiple = false,
+  selectedFieldId,
   selectedFieldIds = [],
   onSelect,
-  onRemove,
+  onMultipleSelect,
   onClear,
+  placeholder = "Select master fields...",
 }: {
   masterFields: JobField[];
+  allowMultiple?: boolean;
+  selectedFieldId?: number;
   selectedFieldIds?: number[];
-  onSelect: (fieldId: number) => void;
-  onRemove: (fieldId: number) => void;
-  onClear: () => void;
+  onSelect?: (field: JobField) => void;
+  onMultipleSelect?: (fieldIds: number[]) => void;
+  onClear?: () => void;
+  placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
+
+  // Handle selection state
+  const currentSelection = useMemo(() => {
+    if (allowMultiple) return selectedFieldIds;
+    if (selectedFieldId) return [selectedFieldId];
+    return [];
+  }, [allowMultiple, selectedFieldId, selectedFieldIds]);
+
   const selectedFields = useMemo(() =>
-    masterFields.filter(f => selectedFieldIds.includes(f.id)),
-    [masterFields, selectedFieldIds]);
+    masterFields.filter(f => currentSelection.includes(f.id)),
+    [masterFields, currentSelection]);
 
   const filteredFields = useMemo(() => {
-    if (!search) return masterFields;
+    if (!search?.trim()) return masterFields;
     const searchLower = search.toLowerCase();
     return masterFields.filter(field =>
       field.label.toLowerCase().includes(searchLower) ||
       field.field_key.toLowerCase().includes(searchLower)
     );
   }, [masterFields, search]);
+
+  const handleSingleSelect = (field: JobField) => {
+    onSelect?.(field);
+    setOpen(false);
+  };
+
+  const handleMultipleSelect = (fieldId: number) => {
+    const isSelected = currentSelection.includes(fieldId);
+    const newSelection = isSelected
+      ? currentSelection.filter(id => id !== fieldId)
+      : [...currentSelection, fieldId];
+    onMultipleSelect?.(newSelection);
+  };
+
+  const handleClear = () => {
+    if (allowMultiple) {
+      onMultipleSelect?.([]);
+    } else if (selectedFieldId) {
+      onSelect?.(undefined as any);
+    }
+    onClear?.();
+  };
 
   return (
     <div className="space-y-2">
@@ -199,8 +625,11 @@ function MasterFieldPicker({
             <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between">
               <span className="truncate">
                 {selectedFields.length > 0
-                  ? `${selectedFields.length} field${selectedFields.length > 1 ? 's' : ''} selected`
-                  : "Select master fields..."}
+                  ? allowMultiple
+                    ? `${selectedFields.length} field${selectedFields.length > 1 ? 's' : ''} selected`
+                    : selectedFields[0]?.label || "Select master field..."
+                  : placeholder
+                }
               </span>
               <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
             </Button>
@@ -216,16 +645,16 @@ function MasterFieldPicker({
                 <CommandEmpty>No master fields found.</CommandEmpty>
                 <CommandGroup className="max-h-[300px] overflow-y-auto">
                   {filteredFields.map((field) => {
-                    const isSelected = selectedFieldIds.includes(field.id);
+                    const isSelected = currentSelection.includes(field.id);
                     return (
                       <CommandItem
                         key={field.id}
                         value={field.label}
                         onSelect={() => {
-                          if (isSelected) {
-                            onRemove(field.id);
+                          if (allowMultiple) {
+                            handleMultipleSelect(field.id);
                           } else {
-                            onSelect(field.id);
+                            handleSingleSelect(field);
                           }
                         }}
                         className="cursor-pointer"
@@ -254,7 +683,7 @@ function MasterFieldPicker({
             className="h-9 w-9"
             onClick={(e) => {
               e.stopPropagation();
-              onClear();
+              handleClear();
             }}
           >
             <X className="h-4 w-4 text-muted-foreground" />
@@ -263,20 +692,24 @@ function MasterFieldPicker({
       </div>
 
       {selectedFields.length > 0 && (
-        <div className="flex flex-wrap gap-2 mt-2">
-          {selectedFields.map(field => (
+        <div className="flex flex-wrap gap-1.5">
+          {selectedFields.map((field) => (
             <Badge
               key={field.id}
               variant="secondary"
-              className="flex items-center gap-1.5 pr-1.5"
+              className="flex items-center gap-1.5 pr-1.5 bg-blue-50 text-blue-700 border-blue-200"
             >
-              <Link2 className="h-3 w-3" />
+              <Database className="h-3 w-3" />
               <span className="max-w-[200px] truncate">{field.label}</span>
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onRemove(field.id);
+                  if (allowMultiple) {
+                    handleMultipleSelect(field.id);
+                  } else {
+                    handleClear();
+                  }
                 }}
                 className="ml-1 rounded-full p-0.5 hover:bg-muted"
               >
@@ -290,43 +723,137 @@ function MasterFieldPicker({
   );
 }
 
+// Centralized JobQuestionPicker component
+interface JobQuestionPickerProps {
+  jobQuestions: JobQuestion[];
+  selectedQuestionId?: string;
+  onSelect: (question: JobQuestion) => void;
+  onClear?: () => void;
+  placeholder?: string;
+  allowMultiple?: boolean;
+  selectedQuestionIds?: string[];
+  onMultipleSelect?: (questionIds: string[]) => void;
+  className?: string;
+}
+
 function JobQuestionPicker({
   jobQuestions,
   selectedQuestionId,
   onSelect,
   onClear,
-}: {
-  jobQuestions: JobQuestion[];
-  selectedQuestionId?: string;
-  onSelect: (question: JobQuestion) => void;
-  onClear: () => void;
-}) {
+  placeholder = "Select job question...",
+  allowMultiple = false,
+  selectedQuestionIds = [],
+  onMultipleSelect,
+  className = ""
+}: JobQuestionPickerProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
+  
   const selectedQuestion = useMemo(() =>
     jobQuestions.find(q => q.id === selectedQuestionId),
     [jobQuestions, selectedQuestionId]);
 
+  const selectedQuestions = useMemo(() =>
+    jobQuestions.filter(q => selectedQuestionIds.includes(q.id)),
+    [jobQuestions, selectedQuestionIds]);
+
   const filteredQuestions = useMemo(() => {
     if (!search) return jobQuestions;
     const searchLower = search.toLowerCase();
-    return jobQuestions.filter(question =>
-      question.label.toLowerCase().includes(searchLower) ||
-      question.type.toLowerCase().includes(searchLower)
-    );
+    
+    return jobQuestions.map(question => {
+      // If it's a field group, check if the group name matches or any sub-question matches
+      if (question.type === 'field_group' && question.sub_questions?.length) {
+        const groupMatches = question.label.toLowerCase().includes(searchLower) ||
+                           question.type.toLowerCase().includes(searchLower);
+        
+        const matchingSubQuestions = question.sub_questions.filter(sub => 
+          sub.label.toLowerCase().includes(searchLower) ||
+          sub.type.toLowerCase().includes(searchLower)
+        );
+        
+        // If group matches or has matching sub-questions, return the question with appropriate sub-questions
+        if (groupMatches || matchingSubQuestions.length > 0) {
+          return {
+            ...question,
+            sub_questions: groupMatches ? question.sub_questions : matchingSubQuestions,
+            // Add a flag to indicate this is a search result with matches
+            _hasMatchingSubQuestions: matchingSubQuestions.length > 0 && !groupMatches
+          };
+        }
+        
+        // If no matches, exclude this field group
+        return null;
+      }
+      
+      // For regular questions, check if they match
+      const matches = question.label.toLowerCase().includes(searchLower) ||
+                     question.type.toLowerCase().includes(searchLower);
+      
+      return matches ? question : null;
+    }).filter(Boolean) as (JobQuestion & { _hasMatchingSubQuestions?: boolean })[];
   }, [jobQuestions, search]);
 
+  // Helper function to render questions with sub_questions
+  const renderQuestionItem = (question: JobQuestion, isSubQuestion = false) => {
+    const isSelected = allowMultiple 
+      ? selectedQuestionIds.includes(question.id)
+      : selectedQuestionId === question.id;
+    const indentClass = isSubQuestion ? 'pl-6' : '';
+    const iconClass = isSubQuestion ? '📄' : question.type === 'field_group' ? '📁' : '📝';
+    const textClass = isSubQuestion ? 'text-sm text-slate-600' : question.type === 'field_group' ? 'font-semibold text-purple-700' : 'font-medium';
+    
+    return (
+      <CommandItem
+        key={question.id}
+        value={question.label}
+        onSelect={() => {
+          if (allowMultiple && onMultipleSelect) {
+            const currentIds = [...selectedQuestionIds];
+            if (isSelected) {
+              onMultipleSelect(currentIds.filter(id => id !== question.id));
+            } else {
+              onMultipleSelect([...currentIds, question.id]);
+            }
+          } else {
+            onSelect(question);
+            setOpen(false);
+          }
+        }}
+        className={`cursor-pointer ${indentClass}`}
+      >
+        <div className="flex items-center">
+          <div className={`mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary ${isSelected ? 'bg-primary text-primary-foreground' : 'opacity-50'}`}>
+            {isSelected && <Check className="h-3 w-3" />}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs">{iconClass}</span>
+            <div>
+              <div className={textClass}>{question.label}</div>
+              <div className="text-xs text-muted-foreground capitalize">{question.type}</div>
+            </div>
+          </div>
+        </div>
+      </CommandItem>
+    );
+  };
+
+  const displayText = allowMultiple 
+    ? selectedQuestions.length > 0 
+      ? `${selectedQuestions.length} question${selectedQuestions.length > 1 ? 's' : ''} selected`
+      : placeholder
+    : selectedQuestion
+      ? selectedQuestion.label
+      : placeholder;
+
   return (
-    <div className="space-y-2">
+    <div className={`space-y-2 ${className}`}>
       <div className="flex items-center gap-2">
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
             <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between">
-              <span className="truncate">
-                {selectedQuestion
-                  ? selectedQuestion.label
-                  : "Select job question..."}
-              </span>
+              <span className="truncate">{displayText}</span>
               <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
             </Button>
           </PopoverTrigger>
@@ -340,33 +867,25 @@ function JobQuestionPicker({
               <CommandList>
                 <CommandEmpty>No job questions found.</CommandEmpty>
                 <CommandGroup className="max-h-[300px] overflow-y-auto">
-                  {filteredQuestions.map((question) => (
-                    <CommandItem
-                      key={question.id}
-                      value={question.label}
-                      onSelect={() => {
-                        onSelect(question);
-                        setOpen(false);
-                      }}
-                      className="cursor-pointer"
-                    >
-                      <div className="flex items-center">
-                        <div className={`mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary ${selectedQuestionId === question.id ? 'bg-primary text-primary-foreground' : 'opacity-50'}`}>
-                          {selectedQuestionId === question.id && <Check className="h-3 w-3" />}
-                        </div>
-                        <div>
-                          <div className="font-medium">{question.label}</div>
-                          <div className="text-xs text-muted-foreground capitalize">{question.type}</div>
-                        </div>
-                      </div>
-                    </CommandItem>
-                  ))}
+                  {filteredQuestions.map((question) => {
+                    if (question.type === 'field_group' && question.sub_questions?.length) {
+                      return (
+                        <React.Fragment key={question.id}>
+                          {renderQuestionItem(question)}
+                          {question.sub_questions.map(subQuestion => 
+                            renderQuestionItem(subQuestion, true)
+                          )}
+                        </React.Fragment>
+                      );
+                    }
+                    return renderQuestionItem(question);
+                  })}
                 </CommandGroup>
               </CommandList>
             </Command>
           </PopoverContent>
         </Popover>
-        {selectedQuestion && (
+        {((!allowMultiple && selectedQuestion) || (allowMultiple && selectedQuestions.length > 0)) && onClear && (
           <Button
             variant="ghost"
             size="icon"
@@ -381,7 +900,33 @@ function JobQuestionPicker({
         )}
       </div>
 
-      {selectedQuestion && (
+      {/* Display selected items */}
+      {allowMultiple && selectedQuestions.length > 0 && (
+        <div className="flex flex-wrap gap-2 mt-2">
+          {selectedQuestions.map(question => (
+            <Badge
+              key={question.id}
+              variant="secondary"
+              className="flex items-center gap-1.5 pr-1.5 bg-purple-50 text-purple-700 border-purple-200"
+            >
+              <HelpCircle className="h-3 w-3" />
+              <span className="max-w-[200px] truncate">{question.label}</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMultipleSelect?.(selectedQuestionIds.filter(id => id !== question.id));
+                }}
+                className="ml-1 rounded-full p-0.5 hover:bg-purple-100"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          ))}
+        </div>
+      )}
+
+      {!allowMultiple && selectedQuestion && (
         <div className="flex flex-wrap gap-2 mt-2">
           <Badge
             variant="secondary"
@@ -726,30 +1271,69 @@ function DocumentPicker({
   );
 }
 
+// Centralized Requirement Picker Component
 function RequirementPicker({
   requirements,
+  allowMultiple = false,
   selectedRequirementId,
+  selectedRequirementIds = [],
   onSelect,
+  onMultipleSelect,
   onClear,
+  placeholder = "Select requirement...",
 }: {
   requirements: Requirement[];
+  allowMultiple?: boolean;
   selectedRequirementId?: string;
-  onSelect: (requirement: Requirement) => void;
-  onClear: () => void;
+  selectedRequirementIds?: string[];
+  onSelect?: (requirement: Requirement) => void;
+  onMultipleSelect?: (requirementIds: string[]) => void;
+  onClear?: () => void;
+  placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const selectedRequirement = useMemo(() =>
-    requirements.find(r => r.id === selectedRequirementId),
-    [requirements, selectedRequirementId]);
+
+  // Handle selection state
+  const currentSelection = useMemo(() => {
+    if (allowMultiple) return selectedRequirementIds;
+    if (selectedRequirementId) return [selectedRequirementId];
+    return [];
+  }, [allowMultiple, selectedRequirementId, selectedRequirementIds]);
+
+  const selectedRequirements = useMemo(() =>
+    requirements.filter(r => currentSelection.includes(r.id)),
+    [requirements, currentSelection]);
 
   const filteredRequirements = useMemo(() => {
-    if (!search) return requirements;
+    if (!search?.trim()) return requirements;
     const searchLower = search.toLowerCase();
     return requirements.filter(requirement =>
       requirement.label.toLowerCase().includes(searchLower)
     );
   }, [requirements, search]);
+
+  const handleSingleSelect = (requirement: Requirement) => {
+    onSelect?.(requirement);
+    setOpen(false);
+  };
+
+  const handleMultipleSelect = (requirementId: string) => {
+    const isSelected = currentSelection.includes(requirementId);
+    const newSelection = isSelected
+      ? currentSelection.filter(id => id !== requirementId)
+      : [...currentSelection, requirementId];
+    onMultipleSelect?.(newSelection);
+  };
+
+  const handleClear = () => {
+    if (allowMultiple) {
+      onMultipleSelect?.([]);
+    } else if (selectedRequirementId) {
+      onSelect?.(undefined as any);
+    }
+    onClear?.();
+  };
 
   return (
     <div className="space-y-2">
@@ -758,9 +1342,12 @@ function RequirementPicker({
           <PopoverTrigger asChild>
             <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between">
               <span className="truncate">
-                {selectedRequirement
-                  ? selectedRequirement.label
-                  : "Select requirement..."}
+                {selectedRequirements.length > 0
+                  ? allowMultiple
+                    ? `${selectedRequirements.length} requirement${selectedRequirements.length > 1 ? 's' : ''} selected`
+                    : selectedRequirements[0]?.label || "Select requirement..."
+                  : placeholder
+                }
               </span>
               <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
             </Button>
@@ -775,44 +1362,50 @@ function RequirementPicker({
               <CommandList>
                 <CommandEmpty>No requirements found.</CommandEmpty>
                 <CommandGroup className="max-h-[300px] overflow-y-auto">
-                  {filteredRequirements.map((requirement) => (
-                    <CommandItem
-                      key={requirement.id}
-                      value={requirement.label}
-                      onSelect={() => {
-                        onSelect(requirement);
-                        setOpen(false);
-                      }}
-                      className="cursor-pointer"
-                    >
-                      <div className="flex items-center">
-                        <div className={`mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary ${selectedRequirementId === requirement.id ? 'bg-primary text-primary-foreground' : 'opacity-50'}`}>
-                          {selectedRequirementId === requirement.id && <Check className="h-3 w-3" />}
+                  {filteredRequirements.map((requirement) => {
+                    const isSelected = currentSelection.includes(requirement.id);
+                    return (
+                      <CommandItem
+                        key={requirement.id}
+                        value={requirement.label}
+                        onSelect={() => {
+                          if (allowMultiple) {
+                            handleMultipleSelect(requirement.id);
+                          } else {
+                            handleSingleSelect(requirement);
+                          }
+                        }}
+                        className="cursor-pointer"
+                      >
+                        <div className="flex items-center">
+                          <div className={`mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary ${isSelected ? 'bg-primary text-primary-foreground' : 'opacity-50'}`}>
+                            {isSelected && <Check className="h-3 w-3" />}
+                          </div>
+                          <div>
+                            <div className="font-medium">{requirement.label}</div>
+                            {requirement.document_ids && requirement.document_ids.length > 0 && (
+                              <div className="text-xs text-muted-foreground">
+                                {requirement.document_ids.length} document(s)
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        <div>
-                          <div className="font-medium">{requirement.label}</div>
-                          {requirement.document_ids && requirement.document_ids.length > 0 && (
-                            <div className="text-xs text-muted-foreground">
-                              {requirement.document_ids.length} document(s)
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </CommandItem>
-                  ))}
+                      </CommandItem>
+                    );
+                  })}
                 </CommandGroup>
               </CommandList>
             </Command>
           </PopoverContent>
         </Popover>
-        {selectedRequirement && (
+        {selectedRequirements.length > 0 && (
           <Button
             variant="ghost"
             size="icon"
             className="h-9 w-9"
             onClick={(e) => {
               e.stopPropagation();
-              onClear();
+              handleClear();
             }}
           >
             <X className="h-4 w-4 text-muted-foreground" />
@@ -820,15 +1413,32 @@ function RequirementPicker({
         )}
       </div>
 
-      {selectedRequirement && (
-        <div className="flex flex-wrap gap-2 mt-2">
-          <Badge
-            variant="secondary"
-            className="flex items-center gap-1.5 pr-1.5 bg-green-50 text-green-700 border-green-200"
-          >
-            <Database className="h-3 w-3" />
-            <span className="max-w-[200px] truncate">{selectedRequirement.label}</span>
-          </Badge>
+      {selectedRequirements.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {selectedRequirements.map((requirement) => (
+            <Badge
+              key={requirement.id}
+              variant="secondary"
+              className="flex items-center gap-1.5 pr-1.5 bg-green-50 text-green-700 border-green-200"
+            >
+              <FileText className="h-3 w-3" />
+              <span className="max-w-[200px] truncate">{requirement.label}</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (allowMultiple) {
+                    handleMultipleSelect(requirement.id);
+                  } else {
+                    handleClear();
+                  }
+                }}
+                className="ml-1 rounded-full p-0.5 hover:bg-muted"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          ))}
         </div>
       )}
     </div>
@@ -984,7 +1594,7 @@ export default function DocumentTemplateManager({
     id: '',
     name: '',
     description: '',
-    display_value: '',
+    display_value: '',  
     type: 'text',
     required: false,
     entity_type: [],
@@ -1022,6 +1632,7 @@ export default function DocumentTemplateManager({
   // Table data hook for fetching available tables
   const { tables, loadingTables } = useTableData();
   const [kycDocuments, setKycDocuments] = useState<any[]>([]);
+  const [documentTypes, setDocumentTypes] = useState<any[]>([]);
 
   // Extract scalar fields from conditional template
   const extractScalarFields = (templateContent: string): string[] => {
@@ -1317,6 +1928,7 @@ export default function DocumentTemplateManager({
       fetchMasterFields();
       fetchJobQuestions();
       fetchKycDocuments();
+      fetchDocumentTypes();
       const initialData = initialTemplates?.map(t => ({
         ...t,
         name: t.file_name,
@@ -1341,11 +1953,27 @@ export default function DocumentTemplateManager({
     }
   };
 
+  const fetchDocumentTypes = async () => {
+    try {
+      const { data, error } = await supabase.from('acc_portal_kyc').select('*').order('display_name');
+      if (error) throw error;
+      setDocumentTypes(data || []);
+    } catch (error) {
+      console.error('Error fetching document types:', error);
+      setDocumentTypes([]);
+    }
+  };
+
   const validateTemplate = async (file: File): Promise<boolean> => {
     try {
       const arrayBuffer = await file.arrayBuffer();
       const zip = new PizZip(arrayBuffer);
+      // Word stores main content in document.xml
+      let xmlContent = zip.files['word/document.xml'].asText();
 
+      // Check for additional content files (header.xml, footer.xml)
+      let headerContent = '';
+      let footerContent = '';
       // Check if the file contains the required document.xml
       const fileList = Object.keys(zip.files);
       const hasDocumentXml = fileList.some(file =>
@@ -2851,7 +3479,23 @@ export default function DocumentTemplateManager({
                   <Label className="text-[11px] font-black uppercase text-slate-400">Placeholder Type</Label>
                   <Select
                     value={newPlaceholder.type}
-                    onValueChange={(v) => setNewPlaceholder({ ...newPlaceholder, type: v })}
+                    onValueChange={(v) => {
+                      const updates: Partial<Placeholder> = { type: v as any };
+                      
+                      // Initialize checklist_data_sources when document_checklist is selected
+                      if (v === 'document_checklist' && (!newPlaceholder.checklist_data_sources || newPlaceholder.checklist_data_sources.length === 0)) {
+                        updates.checklist_data_sources = [{
+                          id: `ds_${Date.now()}`,
+                          table: 'acc_portal_kyc_uploads',
+                          linking_variable: 'company_id',
+                          entity_types: ['company'],
+                          computed_function: 'none',
+                          linked_document_ids: []
+                        }];
+                      }
+                      
+                      setNewPlaceholder({ ...newPlaceholder, ...updates });
+                    }}
                   >
                     <SelectTrigger className="bg-white">
                       <SelectValue />
@@ -2994,7 +3638,7 @@ export default function DocumentTemplateManager({
                   <div className="flex items-center justify-between border-b border-indigo-100 pb-2">
                     <div className="space-y-0.5">
                       <Label className="text-[11px] font-black uppercase text-indigo-600">Logic Blocks (Conditional Sections)</Label>
-                      <p className="text-[10px] text-indigo-400">Define sections that only appear if the linked data exists.</p>
+                      <p className="text-[10px] text-indigo-400">Define sections that appear based on data existence or value comparisons.</p>
                     </div>
                     <Button
                       type="button"
@@ -3067,28 +3711,130 @@ export default function DocumentTemplateManager({
                           </div>
                         </div>
 
-                        <div className="space-y-1.5 pt-1">
-                          <Label className="text-[10px] uppercase font-bold text-slate-400">Trigger: If this field has data...</Label>
-                          <MasterFieldPicker
-                            masterFields={masterFields}
-                            selectedFieldIds={cond.master_field_id ? [cond.master_field_id] : []}
-                            onSelect={(fieldId) => {
-                              const updated = [...newPlaceholder.conditions];
-                              updated[idx].master_field_id = fieldId;
-                              setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
-                            }}
-                            onRemove={() => {
-                              const updated = [...newPlaceholder.conditions];
-                              delete updated[idx].master_field_id;
-                              setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
-                            }}
-                            onClear={() => {
-                              const updated = [...newPlaceholder.conditions];
-                              delete updated[idx].master_field_id;
-                              setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
-                            }}
-                          />
+                        {/* NEW: Condition Type Toggle */}
+                        <div className="space-y-2 pt-1">
+                          <Label className="text-[10px] uppercase font-bold text-slate-400">Condition Type</Label>
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant={!cond.comparison ? "default" : "outline"}
+                              size="sm"
+                              className="flex-1 h-7 text-xs"
+                              onClick={() => {
+                                const updated = [...newPlaceholder.conditions];
+                                delete updated[idx].comparison;
+                                setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                              }}
+                            >
+                              <Database className="h-3 w-3 mr-1" />
+                              Field Exists
+                            </Button>
+                            <Button
+                              type="button"
+                              variant={cond.comparison ? "default" : "outline"}
+                              size="sm"
+                              className="flex-1 h-7 text-xs"
+                              onClick={() => {
+                                const updated = [...newPlaceholder.conditions];
+                                updated[idx].comparison = { field: '', operator: 'equals', value: '' };
+                                setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                              }}
+                            >
+                              <Code className="h-3 w-3 mr-1" />
+                              Value Comparison
+                            </Button>
+                          </div>
                         </div>
+
+                        {/* Existing: Field Exists Logic */}
+                        {!cond.comparison && (
+                          <div className="space-y-1.5 pt-1">
+                            <Label className="text-[10px] uppercase font-bold text-slate-400">Trigger: If this field has data...</Label>
+                            <MasterFieldPicker
+                              masterFields={masterFields}
+                              selectedFieldIds={cond.master_field_id ? [cond.master_field_id] : []}
+                              onSelect={(fieldId) => {
+                                const updated = [...newPlaceholder.conditions];
+                                updated[idx].master_field_id = fieldId;
+                                setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                              }}
+                              onRemove={() => {
+                                const updated = [...newPlaceholder.conditions];
+                                delete updated[idx].master_field_id;
+                                setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                              }}
+                              onClear={() => {
+                                const updated = [...newPlaceholder.conditions];
+                                delete updated[idx].master_field_id;
+                                setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                              }}
+                            />
+                          </div>
+                        )}
+
+                        {/* NEW: Value Comparison Logic */}
+                        {cond.comparison && (
+                          <div className="space-y-2 pt-1">
+                            <Label className="text-[10px] uppercase font-bold text-slate-400">Comparison Logic</Label>
+                            <div className="grid grid-cols-3 gap-2">
+                              <div className="space-y-1">
+                                <Label className="text-[9px] text-slate-500">Field</Label>
+                                <Select
+                                  value={cond.comparison?.field || ''}
+                                  onValueChange={(value) => {
+                                    const updated = [...newPlaceholder.conditions];
+                                    updated[idx].comparison = { ...updated[idx].comparison, field: value };
+                                    setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                                  }}
+                                >
+                                  <SelectTrigger className="h-7">
+                                    <SelectValue placeholder="Select field..." />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {masterFields.map(field => (
+                                      <SelectItem key={field.field_key} value={field.field_key}>
+                                        {field.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-[9px] text-slate-500">Operator</Label>
+                                <Select
+                                  value={cond.comparison?.operator || 'equals'}
+                                  onValueChange={(value) => {
+                                    const updated = [...newPlaceholder.conditions];
+                                    updated[idx].comparison = { ...updated[idx].comparison, operator: value as 'equals' | 'not_equals' | 'contains' };
+                                    setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                                  }}
+                                >
+                                  <SelectTrigger className="h-7">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="equals">Equals</SelectItem>
+                                    <SelectItem value="not_equals">Not Equals</SelectItem>
+                                    <SelectItem value="contains">Contains</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-[9px] text-slate-500">Value</Label>
+                                <Input
+                                  placeholder="e.g. Kenya"
+                                  value={cond.comparison?.value || ''}
+                                  onChange={(e) => {
+                                    const updated = [...newPlaceholder.conditions];
+                                    updated[idx].comparison = { ...updated[idx].comparison, value: e.target.value };
+                                    setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
+                                  }}
+                                  className="h-7 text-xs"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
 
                         <div className="mt-2 pt-2 border-t border-slate-50">
                           <div className="flex items-center gap-2 bg-slate-50 px-2 py-1 rounded">
@@ -3178,56 +3924,61 @@ export default function DocumentTemplateManager({
                             {/* Master Field Picker */}
                             <div className="space-y-1">
                               <Label className="text-[9px] text-blue-600 font-bold">Database Field</Label>
-                              <Select
-                                value={cond.master_field_id?.toString() || ''}
-                                onValueChange={(value) => {
+                              <MasterFieldPicker
+                                masterFields={masterFields}
+                                selectedFieldId={cond.master_field_id}
+                                onSelect={(field) => {
                                   const updated = [...newPlaceholder.boolean_conditions];
-                                  const selectedField = masterFields.find(f => f.id === parseInt(value));
                                   updated[idx] = {
                                     ...updated[idx],
-                                    master_field_id: parseInt(value),
+                                    master_field_id: field.id,
                                     linked_job_question_id: undefined, // Clear the other one
-                                    comparison: { field: selectedField?.field_key, operator: 'equals', value: cond.comparison?.value || '' }
+                                    comparison: { field: field.field_key, operator: 'equals', value: cond.comparison?.value || '' }
                                   };
                                   setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
                                 }}
-                              >
-                                <SelectTrigger className="h-8 text-xs bg-white">
-                                  <SelectValue placeholder="Select DB field..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {masterFields.map(field => (
-                                    <SelectItem key={field.id} value={field.id.toString()}>{field.label}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                                onClear={() => {
+                                  const updated = [...newPlaceholder.boolean_conditions];
+                                  updated[idx] = {
+                                    ...updated[idx],
+                                    master_field_id: undefined,
+                                    linked_job_question_id: undefined,
+                                    comparison: { operator: 'equals', value: '' }
+                                  };
+                                  setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
+                                }}
+                                placeholder="Select DB field..."
+                              />
                             </div>
 
                             {/* Job Question Picker */}
                             <div className="space-y-1">
                               <Label className="text-[9px] text-purple-600 font-bold">Job Question</Label>
-                              <Select
-                                value={cond.linked_job_question_id || ''}
-                                onValueChange={(value) => {
+                              <JobQuestionPicker
+                                jobQuestions={jobQuestions}
+                                selectedQuestionId={cond.linked_job_question_id}
+                                onSelect={(question) => {
                                   const updated = [...newPlaceholder.boolean_conditions];
                                   updated[idx] = {
                                     ...updated[idx],
-                                    linked_job_question_id: value,
+                                    linked_job_question_id: question.id,
                                     master_field_id: undefined, // Clear the other one
                                     comparison: { operator: 'equals', value: cond.comparison?.value || '' }
                                   };
                                   setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
                                 }}
-                              >
-                                <SelectTrigger className="h-8 text-xs bg-white">
-                                  <SelectValue placeholder="Select Question..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {jobQuestions.map(q => (
-                                    <SelectItem key={q.id} value={q.id}>{q.label}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                                onClear={() => {
+                                  const updated = [...newPlaceholder.boolean_conditions];
+                                  updated[idx] = {
+                                    ...updated[idx],
+                                    linked_job_question_id: undefined,
+                                    master_field_id: undefined,
+                                    comparison: { operator: 'equals', value: '' }
+                                  };
+                                  setNewPlaceholder(prev => ({ ...prev, boolean_conditions: updated }));
+                                }}
+                                placeholder="Select question..."
+                              />
                             </div>
                           </div>
                         </div>
@@ -3545,6 +4296,119 @@ export default function DocumentTemplateManager({
                   </div>
                 )}
 
+                {newPlaceholder.type === 'if' && (
+                  <div className="space-y-4">
+                    <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 space-y-4">
+                      <div className="flex items-center gap-2">
+                        <Code className="h-4 w-4 text-blue-600" />
+                        <Label className="text-sm font-medium text-blue-800">If Statement Configuration</Label>
+                      </div>
+                      
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="space-y-2">
+                            <Label className="text-xs font-bold text-slate-500">Field</Label>
+                            <Input 
+                              placeholder="e.g., country_of_residence" 
+                              value={newPlaceholder.if_statement?.condition?.field || ''}
+                              onChange={e => setNewPlaceholder(prev => ({
+                                ...prev,
+                                if_statement: {
+                                  ...prev.if_statement,
+                                  condition: {
+                                    ...prev.if_statement?.condition,
+                                    field: e.target.value
+                                  }
+                                }
+                              }))}
+                              className="bg-white h-8 text-xs"
+                            />
+                          </div>
+                          
+                          <div className="space-y-2">
+                            <Label className="text-xs font-bold text-slate-500">Operator</Label>
+                            <Select 
+                              value={newPlaceholder.if_statement?.condition?.operator || 'equals'}
+                              onValueChange={(value) => setNewPlaceholder(prev => ({
+                                ...prev,
+                                if_statement: {
+                                  ...prev.if_statement,
+                                  condition: {
+                                    ...prev.if_statement?.condition,
+                                    operator: value as 'equals' | 'not_equals' | 'contains'
+                                  }
+                                }
+                              }))}
+                            >
+                              <SelectTrigger className="bg-white h-8">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="equals">Equals</SelectItem>
+                                <SelectItem value="not_equals">Not Equals</SelectItem>
+                                <SelectItem value="contains">Contains</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          
+                          <div className="space-y-2">
+                            <Label className="text-xs font-bold text-slate-500">Value</Label>
+                            <Input 
+                              placeholder="e.g., Kenya" 
+                              value={newPlaceholder.if_statement?.condition?.value || ''}
+                              onChange={e => setNewPlaceholder(prev => ({
+                                ...prev,
+                                if_statement: {
+                                  ...prev.if_statement,
+                                  condition: {
+                                    ...prev.if_statement?.condition,
+                                    value: e.target.value
+                                  }
+                                }
+                              }))}
+                              className="bg-white h-8 text-xs"
+                            />
+                          </div>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-2 pt-2 border-t border-blue-200">
+                          <div className="space-y-2">
+                            <Label className="text-xs font-bold text-blue-700">Then Value</Label>
+                            <Input 
+                              placeholder="Value if condition is true" 
+                              value={newPlaceholder.if_statement?.then_value || ''}
+                              onChange={e => setNewPlaceholder(prev => ({
+                                ...prev,
+                                if_statement: {
+                                  ...prev.if_statement,
+                                  then_value: e.target.value
+                                }
+                              }))}
+                              className="bg-white h-8 text-xs"
+                            />
+                          </div>
+                          
+                          <div className="space-y-2">
+                            <Label className="text-xs font-bold text-slate-500">Else Value (Optional)</Label>
+                            <Input 
+                              placeholder="Value if condition is false" 
+                              value={newPlaceholder.if_statement?.else_value || ''}
+                              onChange={e => setNewPlaceholder(prev => ({
+                                ...prev,
+                                if_statement: {
+                                  ...prev.if_statement,
+                                  else_value: e.target.value
+                                }
+                              }))}
+                              className="bg-white h-8 text-xs"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {newPlaceholder.type === 'image' && (
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-4 p-4 bg-green-50 rounded-xl border border-green-100">
@@ -3558,110 +4422,25 @@ export default function DocumentTemplateManager({
                       </div>
                     </div>
 
-                    <div className="bg-green-50/50 p-4 rounded-lg border border-green-100 space-y-4">
-                      <div className="flex items-center gap-2">
-                        <Database className="h-4 w-4 text-green-600" />
-                        <Label className="text-sm font-medium text-green-800">Image Data Extraction</Label>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label className="text-xs font-bold text-slate-500">Source Table</Label>
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <Button variant="outline" className="w-full justify-between border-dashed border-2 hover:border-primary hover:bg-slate-50 transition-all">
-                              <span className="text-slate-400">
-                                {newPlaceholder.source_table ? tables.find(t => t.name === newPlaceholder.source_table)?.label || newPlaceholder.source_table : "Select source table..."}
-                              </span>
-                              <Search className="h-4 w-4 opacity-50" />
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-[450px] p-0" align="start">
-                            <Command>
-                              <CommandInput placeholder="Search tables..." />
-                              <CommandList>
-                                {loadingTables ? (
-                                  <div className="px-2 py-4 text-center text-sm text-slate-500">Loading tables...</div>
-                                ) : tables.length > 0 ? (
-                                  <CommandGroup className="max-h-[300px] overflow-y-auto">
-                                    {tables.map(table => (
-                                      <CommandItem key={table.name} onSelect={() => {
-                                        setNewPlaceholder(prev => ({ ...prev, source_table: table.name }));
-                                      }}>
-                                        <Check className={cn("mr-2 h-4 w-4", newPlaceholder.source_table === table.name ? "opacity-100" : "opacity-0")} />
-                                        {table.label}
-                                      </CommandItem>
-                                    ))}
-                                  </CommandGroup>
-                                ) : (
-                                  <div className="px-2 py-4 text-center text-sm text-slate-500">No tables available</div>
-                                )}
-                              </CommandList>
-                            </Command>
-                          </PopoverContent>
-                        </Popover>
-                      </div>
-
-                      {newPlaceholder.source_table && (
-                        <div className="space-y-2">
-                          <Label className="text-xs font-bold text-slate-500">Linking Variable</Label>
-                          <Select value={newPlaceholder.linking_variable || ''} onValueChange={(value) => setNewPlaceholder(prev => ({ ...prev, linking_variable: value || null }))}>
-                            <SelectTrigger className="bg-white h-9">
-                              <SelectValue placeholder="Select linking variable..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {LINKING_VARIABLES.map(variable => (
-                                <SelectItem key={variable.value} value={variable.value}>
-                                  {variable.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      )}
-
-                      <div className="pt-4 border-t">
-                        <div className="space-y-2">
-                          <Label className="text-xs font-bold text-slate-500">Extraction / Computed Function</Label>
-                          <Select value={newPlaceholder.computed_function || 'none'} onValueChange={(v) => {
-                            const updates: Partial<Placeholder> = { computed_function: v };
-
-                            if (v === 'none') {
-                              updates.execution_mode = 'latest';
-                            } else if (v.includes('Latest')) {
-                              updates.execution_mode = 'latest';
-                            } else {
-                              updates.execution_mode = 'all';
-                            }
-
-                            setNewPlaceholder(prev => ({ ...prev, ...updates }));
-                          }}>
-                            <SelectTrigger className="bg-white h-9">
-                              <SelectValue placeholder="Select extraction function..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {COMPUTED_FUNCTIONS.map(fn => (
-                                <SelectItem key={fn.value} value={fn.value}>
-                                  {fn.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <Label className="text-[10px] uppercase font-bold text-blue-600">Master Field Sync</Label>
-                        <Select value={newPlaceholder.linked_master_field_id || 'none'} onValueChange={(v) => setNewPlaceholder(prev => ({ ...prev, linked_master_field_id: v === 'none' ? undefined : v }))}>
-                          <SelectTrigger className="h-9"><SelectValue placeholder="Link field..." /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">None</SelectItem>
-                            {masterFields.map(mf => (
-                              <SelectItem key={mf.id} value={String(mf.id)}>{mf.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
+                    <MediaDataSource
+                      config={{
+                        source_table: newPlaceholder.source_table,
+                        linking_variable: newPlaceholder.linking_variable,
+                        entity_types: Array.isArray(newPlaceholder.entity_type) ? newPlaceholder.entity_type : [],
+                        computed_function: newPlaceholder.computed_function,
+                        execution_mode: newPlaceholder.execution_mode,
+                        document_type_ids: newPlaceholder.document_type_ids || []
+                      }}
+                      onChange={(updates) => setNewPlaceholder(prev => ({ ...prev, ...updates }))}
+                      tables={tables}
+                      loadingTables={loadingTables}
+                      documentTypes={documentTypes}
+                      masterFields={masterFields}
+                      showDimensions={false}
+                      showAI={true}
+                      showMasterFieldSync={true}
+                      title="Image Data Source"
+                    />
                   </div>
                 )}
 
@@ -3701,10 +4480,15 @@ export default function DocumentTemplateManager({
                     </Label>
                     <MasterFieldPicker
                       masterFields={masterFields}
+                      allowMultiple={true}
                       selectedFieldIds={newPlaceholder.master_field_ids || []}
-                      onSelect={(id) => setNewPlaceholder(prev => ({ ...prev, master_field_ids: [...(prev.master_field_ids || []), id] }))}
-                      onRemove={(id) => setNewPlaceholder(prev => ({ ...prev, master_field_ids: prev.master_field_ids?.filter(fid => fid !== id) }))}
-                      onClear={() => setNewPlaceholder(prev => ({ ...prev, master_field_ids: [] }))}
+                      onMultipleSelect={(fieldIds) => {
+                        setNewPlaceholder(prev => ({ ...prev, master_field_ids: fieldIds }));
+                      }}
+                      onClear={() => {
+                        setNewPlaceholder(prev => ({ ...prev, master_field_ids: [] }));
+                      }}
+                      placeholder="Select master fields..."
                     />
                   </div>
 
@@ -3715,14 +4499,15 @@ export default function DocumentTemplateManager({
                       </Label>
                       <JobQuestionPicker
                         jobQuestions={jobQuestions}
-                        selectedQuestionId={undefined}
-                        onSelect={(q) => {
-                          const current = newPlaceholder.linked_job_question_ids || [];
-                          if (!current.includes(q.id)) {
-                            setNewPlaceholder(prev => ({ ...prev, linked_job_question_ids: [...current, q.id] }));
-                          }
+                        allowMultiple={true}
+                        selectedQuestionIds={newPlaceholder.linked_job_question_ids || []}
+                        onMultipleSelect={(questionIds) => {
+                          setNewPlaceholder(prev => ({ ...prev, linked_job_question_ids: questionIds }));
                         }}
-                        onClear={() => { }}
+                        onClear={() => {
+                          setNewPlaceholder(prev => ({ ...prev, linked_job_question_ids: [] }));
+                        }}
+                        placeholder="Select job questions..."
                       />
                     </div>
 
@@ -3732,14 +4517,15 @@ export default function DocumentTemplateManager({
                       </Label>
                       <RequirementPicker
                         requirements={requirements}
-                        selectedRequirementId={undefined}
-                        onSelect={(r) => {
-                          const current = newPlaceholder.linked_requirement_ids || [];
-                          if (!current.includes(r.id)) {
-                            setNewPlaceholder(prev => ({ ...prev, linked_requirement_ids: [...current, r.id] }));
-                          }
+                        allowMultiple={true}
+                        selectedRequirementIds={newPlaceholder.linked_requirement_ids || []}
+                        onMultipleSelect={(requirementIds) => {
+                          setNewPlaceholder(prev => ({ ...prev, linked_requirement_ids: requirementIds }));
                         }}
-                        onClear={() => { }}
+                        onClear={() => {
+                          setNewPlaceholder(prev => ({ ...prev, linked_requirement_ids: [] }));
+                        }}
+                        placeholder="Select requirements..."
                       />
                     </div>
                   </div>

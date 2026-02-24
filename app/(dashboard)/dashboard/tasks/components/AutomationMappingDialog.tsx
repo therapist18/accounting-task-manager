@@ -246,6 +246,9 @@ const isValidValue = (val: any): boolean => {
   return !errorStrings.includes(String(val));
 };
 
+// ─── CONSTANT: Fixed document_id for eTA Kenya screenshots ───────────────────
+const ETA_SCREENSHOT_DOCUMENT_ID = '630d0ece-4c94-417b-ae64-135187419699';
+
 export const AutomationMappingDialog = ({
   isOpen,
   onClose,
@@ -295,6 +298,9 @@ export const AutomationMappingDialog = ({
   const isFetchingRef = React.useRef(false);
   const [requirementJobQuestions, setRequirementJobQuestions] = useState<any[]>([]);
   const [individualName, setIndividualName] = useState<string>('');
+  // ── NEW: track the saved eTA screenshot document record ──────────────────────
+  const [savedScreenshotDoc, setSavedScreenshotDoc] = useState<any>(null);
+  const [isSavingScreenshot, setIsSavingScreenshot] = useState(false);
 
   // Helper functions for document preview (moved inside component)
   const getFileUrl = (filePath: string) => {
@@ -520,6 +526,15 @@ export const AutomationMappingDialog = ({
 
     return 'principal';
   }, [webData, selectedAutomationId]);
+
+  // ── NEW: derive the target entity id used in the header ID badge ─────────────
+  const getPrimaryTargetEntityId = useCallback((): string => {
+    const primaryEntityType = getPrimaryEntityType();
+    const entityInfo = getEntityNameAndId(primaryEntityType);
+    return entityInfo.id !== 'Not specified'
+      ? entityInfo.id
+      : (task?.applicant_details?.id || '');
+  }, [getPrimaryEntityType, getEntityNameAndId, task]);
 
   const resolveEntityIdsForArray = (field: any, relationshipData: any) => {
     const types = field.entityTypes || [];
@@ -1027,6 +1042,61 @@ export const AutomationMappingDialog = ({
     return cleaned;
   };
 
+  // ── NEW: save base64 screenshot to Supabase storage + directors_documents ────
+  const saveScreenshotToSupabase = async (base64Screenshot: string, directorId: string): Promise<any> => {
+    setIsSavingScreenshot(true);
+    try {
+      // 1. Convert base64 → Blob
+      const byteCharacters = atob(base64Screenshot);
+      const byteNumbers = new Array(byteCharacters.length).fill(0).map((_, i) => byteCharacters.charCodeAt(i));
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: 'image/png' });
+
+      // 2. Build storage path
+      const timestamp = Date.now();
+      const fileName = `eta-kenya-confirmation-${timestamp}.png`;
+      const storagePath = `individual-documents/${directorId}/${ETA_SCREENSHOT_DOCUMENT_ID}/${fileName}`;
+
+      // 3. Upload to kyc-documents bucket
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('kyc-documents')
+        .upload(storagePath, blob, {
+          contentType: 'image/png',
+          upsert: false,
+        });
+
+      if (uploadError) throw new Error(`Storage upload failed: ${uploadError.message}`);
+
+      // 4. Insert record into acc_portal_directors_documents
+      const { data: docRecord, error: insertError } = await supabase
+        .from('acc_portal_directors_documents')
+        .insert({
+          director_id: directorId,
+          document_id: ETA_SCREENSHOT_DOCUMENT_ID,
+          file_path: storagePath,
+          file_name: fileName,
+          status: 'active',
+          extraction_status: 'success',
+          extracted_details: {
+            source: 'eta-kenya-automation',
+            captured_at: new Date().toISOString(),
+            task_id: taskId,
+          },
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+
+      if (insertError) throw new Error(`DB insert failed: ${insertError.message}`);
+
+      console.log('✅ Screenshot saved to Supabase:', docRecord);
+      return docRecord;
+    } finally {
+      setIsSavingScreenshot(false);
+    }
+  };
+
   const handleRunAutomation = async () => {
     if (!selectedAutomationId) { toast({ title: "Validation Error", description: "Missing automation selection", variant: "destructive" }); return; }
     setIsAutomationRunning(true);
@@ -1083,31 +1153,65 @@ export const AutomationMappingDialog = ({
       const response = await res.json();
 
       if (response.success) {
-        // Handle successful automation completion
+        // ── SAVE SCREENSHOT TO SUPABASE ─────────────────────────────────────
         if (response.screenshot) {
-          // Create a downloadable link for the screenshot
-          const screenshotDataUrl = `data:image/png;base64,${response.screenshot}`;
-          const screenshotLink = document.createElement('a');
-          screenshotLink.href = screenshotDataUrl;
-          screenshotLink.download = `eta-confirmation-${Date.now()}.png`;
-          screenshotLink.click();
-        }
+          const directorId = getPrimaryTargetEntityId();
 
-        toast({
-          title: 'Automation Completed Successfully!',
-          description: response.message || 'Please check your email for payment instructions.',
-          action: response.screenshot ? (
-            <div className="mt-2">
-              <p className="text-sm text-green-600 mb-1">Screenshot downloaded successfully</p>
-              <p className="text-xs text-gray-600">Status: {response.status || 'payment_required'}</p>
-              <p className="text-xs text-gray-600">Next: {response.nextStep || 'Check email for payment instructions'}</p>
-            </div>
-          ) : undefined
-        });
+          if (directorId && directorId !== 'N/A') {
+            try {
+              const savedDoc = await saveScreenshotToSupabase(response.screenshot, directorId);
+              setSavedScreenshotDoc(savedDoc);
 
-        // Optionally refresh data or update UI state
-        if (refreshDocuments) {
-          refreshDocuments();
+              // ── AUTO-OPEN PREVIEW with the saved document ──────────────────
+              const previewDoc = {
+                ...savedDoc,
+                file_path: savedDoc.file_path,
+                file_name: savedDoc.file_name,
+                extracted_details: savedDoc.extracted_details || {},
+                document_fields: [],
+              };
+              setPreviewingDocuments({
+                document_display_name: 'eTA Kenya Confirmation Screenshot',
+                documents: [previewDoc],
+                person_full_name: individualName || directorId,
+                requirementId: ETA_SCREENSHOT_DOCUMENT_ID,
+              });
+              setShowPreviewModal(true);
+
+              // Refresh parent document list
+              if (refreshDocuments) refreshDocuments();
+
+              toast({
+                title: '✅ Automation Completed!',
+                description: 'Screenshot saved and ready for review.',
+              });
+            } catch (saveErr: any) {
+              console.error('Screenshot save error:', saveErr);
+              toast({
+                title: 'Automation Succeeded (screenshot save failed)',
+                description: saveErr.message,
+                variant: 'destructive',
+              });
+            }
+          } else {
+            // No valid director ID — fall back to download
+            const screenshotDataUrl = `data:image/png;base64,${response.screenshot}`;
+            const link = document.createElement('a');
+            link.href = screenshotDataUrl;
+            link.download = `eta-confirmation-${Date.now()}.png`;
+            link.click();
+
+            toast({
+              title: '✅ Automation Completed!',
+              description: response.message || 'Screenshot downloaded (no entity ID to save against).',
+            });
+          }
+        } else {
+          // No screenshot
+          toast({
+            title: '✅ Automation Completed!',
+            description: response.message || 'Please check your email for payment instructions.',
+          });
         }
       } else {
         throw new Error(response.message || 'Automation failed');
@@ -1792,53 +1896,93 @@ export const AutomationMappingDialog = ({
     // Combine all document fields
     const allDocFields = [...normalDocFields, ...arrayDocFields];
 
-    if (allDocFields.length === 0) return <div className="p-12 text-center text-slate-400">No document assets configured.</div>;
-
     return (
-      <div className="grid grid-cols-2 gap-4">
-        {allDocFields.map((req, idx) => {
-          const targetId = resolveTargetEntityId(req);
-          const foundDoc = documentFiles.find(d => req.linkedKycDocuments?.includes(d.document_id) && String(d.owner_id) === String(targetId));
-          const displayName = req.isFromArray
-            ? `${req.arrayFieldName} - ${req.displayName || req.name || req.variableName}`
-            : req.displayName || req.efnsDisplayName || req.variableName;
+      <div className="space-y-4">
+        {/* ── eTA Screenshot saved doc banner ──────────────────────────────── */}
+        {savedScreenshotDoc && (
+          <Card className="border-green-300 bg-green-50/40 shadow-sm">
+            <CardContent className="p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-green-100 text-green-600">
+                  <CheckCircle2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-slate-900">eTA Kenya Confirmation Screenshot</h4>
+                  <p className="text-[10px] text-slate-500">{savedScreenshotDoc.file_name}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge className="bg-green-600 text-white">Saved</Badge>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 px-2 text-xs"
+                  onClick={() => {
+                    setPreviewingDocuments({
+                      document_display_name: 'eTA Kenya Confirmation Screenshot',
+                      documents: [savedScreenshotDoc],
+                      person_full_name: individualName || getPrimaryTargetEntityId(),
+                      requirementId: ETA_SCREENSHOT_DOCUMENT_ID,
+                    });
+                    setShowPreviewModal(true);
+                  }}
+                >
+                  <Eye className="h-3 w-3 mr-1" /> View
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-          return (
-            <Card key={idx} className={cn("overflow-hidden border transition-all", foundDoc ? "border-green-200 shadow-sm" : "border-red-200 bg-red-50/10")}>
-              <CardContent className="p-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className={cn("p-2 rounded-lg", foundDoc ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600")}><Paperclip className="h-4 w-4" /></div>
-                  <div className="flex-1">
-                    <h4 className="font-bold text-sm text-slate-900">{displayName}</h4>
-                    <p className="text-[10px] text-slate-500">
-                      Target: {req.isFromArray ? `${req.arrayVariableName}.${req.variableName}` : req.variableName}
-                    </p>
-                    {req.isFromArray && (
-                      <p className="text-[9px] text-blue-600 font-medium">Array Item</p>
-                    )}
+        {allDocFields.length === 0 && !savedScreenshotDoc && (
+          <div className="p-12 text-center text-slate-400">No document assets configured.</div>
+        )}
+
+        <div className="grid grid-cols-2 gap-4">
+          {allDocFields.map((req, idx) => {
+            const targetId = resolveTargetEntityId(req);
+            const foundDoc = documentFiles.find(d => req.linkedKycDocuments?.includes(d.document_id) && String(d.owner_id) === String(targetId));
+            const displayName = req.isFromArray
+              ? `${req.arrayFieldName} - ${req.displayName || req.name || req.variableName}`
+              : req.displayName || req.efnsDisplayName || req.variableName;
+
+            return (
+              <Card key={idx} className={cn("overflow-hidden border transition-all", foundDoc ? "border-green-200 shadow-sm" : "border-red-200 bg-red-50/10")}>
+                <CardContent className="p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={cn("p-2 rounded-lg", foundDoc ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600")}><Paperclip className="h-4 w-4" /></div>
+                    <div className="flex-1">
+                      <h4 className="font-bold text-sm text-slate-900">{displayName}</h4>
+                      <p className="text-[10px] text-slate-500">
+                        Target: {req.isFromArray ? `${req.arrayVariableName}.${req.variableName}` : req.variableName}
+                      </p>
+                      {req.isFromArray && (
+                        <p className="text-[9px] text-blue-600 font-medium">Array Item</p>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {foundDoc && (
-                    <>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handlePreviewDocument(foundDoc)}
-                        className="h-8 px-2 text-xs"
-                      >
-                        <Eye className="h-3 w-3 mr-1" />
-                        Preview
-                      </Button>
-                      <Badge className="bg-green-600">Available</Badge>
-                    </>
-                  )}
-                  {!foundDoc && <Badge variant="destructive">Missing</Badge>}
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
+                  <div className="flex items-center gap-2">
+                    {foundDoc && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handlePreviewDocument(foundDoc)}
+                          className="h-8 px-2 text-xs"
+                        >
+                          <Eye className="h-3 w-3 mr-1" />
+                          Preview
+                        </Button>
+                        <Badge className="bg-green-600">Available</Badge>
+                      </>
+                    )}
+                    {!foundDoc && <Badge variant="destructive">Missing</Badge>}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
       </div>
     );
   };
@@ -1868,11 +2012,18 @@ export const AutomationMappingDialog = ({
                 <div className="flex items-center gap-2 text-white/80 text-sm mt-0.5">
                   <span className="bg-white/10 px-1.5 py-0.5 rounded font-mono">Task #{task?.id}</span>
                   <span>•</span>
-                  <span>ID: {(() => {
-                    const primaryEntityType = getPrimaryEntityType();
-                    const entityInfo = getEntityNameAndId(primaryEntityType);
-                    return entityInfo.id !== 'Not specified' ? entityInfo.id : (task?.applicant_details?.id || 'N/A');
-                  })()}</span>
+                  <span>ID: {getPrimaryTargetEntityId() || 'N/A'}</span>
+                  {/* ── Screenshot saved indicator in header ─────────────── */}
+                  {savedScreenshotDoc && (
+                    <span className="flex items-center gap-1 bg-green-500/20 border border-green-400/30 px-2 py-0.5 rounded-full text-green-200 text-xs">
+                      <CheckCircle2 className="h-3 w-3" /> Screenshot Saved
+                    </span>
+                  )}
+                  {isSavingScreenshot && (
+                    <span className="flex items-center gap-1 bg-white/10 px-2 py-0.5 rounded-full text-white/70 text-xs">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Saving screenshot...
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -1900,24 +2051,16 @@ export const AutomationMappingDialog = ({
               <div className="flex items-center gap-2 bg-white/10 backdrop-blur px-3 py-2 rounded-lg border border-white/20">
                 <User className="h-4 w-4 text-white" />
                 <input
-                  value={(() => {
-                    const primaryEntityType = getPrimaryEntityType();
-                    const entityInfo = getEntityNameAndId(primaryEntityType);
-                    return entityInfo.id;
-                  })()}
+                  value={getPrimaryTargetEntityId()}
                   onChange={(e) => {
                     const primaryEntityType = getPrimaryEntityType();
-                    const entityInfo = getEntityNameAndId(primaryEntityType);
                     if (primaryEntityType === 'principal') {
                       setCurrentIndividualId(e.target.value);
                     }
                   }}
                   placeholder="ID Number..."
                   className="w-28 outline-none text-sm font-semibold text-white bg-transparent placeholder:text-white/50"
-                  disabled={(() => {
-                    const primaryEntityType = getPrimaryEntityType();
-                    return primaryEntityType !== 'principal';
-                  })()}
+                  disabled={getPrimaryEntityType() !== 'principal'}
                 />
               </div>
             </div>
@@ -1936,7 +2079,10 @@ export const AutomationMappingDialog = ({
                   <Tabs value={activeTab} onValueChange={setActiveTab}>
                     <TabsList className="bg-white border border-slate-200 h-9">
                       <TabsTrigger value="fields" className="text-xs"><Database className="h-3 w-3 mr-2" />Fields</TabsTrigger>
-                      <TabsTrigger value="documents" className="text-xs"><FileText className="h-3 w-3 mr-2" />Documents</TabsTrigger>
+                      <TabsTrigger value="documents" className="text-xs">
+                        <FileText className="h-3 w-3 mr-2" />Documents
+                        {savedScreenshotDoc && <span className="ml-1 h-2 w-2 rounded-full bg-green-500 inline-block" />}
+                      </TabsTrigger>
                     </TabsList>
                   </Tabs>
                   {isLoadingData && (
@@ -1984,15 +2130,15 @@ export const AutomationMappingDialog = ({
               </Button>
               <Button
                 onClick={handleRunAutomation}
-                disabled={isAutomationRunning}
+                disabled={isAutomationRunning || isSavingScreenshot}
                 className="px-10 bg-blue-600 hover:bg-blue-700 h-11 text-white font-bold uppercase text-xs tracking-wide transition-all"
               >
-                {isAutomationRunning ? (
+                {(isAutomationRunning || isSavingScreenshot) ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
                   <Zap className="mr-2 h-4 w-4 fill-white" />
                 )}
-                Execute Workflow
+                {isSavingScreenshot ? 'Saving Screenshot...' : 'Execute Workflow'}
               </Button>
             </div>
           </div>

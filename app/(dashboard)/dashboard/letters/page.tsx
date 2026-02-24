@@ -4,8 +4,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { toast } from 'sonner';
 import supabase from '@/lib/supabase/client';
-import { saveAs } from 'file-saver';
-import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, UnderlineType } from 'docx';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -13,32 +11,34 @@ import html2canvas from 'html2canvas';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandList, CommandItem } from "@/components/ui/command";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+
+// Import sidebar components and database functions
+import { CompanySidebar } from '../companies/company-sidebar';
+import { IndividualSidebar } from '../individuals/individual-sidebar';
+import { fetchCompanies, type Company } from '../companies/database';
+import { fetchIndividuals, type Individual } from '../individuals/database';
 
 // Icons
 import {
-    FileText, ChevronDown, Check,
-    Calendar, Printer, Download,
-    Briefcase, User, Type, Search
+    FileText, Check, Printer, Download,
+    Briefcase, User, Type, Settings2,
+    Mail, MapPin, Phone, Signature, Layout, Info,
+    Building2, FileCheck
 } from "lucide-react";
 
 const SIGNATURE_DOC_TYPE_ID = "67d9f93a-6b2b-4e19-86a3-ea7925c3d6ab";
 const VALEDICTIONS = ['Yours faithfully,', 'Yours sincerely,', 'Kind regards,', 'Respectfully yours,'];
 const todayStr = () => new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 
-// Helper function to construct Supabase storage URL
 const getSupabaseImageUrl = (filePath: string | null): string | null => {
     if (!filePath) return null;
-
-    // If it's already a full URL, return as is
     if (filePath.startsWith('http')) return filePath;
-
-    // Otherwise, construct the Supabase storage URL
     const bucketName = 'kyc-documents';
     const fullPath = filePath.startsWith(bucketName) ? filePath : `${bucketName}/${filePath}`;
     return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${fullPath}`;
@@ -47,98 +47,171 @@ const getSupabaseImageUrl = (filePath: string | null): string | null => {
 export default function LetterGenerationModule() {
     const paperRef = useRef(null);
     const [tab, setTab] = useState('companies');
-    const [letterType, setLetterType] = useState('kra');
+    const [letterType, setLetterType] = useState('kra'); // 'kra' or 'general'
 
     // Selection IDs
     const [companyId, setCompanyId] = useState('');
     const [individualId, setIndividualId] = useState('');
     const [signatoryId, setSignatoryId] = useState('');
 
+    // Custom Header/Reference States
+    const [phone, setPhone] = useState('+254700298298');
+    const [email, setEmail] = useState('');
+    const [reference, setReference] = useState('');
+    const [recipient, setRecipient] = useState('');
+    const [subject, setSubject] = useState('');
+
     // UI States
     const [valediction, setValediction] = useState('Yours faithfully,');
     const [letterDate, setLetterDate] = useState(todayStr());
-    const [openCompany, setOpenCompany] = useState(false);
-    const [openIndividual, setOpenIndividual] = useState(false);
-    const [openSignatory, setOpenSignatory] = useState(false);
 
     // Data states
-    const [companies, setCompanies] = useState([]);
-    const [individuals, setIndividuals] = useState([]);
+    const [companies, setCompanies] = useState<Company[]>([]);
+    const [individuals, setIndividuals] = useState<Individual[]>([]);
     const [signatures, setSignatures] = useState([]);
 
-    // --- Data Fetching ---
     useEffect(() => {
+        console.log('=== DEBUG: Initial Data Fetch ===');
         const fetchData = async () => {
             try {
-                const { data: cos } = await supabase.from('acc_portal_company_duplicate').select('*').order('company_name');
-                const { data: inds } = await supabase.from('registry_individuals').select('*').order('full_name');
-                const { data: sigs } = await supabase.from('acc_portal_directors_documents').select('*').eq('document_id', SIGNATURE_DOC_TYPE_ID);
+                console.log('Starting data fetch...');
+                const [companiesData, individualsData, signaturesData] = await Promise.all([
+                    fetchCompanies(),
+                    fetchIndividuals(),
+                    supabase.from('acc_portal_directors_documents').select('*').eq('document_id', SIGNATURE_DOC_TYPE_ID)
+                ]);
 
-                setCompanies(cos || []);
-                setIndividuals(inds || []);
-                setSignatures(sigs || []);
+                console.log('Data fetched:');
+                console.log('Companies:', companiesData.length, companiesData);
+                console.log('Individuals:', individualsData.length, individualsData);
+                console.log('Signatures:', signaturesData.data?.length, signaturesData.data);
+
+                setCompanies(companiesData);
+                setIndividuals(individualsData);
+                setSignatures(signaturesData.data || []);
             } catch (e) {
+                console.error('Failed to fetch data:', e);
                 toast.error("Failed to fetch data");
             }
         };
         fetchData();
+        console.log('=== END INITIAL DATA FETCH DEBUG ===');
     }, []);
 
-    // --- Signatory Logic (Filtering Directors, Shareholders only) ---
+    const selectedCompany = useMemo(() => companies.find(c => c.id.toString() === companyId), [companies, companyId]);
+    const selectedIndividual = useMemo(() => individuals.find(i => i.id.toString() === individualId), [individuals, individualId]);
+
+    // Update defaults when company changes
+    useEffect(() => {
+        console.log('=== DEBUG: Company Selection Update ===');
+        console.log('Selected company:', selectedCompany);
+        console.log('Letter type:', letterType);
+
+        if (selectedCompany) {
+            // Check for KRA email in contact details or common keys
+            const kraEmail = selectedCompany.contact_details?.kra_email_address || selectedCompany.contact_details?.email || '';
+            console.log('KRA Email found:', kraEmail);
+
+            setEmail(kraEmail);
+            setReference(selectedCompany.registration_number || ''); // PIN
+            console.log('Set reference to PIN:', selectedCompany.registration_number);
+
+            // Set default subject/recipient based on KRA tab
+            if (letterType === 'kra') {
+                setRecipient("Kenya Revenue Authority,\nP.O. Box 48240 - 00100,\nNairobi, Kenya.");
+                setSubject("APPLICATION FOR TAX COMPLIANCE CERTIFICATE");
+            } else {
+                setRecipient("Select Bank Ltd,\nIndustrial Area Branch,\nNairobi.");
+                setSubject("REQUEST FOR BANK STATEMENT");
+            }
+            console.log('Set recipient and subject based on letter type');
+        }
+        console.log('=== END COMPANY SELECTION DEBUG ===');
+    }, [selectedCompany, letterType]);
+
     const availableSignatories = useMemo(() => {
-        if (!companyId || tab !== 'companies') return [];
+        console.log('=== DEBUG: Calculating Available Signatories ===');
+        console.log('companyId:', companyId);
+        console.log('tab:', tab);
+        console.log('individuals count:', individuals.length);
+        console.log('signatures count:', signatures.length);
+
+        // Debug: Log first few individuals to see their structure
+        console.log('Sample individuals data:', individuals.slice(0, 3));
+
+        if (!companyId || tab !== 'companies') {
+            console.log('Early return: No companyId or not companies tab');
+            return [];
+        }
 
         const validRoles = ["Director", "Shareholder"];
+        console.log('Valid roles:', validRoles);
 
-        return individuals.filter(ind => {
+        const filteredIndividuals = individuals.filter(ind => {
             const associations = ind.employment_data?.associations || [];
-            return associations.some(a =>
+            console.log(`Individual ${ind.id} (${ind.full_name || ind.name}):`, {
+                employment_data: ind.employment_data,
+                associations: associations,
+                hasCompanyAssociation: associations.some(a => a.company_id?.toString() === companyId.toString())
+            });
+
+            const hasValidAssociation = associations.some(a =>
                 a.company_id?.toString() === companyId.toString() &&
                 validRoles.includes(a.individual_type)
             );
-        }).map(ind => {
-            const assoc = ind.employment_data.associations.find(a => a.company_id?.toString() === companyId.toString() && ["Director", "Shareholder"].includes(a.individual_type));
+
+            console.log(`  -> Has valid association: ${hasValidAssociation}`);
+            return hasValidAssociation;
+        });
+
+        console.log('Filtered individuals count:', filteredIndividuals.length);
+
+        const signatoryList = filteredIndividuals.map(ind => {
+            const associations = ind.employment_data?.associations || [];
+            const assoc = associations.find(a =>
+                a.company_id?.toString() === companyId.toString() &&
+                validRoles.includes(a.individual_type)
+            );
             const sigDoc = signatures.find(s => s.director_id === ind.id);
 
-            return {
+            const signatory = {
                 id: ind.id,
-                name: ind.full_name,
+                name: ind.full_name || ind.name || 'Unknown',
                 position: assoc?.individual_type || 'Director',
-                signatureUrl: sigDoc ? getSupabaseImageUrl(sigDoc.file_path) : null
+                signatureUrl: sigDoc ? getSupabaseImageUrl(sigDoc.file_path) : null,
+                associations: associations,
+                foundSignature: !!sigDoc,
+                employment_data: ind.employment_data
             };
+
+            console.log(`Signatory created:`, signatory);
+            return signatory;
         });
+
+        console.log('Final signatory list:', signatoryList);
+        console.log('=== END DEBUG ===');
+
+        return signatoryList;
     }, [companyId, individuals, signatures, tab]);
 
     useEffect(() => {
-        if (availableSignatories.length > 0) setSignatoryId(availableSignatories[0].id);
-        else setSignatoryId('');
+        console.log('=== DEBUG: Signatory Selection Effect ===');
+        console.log('Available signatories:', availableSignatories);
+        console.log('Current signatoryId:', signatoryId);
+
+        if (availableSignatories.length > 0) {
+            const firstSignatory = availableSignatories[0];
+            console.log('Setting signatoryId to:', firstSignatory.id, firstSignatory.name);
+            setSignatoryId(firstSignatory.id);
+        } else {
+            console.log('No available signatories, clearing signatoryId');
+            setSignatoryId('');
+        }
+        console.log('=== END SIGNATORY SELECTION DEBUG ===');
     }, [availableSignatories]);
 
-    // --- Derived Data Helper ---
-    const selectedCompany = companies.find(c => c.id.toString() === companyId);
-    const selectedIndividual = individuals.find(i => i.id === individualId);
     const activeSignatory = availableSignatories.find(s => s.id === signatoryId);
-
     const isReady = tab === 'companies' ? !!selectedCompany : !!selectedIndividual;
-
-    // Company Detail Helpers
-    const getContactInfo = () => {
-        if (!selectedCompany) return {};
-        const contact = selectedCompany.contact_details?.[0] || {};
-        const postal = selectedCompany.postal_address_details?.[0] || {};
-
-        return {
-            phone: contact.office_phone_number || '---',
-            email: letterType === 'kra'
-                ? (selectedCompany.kra_email_address || '---')
-                : (contact.current_communication_email || '---'),
-            address: postal.full_postal_address || '---',
-            town: postal.postal_town || '---',
-            pin: selectedCompany.kra_pin || '---'
-        };
-    };
-
-    const details = getContactInfo();
 
     const exportToPDF = async () => {
         if (!paperRef.current) return;
@@ -148,303 +221,319 @@ export default function LetterGenerationModule() {
         const pdfWidth = pdf.internal.pageSize.getWidth();
         const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
         pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-        pdf.save(`${tab === 'companies' ? selectedCompany.company_name : selectedIndividual.full_name}_Letter.pdf`);
+        pdf.save(`${selectedCompany?.company_name || 'Letter'}.pdf`);
     };
 
     return (
-        <div className="flex h-screen bg-zinc-100 overflow-hidden font-sans text-zinc-900 print:bg-white">
-            {/* --- SIDEBAR --- */}
-            <aside className="w-[380px] bg-white border-r flex flex-col shadow-xl z-10 print:hidden">
-                <div className="p-6 border-b bg-zinc-900 text-white">
-                    <div className="flex items-center gap-2 mb-1">
-                        <div className="h-8 w-8 bg-blue-500 rounded flex items-center justify-center">
-                            <FileText size={18} />
-                        </div>
-                        <h1 className="font-bold text-lg tracking-tight">Letter Hub</h1>
-                    </div>
-                </div>
+        <div className="flex h-screen bg-[#F8FAFC] overflow-hidden text-slate-900">
+            <ResizablePanelGroup direction="horizontal" className="h-full">
 
-                <ScrollArea className="flex-1">
-                    <div className="p-6 space-y-8">
-                        {/* 1. Template Toggle */}
-                        <div className="space-y-3">
-                            <Label className="text-[11px] uppercase font-bold text-zinc-400">Template Style</Label>
-                            <div className="grid grid-cols-2 gap-2 p-1 bg-zinc-100 rounded-lg">
-                                <button onClick={() => setLetterType('kra')} className={cn("py-2 text-xs font-medium rounded-md transition-all", letterType === 'kra' ? "bg-white shadow-sm text-blue-600" : "text-zinc-500")}>KRA Template</button>
-                                <button onClick={() => setLetterType('general')} className={cn("py-2 text-xs font-medium rounded-md transition-all", letterType === 'general' ? "bg-white shadow-sm text-blue-600" : "text-zinc-500")}>General</button>
+                {/* --- LEFT SIDEBAR (Entity Search) --- */}
+                <ResizablePanel defaultSize={22} minSize={15} maxSize={30} collapsible className="bg-white border-r border-slate-200 print:hidden">
+                    <div className="flex flex-col h-full">
+                        <div className="p-4 border-b border-slate-100 bg-slate-50/50">
+                            <div className="flex bg-slate-200/60 p-1 rounded-lg">
+                                <button
+                                    onClick={() => setTab('companies')}
+                                    className={cn("flex-1 flex items-center justify-center gap-2 py-2 text-xs font-bold rounded-md transition-all", tab === 'companies' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                                >
+                                    <Briefcase size={14} /> Companies
+                                </button>
+                                <button
+                                    onClick={() => setTab('individuals')}
+                                    className={cn("flex-1 flex items-center justify-center gap-2 py-2 text-xs font-bold rounded-md transition-all", tab === 'individuals' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                                >
+                                    <User size={14} /> Individuals
+                                </button>
                             </div>
                         </div>
 
-                        {/* 2. Entity Selector */}
-                        <Tabs value={tab} onValueChange={setTab} className="w-full">
-                            <TabsList className="grid w-full grid-cols-2 mb-4">
-                                <TabsTrigger value="companies" className="text-xs">Company</TabsTrigger>
-                                <TabsTrigger value="individuals" className="text-xs">Personal</TabsTrigger>
-                            </TabsList>
-
-                            <TabsContent value="companies" className="space-y-4">
-                                <div className="space-y-2">
-                                    <Label className="text-[11px] uppercase font-bold text-zinc-400">Search Company</Label>
-                                    <Popover open={openCompany} onOpenChange={setOpenCompany}>
-                                        <PopoverTrigger asChild>
-                                            <Button variant="outline" className="w-full justify-between h-10 text-xs">
-                                                <span className="truncate">{selectedCompany?.company_name || "Select..."}</span>
-                                                <Search className="h-3 w-3 opacity-50" />
-                                            </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-[330px] p-0" align="start">
-                                            <Command>
-                                                <CommandInput placeholder="Type company name..." />
-                                                <CommandList>
-                                                    <CommandEmpty>No company found.</CommandEmpty>
-                                                    <CommandGroup>
-                                                        {companies.map((c) => (
-                                                            <CommandItem key={c.id} onSelect={() => { setCompanyId(c.id.toString()); setOpenCompany(false); }}>
-                                                                <Check className={cn("mr-2 h-4 w-4", companyId === c.id.toString() ? "opacity-100" : "opacity-0")} />
-                                                                {c.company_name}
-                                                            </CommandItem>
-                                                        ))}
-                                                    </CommandGroup>
-                                                </CommandList>
-                                            </Command>
-                                        </PopoverContent>
-                                    </Popover>
-                                </div>
-
-                                {selectedCompany && (
-                                    <div className="space-y-2 pt-2 animate-in fade-in slide-in-from-top-1">
-                                        <Label className="text-[11px] uppercase font-bold text-zinc-400">Authorized Signatory</Label>
-                                        <Popover open={openSignatory} onOpenChange={setOpenSignatory}>
-                                            <PopoverTrigger asChild>
-                                                <Button variant="outline" className="w-full justify-between h-10 text-xs">
-                                                    <span className="truncate font-medium">{activeSignatory?.name || "Select Signatory"}</span>
-                                                    <ChevronDown className="h-4 w-4 opacity-50" />
-                                                </Button>
-                                            </PopoverTrigger>
-                                            <PopoverContent className="w-[330px] p-0" align="start">
-                                                <Command>
-                                                    <CommandInput placeholder="Search officials..." />
-                                                    <CommandList>
-                                                        <CommandEmpty>No directors or shareholders found.</CommandEmpty>
-                                                        <CommandGroup>
-                                                            {availableSignatories.map((s) => (
-                                                                <CommandItem key={s.id} onSelect={() => { setSignatoryId(s.id); setOpenSignatory(false); }}>
-                                                                    <div className="flex flex-col">
-                                                                        <span>{s.name}</span>
-                                                                        <span className="text-[10px] text-zinc-400 uppercase">{s.position}</span>
-                                                                    </div>
-                                                                </CommandItem>
-                                                            ))}
-                                                        </CommandGroup>
-                                                    </CommandList>
-                                                </Command>
-                                            </PopoverContent>
-                                        </Popover>
-                                    </div>
-                                )}
-                            </TabsContent>
-
-                            <TabsContent value="individuals" className="space-y-4">
-                                <Label className="text-[11px] uppercase font-bold text-zinc-400">Search Individual</Label>
-                                <Popover open={openIndividual} onOpenChange={setOpenIndividual}>
-                                    <PopoverTrigger asChild>
-                                        <Button variant="outline" className="w-full justify-between h-10 text-xs">
-                                            <span className="truncate">{selectedIndividual?.full_name || "Select name..."}</span>
-                                            <Search className="h-3 w-3 opacity-50" />
-                                        </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-[330px] p-0" align="start">
-                                        <Command>
-                                            <CommandInput placeholder="Search people..." />
-                                            <CommandList>
-                                                <CommandEmpty>No results.</CommandEmpty>
-                                                <CommandGroup>
-                                                    {individuals.map((i) => (
-                                                        <CommandItem key={i.id} onSelect={() => { setIndividualId(i.id); setOpenIndividual(false); }}>
-                                                            {i.full_name}
-                                                        </CommandItem>
-                                                    ))}
-                                                </CommandGroup>
-                                            </CommandList>
-                                        </Command>
-                                    </PopoverContent>
-                                </Popover>
-                            </TabsContent>
-                        </Tabs>
-
-                        <Separator />
-
-                        <div className="space-y-4">
-                            <div className="space-y-2">
-                                <Label className="text-[11px] uppercase font-bold text-zinc-400">Valediction</Label>
-                                <select className="w-full h-10 px-3 rounded-md border text-xs outline-none" value={valediction} onChange={(e) => setValediction(e.target.value)}>
-                                    {VALEDICTIONS.map(v => <option key={v} value={v}>{v}</option>)}
-                                </select>
-                            </div>
-                            <div className="space-y-2">
-                                <Label className="text-[11px] uppercase font-bold text-zinc-400">Letter Date</Label>
-                                <Input className="h-10 text-xs" value={letterDate} onChange={e => setLetterDate(e.target.value)} />
-                            </div>
-                        </div>
-                    </div>
-                </ScrollArea>
-
-                <div className="p-6 border-t bg-zinc-50 space-y-2">
-                    <Button className="w-full bg-blue-600 hover:bg-blue-700 shadow-lg text-xs" disabled={!isReady} onClick={exportToPDF}>
-                        <Download className="mr-2 h-4 w-4" /> Download PDF
-                    </Button>
-                    <Button variant="outline" className="w-full text-xs" disabled={!isReady} onClick={() => window.print()}>
-                        <Printer className="mr-2 h-4 w-4" /> Print Document
-                    </Button>
-                </div>
-            </aside>
-
-            {/* --- MAIN CANVAS --- */}
-            <main className="flex-1 overflow-y-auto p-12 flex flex-col items-center print:p-0 print:bg-white print:overflow-visible">
-                {isReady ? (
-                    <div className="flex flex-col items-center">
-                        <div className="mb-6 bg-blue-600 text-white px-5 py-2 rounded-full shadow-lg flex gap-4 items-center print:hidden">
-                            <span className="text-xs font-medium flex items-center gap-2">
-                                <Type size={14} /> Click any text to edit directly
-                            </span>
-                        </div>
-
-                        {/* A4 Paper Component */}
-                        <div
-                            ref={paperRef}
-                            className={cn(
-                                "w-[210mm] min-h-[297mm] bg-white p-[25mm] flex flex-col relative transition-all",
-                                "shadow-[0_0_50px_rgba(0,0,0,0.08)] print:shadow-none print:w-full print:m-0 print:p-[20mm]"
-                            )}
-                        >
-                            {/* --- HEADER LOGIC --- */}
+                        <div className="flex-1 overflow-hidden">
                             {tab === 'companies' ? (
-                                letterType === 'kra' ? (
-                                    <div className="text-center border-b-[3px] border-zinc-900 pb-6 mb-10">
-                                        <h2 className="text-2xl font-serif font-black text-zinc-900 uppercase tracking-tight mb-2">
-                                            {selectedCompany.company_name}
-                                        </h2>
-                                        <div className="text-[11px] font-bold text-zinc-700 space-y-1 uppercase tracking-wider leading-relaxed">
-                                            <p>EMAIL: {details.email} &nbsp;&nbsp;|&nbsp;&nbsp; MOBILE NO: {details.phone}</p>
-                                            <p>P.O. BOX - {details.address}, {details.town}, KENYA</p>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="flex justify-between items-start border-b-2 border-zinc-100 pb-8 mb-10">
-                                        <div className="max-w-[65%]">
-                                            <h2 className="text-2xl font-serif font-bold text-zinc-900 leading-tight uppercase">
-                                                {selectedCompany.company_name}
-                                            </h2>
-                                            <div className="mt-2 text-[11px] font-bold text-zinc-500 uppercase">
-                                                PIN: {details.pin}
-                                            </div>
-                                        </div>
-                                        <div className="text-right text-[10px] text-zinc-500 uppercase leading-relaxed font-medium">
-                                            <p>P.O. Box {details.address}</p>
-                                            <p>{details.town}, KENYA</p>
-                                            <p>Tel: {details.phone}</p>
-                                            <p className="lowercase font-bold text-zinc-800">{details.email}</p>
-                                        </div>
-                                    </div>
-                                )
+                                <CompanySidebar
+                                    companies={companies} activeCompany={companyId}
+                                    onCompanyClick={setCompanyId} isCollapsed={false}
+                                />
                             ) : (
-                                <div className="border-b-2 border-zinc-900 pb-6 mb-10 flex justify-between items-end">
-                                    <div>
-                                        <h2 className="text-2xl font-serif font-bold text-zinc-900">{selectedIndividual.full_name}</h2>
-                                        <p className="text-[10px] text-zinc-500 font-bold uppercase mt-1 tracking-widest">Personal Account</p>
-                                    </div>
-                                    <div className="text-right text-[11px] font-bold text-zinc-600 uppercase space-y-1">
-                                        <p>ID: {selectedIndividual.id_number || '---'}</p>
-                                        <p>PIN: {selectedIndividual.kra_pin || '---'}</p>
-                                    </div>
-                                </div>
+                                <IndividualSidebar
+                                    individuals={individuals} activeIndividual={individualId}
+                                    onIndividualClick={setIndividualId} isCollapsed={false}
+                                />
                             )}
+                        </div>
+                    </div>
+                </ResizablePanel>
 
-                            {/* --- CONTENT --- */}
-                            <div className="flex-1 font-serif text-[15px] leading-relaxed text-zinc-800">
-                                <div className="mb-8 font-medium">{letterDate}</div>
+                <ResizableHandle withHandle className="bg-slate-200 border-none w-1" />
 
-                                <div className="mb-6 flex gap-2 group justify-end">
-                                    Your Ref:<span className="font-bold min-w-[150px] outline-none border-b border-transparent focus:border-blue-200 focus:bg-blue-50/30 px-1 transition-all" contentEditable suppressContentEditableWarning>
-                                        {letterType === 'kra' ? `PIN ${details.pin}` : 'GEN/FIN/2026/102'}
-                                    </span>
+                {/* --- MAIN CONTENT --- */}
+                <ResizablePanel defaultSize={78}>
+                    <div className="h-full flex flex-col">
+
+                        {/* TOP COMMAND BAR */}
+                        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0 z-10 shadow-sm">
+                            <div className="flex items-center gap-4">
+                                <div className="bg-blue-600 p-2.5 rounded-xl shadow-blue-200 shadow-lg">
+                                    <FileText className="text-white" size={20} />
                                 </div>
+                                <div>
+                                    <h1 className="text-sm font-black text-slate-800 uppercase">Letter Generation Engine</h1>
+                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest flex items-center gap-1">
+                                        <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" /> Registry Portal v2.0
+                                    </p>
+                                </div>
+                            </div>
 
-                                <div className="mb-8">
-                                    <div className="text-[9px] font-black text-zinc-300 uppercase mb-2 tracking-widest print:hidden">Recipient:</div>
-                                    <div className="whitespace-pre-wrap outline-none focus:bg-zinc-50 p-2 -m-2 rounded transition-colors" contentEditable suppressContentEditableWarning>
-                                        {letterType === 'kra' ?
-                                            "Kenya Revenue Authority,\nNairobi, Kenya." :
-                                            "The Branch Manager,\nSelect Bank Ltd,\nIndustrial Area Branch,\nNairobi."
-                                        }
+                            <div className="flex items-center gap-3">
+                                <Button variant="outline" size="sm" className="border-slate-200 text-slate-600 font-bold text-xs uppercase" disabled={!isReady} onClick={() => window.print()}>
+                                    <Printer className="mr-2 h-3.5 w-3.5" /> Print
+                                </Button>
+                                <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs uppercase shadow-lg shadow-blue-100 px-6 h-9" disabled={!isReady} onClick={exportToPDF}>
+                                    <Download className="mr-2 h-3.5 w-3.5" /> Export PDF
+                                </Button>
+                            </div>
+                        </header>
+
+                        <ResizablePanelGroup direction="horizontal" className="flex-1">
+                            {/* --- CANVAS --- */}
+                            <ResizablePanel defaultSize={70} className="bg-slate-100/50">
+                                <ScrollArea className="h-full">
+                                    <div className="p-12 flex flex-col items-center">
+                                        {isReady ? (
+                                            <div className="space-y-6">
+                                                <div className="flex justify-center">
+                                                    <Badge variant="secondary" className="bg-white text-blue-600 border-blue-100 px-4 py-1.5 rounded-full shadow-sm">
+                                                        <Type size={14} className="mr-2" />
+                                                        Click text on the paper to edit directly
+                                                    </Badge>
+                                                </div>
+
+                                                {/* A4 Paper */}
+                                                <div
+                                                    ref={paperRef}
+                                                    className={cn(
+                                                        "w-[210mm] min-h-[297mm] bg-white p-[25mm] shadow-[0_20px_50px_rgba(0,0,0,0.05)] transition-all",
+                                                        "print:shadow-none print:w-full print:m-0"
+                                                    )}
+                                                >
+                                                    {/* HEADER - KRA VS GENERAL */}
+                                                    {letterType === 'kra' ? (
+                                                        <div className="border-b-[3px] border-slate-900 pb-8 mb-10 text-center">
+                                                            <h2 className="text-3xl font-black text-slate-900 uppercase mb-2">
+                                                                {tab === 'companies' ? selectedCompany?.company_name : selectedIndividual?.full_name}
+                                                            </h2>
+                                                            <div className="text-[11px] font-bold text-slate-700 space-y-1 uppercase tracking-widest">
+                                                                <p className="flex justify-center gap-4">
+                                                                    <span className="flex items-center gap-1">EMAIL: {email || 'INFO@REGISTRY.CO.KE'}</span>
+                                                                    <span className="flex items-center gap-1">MOBILE NO: {phone}</span>
+                                                                </p>
+                                                                <p>P.O. BOX 12345 - 00100, NAIROBI, KENYA</p>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex justify-between items-start border-b-2 border-slate-100 pb-8 mb-10">
+                                                            <div className="max-w-[60%]">
+                                                                <h2 className="text-2xl font-bold text-slate-900 uppercase leading-tight">
+                                                                    {tab === 'companies' ? selectedCompany?.company_name : selectedIndividual?.full_name}
+                                                                </h2>
+                                                                <div className="mt-2 text-[10px] font-black text-blue-600 uppercase tracking-widest">
+                                                                    Ref: {reference}
+                                                                </div>
+                                                            </div>
+                                                            <div className="text-right text-[10px] font-bold text-slate-500 uppercase">
+                                                                <p>P.O. BOX 12345 - 00100</p>
+                                                                <p>NAIROBI, KENYA</p>
+                                                                <p>TEL: {phone}</p>
+                                                                <p className="lowercase text-blue-600 font-black">{email}</p>
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    {/* BODY */}
+                                                    <div className="text-[16px] text-slate-800">
+                                                        <div className="mb-4 font-bold">{letterDate}</div>
+
+                                                        <div className="mb-10 text-right text-[14px] font-bold">
+                                                            Your Ref: <span className="underline decoration-blue-200" contentEditable suppressContentEditableWarning>{reference}</span>
+                                                        </div>
+
+                                                        <div className="mb-10 whitespace-pre-wrap outline-none focus:bg-blue-50/50 p-2 -mx-2 rounded" contentEditable suppressContentEditableWarning>
+                                                            {recipient}
+                                                        </div>
+
+                                                        <div className="mb-8 uppercase font-black underline underline-offset-8">
+                                                            RE: <span contentEditable suppressContentEditableWarning>{subject}</span>
+                                                        </div>
+
+                                                        <div className="min-h-[350px] whitespace-pre-wrap outline-none focus:bg-blue-50/50 p-2 -mx-2 rounded mb-12" contentEditable suppressContentEditableWarning>
+                                                            Dear Sir/Madam,{"\n\n"}
+                                                            I am writing on behalf of the company to request for the issuance of a Tax Compliance Certificate.
+                                                            All relevant returns have been filed and payments made up to date.{"\n\n"}
+                                                            Your prompt assistance in this matter will be highly appreciated.
+                                                        </div>
+
+                                                        {/* SIGN-OFF */}
+                                                        <div className="mt-16 space-y-12">
+                                                            <div className="outline-none" contentEditable suppressContentEditableWarning>{valediction}</div>
+
+                                                            <div className="space-y-1">
+                                                                <div className="w-64 border-b border-slate-900 relative h-20 flex items-end mb-4">
+                                                                    {tab === 'companies' && activeSignatory?.signatureUrl && (
+                                                                        <img src={activeSignatory.signatureUrl} className="absolute bottom-1 left-0 h-28 object-contain mix-blend-multiply grayscale hover:grayscale-0 transition-all" />
+                                                                    )}
+                                                                </div>
+                                                                <div className="font-black uppercase text-lg">
+                                                                    {tab === 'companies' ? (activeSignatory?.name || '____________________') : selectedIndividual?.full_name}
+                                                                </div>
+                                                                <div className="text-xs text-slate-500 font-bold uppercase tracking-widest italic">
+                                                                    {tab === 'companies' ? (activeSignatory?.position || 'Authorized Signatory') : 'Applicant'}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="h-[70vh] flex flex-col items-center justify-center text-slate-400">
+                                                <div className="bg-white p-16 rounded-[40px] shadow-sm border border-slate-200 flex flex-col items-center text-center max-w-sm">
+                                                    <div className="h-20 w-20 bg-blue-50 rounded-full flex items-center justify-center mb-6 text-blue-600">
+                                                        <Layout size={40} />
+                                                    </div>
+                                                    <h3 className="text-xl font-black text-slate-800 uppercase">Empty Canvas</h3>
+                                                    <p className="text-sm text-slate-500 mt-2 font-medium">Select a record from the left sidebar to start generating a professional letterhead.</p>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
-                                </div>
+                                </ScrollArea>
+                            </ResizablePanel>
 
-                                <div className="mb-8 uppercase font-bold underline decoration-zinc-900 underline-offset-[6px] decoration-1">
-                                    RE: <span className="outline-none focus:bg-blue-50 px-1" contentEditable suppressContentEditableWarning>
-                                        {letterType === 'kra' ? 'Application for Tax Compliance Certificate' : 'Request for Bank Statement'}
-                                    </span>
-                                </div>
+                            <ResizableHandle withHandle className="bg-slate-200 border-none w-1" />
 
-                                <div className="min-h-[350px] whitespace-pre-wrap outline-none focus:bg-zinc-50 py-2 leading-relaxed" contentEditable suppressContentEditableWarning>
-                                    Dear Sir/Madam,{"\n\n"}
-                                    I am writing on behalf of the company to request for...{"\n\n"}
-                                    Your prompt assistance in this matter will be highly appreciated.
-                                </div>
+                            {/* --- RIGHT SIDEBAR (Configuration) --- */}
+                            <ResizablePanel defaultSize={30} className="bg-white border-l border-slate-200 print:hidden">
+                                <div className="h-full flex flex-col">
+                                    <div className="p-6 border-b border-slate-100 flex items-center gap-2 bg-slate-50/50 shrink-0">
+                                        <Settings2 size={18} className="text-blue-600" />
+                                        <h2 className="font-black text-sm uppercase tracking-wider text-slate-800">Configuration</h2>
+                                    </div>
 
-                                {/* --- SIGN-OFF --- */}
-                                <div className="mt-12 space-y-10">
-                                    <div className="outline-none" contentEditable suppressContentEditableWarning>{valediction}</div>
+                                    <ScrollArea className="flex-1 px-6">
+                                        <div className="py-6 space-y-6">
 
-                                    <div className="space-y-1">
-                                        {/* Signature Rendering */}
-                                        <div className="w-56 border-b border-zinc-900 relative h-20 flex items-end mb-2">
-                                            {tab === 'companies' && activeSignatory?.signatureUrl ? (
-                                                <img
-                                                    src={activeSignatory.signatureUrl}
-                                                    alt="Official Signature"
-                                                    className="absolute bottom-1 left-0 h-24 object-contain mix-blend-multiply grayscale print:grayscale transition-all hover:grayscale-0"
-                                                />
-                                            ) : (
-                                                <div className="text-[10px] text-zinc-200 italic pb-1 no-print">Signatory scan appears here</div>
+                                            {/* Section: Layout Type */}
+                                            <Card className="border-blue-100 shadow-sm overflow-hidden ring-1 ring-blue-50">
+                                                <CardHeader className="bg-blue-50/50 py-3 px-4 border-b border-blue-100">
+                                                    <CardTitle className="text-[10px] font-black text-blue-700 uppercase tracking-widest flex items-center gap-2">
+                                                        <Layout size={12} /> Layout Template
+                                                    </CardTitle>
+                                                </CardHeader>
+                                                <CardContent className="p-1">
+                                                    <div className="flex">
+                                                        <button
+                                                            onClick={() => setLetterType('kra')}
+                                                            className={cn("flex-1 py-3 text-[10px] font-black uppercase transition-all flex flex-col items-center gap-1",
+                                                                letterType === 'kra' ? "bg-white text-blue-600 shadow-inner" : "bg-slate-50 text-slate-400 hover:text-slate-600")}
+                                                        >
+                                                            <Building2 size={14} /> KRA Layout
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setLetterType('general')}
+                                                            className={cn("flex-1 py-3 text-[10px] font-black uppercase transition-all flex flex-col items-center gap-1",
+                                                                letterType === 'general' ? "bg-white text-blue-600 shadow-inner" : "bg-slate-50 text-slate-400 hover:text-slate-600")}
+                                                        >
+                                                            <FileCheck size={14} /> General Layout
+                                                        </button>
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+
+                                            {/* Section: Contact Details */}
+                                            <Card className="border-slate-100 shadow-sm overflow-hidden">
+                                                <CardHeader className="bg-slate-50 py-3 px-4 border-b border-slate-100">
+                                                    <CardTitle className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                                        <Phone size={12} /> Header Information
+                                                    </CardTitle>
+                                                </CardHeader>
+                                                <CardContent className="p-4 space-y-4">
+                                                    <div className="space-y-1.5">
+                                                        <Label className="text-[10px] font-black uppercase text-slate-400">Mobile Number</Label>
+                                                        <Input className="h-9 text-xs font-bold" value={phone} onChange={e => setPhone(e.target.value)} />
+                                                    </div>
+                                                    <div className="space-y-1.5">
+                                                        <Label className="text-[10px] font-black uppercase text-slate-400">Email Address</Label>
+                                                        <Input className="h-9 text-xs font-bold" value={email} onChange={e => setEmail(e.target.value)} />
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+
+                                            {/* Section: Content */}
+                                            <Card className="border-slate-100 shadow-sm overflow-hidden">
+                                                <CardHeader className="bg-slate-50 py-3 px-4 border-b border-slate-100">
+                                                    <CardTitle className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                                        <MapPin size={12} /> Letter Logistics
+                                                    </CardTitle>
+                                                </CardHeader>
+                                                <CardContent className="p-4 space-y-4">
+                                                    <div className="space-y-1.5">
+                                                        <Label className="text-[10px] font-black uppercase text-slate-400">Ref / PIN Number</Label>
+                                                        <Input className="h-9 text-xs font-bold" value={reference} onChange={e => setReference(e.target.value)} />
+                                                    </div>
+                                                    <div className="space-y-1.5">
+                                                        <Label className="text-[10px] font-black uppercase text-slate-400">Recipient</Label>
+                                                        <Textarea className="text-xs font-medium min-h-[60px]" value={recipient} onChange={e => setRecipient(e.target.value)} />
+                                                    </div>
+                                                    <div className="space-y-1.5">
+                                                        <Label className="text-[10px] font-black uppercase text-slate-400">Subject</Label>
+                                                        <Input className="h-9 text-xs font-bold" value={subject} onChange={e => setSubject(e.target.value)} />
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+
+                                            {/* Section: Signatory */}
+                                            {tab === 'companies' && (
+                                                <Card className="border-blue-100 shadow-sm overflow-hidden ring-1 ring-blue-50">
+                                                    <CardHeader className="bg-blue-50/50 py-3 px-4 border-b border-blue-100">
+                                                        <CardTitle className="text-[10px] font-black text-blue-700 uppercase tracking-widest flex items-center gap-2">
+                                                            <Signature size={12} /> Authorized Signatory
+                                                        </CardTitle>
+                                                    </CardHeader>
+                                                    <CardContent className="p-4">
+                                                        {availableSignatories.length > 0 ? (
+                                                            <div className="space-y-4">
+                                                                <select
+                                                                    className="w-full h-10 px-3 rounded-md border border-blue-200 text-sm outline-none bg-white font-bold text-slate-700"
+                                                                    value={signatoryId}
+                                                                    onChange={(e) => setSignatoryId(e.target.value)}
+                                                                >
+                                                                    {availableSignatories.map((s) => (
+                                                                        <option key={s.id} value={s.id}>{s.name} ({s.position})</option>
+                                                                    ))}
+                                                                </select>
+                                                                {activeSignatory?.signatureUrl ? (
+                                                                    <div className="flex items-center gap-2 text-[10px] font-bold text-emerald-600 bg-emerald-50 p-2 rounded border border-emerald-100 uppercase">
+                                                                        <Check size={12} /> Digital Signature Found
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="text-[10px] font-bold text-amber-600 bg-amber-50 p-2 rounded border border-amber-100 uppercase">
+                                                                        No signature scan found
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        ) : (
+                                                            <p className="text-xs text-slate-500 italic">No directors found for this company.</p>
+                                                        )}
+                                                    </CardContent>
+                                                </Card>
                                             )}
-                                            <div className="absolute -bottom-[2px] w-full border-b border-zinc-400 border-dotted print:hidden" />
                                         </div>
-
-                                        <div className="font-bold uppercase tracking-tight">
-                                            {tab === 'companies' ? (activeSignatory?.name || '____________________') : selectedIndividual?.full_name}
-                                        </div>
-                                        <div className="text-sm text-zinc-500 italic">
-                                            {tab === 'companies' ? (activeSignatory?.position || 'Director') : 'Individual'}
-                                        </div>
-                                    </div>
+                                    </ScrollArea>
                                 </div>
-                            </div>
-
-                            {/* --- FOOTER --- */}
-                            <div className="mt-16 pt-6 border-t border-zinc-100 flex justify-between items-center">
-                                <p className="text-[8px] text-zinc-400 uppercase tracking-[0.3em] font-medium">
-                                    Generated via Registry Portal &bull; {new Date().getFullYear()}
-                                </p>
-                                <div className="flex gap-4">
-                                    <span className="text-[8px] text-zinc-400 font-mono">DOC-ID: {Math.random().toString(36).substr(2, 9).toUpperCase()}</span>
-                                    <span className="text-[8px] text-zinc-400 font-mono uppercase">Original Copy</span>
-                                </div>
-                            </div>
-                        </div>
+                            </ResizablePanel>
+                        </ResizablePanelGroup>
                     </div>
-                ) : (
-                    <div className="h-full flex flex-col items-center justify-center text-zinc-400 animate-in fade-in duration-700">
-                        <div className="bg-white p-12 rounded-3xl shadow-sm border border-zinc-200/50 flex flex-col items-center">
-                            <div className="h-20 w-20 bg-zinc-50 rounded-full flex items-center justify-center mb-6">
-                                <FileText size={40} className="opacity-20" />
-                            </div>
-                            <h3 className="text-xl font-bold text-zinc-800">Ready to Generate</h3>
-                            <p className="text-sm max-w-[250px] text-center mt-2 leading-relaxed">Select a company or individual record from the sidebar to populate the letterhead.</p>
-                        </div>
-                    </div>
-                )}
-            </main>
+                </ResizablePanel>
+            </ResizablePanelGroup>
         </div>
     );
 }
