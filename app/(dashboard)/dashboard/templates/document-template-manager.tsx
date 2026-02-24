@@ -158,6 +158,8 @@ interface DocumentChecklistConfig extends BaseMediaConfig {
     linked_document_ids?: string[]; // documents linked to this data source
   }>;
   checklist_display_format?: 'bullets' | 'checkboxes' | 'table';
+  checklist_success_label?: string; // Label to show when document is found (default: "✔")
+  checklist_not_found_label?: string; // Label to show when document is not found (default: "✗")
 }
 
 // Image specific configuration  
@@ -2696,6 +2698,8 @@ export default function DocumentTemplateManager({
         linked_document_ids: newPlaceholder.linked_document_ids || [],
         checklist_display_format: newPlaceholder.checklist_display_format || 'checkboxes',
         checklist_data_sources: newPlaceholder.checklist_data_sources || [],
+        checklist_success_label: newPlaceholder.checklist_success_label || '✔',
+        checklist_not_found_label: newPlaceholder.checklist_not_found_label || '✗',
       }),
       // Include default_value field
       default_value: newPlaceholder.default_value || ''
@@ -3752,15 +3756,10 @@ export default function DocumentTemplateManager({
                             <Label className="text-[10px] uppercase font-bold text-slate-400">Trigger: If this field has data...</Label>
                             <MasterFieldPicker
                               masterFields={masterFields}
-                              selectedFieldIds={cond.master_field_id ? [cond.master_field_id] : []}
-                              onSelect={(fieldId) => {
+                              selectedFieldId={cond.master_field_id || null}
+                              onSelect={(field) => {
                                 const updated = [...newPlaceholder.conditions];
-                                updated[idx].master_field_id = fieldId;
-                                setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
-                              }}
-                              onRemove={() => {
-                                const updated = [...newPlaceholder.conditions];
-                                delete updated[idx].master_field_id;
+                                updated[idx].master_field_id = field?.id;
                                 setNewPlaceholder(prev => ({ ...prev, conditions: updated }));
                               }}
                               onClear={() => {
@@ -4245,6 +4244,60 @@ export default function DocumentTemplateManager({
                         </Button>
                       </div>
                     ))}
+                  </div>
+
+                  {/* Display Format & Labels */}
+                  <div className="bg-white p-4 rounded-lg border border-blue-100 space-y-4">
+                    <Label className="text-sm font-medium text-blue-700">Display Settings</Label>
+                    
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label className="text-xs font-bold text-slate-500">Display Format</Label>
+                        <Select 
+                          value={newPlaceholder.checklist_display_format || 'checkboxes'} 
+                          onValueChange={(value) => setNewPlaceholder(prev => ({ ...prev, checklist_display_format: value }))}
+                        >
+                          <SelectTrigger className="bg-white h-9">
+                            <SelectValue placeholder="Select format..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="checkboxes">Checkboxes</SelectItem>
+                            <SelectItem value="bullets">Bullets</SelectItem>
+                            <SelectItem value="table">Table</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-xs font-bold text-slate-500 flex items-center gap-1">
+                          Success Label
+                          <span className="text-[9px] text-green-600 font-normal">(when found)</span>
+                        </Label>
+                        <Input
+                          value={newPlaceholder.checklist_success_label || '✔'}
+                          onChange={(e) => setNewPlaceholder(prev => ({ ...prev, checklist_success_label: e.target.value }))}
+                          placeholder="✔"
+                          className="h-9 text-sm bg-white"
+                          maxLength={10}
+                        />
+                        <p className="text-[9px] text-slate-500">e.g., ✔, YES, ✓, TRUE</p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-xs font-bold text-slate-500 flex items-center gap-1">
+                          Not Found Label
+                          <span className="text-[9px] text-red-600 font-normal">(when missing)</span>
+                        </Label>
+                        <Input
+                          value={newPlaceholder.checklist_not_found_label || '✗'}
+                          onChange={(e) => setNewPlaceholder(prev => ({ ...prev, checklist_not_found_label: e.target.value }))}
+                          placeholder="✗"
+                          className="h-9 text-sm bg-white"
+                          maxLength={10}
+                        />
+                        <p className="text-[9px] text-slate-500">e.g., ✗, NO, ✘, FALSE</p>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}

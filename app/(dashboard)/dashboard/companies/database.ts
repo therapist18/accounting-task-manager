@@ -4,6 +4,11 @@ export type Company = {
   id: string | number;
   company_name: string;
   registration_number?: string;
+  kra_email_address?: string;
+  contact_details?: {
+    email?: string;
+    [key: string]: any;
+  };
   default_display?: boolean;
   order?: number;
 }
@@ -15,7 +20,9 @@ export async function fetchCompanies(): Promise<Company[]> {
       .select(`
         id,
         company_name,
-        registration_number
+        registration_number,
+        kra_email_address,
+        contact_details
       `)
       .order('company_name', { ascending: true })
 
@@ -29,6 +36,8 @@ export async function fetchCompanies(): Promise<Company[]> {
       id: company.id,
       company_name: company.company_name || 'Unnamed Company',
       registration_number: company.registration_number,
+      kra_email_address: company.kra_email_address,
+      contact_details: company.contact_details,
       default_display: false, // Default value
       order: 0 // Default value
     }))
@@ -47,7 +56,9 @@ export async function fetchCompanyById(id: string | number): Promise<Company | n
       .select(`
         id,
         company_name,
-        registration_number
+        registration_number,
+        kra_email_address,
+        contact_details
       `)
       .eq('id', id)
       .single()
@@ -64,7 +75,9 @@ export async function fetchCompanyById(id: string | number): Promise<Company | n
       id: data.id,
       company_name: data.company_name || 'Unnamed Company',
       registration_number: data.registration_number,
-          default_display: false, // Default value
+      kra_email_address: data.kra_email_address,
+      contact_details: data.contact_details,
+      default_display: false, // Default value
       order: 0 // Default value
     }
 
@@ -82,7 +95,9 @@ export async function searchCompanies(query: string): Promise<Company[]> {
       .select(`
         id,
         company_name,
-        registration_number
+        registration_number,
+        kra_email_address,
+        contact_details
       `)
       .or(`company_name.ilike.%${query}%,registration_number.ilike.%${query}%`)
       .order('company_name', { ascending: true })
@@ -97,6 +112,8 @@ export async function searchCompanies(query: string): Promise<Company[]> {
       id: company.id,
       company_name: company.company_name || 'Unnamed Company',
       registration_number: company.registration_number,
+      kra_email_address: company.kra_email_address,
+      contact_details: company.contact_details,
       default_display: false, // Default value
       order: 0 // Default value
     }))

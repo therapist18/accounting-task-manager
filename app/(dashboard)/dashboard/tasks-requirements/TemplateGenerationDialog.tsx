@@ -408,41 +408,133 @@ const processCurrentDateField = (placeholder, masterFields) => {
     return { value: '', source: null };
 };
 
-const processConditionalField = (placeholder, targetEntity, combinedCache, masterFields) => {
+const processConditionalField = (placeholder, targetEntity, combinedCache, masterFields, computedFieldCache) => {
     if (!placeholder.conditions || !targetEntity) return { value: '', source: null };
 
     const targetId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id);
 
     for (const condition of placeholder.conditions) {
-        if (!condition.master_field_id) continue;
+        if (condition.comparison) {
+            const { field, operator, value: compareValue } = condition.comparison;
 
-        const mf = masterFields.get(parseInt(condition.master_field_id, 10));
-        if (!mf?.sources) continue;
+            if (!field) continue;
 
-        for (const source of mf.sources) {
-            const tableData = combinedCache[source.table];
-            if (!tableData) continue;
+            let fieldValue = null;
 
-            const linkingVar = source.linking_variable || 'id';
-            const record = Object.values(tableData).find(rec =>
-                String(rec[linkingVar] || rec.id) === targetId
-            );
+            if (condition.master_field_id) {
+                const mf = masterFields.get(parseInt(condition.master_field_id, 10));
+                if (mf?.sources) {
+                    for (const source of mf.sources) {
+                        // Handle computed fields
+                        if (source.is_computed && computedFieldCache) {
+                            const extractionMode = 'latest';
+                            const cacheKey = `${mf.id}_${targetId}_${extractionMode}`;
+                            const computedVal = computedFieldCache[cacheKey];
 
-            if (record) {
-                let rawVal = source.path
-                    ? parseJsonValue(record, source.path)
-                    : record[condition.tag || mf.field_key];
+                            if (computedVal !== undefined && computedVal !== null && computedVal !== '' &&
+                                !['Document Not Found', 'Missing Document', 'Field Not Found', 'Missing', 'No Source'].includes(computedVal)) {
+                                fieldValue = computedVal;
+                                break;
+                            }
+                            continue;
+                        }
 
-                // FIX: If rawVal is an object (common in JSONB columns), try to get a string value
-                if (rawVal && typeof rawVal === 'object') {
-                    rawVal = rawVal.number || rawVal.value || rawVal.name || JSON.stringify(rawVal);
+                        // Handle regular database fields
+                        const tableData = combinedCache[source.table];
+                        if (!tableData) continue;
+
+                        const linkingVar = source.linking_variable || 'id';
+                        const record = Object.values(tableData).find(rec =>
+                            String(rec[linkingVar] || rec.id) === targetId
+                        );
+
+                        if (record) {
+                            fieldValue = source.path
+                                ? parseJsonValue(record, source.path)
+                                : record[field || mf.field_key];
+
+                            if (fieldValue && typeof fieldValue === 'object') {
+                                fieldValue = fieldValue.number || fieldValue.value || fieldValue.name || String(fieldValue);
+                            }
+                            break;
+                        }
+                    }
+                }
+            } else {
+                fieldValue = targetEntity[field];
+            }
+
+            if (fieldValue === null || fieldValue === undefined) continue;
+
+            const strFieldValue = String(fieldValue).trim().toLowerCase();
+            const strCompareValue = String(compareValue || '').trim().toLowerCase();
+
+            let conditionMet = false;
+            switch (operator) {
+                case 'equals':
+                    conditionMet = strFieldValue === strCompareValue;
+                    break;
+                case 'not_equals':
+                    conditionMet = strFieldValue !== strCompareValue;
+                    break;
+                case 'contains':
+                    conditionMet = strFieldValue.includes(strCompareValue);
+                    break;
+                default:
+                    conditionMet = Boolean(fieldValue);
+            }
+
+            if (conditionMet) {
+                return {
+                    value: `${condition.label || ''}${fieldValue}`,
+                    source: 'Conditional Match'
+                };
+            }
+        } else if (condition.master_field_id) {
+            const mf = masterFields.get(parseInt(condition.master_field_id, 10));
+            if (!mf?.sources) continue;
+
+            for (const source of mf.sources) {
+                // Handle computed fields
+                if (source.is_computed && computedFieldCache) {
+                    const extractionMode = 'latest';
+                    const cacheKey = `${mf.id}_${targetId}_${extractionMode}`;
+                    const computedVal = computedFieldCache[cacheKey];
+
+                    if (computedVal !== undefined && computedVal !== null && computedVal !== '' &&
+                        !['Document Not Found', 'Missing Document', 'Field Not Found', 'Missing', 'No Source'].includes(computedVal)) {
+                        return {
+                            value: `${condition.label || ''}${computedVal}`,
+                            source: `Conditional: ${mf.label || 'Computed'}`
+                        };
+                    }
+                    continue;
                 }
 
-                if (rawVal && String(rawVal).trim() !== '' && String(rawVal) !== '[object Object]') {
-                    return {
-                        value: `${condition.label || ''}${rawVal}`,
-                        source: `Conditional: ${mf.label || source.table}`
-                    };
+                // Handle regular database fields
+                const tableData = combinedCache[source.table];
+                if (!tableData) continue;
+
+                const linkingVar = source.linking_variable || 'id';
+                const record = Object.values(tableData).find(rec =>
+                    String(rec[linkingVar] || rec.id) === targetId
+                );
+
+                if (record) {
+                    let rawVal = source.path
+                        ? parseJsonValue(record, source.path)
+                        : record[condition.tag || mf.field_key];
+
+                    if (rawVal && typeof rawVal === 'object') {
+                        rawVal = rawVal.number || rawVal.value || rawVal.name || JSON.stringify(rawVal);
+                    }
+
+                    if (rawVal && String(rawVal).trim() !== '' && String(rawVal) !== '[object Object]') {
+                        return {
+                            value: `${condition.label || ''}${rawVal}`,
+                            source: `Conditional: ${mf.label || source.table}`
+                        };
+                    }
                 }
             }
         }
@@ -523,47 +615,141 @@ const processBooleanField = (placeholder, targetEntity, combinedCache, masterFie
     };
 };
 
-const processImageField = (placeholder, targetEntity, combinedCache, masterFields) => {
-    if (!placeholder.master_field_ids?.length) {
+const processDocumentChecklistField = (placeholder, targetEntity, combinedCache) => {
+    const checklistDataSources = placeholder.checklist_data_sources || [];
+    const displayFormat = placeholder.checklist_display_format || 'bullets';
+    const successLabel = placeholder.checklist_success_label || '✔';
+    const notFoundLabel = placeholder.checklist_not_found_label || '✗';
+
+    if (checklistDataSources.length === 0) {
         return { value: '', source: null };
     }
 
-    const searchId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id);
-    for (const id of placeholder.master_field_ids) {
-        const mf = masterFields.get(parseInt(id, 10));
-        if (!mf?.sources) {
+    const searchId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id);
+    const foundDocuments = [];
+
+    console.log(`🔎 Processing checklist for ${placeholder.name}, searchId: ${searchId}`);
+
+    for (const dataSource of checklistDataSources) {
+        const { table, linking_variable, linked_document_ids = [], execution_mode = 'latest' } = dataSource;
+
+        console.log(`  Checking table: ${table}, linking_variable: ${linking_variable}, linked_docs: ${linked_document_ids.length}`);
+
+        const tableData = combinedCache[table];
+        if (!tableData) {
+            console.log(`  ❌ Table ${table} not found in cache. Available tables:`, Object.keys(combinedCache));
             continue;
         }
 
-        for (const source of mf.sources) {
-            const tableData = combinedCache[source.table];
+        console.log(`  ✓ Table ${table} found with ${Object.keys(tableData).length} entries`);
 
-            if (!tableData) {
-                continue;
+        let matches = Object.values(tableData).filter(d => {
+            const entityIdMatch = String(d[linking_variable] || d.id) === searchId;
+            if (!entityIdMatch) return false;
+
+            if (linked_document_ids.length > 0) {
+                return linked_document_ids.includes(d.document_id);
             }
 
-            const linkingVar = source.linking_variable || 'id';
-            const reqDocIds = Array.isArray(source.document_id)
-                ? source.document_id
-                : [source.document_id];
+            return true;
+        });
 
-            const match = Object.values(tableData).find(d => {
-                const docIdMatch = reqDocIds.includes(d.document_id || d.document_id);
-                const entityIdMatch = String(d[linkingVar] || d.id) === searchId;
-                return docIdMatch && entityIdMatch;
-            });
-            if (match?.file_path) {
-                const imageUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${match.file_path}`;
-                return {
-                    value: imageUrl,
-                    source: 'Image Cache'
-                };
-            }
+        console.log(`  Found ${matches.length} matches for searchId ${searchId}`);
+        if (matches.length > 0) {
+            console.log(`  First match:`, matches[0]);
         }
+
+        if (execution_mode === 'latest' && matches.length > 0) {
+            matches = matches.sort((a, b) => {
+                const aDate = a.issue_date ? new Date(a.issue_date).getTime() : 0;
+                const bDate = b.issue_date ? new Date(b.issue_date).getTime() : 0;
+                return bDate - aDate;
+            });
+            matches = [matches[0]];
+        }
+
+        matches.forEach(doc => {
+            if (doc.file_name || doc.document_name) {
+                foundDocuments.push({
+                    name: doc.file_name || doc.document_name,
+                    status: doc.status || 'uploaded',
+                    date: doc.issue_date || doc.uploaded_at
+                });
+            }
+        });
     }
-    return { value: '', source: null };
+
+    if (foundDocuments.length === 0) {
+        return { value: notFoundLabel, source: null };
+    }
+
+    let formattedValue = '';
+    if (displayFormat === 'checkboxes') {
+        formattedValue = foundDocuments.map(doc => `${successLabel} ${doc.name}`).join('\n');
+    } else if (displayFormat === 'table') {
+        formattedValue = foundDocuments.map(doc => `${doc.name} | ${doc.status}`).join('\n');
+    } else {
+        formattedValue = foundDocuments.map(doc => `• ${doc.name}`).join('\n');
+    }
+
+    return {
+        value: formattedValue,
+        source: 'Document Checklist'
+    };
 };
 
+const processImageField = (placeholder, targetEntity, combinedCache, masterFields) => {
+    const sourceTable = placeholder.source_table;
+    const linkingVariable = placeholder.linking_variable;
+    const documentTypeIds = placeholder.document_type_ids || [];
+    const computedFunction = placeholder.computed_function || 'none';
+    const executionMode = placeholder.execution_mode || 'latest';
+
+    if (!sourceTable || !linkingVariable) {
+        return { value: '', source: null };
+    }
+
+    const tableData = combinedCache[sourceTable];
+    if (!tableData) {
+        return { value: '', source: null };
+    }
+
+    const searchId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id);
+
+    let matches = Object.values(tableData).filter(d => {
+        const entityIdMatch = String(d[linkingVariable] || d.id) === searchId;
+        if (!entityIdMatch) return false;
+
+        if (documentTypeIds.length > 0) {
+            return documentTypeIds.includes(d.document_id);
+        }
+
+        return true;
+    });
+
+    if (matches.length === 0) {
+        return { value: '', source: null };
+    }
+
+    if (executionMode === 'latest' || computedFunction.includes('Latest')) {
+        matches = matches.sort((a, b) => {
+            const aDate = a.issue_date ? new Date(a.issue_date).getTime() : 0;
+            const bDate = b.issue_date ? new Date(b.issue_date).getTime() : 0;
+            return bDate - aDate;
+        });
+    }
+
+    const match = matches[0];
+    if (match?.file_path) {
+        const imageUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${match.file_path}`;
+        return {
+            value: imageUrl,
+            source: `Image: ${sourceTable}`
+        };
+    }
+
+    return { value: '', source: null };
+};
 
 const processTextField = (placeholder, targetEntity, combinedCache, masterFields, computedFieldCache) => {
     if (!placeholder.master_field_ids?.length) {
@@ -700,7 +886,7 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
                 if (placeholder.type === 'ordinal') {
                     result = processOrdinalField(placeholder, arrayIndex);
                 } else if (placeholder.type === 'image') {
-                    result = processImageField({ ...placeholder, master_field_ids: [mid] }, targetEntity, combinedCache, masterFields);
+                    result = processImageField(placeholder, targetEntity, combinedCache, masterFields);
                 } else if (placeholder.type === 'boolean') {
                     result = processBooleanField({ ...placeholder, master_field_ids: [mid] }, targetEntity, combinedCache, masterFields);
                 } else {
@@ -728,11 +914,42 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
     }
 
     if (placeholder.type === 'conditional' && placeholder.conditions?.length > 0 && targetEntity) {
-        const result = processConditionalField(placeholder, targetEntity, combinedCache, masterFields);
+        const result = processConditionalField(placeholder, targetEntity, combinedCache, masterFields, computedFieldCache);
         if (isValidValue(result.value)) {
             if (logic === 'priority') { console.groupEnd(); return result; }
             collectedValues.push(String(result.value));
             sourceMetadata.push(result.source || 'Conditional (DB)');
+        }
+    }
+
+    if (placeholder.type === 'document_checklist' && placeholder.checklist_data_sources?.length > 0 && targetEntity) {
+        console.log('🔍 DOCUMENT_CHECKLIST PLACEHOLDER:', {
+            name: placeholder.name,
+            display_value: placeholder.display_value,
+            checklist_data_sources: placeholder.checklist_data_sources,
+            targetEntity: targetEntity,
+            targetEntityId: targetEntity.id || targetEntity.company_id || targetEntity.individual_id,
+            combinedCacheTables: Object.keys(combinedCache)
+        });
+        const result = processDocumentChecklistField(placeholder, targetEntity, combinedCache);
+        console.log('📋 DOCUMENT_CHECKLIST RESULT:', {
+            name: placeholder.name,
+            result: result,
+            isValid: isValidValue(result.value)
+        });
+        if (isValidValue(result.value)) {
+            if (logic === 'priority') { console.groupEnd(); return result; }
+            collectedValues.push(String(result.value));
+            sourceMetadata.push(result.source || 'Document Checklist');
+        }
+    }
+
+    if (placeholder.type === 'image' && placeholder.source_table && placeholder.linking_variable && targetEntity) {
+        const result = processImageField(placeholder, targetEntity, combinedCache, masterFields);
+        if (isValidValue(result.value)) {
+            if (logic === 'priority') { console.groupEnd(); return result; }
+            collectedValues.push(String(result.value));
+            sourceMetadata.push(result.source || 'Image');
         }
     }
 
@@ -1058,19 +1275,24 @@ const PlaceholderInput = ({
 
     if (placeholder.type === 'image') {
         const style = imageStyles[fieldKey] || {};
+        const defaultWidth = placeholder.image_width ? parseInt(placeholder.image_width) : 300;
+        const defaultHeight = placeholder.image_height ? parseInt(placeholder.image_height) : 200;
+        const imageWidth = style.imageWidth || defaultWidth;
+        const imageHeight = style.imageHeight || defaultHeight;
+
         return (
             <div className="">
                 <FieldHeader />
                 {value ? (
-                    <div className={cn("relative border rounded overflow-hidden aspect-video flex items-center justify-center bg-white", hasChanged && canSave ? "border-amber-400" : "")}>
-                        <img src={value} className="max-h-full object-contain" style={{ textAlign: style.textAlign || 'center', maxWidth: style.maxWidth || '100%' }} />
+                    <div className={cn("relative border rounded overflow-hidden flex items-center justify-center bg-white", hasChanged && canSave ? "border-amber-400" : "")} style={{ maxWidth: `${imageWidth}px`, height: `${imageHeight}px` }}>
+                        <img src={value} className="max-h-full object-contain" style={{ textAlign: style.textAlign || 'center', maxWidth: style.maxWidth || '100%', width: `${imageWidth}px`, height: `${imageHeight}px` }} />
                         <div className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                             <Button size="sm" variant="secondary" className="h-7 text-[10px]" onClick={() => document.getElementById(`file-${fieldKey}`).click()}>Replace</Button>
                             <Button size="sm" variant="destructive" className="h-7 text-[10px]" onClick={() => onChange('')}>Remove</Button>
                         </div>
                     </div>
                 ) : <div className="text-xs italic border-2 border-dashed rounded p-4 text-center">Upload {placeholder.display_value || placeholder.name}</div>}
-                <input id={`file-${fieldKey}`} type="file" className="hidden" accept="image/*" onChange={onFileChange} />
+                <input id={`file-${fieldKey}`} type="file" className="hidden" accept="image/jpeg,image/jpg,image/png" onChange={onFileChange} />
                 {value && onImageStyleChange && (
                     <ImagePlaceholderControls
                         styles={style}
@@ -1883,21 +2105,14 @@ export default function TemplateGenerationDialog({
         }
     }, [isOpen, selectedTemplate?.id, entityIdMap, relationshipData, masterFields]);
 
-    // ============================================================
-    // REPLACEMENT for resolveComputedFields in TemplateGenerationDialog
-    // Paste this entire useCallback to replace the existing one
-    // ============================================================
-
     const resolveComputedFields = useCallback(async (updatedCache: Record<string, any>) => {
-        console.group('🔬 [resolveComputedFields] START');
+        console.log('🚀 resolveComputedFields CALLED');
 
         if (!selectedTemplate?.placeholders || !masterFields) {
-            console.warn('⚠️ [resolveComputedFields] Missing template or masterFields — aborting');
-            console.groupEnd();
+            console.log('⚠️ Early return: missing template or masterFields');
             return;
         }
 
-        // 1. Collect all entity IDs
         const allEntityIds = new Set<string>();
         if (entityIdMap?.company) allEntityIds.add(String(entityIdMap.company));
         if (entityIdMap?.principal) allEntityIds.add(String(entityIdMap.principal));
@@ -1932,9 +2147,15 @@ export default function TemplateGenerationDialog({
             (p.master_field_ids || []).forEach(id => allLinkedMasterIds.add(parseInt(id)));
         });
 
-        const neededDocumentIds = new Set<string>();
-        const neededEntityIds = new Set<string>();
+        console.log('📋 Scanning placeholders for document tables...');
+        console.log('  Total placeholders:', selectedTemplate.placeholders.length);
+        console.log('  Linked master field IDs:', Array.from(allLinkedMasterIds));
 
+        // Dynamically collect document tables from all placeholder configurations
+        const documentTableConfigs = new Map(); // table -> { linkingVars: Set, documentIds: Set }
+        const neededDocumentIds = new Set<string>();
+
+        // 1. From master field sources (computed fields)
         allLinkedMasterIds.forEach(mfId => {
             const mf = masterFields.get(mfId);
             if (!mf?.sources) return;
@@ -1944,37 +2165,146 @@ export default function TemplateGenerationDialog({
                     ? source.document_id
                     : (source.document_id ? [source.document_id] : []);
                 docIds.forEach(id => neededDocumentIds.add(id));
-                allEntityIds.forEach(eid => neededEntityIds.add(eid));
+
+                const table = source.table;
+                const linkingVar = source.linking_variable || 'director_id';
+                if (!documentTableConfigs.has(table)) {
+                    documentTableConfigs.set(table, { linkingVars: new Set(), documentIds: new Set() });
+                }
+                documentTableConfigs.get(table).linkingVars.add(linkingVar);
+                docIds.forEach(id => documentTableConfigs.get(table).documentIds.add(id));
             });
         });
 
-        if (neededDocumentIds.size === 0) {
+        // 2. From document_checklist placeholders
+        selectedTemplate.placeholders.forEach(p => {
+            if (p.type === 'document_checklist' && p.checklist_data_sources) {
+                p.checklist_data_sources.forEach(ds => {
+                    const table = ds.table;
+                    const linkingVar = ds.linking_variable || 'director_id';
+                    const docIds = ds.linked_document_ids || [];
+
+                    if (!documentTableConfigs.has(table)) {
+                        documentTableConfigs.set(table, { linkingVars: new Set(), documentIds: new Set() });
+                    }
+                    documentTableConfigs.get(table).linkingVars.add(linkingVar);
+                    docIds.forEach(id => {
+                        documentTableConfigs.get(table).documentIds.add(id);
+                        neededDocumentIds.add(id);
+                    });
+                });
+            }
+        });
+
+        console.log(`  Document tables collected after document_checklist scanning:`, Array.from(documentTableConfigs.keys()));
+
+        // 3. From image placeholders with source_table
+        selectedTemplate.placeholders.forEach(p => {
+            if (p.type === 'image' && p.source_table && p.document_type_ids) {
+                const table = p.source_table;
+                const linkingVar = p.linking_variable || 'director_id';
+                const docIds = p.document_type_ids || [];
+
+                if (!documentTableConfigs.has(table)) {
+                    documentTableConfigs.set(table, { linkingVars: new Set(), documentIds: new Set() });
+                }
+                documentTableConfigs.get(table).linkingVars.add(linkingVar);
+                docIds.forEach(id => {
+                    documentTableConfigs.get(table).documentIds.add(id);
+                    neededDocumentIds.add(id);
+                });
+            }
+        });
+
+        if (documentTableConfigs.size === 0) {
             return;
         }
 
-        // 4. Fetch documents
-        let documents = [];
+        // 4. Dynamically fetch documents from all discovered tables
+        const allDocuments = {};
         let docTypes = [];
+
         try {
-            const [docsResult, docTypesResult] = await Promise.all([
-                supabase
-                    .from('acc_portal_directors_documents')
-                    .select('*')
-                    .in('director_id', Array.from(neededEntityIds))
-                    .in('document_id', Array.from(neededDocumentIds))
-                    .neq('status', 'deleted'),
-                supabase
-                    .from('acc_portal_kyc')
-                    .select('*')
-                    .in('id', Array.from(neededDocumentIds))
-            ]);
-            documents = docsResult.data || [];
-            docTypes = docTypesResult.data || [];
+            const fetchPromises = Array.from(documentTableConfigs.entries()).map(async ([table, config]) => {
+                const linkingVars = Array.from(config.linkingVars);
+                const documentIds = Array.from(config.documentIds);
+
+                // Build query dynamically based on linking variables
+                let query = supabase.from(table).select('*');
+
+                // Filter by entity IDs using all linking variables
+                const entityIdArray = Array.from(allEntityIds);
+                if (linkingVars.length === 1) {
+                    query = query.in(linkingVars[0], entityIdArray);
+                } else {
+                    // Multiple linking vars - use OR logic
+                    const orConditions = linkingVars.map(v => `${v}.in.(${entityIdArray.join(',')})`).join(',');
+                    query = query.or(orConditions);
+                }
+
+                // Filter by document IDs if any
+                if (documentIds.length > 0) {
+                    query = query.in('document_id', documentIds);
+                }
+
+                query = query.neq('status', 'deleted');
+
+                const { data, error } = await query;
+                if (error) throw error;
+
+                return { table, data: data || [] };
+            });
+
+            // Also fetch document types
+            const docTypesPromise = neededDocumentIds.size > 0
+                ? supabase.from('acc_portal_kyc').select('*').in('id', Array.from(neededDocumentIds))
+                : Promise.resolve({ data: [] });
+
+            const results = await Promise.all([...fetchPromises, docTypesPromise]);
+
+            // Organize documents by table
+            results.slice(0, -1).forEach(result => {
+                if (result.data) {
+                    allDocuments[result.table] = result.data;
+                }
+            });
+
+            docTypes = results[results.length - 1]?.data || [];
+
         } catch (err) {
             console.error('❌ [resolveComputedFields] Failed to fetch documents:', err);
             console.groupEnd();
             return;
         }
+
+        // Add all fetched document tables to cache for document_checklist and image placeholders
+        // This must happen BEFORE checking for computed jobs, so documents are cached even without computed fields
+        if (Object.keys(allDocuments).length > 0) {
+            console.log('📦 Adding fetched document tables to cache:', Object.keys(allDocuments));
+            const cacheUpdates = {};
+
+            Object.entries(allDocuments).forEach(([table, docs]) => {
+                console.log(`  ✓ ${table}: ${docs.length} documents`);
+                // Store documents indexed by their ID for easy lookup
+                const documentsById = docs.reduce((acc, doc) => {
+                    acc[doc.id] = doc;
+                    return acc;
+                }, {});
+                cacheUpdates[table] = documentsById;
+            });
+
+            setAdditionalCache(prev => {
+                const updated = { ...prev, ...cacheUpdates };
+                console.log('📦 Updated cache tables:', Object.keys(updated));
+                return updated;
+            });
+        } else {
+            console.log('⚠️ No document tables to add to cache');
+        }
+
+        // Flatten all documents for computed field processing
+        const documents = Object.values(allDocuments).flat();
+
         const computedJobs: Array<{
             fieldId: number;
             entityId: string;
@@ -1997,6 +2327,8 @@ export default function TemplateGenerationDialog({
         });
 
         if (computedJobs.length === 0) {
+            console.log('✅ No computed jobs, but documents already cached. Exiting.');
+            console.groupEnd();
             return;
         }
         const newComputedCache: Record<string, any> = {};
@@ -2034,29 +2366,45 @@ export default function TemplateGenerationDialog({
                     if (path) {
                         extractedValue = parseJsonValue(latestDoc, path);
                     } else {
+
                         // No path — return the whole extracted_details object
+
                         extractedValue = latestDoc.extracted_details || latestDoc;
+
                     }
+
+
 
                     if (extractedValue && String(extractedValue).trim() !== '') {
+
                         newComputedCache[cacheKey] = extractedValue;
+
                     } else {
+
                         newComputedCache[cacheKey] = 'Field Not Found';
+
                     }
 
-                } catch (err) {
-                    newComputedCache[cacheKey] = null;
-                }
-            })
-        );
 
-        setComputedFieldCache(prev => {
-            const merged = { ...prev, ...newComputedCache };
-            return merged;
+
+                } catch (err) {
+
+                    newComputedCache[cacheKey] = null;
+
+                }
+
+            })
+        ).then(() => {
+            setComputedFieldCache(prev => {
+                const merged = { ...prev, ...newComputedCache };
+                console.log('📦 Adding computed fields to cache:', Object.keys(merged));
+                return merged;
+            });
         });
 
         console.groupEnd();
     }, [selectedTemplate, masterFields, entityIdMap, relationshipData]);
+
 
     useEffect(() => {
         if (isOpen && selectedTemplate?.id) {
@@ -2067,10 +2415,10 @@ export default function TemplateGenerationDialog({
     }, [isOpen, selectedTemplate?.id, fetchMissingDataSources]);
 
     useEffect(() => {
-        if (isOpen && selectedTemplate?.id && masterFields && Object.keys(combinedCache).length > 0) {
+        if (isOpen && selectedTemplate?.id && masterFields) {
             resolveComputedFields(combinedCache);
         }
-    }, [isOpen, selectedTemplate?.id, Object.keys(combinedCache).length]);
+    }, [isOpen, selectedTemplate?.id, masterFields, resolveComputedFields]);
 
     useEffect(() => {
         if (!isOpen || !selectedTemplate) return;
@@ -2576,6 +2924,10 @@ export default function TemplateGenerationDialog({
                                                 isEvenRow ? "bg-white" : "bg-slate-50/50"
                                             )}
                                         >
+                                            {/* Field label column */}
+                                            <td className="px-3 py-2 font-medium text-slate-700 text-[11px] border-r border-slate-200 sticky left-0 bg-inherit z-10">
+                                                {child.display_value || child.name.replace(/_/g, ' ')}
+                                            </td>
 
                                             {/* One input cell per entity/row */}
                                             {rows.map((row, rowIdx) => {

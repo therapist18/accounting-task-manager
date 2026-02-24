@@ -108,22 +108,48 @@ export default function LetterGenerationModule() {
         console.log('Letter type:', letterType);
 
         if (selectedCompany) {
-            // Check for KRA email in contact details or common keys
-            const kraEmail = selectedCompany.contact_details?.kra_email_address || selectedCompany.contact_details?.email || '';
-            console.log('KRA Email found:', kraEmail);
+            console.log('Contact details object:', selectedCompany.contact_details);
 
-            setEmail(kraEmail);
-            setReference(selectedCompany.registration_number || ''); // PIN
-            console.log('Set reference to PIN:', selectedCompany.registration_number);
-
-            // Set default subject/recipient based on KRA tab
+            // Switch between KRA and general contact details based on letter type
             if (letterType === 'kra') {
+                // KRA Layout: Use KRA-specific email and default BCL phone
+                const kraEmail = selectedCompany.kra_email_address || selectedCompany.contact_details?.email || '';
+                console.log('KRA Email found:', kraEmail);
+                setEmail(kraEmail);
+                setPhone('+254700298298'); // BCL Default
+                console.log('Setting phone to BCL default: +254700298298');
                 setRecipient("Kenya Revenue Authority,\nP.O. Box 48240 - 00100,\nNairobi, Kenya.");
                 setSubject("APPLICATION FOR TAX COMPLIANCE CERTIFICATE");
             } else {
+                // General Layout: Use company communication email and office phone
+                const companyEmail = selectedCompany.contact_details?.email || '';
+                // Check both top-level and contact_details for phone
+                const companyPhone = selectedCompany.phone
+                    || selectedCompany.office_phone
+                    || selectedCompany.contact_details?.office_phone
+                    || selectedCompany.contact_details?.phone
+                    || selectedCompany.contact_details?.mobile
+                    || selectedCompany.contact_details?.telephone
+                    || '+254700000000'; // Distinct from BCL default
+                console.log('Company Email found:', companyEmail);
+                console.log('Company Phone found:', companyPhone);
+                console.log('Available phone fields:', {
+                    top_level_phone: selectedCompany.phone,
+                    top_level_office_phone: selectedCompany.office_phone,
+                    contact_office_phone: selectedCompany.contact_details?.office_phone,
+                    contact_phone: selectedCompany.contact_details?.phone,
+                    contact_mobile: selectedCompany.contact_details?.mobile,
+                    contact_telephone: selectedCompany.contact_details?.telephone
+                });
+                setEmail(companyEmail);
+                setPhone(companyPhone);
+                console.log('Setting phone to company phone:', companyPhone);
                 setRecipient("Select Bank Ltd,\nIndustrial Area Branch,\nNairobi.");
                 setSubject("REQUEST FOR BANK STATEMENT");
             }
+
+            setReference(selectedCompany.registration_number || ''); // PIN
+            console.log('Set reference to PIN:', selectedCompany.registration_number);
             console.log('Set recipient and subject based on letter type');
         }
         console.log('=== END COMPANY SELECTION DEBUG ===');
@@ -324,8 +350,12 @@ export default function LetterGenerationModule() {
                                                             </h2>
                                                             <div className="text-[11px] font-bold text-slate-700 space-y-1 uppercase tracking-widest">
                                                                 <p className="flex justify-center gap-4">
-                                                                    <span className="flex items-center gap-1">EMAIL: {email || 'INFO@REGISTRY.CO.KE'}</span>
-                                                                    <span className="flex items-center gap-1">MOBILE NO: {phone}</span>
+                                                                    <span className="flex items-center gap-1">
+                                                                        EMAIL: {tab === 'companies'
+                                                                            ? (selectedCompany?.kra_email_address || email || '')
+                                                                            : (email || '')}
+                                                                    </span>
+                                                                    <span className="flex items-center gap-1">MOBILE NO: {phone || ''}</span>
                                                                 </p>
                                                                 <p>P.O. BOX 12345 - 00100, NAIROBI, KENYA</p>
                                                             </div>
@@ -386,7 +416,7 @@ export default function LetterGenerationModule() {
                                                                     {tab === 'companies' ? (activeSignatory?.name || '____________________') : selectedIndividual?.full_name}
                                                                 </div>
                                                                 <div className="text-xs text-slate-500 font-bold uppercase tracking-widest italic">
-                                                                    {tab === 'companies' ? (activeSignatory?.position || 'Authorized Signatory') : 'Applicant'}
+                                                                    {tab === 'companies' ? (activeSignatory?.position || 'Directors') : 'Applicant'}
                                                                 </div>
                                                             </div>
                                                         </div>
@@ -457,11 +487,15 @@ export default function LetterGenerationModule() {
                                                 </CardHeader>
                                                 <CardContent className="p-4 space-y-4">
                                                     <div className="space-y-1.5">
-                                                        <Label className="text-[10px] font-black uppercase text-slate-400">Mobile Number</Label>
+                                                        <Label className="text-[10px] font-black uppercase text-slate-400">
+                                                            {letterType === 'kra' ? 'Mobile Number (BCL - Default)' : 'Mobile Number'}
+                                                        </Label>
                                                         <Input className="h-9 text-xs font-bold" value={phone} onChange={e => setPhone(e.target.value)} />
                                                     </div>
                                                     <div className="space-y-1.5">
-                                                        <Label className="text-[10px] font-black uppercase text-slate-400">Email Address</Label>
+                                                        <Label className="text-[10px] font-black uppercase text-slate-400">
+                                                            {letterType === 'kra' ? 'Email Address (iTax)' : 'Email Address'}
+                                                        </Label>
                                                         <Input className="h-9 text-xs font-bold" value={email} onChange={e => setEmail(e.target.value)} />
                                                     </div>
                                                 </CardContent>
@@ -490,12 +524,35 @@ export default function LetterGenerationModule() {
                                                 </CardContent>
                                             </Card>
 
+                                            {/* Section: Valediction */}
+                                            <Card className="border-slate-100 shadow-sm overflow-hidden">
+                                                <CardHeader className="bg-slate-50 py-3 px-4 border-b border-slate-100">
+                                                    <CardTitle className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                                        <Signature size={12} /> Sign-Off Style
+                                                    </CardTitle>
+                                                </CardHeader>
+                                                <CardContent className="p-4">
+                                                    <div className="space-y-1.5">
+                                                        <Label className="text-[10px] font-black uppercase text-slate-400">Valediction</Label>
+                                                        <select
+                                                            className="w-full h-10 px-3 rounded-md border border-slate-200 text-sm outline-none bg-white font-bold text-slate-700"
+                                                            value={valediction}
+                                                            onChange={(e) => setValediction(e.target.value)}
+                                                        >
+                                                            {VALEDICTIONS.map((v) => (
+                                                                <option key={v} value={v}>{v}</option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+
                                             {/* Section: Signatory */}
                                             {tab === 'companies' && (
                                                 <Card className="border-blue-100 shadow-sm overflow-hidden ring-1 ring-blue-50">
                                                     <CardHeader className="bg-blue-50/50 py-3 px-4 border-b border-blue-100">
                                                         <CardTitle className="text-[10px] font-black text-blue-700 uppercase tracking-widest flex items-center gap-2">
-                                                            <Signature size={12} /> Authorized Signatory
+                                                            <Signature size={12} /> Directors
                                                         </CardTitle>
                                                     </CardHeader>
                                                     <CardContent className="p-4">
