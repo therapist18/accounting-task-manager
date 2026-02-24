@@ -690,9 +690,6 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
     const sourceMetadata: string[] = [];
     const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData);
     const targetId = targetEntity ? String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id) : null;
-    console.group(`[FIELD PROCESS] ${placeholder.name}`);
-    console.log("Target Entity ID:", targetId);
-    console.log("Master Fields Linked:", placeholder.master_field_ids);
     if (placeholder.master_field_ids?.length > 0 && targetEntity) {
         for (const mid of placeholder.master_field_ids) {
             let result = { value: '', source: null };
@@ -711,7 +708,6 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
                 }
             }
             if (isValidValue(result.value, placeholder.type)) {
-                console.log(`✅ Found Value: "${result.value}" from Source: ${result.source}`);
                 if (logic === 'priority') {
                     console.groupEnd();
                     return result;
@@ -725,20 +721,15 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
         const result = processBooleanField(placeholder, targetEntity, combinedCache, masterFields, task);
         if (isValidValue(result.value, placeholder.type)) {
             const matchedLabel = result.value.find(v => v.checked)?.label;
-            console.log(`✅ Found Boolean Match: "${matchedLabel}"`);
             if (logic === 'priority') { console.groupEnd(); return result; }
             collectedValues.push(result.value);
             sourceMetadata.push(result.source || 'Boolean (DB)');
-        } else {
-            console.log(`❌ No Boolean Match found for ${placeholder.name}`);
         }
     }
 
-    // 3. ADDED: Handle Conditional logic (e.g. sponsor_r_number)
     if (placeholder.type === 'conditional' && placeholder.conditions?.length > 0 && targetEntity) {
         const result = processConditionalField(placeholder, targetEntity, combinedCache, masterFields);
         if (isValidValue(result.value)) {
-            console.log(`✅ Found Conditional Match: "${result.value}"`);
             if (logic === 'priority') { console.groupEnd(); return result; }
             collectedValues.push(String(result.value));
             sourceMetadata.push(result.source || 'Conditional (DB)');
@@ -791,12 +782,10 @@ const extractDisplayValue = (value) => {
     if (value === null || value === undefined) return '';
 
     if (Array.isArray(value)) {
-        // If it's a list of condition objects (like prefix/possessive)
         const checkedItems = value.filter(opt => opt && opt.checked);
 
         if (checkedItems.length > 0) {
             return checkedItems.map(opt => {
-                // Return label ("Mr") or the tag or the raw value
                 return opt.label || opt.tag || opt.value || '';
             }).join(', ');
         }
@@ -1938,17 +1927,11 @@ export default function TemplateGenerationDialog({
             if (sid) allEntityIds.add(String(sid));
         }
 
-        console.log('📋 [resolveComputedFields] Entity IDs collected:', Array.from(allEntityIds));
-
-        // 2. Find all master fields that have is_computed sources
         const allLinkedMasterIds = new Set<number>();
         selectedTemplate.placeholders.forEach(p => {
             (p.master_field_ids || []).forEach(id => allLinkedMasterIds.add(parseInt(id)));
         });
 
-        console.log('🔗 [resolveComputedFields] All linked master field IDs:', Array.from(allLinkedMasterIds));
-
-        // 3. Collect needed document IDs from computed sources
         const neededDocumentIds = new Set<string>();
         const neededEntityIds = new Set<string>();
 
@@ -1957,7 +1940,6 @@ export default function TemplateGenerationDialog({
             if (!mf?.sources) return;
             mf.sources.forEach(source => {
                 if (!source.is_computed) return;
-                console.log(`✅ [resolveComputedFields] Computed source found for MF ${mfId}:`, source);
                 const docIds = Array.isArray(source.document_id)
                     ? source.document_id
                     : (source.document_id ? [source.document_id] : []);
@@ -1966,12 +1948,7 @@ export default function TemplateGenerationDialog({
             });
         });
 
-        console.log('📄 [resolveComputedFields] Needed document IDs:', Array.from(neededDocumentIds));
-        console.log('👤 [resolveComputedFields] Needed entity IDs:', Array.from(neededEntityIds));
-
         if (neededDocumentIds.size === 0) {
-            console.warn('⚠️ [resolveComputedFields] No computed document sources found — aborting');
-            console.groupEnd();
             return;
         }
 
@@ -1991,10 +1968,6 @@ export default function TemplateGenerationDialog({
                     .select('*')
                     .in('id', Array.from(neededDocumentIds))
             ]);
-
-            console.log('📦 [resolveComputedFields] Raw docs fetched:', docsResult.data?.length, docsResult.error);
-            console.log('📦 [resolveComputedFields] Raw docTypes fetched:', docTypesResult.data?.length, docTypesResult.error);
-
             documents = docsResult.data || [];
             docTypes = docTypesResult.data || [];
         } catch (err) {
@@ -2002,11 +1975,6 @@ export default function TemplateGenerationDialog({
             console.groupEnd();
             return;
         }
-
-        console.log(`📋 [resolveComputedFields] Total documents available: ${documents.length}`);
-        documents.forEach(d => console.log(`  doc: id=${d.id} director_id=${d.director_id} document_id=${d.document_id} status=${d.status} issue_date=${d.issue_date}`));
-
-        // 5. Build compute jobs
         const computedJobs: Array<{
             fieldId: number;
             entityId: string;
@@ -2028,24 +1996,14 @@ export default function TemplateGenerationDialog({
             });
         });
 
-        console.log(`🏗️ [resolveComputedFields] Total compute jobs: ${computedJobs.length}`);
-        computedJobs.forEach(j => console.log(`  job: key=${j.cacheKey} fn=${j.computedSource.computed_function} path=${j.computedSource.path}`));
-
         if (computedJobs.length === 0) {
-            console.groupEnd();
             return;
         }
-
-        // 6. Execute all jobs — with DIRECT extraction as the primary approach
-        //    We do NOT rely on executeComputedField here; we implement the
-        //    "getLatestDocument + extractField" logic inline so it's transparent.
         const newComputedCache: Record<string, any> = {};
 
         await Promise.all(
             computedJobs.map(async ({ fieldId, entityId, extractionMode, computedSource, cacheKey }) => {
-                console.group(`🔧 [resolveComputedFields] Job: ${cacheKey}`);
                 try {
-                    // Filter docs for this specific entity + document types
                     const reqDocIds = Array.isArray(computedSource.document_id)
                         ? computedSource.document_id
                         : (computedSource.document_id ? [computedSource.document_id] : []);
@@ -2056,63 +2014,44 @@ export default function TemplateGenerationDialog({
                         reqDocIds.includes(d.document_id)
                     );
 
-                    console.log(`  Filtered docs for entity ${entityId}:`, entityDocs.length, 'docs');
-                    entityDocs.forEach(d => console.log(`    → id=${d.id} doc_id=${d.document_id} status=${d.status} issue_date=${d.issue_date} has_extracted=${!!d.extracted_details}`));
-
                     if (entityDocs.length === 0) {
-                        console.warn(`  ⚠️ No documents found for entity ${entityId}`);
                         newComputedCache[cacheKey] = 'Document Not Found';
-                        console.groupEnd();
                         return;
                     }
 
-                    // Sort by issue_date descending to get "latest"
                     const sorted = [...entityDocs].sort((a, b) => {
                         const aDate = a.issue_date ? new Date(a.issue_date).getTime() : 0;
                         const bDate = b.issue_date ? new Date(b.issue_date).getTime() : 0;
-                        // Also prefer 'extracted' status over others
                         if (a.status === 'extracted' && b.status !== 'extracted') return -1;
                         if (b.status === 'extracted' && a.status !== 'extracted') return 1;
                         return bDate - aDate;
                     });
 
                     const latestDoc = sorted[0];
-                    console.log(`  🏆 Latest doc selected: id=${latestDoc.id} issue_date=${latestDoc.issue_date} status=${latestDoc.status}`);
-
-                    // Extract value from path
-                    // path is like: "extracted_details->>'passport_number'"
                     const path = computedSource.path;
                     let extractedValue: any = null;
 
                     if (path) {
                         extractedValue = parseJsonValue(latestDoc, path);
-                        console.log(`  🔍 Path "${path}" → extracted: "${extractedValue}"`);
                     } else {
                         // No path — return the whole extracted_details object
                         extractedValue = latestDoc.extracted_details || latestDoc;
-                        console.log(`  🔍 No path — returning full extracted_details`);
                     }
 
                     if (extractedValue && String(extractedValue).trim() !== '') {
-                        console.log(`  ✅ Final value: "${extractedValue}"`);
                         newComputedCache[cacheKey] = extractedValue;
                     } else {
-                        console.warn(`  ❌ Empty extraction result`);
                         newComputedCache[cacheKey] = 'Field Not Found';
                     }
 
                 } catch (err) {
-                    console.error(`  ❌ Job failed for ${cacheKey}:`, err);
                     newComputedCache[cacheKey] = null;
                 }
-                console.groupEnd();
             })
         );
 
-        console.log('💾 [resolveComputedFields] New cache entries:', newComputedCache);
         setComputedFieldCache(prev => {
             const merged = { ...prev, ...newComputedCache };
-            console.log('💾 [resolveComputedFields] Full computed cache after merge:', merged);
             return merged;
         });
 
@@ -2122,7 +2061,6 @@ export default function TemplateGenerationDialog({
     useEffect(() => {
         if (isOpen && selectedTemplate?.id) {
             fetchMissingDataSources().then(() => {
-                // After DB data is loaded, resolve computed fields
                 resolveComputedFields(combinedCache);
             });
         }
@@ -2164,7 +2102,7 @@ export default function TemplateGenerationDialog({
                     relationshipData,
                     extractedData,
                     companyData,
-                    computedFieldCache   
+                    computedFieldCache
                 );
                 const actuallyFoundDbData = resolvedRows.some(row =>
                     Object.entries(row).some(([key, val]) => {
@@ -2349,7 +2287,7 @@ export default function TemplateGenerationDialog({
                     index,         // Argument 8: arrayIndex (Critical Fix)
                     sourceArray,
                     task,
-                    computedFieldCache  
+                    computedFieldCache
                 );
                 // For boolean fields, preserve the structure (array of options)
                 if (field.type === 'boolean') {
@@ -3371,21 +3309,8 @@ export default function TemplateGenerationDialog({
                 const typeKey = Array.isArray(placeholder.entity_type) ? placeholder.entity_type[0] : placeholder.entity_type;
                 entId = entityIdMap[typeKey];
             }
-
-            console.log(`[SAVE FIELD DEBUG] Saving: ${placeholder.name} | Value: ${newValue}`);
-            console.log(`[SAVE FIELD DEBUG] Target Entity found:`, targetEntity);
-            console.log(`[SAVE FIELD DEBUG] Target ID resolved:`, entId);
-
-            // ---------------------------------------------------------
-            // 2. Determine Database Metadata (Table, Path, Linking Var)
-            // ---------------------------------------------------------
-
-            // CASE A: User selected a specific database source from the UI
             if (specificSource?.type === 'db') {
                 const mf = masterFields.get(parseInt(specificSource.id));
-
-                // Try to find the source matching the specific table requested
-                // If not found, fall back to smart type matching
                 let src = mf?.sources?.find(s => s.table === specificSource.table);
 
                 if (!src) {
@@ -3406,10 +3331,9 @@ export default function TemplateGenerationDialog({
                 table = 'tm_tasks';
                 path = `job_specific_answers->>'${specificSource.id}'`;
                 linkVar = 'id';
-                entId = task?.id; // Override entId for job questions (always attached to task)
+                entId = task?.id;
                 sourceLabel = `Job Question: ${specificSource.id}`;
             }
-            // CASE C: Default / Inline Edit (The Critical Fix)
             else {
                 const mfId = placeholder.master_field_ids?.[0];
                 if (!mfId) throw new Error("No Master Field ID linked to this placeholder");
@@ -3417,23 +3341,16 @@ export default function TemplateGenerationDialog({
                 const mf = masterFields.get(parseInt(mfId));
                 if (!mf || !mf.sources) throw new Error("Master Field configuration missing");
 
-                // --- SMART SOURCE SELECTION ---
-                // 1. Determine the effective type of the target entity
-                let targetType = 'individual'; // Default to individual (Director, Sponsor, Principal, Dependant)
+                let targetType = 'individual';
 
                 const pTypes = Array.isArray(placeholder.entity_type) ? placeholder.entity_type : [placeholder.entity_type];
 
                 if (pTypes.includes('company')) {
                     targetType = 'company';
                 } else if (targetEntity && (targetEntity.company_name || targetEntity.registration_number)) {
-                    // Heuristic: If the entity object looks like a company
                     targetType = 'company';
                 }
 
-                console.log(`[SAVE FIELD DEBUG] Detected Target Type: ${targetType}`);
-
-                // 2. Find the source definition that matches this type
-                // Note: Database usually uses 'company' or 'individual' as source_type
                 const src = mf.sources.find(s => s.source_type === targetType)
                     || mf.sources[0]; // Fallback to first if no specific match
 
@@ -3443,16 +3360,12 @@ export default function TemplateGenerationDialog({
                 path = src.path;
                 linkVar = src.linking_variable || 'id';
 
-                // Double check for Sponsor/Individual mismatch
-                // If we are saving an Individual but the table is a Company table, try to find an alternative
                 if (targetType === 'individual' && table.includes('acc_portal_company')) {
-                    console.warn(`[SAVE WARNING] Type is individual but table is ${table}. Attempting to find individual table...`);
                     const altSource = mf.sources.find(s => s.table === 'registry_individuals' || s.source_type === 'individual');
                     if (altSource) {
                         table = altSource.table;
                         path = altSource.path;
                         linkVar = altSource.linking_variable || 'id';
-                        console.log(`[SAVE FIX] Switched to table: ${table}`);
                     }
                 }
             }
@@ -3461,30 +3374,15 @@ export default function TemplateGenerationDialog({
                 throw new Error(`Could not resolve database target. Table: ${table}, ID: ${entId}`);
             }
 
-            // ---------------------------------------------------------
-            // 3. Perform the Update
-            // ---------------------------------------------------------
-            console.log(`[SAVE EXECUTING] Updating ${table} where ${linkVar}=${entId}. Path: ${path}`);
-
             const { data: existing, error: findError } = await supabase.from(table).select('*').eq(linkVar, entId).maybeSingle();
-
-            if (findError) {
-                console.error("Error finding record:", findError);
-                // Don't throw here, sometimes maybeSingle returns null without error, but if error exists we should know
-            }
 
             let updatePayload = {};
 
             if (path && (path.includes('->') || path.includes('.'))) {
-                // Handle JSON path updates (e.g., residential_address->>city)
                 const pathParts = path.split(/->>|->|\./).map(p => p.trim().replace(/['"]/g, '')).filter(Boolean);
                 const column = pathParts[0];
                 const nestedPath = pathParts.slice(1);
-
-                // Get existing JSON or empty object
                 const existingJson = existing ? { ...(existing[column] || {}) } : {};
-
-                // Helper to set deep value safely
                 const setDeepValue = (obj, parts, val) => {
                     let current = obj;
                     for (let i = 0; i < parts.length - 1; i++) {
@@ -3500,7 +3398,6 @@ export default function TemplateGenerationDialog({
 
                 updatePayload[column] = setDeepValue(existingJson, nestedPath, newValue);
             } else {
-                // Standard column update
                 updatePayload[path || placeholder.name] = newValue;
             }
 
@@ -3510,10 +3407,6 @@ export default function TemplateGenerationDialog({
                 .eq(linkVar, entId);
 
             if (updateError) throw updateError;
-
-            // ---------------------------------------------------------
-            // 4. Fetch Updated Data & Refresh UI
-            // ---------------------------------------------------------
             const { data: refreshedRecord, error: fetchError } = await supabase
                 .from(table)
                 .select('*')
@@ -3522,7 +3415,6 @@ export default function TemplateGenerationDialog({
 
             if (fetchError) throw fetchError;
 
-            // Update the Cache so resolvers see the new data
             setAdditionalCache(prev => ({
                 ...prev,
                 [table]: {
@@ -3531,10 +3423,9 @@ export default function TemplateGenerationDialog({
                 }
             }));
 
-            // Create a temporary cache object for immediate resolution
             const updatedCombinedCache = {
                 ...combinedCache,
-                ...additionalCache, // include existing additional cache
+                ...additionalCache,
                 [table]: {
                     ...(combinedCache[table] || {}),
                     ...(additionalCache[table] || {}),
@@ -3545,7 +3436,7 @@ export default function TemplateGenerationDialog({
             const match = processPlaceholderValue(
                 placeholder,
                 relationshipData,
-                updatedCombinedCache, // Use the new data
+                updatedCombinedCache,
                 masterFields,
                 entityIdMap,
                 extractedData,
@@ -3557,15 +3448,11 @@ export default function TemplateGenerationDialog({
             );
 
             const finalResolvedValue = placeholder.type === 'boolean' ? match.value : extractDisplayValue(match.value);
-
-            // Sync UI state
             if (arrayIndex !== null && placeholder.parent_name) {
                 handleArrayInputChange(placeholder.parent_name, arrayIndex, placeholder.name, finalResolvedValue);
             } else {
                 handleInputChange(placeholder.name, finalResolvedValue);
             }
-
-            // Sync originalFormData so "Save" buttons hide
             setOriginalFormData(prev => {
                 const updated = JSON.parse(JSON.stringify(prev));
                 if (arrayIndex !== null && placeholder.parent_name) {
@@ -3596,7 +3483,7 @@ export default function TemplateGenerationDialog({
             return (val && typeof val !== 'object') ? val : match;
         });
         try {
-            const response = await fetch('/api/ai/refine', { // Ensure this matches your route path
+            const response = await fetch('/api/ai/refine', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -3610,7 +3497,7 @@ export default function TemplateGenerationDialog({
             }
 
             const data = await response.json();
-            return data.result; // This matches your Gemini route return
+            return data.result;
         } catch (err) {
             toast({
                 title: "AI Error",
