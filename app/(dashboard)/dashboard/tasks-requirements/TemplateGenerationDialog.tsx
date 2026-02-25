@@ -626,18 +626,21 @@ const processDocumentChecklistField = (placeholder, targetEntity, combinedCache)
     }
 
     const searchId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id);
-    const foundDocuments = [];
+    const checklistResults = [];
 
     console.log(`🔎 Processing checklist for ${placeholder.name}, searchId: ${searchId}`);
 
     for (const dataSource of checklistDataSources) {
-        const { table, linking_variable, linked_document_ids = [], execution_mode = 'latest' } = dataSource;
+        const { table, linking_variable, linked_document_ids = [], execution_mode = 'latest', label } = dataSource;
 
         console.log(`  Checking table: ${table}, linking_variable: ${linking_variable}, linked_docs: ${linked_document_ids.length}`);
 
         const tableData = combinedCache[table];
         if (!tableData) {
             console.log(`  ❌ Table ${table} not found in cache. Available tables:`, Object.keys(combinedCache));
+            // Use label from data source or placeholder display_value as fallback
+            const itemLabel = label || placeholder.display_value || placeholder.name;
+            checklistResults.push(`${notFoundLabel} ${itemLabel}`);
             continue;
         }
 
@@ -668,32 +671,23 @@ const processDocumentChecklistField = (placeholder, targetEntity, combinedCache)
             matches = [matches[0]];
         }
 
-        matches.forEach(doc => {
-            if (doc.file_name || doc.document_name) {
-                foundDocuments.push({
-                    name: doc.file_name || doc.document_name,
-                    status: doc.status || 'uploaded',
-                    date: doc.issue_date || doc.uploaded_at
-                });
-            }
-        });
+        // Use label from data source or placeholder display_value as fallback
+        const itemLabel = label || placeholder.display_value || placeholder.name;
+
+        if (matches.length > 0) {
+            checklistResults.push(`${successLabel} ${itemLabel}`);
+        } else {
+            checklistResults.push(`${notFoundLabel} ${itemLabel}`);
+        }
     }
 
-    if (foundDocuments.length === 0) {
-        return { value: notFoundLabel, source: null };
+    if (checklistResults.length === 0) {
+        return { value: '', source: null };
     }
 
-    let formattedValue = '';
-    if (displayFormat === 'checkboxes') {
-        formattedValue = foundDocuments.map(doc => `${successLabel} ${doc.name}`).join('\n');
-    } else if (displayFormat === 'table') {
-        formattedValue = foundDocuments.map(doc => `${doc.name} | ${doc.status}`).join('\n');
-    } else {
-        formattedValue = foundDocuments.map(doc => `• ${doc.name}`).join('\n');
-    }
-
+    // Join all checklist items with newlines
     return {
-        value: formattedValue,
+        value: checklistResults.join('\n'),
         source: 'Document Checklist'
     };
 };
@@ -1419,6 +1413,7 @@ export default function TemplateGenerationDialog({
     const togglePanel = (panel) => setPanelsVisible(prev => ({ ...prev, [panel]: !prev[panel] }));
     const [requirementJobQuestions, setRequirementJobQuestions] = useState<any[]>([]);
     const [computedFieldCache, setComputedFieldCache] = useState<Record<string, any>>({});
+    const [documentTablesReady, setDocumentTablesReady] = useState(false);
 
     useEffect(() => {
         const fetchJobQuestions = async () => {
@@ -2293,13 +2288,13 @@ export default function TemplateGenerationDialog({
                 cacheUpdates[table] = documentsById;
             });
 
-            setAdditionalCache(prev => {
-                const updated = { ...prev, ...cacheUpdates };
-                console.log('📦 Updated cache tables:', Object.keys(updated));
-                return updated;
-            });
+            setAdditionalCache(prev => ({ ...prev, ...cacheUpdates }));
+            setDocumentTablesReady(true);
+            // Return the fresh doc cache so callers can use it synchronously
+            return cacheUpdates;
         } else {
             console.log('⚠️ No document tables to add to cache');
+            setDocumentTablesReady(true);
         }
 
         // Flatten all documents for computed field processing
@@ -2403,15 +2398,21 @@ export default function TemplateGenerationDialog({
         });
 
         console.groupEnd();
+        return cacheUpdates;
     }, [selectedTemplate, masterFields, entityIdMap, relationshipData]);
 
-
     useEffect(() => {
-        if (isOpen && selectedTemplate?.id) {
-            fetchMissingDataSources().then(() => {
-                resolveComputedFields(combinedCache);
-            });
-        }
+        if (!isOpen || !selectedTemplate?.id) return;
+
+        const loadAndResolve = async () => {
+            await fetchMissingDataSources();
+            const freshDocCache = await resolveComputedFields(combinedCache);
+            if (freshDocCache && Object.keys(freshDocCache).length > 0) {
+                setAdditionalCache(prev => ({ ...prev, ...freshDocCache }));
+            }
+        };
+
+        loadAndResolve();
     }, [isOpen, selectedTemplate?.id, fetchMissingDataSources]);
 
     useEffect(() => {
@@ -2424,6 +2425,10 @@ export default function TemplateGenerationDialog({
         if (!isOpen || !selectedTemplate) return;
         if (loadedDraft && Object.keys(formData).length > 0) return;
         if (fetchingTables.size > 0) {
+            return;
+        }
+        // Wait for document tables to be cached before processing document checklists
+        if (!documentTablesReady) {
             return;
         }
 
@@ -2497,7 +2502,7 @@ export default function TemplateGenerationDialog({
             setOriginalFormData(JSON.parse(JSON.stringify(init)));
             setAutoPopulatedFields(autoMap);
         }
-    }, [isOpen, selectedTemplate?.id, combinedCache, loadedDraft, fetchingTables, task, computedFieldCache]);
+    }, [isOpen, selectedTemplate?.id, combinedCache, loadedDraft, fetchingTables, task, computedFieldCache, documentTablesReady]);
 
     useEffect(() => {
         const fetchAvailableDocuments = async () => {
@@ -3169,6 +3174,7 @@ export default function TemplateGenerationDialog({
                                 row[child.name] = b64;
                             }
                         });
+                        imagePromises.push(promise);  // ← THIS LINE WAS MISSING
                     }
                 }
             }
@@ -4144,17 +4150,47 @@ export default function TemplateGenerationDialog({
         try {
             const fileName = `${documentName.replace(/[^\w\s-]/g, '_')}_${formatDate(new Date(), 'YYYYMMDD')}`;
             const renderData = await prepareRenderData(formData);
+
+            // Pre-convert any remaining HTTP image URLs to base64 before docxtemplater renders
+            const imageConversionPromises = Object.entries(renderData).map(async ([key, value]) => {
+                if (typeof value === 'string' && (value.startsWith('http') || value.startsWith('blob:'))) {
+                    const b64 = await fetchImageAsBase64(value);
+                    if (b64) renderData[key] = b64;
+                }
+            });
+            await Promise.all(imageConversionPromises);
             if (isWordTemplate) {
                 let templateBuffer = docxTemplateBuffer.current;
-                if (templateBuffer && typeof templateBuffer.then === 'function') {
+
+                // Resolve promise if the ref was set before the fetch completed
+                if (templateBuffer && typeof (templateBuffer as any).then === 'function') {
                     templateBuffer = await templateBuffer;
                 }
 
+                // If still missing, fetch it now (same pattern as saveAsDraft)
                 if (!templateBuffer) {
-                    throw new Error('No template buffer available for document generation');
+                    const filePath = selectedTemplate?.file_path;
+                    if (!filePath) throw new Error('No template file path available');
+
+                    let publicUrl: string;
+                    if (filePath.startsWith('kyc-templates/')) {
+                        const { data, error } = await supabase.storage
+                            .from('templates')
+                            .createSignedUrl(filePath, 3600);
+                        if (error || !data?.signedUrl) throw new Error('Could not create signed URL for template');
+                        publicUrl = data.signedUrl;
+                    } else {
+                        publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${filePath}`;
+                    }
+
+                    const res = await fetch(publicUrl);
+                    if (!res.ok) throw new Error(`Failed to fetch template: ${res.statusText}`);
+                    templateBuffer = await res.arrayBuffer();
+                    docxTemplateBuffer.current = templateBuffer;   // cache for next time
                 }
 
-                const zip = new PizZip(templateBuffer);
+                // At this point templateBuffer is guaranteed to be an ArrayBuffer
+                const zip = new PizZip(templateBuffer as ArrayBuffer);
 
                 const imageModule = new ImageModule({
                     centered: false,
@@ -4163,6 +4199,10 @@ export default function TemplateGenerationDialog({
                         try {
                             if (tag.startsWith('data:image')) {
                                 const base64Data = tag.split('base64,')[1];
+                                if (!base64Data) {
+                                    console.error('Invalid base64 image data');
+                                    return null;
+                                }
                                 const binaryStr = atob(base64Data);
                                 const len = binaryStr.length;
                                 const bytes = new Uint8Array(len);
@@ -4171,8 +4211,15 @@ export default function TemplateGenerationDialog({
                                 }
                                 return bytes.buffer;
                             }
+                            // All HTTP/blob URLs should have been converted to base64 already
+                            // If we still get one here, log a warning
+                            if (tag.startsWith('http') || tag.startsWith('blob:')) {
+                                console.warn('Image URL not pre-converted to base64:', tag.substring(0, 80));
+                                return null;
+                            }
                             return null;
                         } catch (error) {
+                            console.error('getImage error for tag:', tag?.substring(0, 80), error);
                             return null;
                         }
                     },
