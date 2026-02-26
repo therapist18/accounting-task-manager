@@ -627,25 +627,14 @@ const processDocumentChecklistField = (placeholder, targetEntity, combinedCache)
 
     const searchId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id);
     const checklistResults = [];
-
-    console.log(`🔎 Processing checklist for ${placeholder.name}, searchId: ${searchId}`);
-
     for (const dataSource of checklistDataSources) {
         const { table, linking_variable, linked_document_ids = [], execution_mode = 'latest', label } = dataSource;
-
-        console.log(`  Checking table: ${table}, linking_variable: ${linking_variable}, linked_docs: ${linked_document_ids.length}`);
-
         const tableData = combinedCache[table];
         if (!tableData) {
-            console.log(`  ❌ Table ${table} not found in cache. Available tables:`, Object.keys(combinedCache));
-            // Use label from data source or placeholder display_value as fallback
             const itemLabel = label || placeholder.display_value || placeholder.name;
             checklistResults.push(`${notFoundLabel} ${itemLabel}`);
             continue;
         }
-
-        console.log(`  ✓ Table ${table} found with ${Object.keys(tableData).length} entries`);
-
         let matches = Object.values(tableData).filter(d => {
             const entityIdMatch = String(d[linking_variable] || d.id) === searchId;
             if (!entityIdMatch) return false;
@@ -656,12 +645,6 @@ const processDocumentChecklistField = (placeholder, targetEntity, combinedCache)
 
             return true;
         });
-
-        console.log(`  Found ${matches.length} matches for searchId ${searchId}`);
-        if (matches.length > 0) {
-            console.log(`  First match:`, matches[0]);
-        }
-
         if (execution_mode === 'latest' && matches.length > 0) {
             matches = matches.sort((a, b) => {
                 const aDate = a.issue_date ? new Date(a.issue_date).getTime() : 0;
@@ -745,56 +728,76 @@ const processImageField = (placeholder, targetEntity, combinedCache, masterField
     return { value: '', source: null };
 };
 
-const processTextField = (placeholder, targetEntity, combinedCache, masterFields, computedFieldCache) => {
+const processTextField = (
+    placeholder: any,
+    targetEntity: any,
+    combinedCache: Record<string, any>,
+    masterFields: Map<number, any>,
+    computedFieldCache: Record<string, any> | null,
+) => {
     if (!placeholder.master_field_ids?.length) {
         return { value: '', source: null };
     }
 
-    const searchId = String(
-        targetEntity.id || targetEntity.director_id ||
-        targetEntity.individual_id || targetEntity.company_id
-    );
+    const candidateIds = [
+        targetEntity?.id,
+        targetEntity?.director_id,
+        targetEntity?.individual_id,
+        targetEntity?.company_id,
+    ]
+        .filter(Boolean)
+        .map(String)
+        .filter((v, i, arr) => arr.indexOf(v) === i);
 
-    const allValues = [];
-    const allSources = [];
+    if (candidateIds.length === 0) {
+        return { value: '', source: null };
+    }
+
+    const allValues: string[] = [];
+    const allSources: string[] = [];
 
     for (const id of placeholder.master_field_ids) {
         const mf = masterFields.get(parseInt(id, 10));
         if (!mf?.sources) continue;
 
-        // Sort sources by priority
-        const sortedSources = [...mf.sources].sort((a, b) => (a.priority || 999) - (b.priority || 999));
+        // Sort by priority ascending so lower number = higher priority
+        const sortedSources = [...mf.sources].sort(
+            (a, b) => (a.priority ?? 999) - (b.priority ?? 999)
+        );
 
         for (const source of sortedSources) {
-            // ── COMPUTED SOURCE HANDLING (NEW) ──
+
+            // ── COMPUTED SOURCE ──────────────────────────────────────────────
             if (source.is_computed) {
-                const extractionMode = 'latest';
-                const cacheKey = `${mf.id}_${searchId}_${extractionMode}`;
-
                 if (!computedFieldCache) continue;
-                const computedVal = computedFieldCache[cacheKey];
 
-                if (computedVal === undefined) {
-                    // Still loading — skip this source and try next
-                    continue;
+                const extractionMode = 'latest';
+                let computedVal: any;
+
+                for (const candidateId of candidateIds) {
+                    const ck = `${mf.id}_${candidateId}_${extractionMode}`;
+                    if (computedFieldCache[ck] !== undefined) {
+                        computedVal = computedFieldCache[ck];
+                        break;
+                    }
                 }
 
-                // Validate computed value (mirror AutomationMappingDialog logic)
+                if (computedVal === undefined) continue; // still loading
+
                 const errorStrings = [
                     'Document Not Found', 'Missing Document', 'No Document Specified',
-                    'Field Not Found', 'Number Not Found', 'Missing', 'No Source', null, undefined, ''
+                    'Field Not Found', 'Number Not Found', 'Missing', 'No Source',
                 ];
 
-                if (!errorStrings.includes(computedVal) && computedVal !== null) {
+                if (computedVal !== null && !errorStrings.includes(computedVal)) {
                     let finalVal = computedVal;
 
-                    // Handle object results — extract the relevant sub-field if path indicates one
                     if (typeof computedVal === 'object' && computedVal !== null && source.path) {
                         const pathMatch = source.path.match(/['"]([\w_]+)['"]$/);
                         const fieldName = pathMatch ? pathMatch[1] : null;
                         if (fieldName && computedVal[fieldName]) {
                             finalVal = String(computedVal[fieldName]);
-                        } else if (typeof computedVal === 'object') {
+                        } else {
                             finalVal = computedVal.en || computedVal.name || computedVal.title ||
                                 String(Object.values(computedVal)[0] || '');
                         }
@@ -803,43 +806,78 @@ const processTextField = (placeholder, targetEntity, combinedCache, masterFields
                     if (finalVal && String(finalVal).trim() !== '') {
                         allValues.push(String(finalVal));
                         allSources.push(`Computed: ${mf.label || source.table}`);
-                        break; // Found a valid computed value for this master field, move on
+                        break; // found for this master field — stop trying sources
                     }
                 }
-
-                // Computed returned an error — fall through to next source
-                continue;
+                continue; // computed error → try next priority source
             }
 
-            // ── STANDARD DB SOURCE HANDLING (EXISTING) ──
+            // ── STANDARD DB SOURCE ───────────────────────────────────────────
             const tableData = combinedCache[source.table];
             if (!tableData) continue;
 
             const linkingVar = source.linking_variable || 'id';
-            const record = Object.values(tableData).find(r => {
-                const recordId = String(r[linkingVar] || r.id);
-                return recordId === searchId;
-            });
 
-            if (record) {
-                const val = source.path
-                    ? parseJsonValue(record, source.path)
-                    : (record[mf.field_key] || record[placeholder.name]);
+            // Document-scoped sources (source_type === 'document' or has document_id[])
+            // are cached under a composite key: doc_<docId>_<entityId>
+            const docIds: string[] = Array.isArray(source.document_id)
+                ? source.document_id
+                : (source.document_id ? [source.document_id] : []);
 
-                if (val && String(val).trim() !== '') {
-                    allValues.push(val);
-                    allSources.push(`DB: ${source.table}`);
-                    break; // Found value from this master field, move on
+            let record: any = null;
+
+            if (docIds.length > 0) {
+                // Try composite key first: doc_<documentId>_<entityId>
+                for (const docId of docIds) {
+                    for (const candidateId of candidateIds) {
+                        const compositeKey = `doc_${docId}_${candidateId}`;
+                        if (tableData[compositeKey]) {
+                            record = tableData[compositeKey];
+                            break;
+                        }
+                    }
+                    if (record) break;
+                }
+
+                // Fallback: scan table rows matching both entity ID and document_id
+                if (!record) {
+                    const allRows = Object.values(tableData);
+                    for (const candidateId of candidateIds) {
+                        record = allRows.find((r: any) =>
+                            String(r[linkingVar]) === candidateId &&
+                            docIds.includes(r.document_id)
+                        ) || null;
+                        if (record) break;
+                    }
+                }
+            } else {
+                // Standard entity-ID lookup
+                for (const candidateId of candidateIds) {
+                    record = Object.values(tableData).find((r: any) =>
+                        String((r as any)[linkingVar]) === candidateId
+                    ) || null;
+                    if (record) break;
                 }
             }
+
+            if (record) {
+                let val = source.path
+                    ? parseJsonValue(record, source.path)
+                    : ((record as any)[mf.field_key] || (record as any)[placeholder.name]);
+
+                if (val && String(val).trim() !== '') {
+                    allValues.push(String(val));
+                    allSources.push(`DB(p${source.priority ?? '?'}): ${source.table}`);
+                    break; // found a value at this priority — stop trying lower priorities
+                }
+                // value was empty → fall through to next priority source
+            }
+            // record not found → fall through to next priority source
         }
     }
 
     if (allValues.length > 0) {
-        return {
-            value: allValues.join(' '),
-            source: allSources[0]
-        };
+        return { value: allValues.join(' '), source: allSources[0] };
     }
 
     return { value: '', source: null };
@@ -917,20 +955,7 @@ const processPlaceholderValue = (placeholder, relationshipData, combinedCache, m
     }
 
     if (placeholder.type === 'document_checklist' && placeholder.checklist_data_sources?.length > 0 && targetEntity) {
-        console.log('🔍 DOCUMENT_CHECKLIST PLACEHOLDER:', {
-            name: placeholder.name,
-            display_value: placeholder.display_value,
-            checklist_data_sources: placeholder.checklist_data_sources,
-            targetEntity: targetEntity,
-            targetEntityId: targetEntity.id || targetEntity.company_id || targetEntity.individual_id,
-            combinedCacheTables: Object.keys(combinedCache)
-        });
         const result = processDocumentChecklistField(placeholder, targetEntity, combinedCache);
-        console.log('📋 DOCUMENT_CHECKLIST RESULT:', {
-            name: placeholder.name,
-            result: result,
-            isValid: isValidValue(result.value)
-        });
         if (isValidValue(result.value)) {
             if (logic === 'priority') { console.groupEnd(); return result; }
             collectedValues.push(String(result.value));
@@ -1960,35 +1985,30 @@ export default function TemplateGenerationDialog({
     const fetchMissingDataSources = useCallback(async () => {
         if (!isOpen || !selectedTemplate || !masterFields) return;
 
-        const allIds = new Set();
+        const allIds = new Set<string>();
 
-        // --- FIX START: robustly collect all entity IDs ---
-        // 1. Core Map IDs
         if (entityIdMap.company) allIds.add(String(entityIdMap.company));
         if (entityIdMap.principal) allIds.add(String(entityIdMap.principal));
         if (entityIdMap.sponsor) allIds.add(String(entityIdMap.sponsor));
 
-        // 2. Arrays from Entity Map
-        const dirIds = Array.isArray(entityIdMap.directors) ? entityIdMap.directors : (entityIdMap.director ? [entityIdMap.director] : []);
+        const dirIds = Array.isArray(entityIdMap.directors)
+            ? entityIdMap.directors
+            : (entityIdMap.director ? [entityIdMap.director] : []);
         dirIds.forEach(id => id && allIds.add(String(id)));
 
         const depIds = Array.isArray(entityIdMap.dependants) ? entityIdMap.dependants : [];
         depIds.forEach(id => id && allIds.add(String(id)));
 
-        // 3. Objects from Relationship Data (fallback if not in Map)
         relationshipData?.directors?.forEach(d => (d.id || d.director_id) && allIds.add(String(d.id || d.director_id)));
         relationshipData?.dependants?.forEach(d => {
-            // Handle both object {id: 1} and raw ID 1
             const id = typeof d === 'object' ? (d.id || d.individual_id) : d;
             if (id) allIds.add(String(id));
         });
-
         if (relationshipData?.principal) {
             const p = relationshipData.principal;
             const pid = typeof p === 'object' ? (p.id || p.individual_id) : p;
             if (pid) allIds.add(String(pid));
         }
-
         if (relationshipData?.sponsor) {
             const s = relationshipData.sponsor;
             const sid = typeof s === 'object' ? (s.id || s.individual_id) : s;
@@ -1997,25 +2017,46 @@ export default function TemplateGenerationDialog({
 
         const idList = Array.from(allIds).filter(Boolean);
         if (idList.length === 0) return;
+        interface TableConfig {
+            linkingVars: Set<string>;
+            documentIds: Set<string>;
+            hasDocFilter: boolean;
+        }
 
-        const tableConfigs = new Map();
+        const tableConfigs = new Map<string, TableConfig>();
+
         selectedTemplate.placeholders?.forEach(p => {
-            // --- UPDATED: Collect IDs from all possible locations ---
             const allLinkedMasterIds = new Set([
                 ...(p.master_field_ids || []),
-                ...(p.conditions?.map(c => c.master_field_id).filter(Boolean) || []),
-                ...(p.boolean_conditions?.map(c => c.master_field_id).filter(Boolean) || [])
+                ...(p.conditions?.map((c: any) => c.master_field_id).filter(Boolean) || []),
+                ...(p.boolean_conditions?.map((c: any) => c.master_field_id).filter(Boolean) || []),
             ]);
 
             allLinkedMasterIds.forEach(mId => {
                 const masterField = masterFields.get(parseInt(mId));
-                masterField?.sources?.forEach(source => {
+                masterField?.sources?.forEach((source: any) => {
                     if (!source.table) return;
+
                     if (!tableConfigs.has(source.table)) {
-                        tableConfigs.set(source.table, { linkingVars: new Set() });
+                        tableConfigs.set(source.table, {
+                            linkingVars: new Set(),
+                            documentIds: new Set(),
+                            hasDocFilter: false,
+                        });
                     }
-                    const config = tableConfigs.get(source.table);
-                    config.linkingVars.add(source.linking_variable || 'id');
+
+                    const cfg = tableConfigs.get(source.table)!;
+                    cfg.linkingVars.add(source.linking_variable || 'id');
+
+                    // Capture document_id filters from the source config
+                    const docIds: string[] = Array.isArray(source.document_id)
+                        ? source.document_id
+                        : (source.document_id ? [source.document_id] : []);
+
+                    if (docIds.length > 0) {
+                        docIds.forEach(id => cfg.documentIds.add(id));
+                        cfg.hasDocFilter = true;
+                    }
                 });
             });
         });
@@ -2027,23 +2068,89 @@ export default function TemplateGenerationDialog({
             const fetchPromises = Array.from(tableConfigs.entries()).map(async ([table, config]) => {
                 try {
                     const linkingVars = Array.from(config.linkingVars);
+                    const docIds = Array.from(config.documentIds);
+
+                    // Build the base query filtered by entity IDs
                     let query = supabase.from(table).select('*');
 
                     if (linkingVars.length === 1) {
                         query = query.in(linkingVars[0], idList);
                     } else {
-                        const orConditions = linkingVars.map(linkVar => `${linkVar}.in.(${idList.join(',')})`).join(',');
+                        const orConditions = linkingVars
+                            .map(lv => `${lv}.in.(${idList.join(',')})`)
+                            .join(',');
                         query = query.or(orConditions);
+                    }
+
+                    // When the source specifies document_id filters we must include
+                    // those rows too — they're the fallback source rows.
+                    // We use an OR so we get:
+                    //   (entity rows)  OR  (document-filtered rows for this entity)
+                    //
+                    // Actually the entity ID filter already scopes to the right entity.
+                    // The document_id filter just narrows to a specific document type.
+                    // So we add it as an additional AND filter only for this table when
+                    // EVERY source on this table has a doc filter (meaning the table is
+                    // purely a document-uploads table).  If some sources have no doc
+                    // filter we must fetch all entity rows regardless.
+                    if (config.hasDocFilter && docIds.length > 0) {
+                        // Check if ALL sources for this table have doc filters.
+                        // If so, we can safely add the .in('document_id', docIds) filter
+                        // to avoid pulling every row for the entity.
+                        // If not (mixed), skip the document_id filter so non-doc rows
+                        // still come through.
+                        const allSourcesHaveDocFilter = (() => {
+                            let allHave = true;
+                            tableConfigs.get(table)!.documentIds.size > 0
+                                ? null
+                                : (allHave = false);
+                            return allHave;
+                        })();
+
+                        const { data: docRows, error: docErr } = await supabase
+                            .from(table)
+                            .select('*')
+                            .in('document_id', docIds)
+                            .in(linkingVars[0], idList);  // still scoped to entity
+
+                        if (!docErr && docRows) {
+                            // These will be merged into the cache below alongside
+                            // the main query results.
+                            const { data: mainRows, error: mainErr } = await query;
+                            if (mainErr) throw mainErr;
+
+                            const combined = [...(mainRows || []), ...docRows];
+                            // Deduplicate by row id
+                            const seen = new Set<string>();
+                            const deduped = combined.filter(row => {
+                                const key = String(row.id || row.director_id || row.individual_id || row.company_id);
+                                if (seen.has(key + JSON.stringify(row))) return false;
+                                seen.add(key + JSON.stringify(row));
+                                return true;
+                            });
+
+                            const tableCache: Record<string, any> = {};
+                            deduped.forEach(row => {
+                                const primaryId = String(row.id || row.director_id || row.individual_id || row.company_id);
+                                if (primaryId && primaryId !== 'undefined') tableCache[primaryId] = row;
+                                linkingVars.forEach(v => { if (row[v]) tableCache[String(row[v])] = row; });
+                                // Also key by document_id so processTextField can find it
+                                if (row.document_id) tableCache[`doc_${row.document_id}_${String(row[linkingVars[0]])}`] = row;
+                            });
+
+                            return { table, cache: tableCache };
+                        }
                     }
 
                     const { data, error } = await query;
                     if (error) throw error;
 
-                    const tableCache = {};
+                    const tableCache: Record<string, any> = {};
                     data?.forEach(row => {
                         const primaryId = String(row.id || row.director_id || row.individual_id || row.company_id);
                         if (primaryId && primaryId !== 'undefined') tableCache[primaryId] = row;
                         linkingVars.forEach(v => { if (row[v]) tableCache[String(row[v])] = row; });
+                        if (row.document_id) tableCache[`doc_${row.document_id}_${String(row[linkingVars[0]])}`] = row;
                     });
                     return { table, cache: tableCache };
                 } catch (err) {
@@ -2053,9 +2160,9 @@ export default function TemplateGenerationDialog({
             });
 
             const results = await Promise.all(fetchPromises);
-            const newCacheEntries = {};
-            const successfulTables = [];
-            const failedTables = [];
+            const newCacheEntries: Record<string, any> = {};
+            const successfulTables: string[] = [];
+            const failedTables: string[] = [];
 
             results.forEach(res => {
                 if (res.cache) {
@@ -2068,12 +2175,10 @@ export default function TemplateGenerationDialog({
 
             if (Object.keys(newCacheEntries).length > 0) {
                 setAdditionalCache(prev => ({ ...prev, ...newCacheEntries }));
-
                 if (successfulTables.length > 0) {
                     toast({
                         title: "Data Loaded",
                         description: `Successfully loaded data from ${successfulTables.length} table(s)`,
-                        variant: "default"
                     });
                 }
             }
@@ -2082,14 +2187,14 @@ export default function TemplateGenerationDialog({
                 toast({
                     title: "Partial Data Load",
                     description: `Failed to load data from ${failedTables.length} table(s)`,
-                    variant: "warning"
+                    variant: "warning",
                 });
             }
         } catch (error) {
             toast({
                 title: "Data Load Failed",
                 description: "Could not fetch additional data sources",
-                variant: "destructive"
+                variant: "destructive",
             });
         } finally {
             setFetchingTables(prev => {
@@ -2100,15 +2205,12 @@ export default function TemplateGenerationDialog({
         }
     }, [isOpen, selectedTemplate?.id, entityIdMap, relationshipData, masterFields]);
 
-    const resolveComputedFields = useCallback(async (updatedCache: Record<string, any>) => {
-        console.log('🚀 resolveComputedFields CALLED');
+    const resolveComputedFields = useCallback(async (_updatedCache: Record<string, any>) => {
+        if (!selectedTemplate?.placeholders || !masterFields) return;
 
-        if (!selectedTemplate?.placeholders || !masterFields) {
-            console.log('⚠️ Early return: missing template or masterFields');
-            return;
-        }
-
+        // ── 1. Collect every entity ID we might need ──────────────────────────────
         const allEntityIds = new Set<string>();
+
         if (entityIdMap?.company) allEntityIds.add(String(entityIdMap.company));
         if (entityIdMap?.principal) allEntityIds.add(String(entityIdMap.principal));
         if (entityIdMap?.sponsor) allEntityIds.add(String(entityIdMap.sponsor));
@@ -2116,290 +2218,239 @@ export default function TemplateGenerationDialog({
         const dirIds = Array.isArray(entityIdMap?.directors)
             ? entityIdMap.directors
             : (entityIdMap?.director ? [entityIdMap.director] : []);
-        dirIds.forEach(id => id && allEntityIds.add(String(id)));
+        dirIds.forEach((id: any) => id && allEntityIds.add(String(id)));
 
-        relationshipData?.directors?.forEach(d => {
-            const id = d.id || d.director_id;
-            if (id) allEntityIds.add(String(id));
-        });
-        relationshipData?.dependants?.forEach(d => {
-            const id = typeof d === 'object' ? (d.id || d.individual_id) : d;
-            if (id) allEntityIds.add(String(id));
-        });
-        if (relationshipData?.principal) {
-            const p = relationshipData.principal;
-            const pid = typeof p === 'object' ? (p.id || p.individual_id) : p;
-            if (pid) allEntityIds.add(String(pid));
-        }
-        if (relationshipData?.sponsor) {
-            const s = relationshipData.sponsor;
-            const sid = typeof s === 'object' ? (s.id || s.individual_id) : s;
-            if (sid) allEntityIds.add(String(sid));
-        }
+        const addAllIds = (obj: any) => {
+            if (!obj) return;
+            if (typeof obj !== 'object') { allEntityIds.add(String(obj)); return; }
+            [obj.id, obj.director_id, obj.individual_id, obj.company_id]
+                .filter(Boolean)
+                .forEach((id: any) => allEntityIds.add(String(id)));
+        };
+        relationshipData?.directors?.forEach(addAllIds);
+        relationshipData?.dependants?.forEach(addAllIds);
+        addAllIds(relationshipData?.principal);
+        addAllIds(relationshipData?.sponsor);
 
+        const entityIdArray = Array.from(allEntityIds).filter(Boolean);
+        if (entityIdArray.length === 0) { setDocumentTablesReady(true); return; }
+
+        // ── 2. Collect every master field ID referenced in the template ───────────
         const allLinkedMasterIds = new Set<number>();
-        selectedTemplate.placeholders.forEach(p => {
-            (p.master_field_ids || []).forEach(id => allLinkedMasterIds.add(parseInt(id)));
+        selectedTemplate.placeholders.forEach((p: any) => {
+            (p.master_field_ids || []).forEach((id: any) => allLinkedMasterIds.add(parseInt(id)));
         });
+        interface PlanEntry {
+            linkingVar: string;
+            docIds: Set<string>;
+            isDocScoped: boolean;
+        }
 
-        console.log('📋 Scanning placeholders for document tables...');
-        console.log('  Total placeholders:', selectedTemplate.placeholders.length);
-        console.log('  Linked master field IDs:', Array.from(allLinkedMasterIds));
+        const tableFetchPlan = new Map<string, PlanEntry>();
 
-        // Dynamically collect document tables from all placeholder configurations
-        const documentTableConfigs = new Map(); // table -> { linkingVars: Set, documentIds: Set }
-        const neededDocumentIds = new Set<string>();
+        const ensureTable = (table: string, linkingVar: string, docIds: string[] = []) => {
+            if (!table) return;
+            if (!tableFetchPlan.has(table)) {
+                tableFetchPlan.set(table, {
+                    linkingVar: linkingVar || 'id',
+                    docIds: new Set(),
+                    isDocScoped: false,
+                });
+            }
+            const entry = tableFetchPlan.get(table)!;
+            // Keep the first linkingVar seen (highest priority source wins)
+            if (!entry.linkingVar) entry.linkingVar = linkingVar || 'id';
+            if (docIds.length > 0) {
+                docIds.forEach(id => entry.docIds.add(id));
+                entry.isDocScoped = true;
+            }
+        };
 
-        // 1. From master field sources (computed fields)
+        const computedJobs: Array<{ mfId: number; source: any }> = [];
+
         allLinkedMasterIds.forEach(mfId => {
             const mf = masterFields.get(mfId);
             if (!mf?.sources) return;
-            mf.sources.forEach(source => {
-                if (!source.is_computed) return;
-                const docIds = Array.isArray(source.document_id)
-                    ? source.document_id
-                    : (source.document_id ? [source.document_id] : []);
-                docIds.forEach(id => neededDocumentIds.add(id));
 
-                const table = source.table;
-                const linkingVar = source.linking_variable || 'director_id';
-                if (!documentTableConfigs.has(table)) {
-                    documentTableConfigs.set(table, { linkingVars: new Set(), documentIds: new Set() });
+            mf.sources.forEach((source: any) => {
+                if (!source.table) return;
+
+                const docIds: string[] = Array.isArray(source.document_id)
+                    ? source.document_id.filter(Boolean)
+                    : (source.document_id ? [source.document_id] : []);
+
+                if (source.is_computed) {
+                    // Computed sources: register their table so we can pre-fetch docs
+                    ensureTable(source.table, source.linking_variable, docIds);
+                    computedJobs.push({ mfId, source });
+                } else {
+                    // Non-computed sources: register for fetchMissingDataSources-style fetching
+                    // so processTextField priority fallback has the data it needs
+                    ensureTable(source.table, source.linking_variable, docIds);
                 }
-                documentTableConfigs.get(table).linkingVars.add(linkingVar);
-                docIds.forEach(id => documentTableConfigs.get(table).documentIds.add(id));
             });
         });
 
-        // 2. From document_checklist placeholders
-        selectedTemplate.placeholders.forEach(p => {
+        // Also register tables needed by document_checklist / image placeholders
+        selectedTemplate.placeholders.forEach((p: any) => {
             if (p.type === 'document_checklist' && p.checklist_data_sources) {
-                p.checklist_data_sources.forEach(ds => {
-                    const table = ds.table;
-                    const linkingVar = ds.linking_variable || 'director_id';
-                    const docIds = ds.linked_document_ids || [];
-
-                    if (!documentTableConfigs.has(table)) {
-                        documentTableConfigs.set(table, { linkingVars: new Set(), documentIds: new Set() });
-                    }
-                    documentTableConfigs.get(table).linkingVars.add(linkingVar);
-                    docIds.forEach(id => {
-                        documentTableConfigs.get(table).documentIds.add(id);
-                        neededDocumentIds.add(id);
-                    });
+                p.checklist_data_sources.forEach((ds: any) => {
+                    ensureTable(ds.table, ds.linking_variable, ds.linked_document_ids || []);
                 });
+            }
+            if (p.type === 'image' && p.source_table) {
+                ensureTable(p.source_table, p.linking_variable, p.document_type_ids || []);
             }
         });
 
-        console.log(`  Document tables collected after document_checklist scanning:`, Array.from(documentTableConfigs.keys()));
+        // ── 4. Fetch all required tables ─────────────────────────────────────────
+        //
+        // documentCache accumulates rows in the shape executeComputedField expects:
+        //   { documents: any[], docTypes: any[] }
+        //
+        // additionalCache is updated so processTextField / checklist / image
+        // rendering can find the rows without a second round-trip.
 
-        // 3. From image placeholders with source_table
-        selectedTemplate.placeholders.forEach(p => {
-            if (p.type === 'image' && p.source_table && p.document_type_ids) {
-                const table = p.source_table;
-                const linkingVar = p.linking_variable || 'director_id';
-                const docIds = p.document_type_ids || [];
-
-                if (!documentTableConfigs.has(table)) {
-                    documentTableConfigs.set(table, { linkingVars: new Set(), documentIds: new Set() });
-                }
-                documentTableConfigs.get(table).linkingVars.add(linkingVar);
-                docIds.forEach(id => {
-                    documentTableConfigs.get(table).documentIds.add(id);
-                    neededDocumentIds.add(id);
-                });
-            }
-        });
-
-        if (documentTableConfigs.size === 0) {
-            return;
-        }
-
-        // 4. Dynamically fetch documents from all discovered tables
-        const allDocuments = {};
-        let docTypes = [];
+        const documentCache: { documents: any[]; docTypes: any[] } = {
+            documents: [],
+            docTypes: [],
+        };
 
         try {
-            const fetchPromises = Array.from(documentTableConfigs.entries()).map(async ([table, config]) => {
-                const linkingVars = Array.from(config.linkingVars);
-                const documentIds = Array.from(config.documentIds);
+            const fetchPromises: Promise<void>[] = [];
 
-                // Build query dynamically based on linking variables
-                let query = supabase.from(table).select('*');
+            tableFetchPlan.forEach((entry, table) => {
+                const { linkingVar, docIds, isDocScoped } = entry;
+                const docIdsArray = Array.from(docIds);
 
-                // Filter by entity IDs using all linking variables
-                const entityIdArray = Array.from(allEntityIds);
-                if (linkingVars.length === 1) {
-                    query = query.in(linkingVars[0], entityIdArray);
-                } else {
-                    // Multiple linking vars - use OR logic
-                    const orConditions = linkingVars.map(v => `${v}.in.(${entityIdArray.join(',')})`).join(',');
-                    query = query.or(orConditions);
+                // Build query scoped to our entity IDs
+                let q = supabase
+                    .from(table)
+                    .select('*')
+                    .in(linkingVar, entityIdArray);
+
+                // If this table is doc-scoped, add the document_id filter so we don't
+                // pull every upload row for the entity — only the relevant document types.
+                if (isDocScoped && docIdsArray.length > 0) {
+                    q = q.in('document_id', docIdsArray);
                 }
 
-                // Filter by document IDs if any
-                if (documentIds.length > 0) {
-                    query = query.in('document_id', documentIds);
-                }
+                fetchPromises.push(
+                    q.then(({ data, error }) => {
+                        if (error) {
+                            console.error(`❌ [resolveComputedFields] fetch ${table}:`, error.message);
+                            return;
+                        }
+                        if (!data?.length) return;
 
-                query = query.neq('status', 'deleted');
+                        // Feed into documentCache for executeComputedField
+                        documentCache.documents.push(...data);
 
-                const { data, error } = await query;
-                if (error) throw error;
+                        // Feed into additionalCache for UI rendering
+                        const tableCache: Record<string, any> = {};
+                        data.forEach((row: any) => {
+                            // Primary key index
+                            const pk = String(row.id ?? row.director_id ?? row.individual_id ?? row.company_id ?? '');
+                            if (pk && pk !== 'undefined') tableCache[pk] = row;
 
-                return { table, data: data || [] };
+                            // linking_variable index (may differ from pk)
+                            const lv = row[linkingVar];
+                            if (lv) tableCache[String(lv)] = row;
+
+                            // Composite doc key: doc_<documentId>_<entityId>
+                            // Used by processTextField for doc-scoped lookups
+                            if (row.document_id) {
+                                tableCache[`doc_${row.document_id}_${String(row[linkingVar] ?? pk)}`] = row;
+                            }
+                        });
+
+                        setAdditionalCache(prev => ({
+                            ...prev,
+                            [table]: { ...(prev[table] || {}), ...tableCache },
+                        }));
+                    }).catch(err => {
+                        console.error(`❌ [resolveComputedFields] fetch ${table}:`, err);
+                    })
+                );
             });
 
-            // Also fetch document types
-            const docTypesPromise = neededDocumentIds.size > 0
-                ? supabase.from('acc_portal_kyc').select('*').in('id', Array.from(neededDocumentIds))
-                : Promise.resolve({ data: [] });
+            // Also fetch docType metadata from acc_portal_kyc for any collected doc IDs
+            const allDocIds = new Set<string>();
+            tableFetchPlan.forEach(entry => entry.docIds.forEach(id => allDocIds.add(id)));
+            if (allDocIds.size > 0) {
+                fetchPromises.push(
+                    supabase
+                        .from('acc_portal_kyc')
+                        .select('*')
+                        .in('id', Array.from(allDocIds))
+                        .then(({ data }) => { if (data) documentCache.docTypes.push(...data); })
+                        .catch(() => { /* non-fatal */ })
+                );
+            }
 
-            const results = await Promise.all([...fetchPromises, docTypesPromise]);
-
-            // Organize documents by table
-            results.slice(0, -1).forEach(result => {
-                if (result.data) {
-                    allDocuments[result.table] = result.data;
-                }
-            });
-
-            docTypes = results[results.length - 1]?.data || [];
-
+            await Promise.all(fetchPromises);
         } catch (err) {
-            console.error('❌ [resolveComputedFields] Failed to fetch documents:', err);
-            console.groupEnd();
-            return;
+            console.error('❌ [resolveComputedFields] fetch phase failed:', err);
         }
 
-        // Add all fetched document tables to cache for document_checklist and image placeholders
-        // This must happen BEFORE checking for computed jobs, so documents are cached even without computed fields
-        if (Object.keys(allDocuments).length > 0) {
-            console.log('📦 Adding fetched document tables to cache:', Object.keys(allDocuments));
-            const cacheUpdates = {};
+        // Signal that document tables are ready even when there are no computed jobs
+        setDocumentTablesReady(true);
+        if (computedJobs.length === 0) return;
 
-            Object.entries(allDocuments).forEach(([table, docs]) => {
-                console.log(`  ✓ ${table}: ${docs.length} documents`);
-                // Store documents indexed by their ID for easy lookup
-                const documentsById = docs.reduce((acc, doc) => {
-                    acc[doc.id] = doc;
-                    return acc;
-                }, {});
-                cacheUpdates[table] = documentsById;
-            });
-
-            setAdditionalCache(prev => ({ ...prev, ...cacheUpdates }));
-            setDocumentTablesReady(true);
-            // Return the fresh doc cache so callers can use it synchronously
-            return cacheUpdates;
-        } else {
-            console.log('⚠️ No document tables to add to cache');
-            setDocumentTablesReady(true);
-        }
-
-        // Flatten all documents for computed field processing
-        const documents = Object.values(allDocuments).flat();
-
-        const computedJobs: Array<{
-            fieldId: number;
-            entityId: string;
-            extractionMode: string;
-            computedSource: any;
-            cacheKey: string;
-        }> = [];
-
-        allLinkedMasterIds.forEach(mfId => {
-            const mf = masterFields.get(mfId);
-            if (!mf?.sources) return;
-            mf.sources.forEach(source => {
-                if (!source.is_computed) return;
-                allEntityIds.forEach(entityId => {
-                    const extractionMode = 'latest';
-                    const cacheKey = `${mfId}_${entityId}_${extractionMode}`;
-                    computedJobs.push({ fieldId: mfId, entityId, extractionMode, computedSource: source, cacheKey });
-                });
-            });
-        });
-
-        if (computedJobs.length === 0) {
-            console.log('✅ No computed jobs, but documents already cached. Exiting.');
-            console.groupEnd();
-            return;
-        }
+        // ── 5. Execute computed fields using the pre-fetched cache ────────────────
         const newComputedCache: Record<string, any> = {};
 
         await Promise.all(
-            computedJobs.map(async ({ fieldId, entityId, extractionMode, computedSource, cacheKey }) => {
-                try {
-                    const reqDocIds = Array.isArray(computedSource.document_id)
-                        ? computedSource.document_id
-                        : (computedSource.document_id ? [computedSource.document_id] : []);
+            computedJobs.flatMap(({ mfId, source }) =>
+                entityIdArray.map(async (entityId) => {
+                    const extractionMode = 'latest';
+                    const cacheKey = `${mfId}_${entityId}_${extractionMode}`;
 
-                    const linkingVar = computedSource.linking_variable || 'director_id';
-                    const entityDocs = documents.filter(d =>
-                        String(d[linkingVar]) === String(entityId) &&
-                        reqDocIds.includes(d.document_id)
-                    );
-
-                    if (entityDocs.length === 0) {
-                        newComputedCache[cacheKey] = 'Document Not Found';
+                    // Reuse already-resolved value to avoid redundant work
+                    if (computedFieldCache[cacheKey] !== undefined) {
+                        newComputedCache[cacheKey] = computedFieldCache[cacheKey];
                         return;
                     }
 
-                    const sorted = [...entityDocs].sort((a, b) => {
-                        const aDate = a.issue_date ? new Date(a.issue_date).getTime() : 0;
-                        const bDate = b.issue_date ? new Date(b.issue_date).getTime() : 0;
-                        if (a.status === 'extracted' && b.status !== 'extracted') return -1;
-                        if (b.status === 'extracted' && a.status !== 'extracted') return 1;
-                        return bDate - aDate;
-                    });
+                    const docIds: string[] = Array.isArray(source.document_id)
+                        ? source.document_id.filter(Boolean)
+                        : (source.document_id ? [source.document_id] : []);
 
-                    const latestDoc = sorted[0];
-                    const path = computedSource.path;
-                    let extractedValue: any = null;
-
-                    if (path) {
-                        extractedValue = parseJsonValue(latestDoc, path);
-                    } else {
-
-                        // No path — return the whole extracted_details object
-
-                        extractedValue = latestDoc.extracted_details || latestDoc;
-
+                    // Normalise legacy function name
+                    let functionToCall: string = source.computed_function || 'extractFieldFromLatestDocument';
+                    if (functionToCall === 'getLatestDocument' && source.path) {
+                        functionToCall = 'extractFieldFromLatestDocument';
                     }
 
-
-
-                    if (extractedValue && String(extractedValue).trim() !== '') {
-
-                        newComputedCache[cacheKey] = extractedValue;
-
-                    } else {
-
-                        newComputedCache[cacheKey] = 'Field Not Found';
-
+                    try {
+                        const val = await executeComputedField(
+                            functionToCall,
+                            entityId,
+                            docIds,
+                            source.path,
+                            extractionMode,
+                            documentCache,          // pre-fetched — no extra DB calls
+                            source.computed_config,
+                        );
+                        newComputedCache[cacheKey] = val;
+                    } catch (err) {
+                        console.error(`❌ computedField mf=${mfId} entity=${entityId}:`, err);
+                        newComputedCache[cacheKey] = null;
                     }
+                })
+            )
+        );
 
-
-
-                } catch (err) {
-
-                    newComputedCache[cacheKey] = null;
-
-                }
-
-            })
-        ).then(() => {
-            setComputedFieldCache(prev => {
-                const merged = { ...prev, ...newComputedCache };
-                console.log('📦 Adding computed fields to cache:', Object.keys(merged));
-                return merged;
-            });
-        });
-
-        console.groupEnd();
-        return cacheUpdates;
-    }, [selectedTemplate, masterFields, entityIdMap, relationshipData]);
+        if (Object.keys(newComputedCache).length > 0) {
+            setComputedFieldCache(prev => ({ ...prev, ...newComputedCache }));
+        }
+    }, [
+        selectedTemplate,
+        masterFields,
+        entityIdMap,
+        relationshipData,
+        computedFieldCache,
+    ]);
 
     useEffect(() => {
         if (!isOpen || !selectedTemplate?.id) return;
@@ -2427,11 +2478,9 @@ export default function TemplateGenerationDialog({
         if (fetchingTables.size > 0) {
             return;
         }
-        // Wait for document tables to be cached before processing document checklists
         if (!documentTablesReady) {
             return;
         }
-
         const init = { ...formData };
         const autoMap = new Map(autoPopulatedFields);
         let hasChanged = false;
