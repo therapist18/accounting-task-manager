@@ -19,6 +19,8 @@ interface GeneralLetterLayoutProps {
     useLetterhead?: boolean;
     headerUrl?: string | null;
     footerUrl?: string | null;
+    headerImageUrl?: string;
+    footerImageUrl?: string;
 }
 
 export function GeneralLetterLayout({
@@ -35,11 +37,34 @@ export function GeneralLetterLayout({
     activeSignatory,
     useLetterhead = false,
     headerUrl = null,
-    footerUrl = null
+    footerUrl = null,
+    headerImageUrl = '',
+    footerImageUrl = ''
 }: GeneralLetterLayoutProps) {
     return (
         <div className="text-[16px] text-slate-800">
-            {useLetterhead && headerUrl ? (
+            {useLetterhead && headerImageUrl ? (
+                <div className="mb-6">
+                    {headerImageUrl.startsWith('data:text/html') ? (
+                        <iframe
+                            src={headerImageUrl}
+                            className="w-full h-40 border border-gray-200 rounded-lg"
+                            title="Letterhead Header Preview"
+                        />
+                    ) : (
+                        <img
+                            src={headerImageUrl}
+                            alt="Company Letterhead Header"
+                            className="w-full h-auto border border-gray-200 rounded-lg"
+                        />
+                    )}
+                    <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                        <p className="text-sm text-blue-800 font-medium">
+                            📄 Letterhead header preview. Your letter content will be merged into the full template when you download.
+                        </p>
+                    </div>
+                </div>
+            ) : useLetterhead && headerUrl ? (
                 <div className="mb-10">
                     <img
                         src={headerUrl}
@@ -115,17 +140,30 @@ export function GeneralLetterLayout({
                 </div>
             </div>
 
-            {useLetterhead && footerUrl && (
+            {useLetterhead && footerImageUrl && (
                 <div className="mt-16 pt-8 border-t border-slate-200">
-                    <img
-                        src={footerUrl}
-                        alt="Company Letterhead Footer"
-                        className="w-full h-auto max-h-[150px] object-contain"
-                        onError={(e) => {
-                            console.error('Failed to load letterhead footer');
-                            e.currentTarget.style.display = 'none';
-                        }}
-                    />
+                    {footerImageUrl.startsWith('data:text/html') ? (
+                        <iframe
+                            src={footerImageUrl}
+                            className="w-full h-32 border border-gray-200 rounded-lg"
+                            title="Letterhead Footer Preview"
+                        />
+                    ) : (
+                        <img
+                            src={footerImageUrl}
+                            alt="Company Letterhead Footer"
+                            className="w-full h-auto border border-gray-200 rounded-lg"
+                            onError={(e) => {
+                                console.error('Failed to load letterhead footer');
+                                e.currentTarget.style.display = 'none';
+                            }}
+                        />
+                    )}
+                    <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                        <p className="text-sm text-blue-800 font-medium">
+                            📄 Letterhead footer preview. This will appear at the bottom of your downloaded document.
+                        </p>
+                    </div>
                 </div>
             )}
         </div>

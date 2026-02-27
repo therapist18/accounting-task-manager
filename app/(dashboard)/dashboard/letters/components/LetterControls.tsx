@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import { Settings2, Layout, Phone, MapPin, Signature, Building2, FileCheck, Check, Image } from "lucide-react";
 import type { Signatory } from '../hooks/useLetterData';
+import type { Letterhead } from '../hooks/useLetterheads';
 
 const VALEDICTIONS = ['Yours faithfully,', 'Yours sincerely,', 'Kind regards,', 'Respectfully yours,'];
 
@@ -35,6 +36,9 @@ interface LetterControlsProps {
     useLetterhead: boolean;
     setUseLetterhead: (use: boolean) => void;
     hasLetterhead: boolean;
+    availableLetterheads?: Letterhead[];
+    selectedLetterheadId?: string;
+    setSelectedLetterheadId?: (id: string) => void;
 }
 
 export function LetterControls({
@@ -59,7 +63,10 @@ export function LetterControls({
     activeSignatory,
     useLetterhead,
     setUseLetterhead,
-    hasLetterhead
+    hasLetterhead,
+    availableLetterheads = [],
+    selectedLetterheadId,
+    setSelectedLetterheadId
 }: LetterControlsProps) {
     return (
         <div className="h-full flex flex-col">
@@ -124,6 +131,28 @@ export function LetterControls({
                                         />
                                     </button>
                                 </div>
+
+                                {availableLetterheads.length > 0 && useLetterhead && setSelectedLetterheadId && (
+                                    <div className="space-y-1.5">
+                                        <Label className="text-[10px] font-black uppercase text-slate-400">Select Letterhead</Label>
+                                        <Select
+                                            value={selectedLetterheadId}
+                                            onValueChange={setSelectedLetterheadId}
+                                        >
+                                            <SelectTrigger className="h-9 text-xs">
+                                                <SelectValue placeholder="Choose letterhead template" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {availableLetterheads.map(letterhead => (
+                                                    <SelectItem key={letterhead.id} value={letterhead.id}>
+                                                        {letterhead.name} {letterhead.is_default && '(Default)'}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                )}
+
                                 {!hasLetterhead && (
                                     <p className="text-[10px] text-amber-600 bg-amber-50 p-2 rounded border border-amber-200">
                                         No letterhead uploaded for this company

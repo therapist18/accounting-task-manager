@@ -1,0 +1,294 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { fetchCompanies, type Company } from '../../companies/database';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Upload, FileText, Trash2, Edit, Star, StarOff, Download } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { LetterheadUploadDialog } from '../components/LetterheadUploadDialog';
+import { LetterheadEditDialog } from '../components/LetterheadEditDialog';
+
+interface Letterhead {
+  id: string;
+  company_id: number;
+  name: string;
+  description?: string;
+  file_path: string;
+  file_name: string;
+  file_size?: number;
+  contact_details?: any;
+  is_default: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export default function LetterheadsPage() {
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [letterheads, setLetterheads] = useState<Letterhead[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [companiesLoading, setCompaniesLoading] = useState(true);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [selectedLetterhead, setSelectedLetterhead] = useState<Letterhead | null>(null);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    loadCompanies();
+    fetchLetterheads();
+  }, []);
+
+  const loadCompanies = async () => {
+    try {
+      setCompaniesLoading(true);
+      const data = await fetchCompanies();
+      setCompanies(data);
+    } catch (error) {
+      console.error('Error loading companies:', error);
+    } finally {
+      setCompaniesLoading(false);
+    }
+  };
+
+  const fetchLetterheads = async (companyId?: number) => {
+    try {
+      setLoading(true);
+      const url = companyId 
+        ? `/api/letterheads?company_id=${companyId}`
+        : '/api/letterheads';
+      
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Failed to fetch letterheads');
+      
+      const data = await response.json();
+      setLetterheads(data);
+    } catch (error) {
+      console.error('Error fetching letterheads:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to load letterheads',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSetDefault = async (letterhead: Letterhead) => {
+    try {
+      const response = await fetch('/api/letterheads', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: letterhead.id,
+          company_id: letterhead.company_id,
+          is_default: true,
+        }),
+      });
+
+      if (!response.ok) throw new Error('Failed to set default');
+
+      toast({
+        title: 'Success',
+        description: 'Default letterhead updated',
+      });
+
+      fetchLetterheads(selectedCompanyId || undefined);
+    } catch (error) {
+      console.error('Error setting default:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to set default letterhead',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleDelete = async (letterhead: Letterhead) => {
+    if (!confirm(`Are you sure you want to delete "${letterhead.name}"?`)) return;
+
+    try {
+      const response = await fetch(`/api/letterheads?id=${letterhead.id}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) throw new Error('Failed to delete');
+
+      toast({
+        title: 'Success',
+        description: 'Letterhead deleted',
+      });
+
+      fetchLetterheads(selectedCompanyId || undefined);
+    } catch (error) {
+      console.error('Error deleting letterhead:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to delete letterhead',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleEdit = (letterhead: Letterhead) => {
+    setSelectedLetterhead(letterhead);
+    setEditDialogOpen(true);
+  };
+
+  const handleUploadSuccess = () => {
+    setUploadDialogOpen(false);
+    fetchLetterheads(selectedCompanyId || undefined);
+  };
+
+  const handleEditSuccess = () => {
+    setEditDialogOpen(false);
+    setSelectedLetterhead(null);
+    fetchLetterheads(selectedCompanyId || undefined);
+  };
+
+  const formatFileSize = (bytes?: number) => {
+    if (!bytes) return 'Unknown size';
+    const mb = bytes / (1024 * 1024);
+    return `${mb.toFixed(2)} MB`;
+  };
+
+  const groupedLetterheads = letterheads.reduce((acc, letterhead) => {
+    const companyId = letterhead.company_id;
+    if (!acc[companyId]) {
+      acc[companyId] = [];
+    }
+    acc[companyId].push(letterhead);
+    return acc;
+  }, {} as Record<number, Letterhead[]>);
+
+  return (
+    <div className="container mx-auto p-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold">Company Letterheads</h1>
+          <p className="text-muted-foreground mt-1">
+            Manage letterhead templates for your companies
+          </p>
+        </div>
+        <Button onClick={() => setUploadDialogOpen(true)}>
+          <Upload className="mr-2 h-4 w-4" />
+          Upload Letterhead
+        </Button>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center items-center h-64">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        </div>
+      ) : letterheads.length === 0 ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center h-64">
+            <FileText className="h-12 w-12 text-muted-foreground mb-4" />
+            <p className="text-muted-foreground text-center">
+              No letterheads found. Upload your first letterhead to get started.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-8">
+          {Object.entries(groupedLetterheads).map(([companyId, companyLetterheads]) => (
+            <div key={companyId} className="space-y-4">
+              <h2 className="text-xl font-semibold">{companies.find(c => c.id.toString() === companyId)?.company_name || `Company ID: ${companyId}`}</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {companyLetterheads.map((letterhead) => (
+                  <Card key={letterhead.id} className="relative">
+                    <CardHeader>
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <CardTitle className="flex items-center gap-2">
+                            {letterhead.name}
+                            {letterhead.is_default && (
+                              <Badge variant="default" className="ml-2">
+                                <Star className="h-3 w-3 mr-1" />
+                                Default
+                              </Badge>
+                            )}
+                          </CardTitle>
+                          {letterhead.description && (
+                            <CardDescription className="mt-1">
+                              {letterhead.description}
+                            </CardDescription>
+                          )}
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="text-sm space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">File:</span>
+                          <span className="font-medium truncate ml-2" title={letterhead.file_name}>
+                            {letterhead.file_name}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Size:</span>
+                          <span>{formatFileSize(letterhead.file_size)}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Created:</span>
+                          <span>{new Date(letterhead.created_at).toLocaleDateString()}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2">
+                        {!letterhead.is_default && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleSetDefault(letterhead)}
+                            className="flex-1"
+                          >
+                            <Star className="h-4 w-4 mr-1" />
+                            Set Default
+                          </Button>
+                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleEdit(letterhead)}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDelete(letterhead)}
+                          disabled={letterhead.is_default}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <LetterheadUploadDialog
+        open={uploadDialogOpen}
+        onOpenChange={setUploadDialogOpen}
+        onSuccess={handleUploadSuccess}
+      />
+
+      {selectedLetterhead && (
+        <LetterheadEditDialog
+          open={editDialogOpen}
+          onOpenChange={setEditDialogOpen}
+          letterhead={selectedLetterhead}
+          onSuccess={handleEditSuccess}
+        />
+      )}
+    </div>
+  );
+}

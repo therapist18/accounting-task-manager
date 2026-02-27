@@ -17,9 +17,12 @@ import { CompanySidebar } from '../companies/company-sidebar';
 import { IndividualSidebar } from '../individuals/individual-sidebar';
 import { useLetterData } from './hooks/useLetterData';
 import { useLetterheadData } from './hooks/useLetterheadData';
+import { useLetterheads } from './hooks/useLetterheads';
 import { KRALetterLayout } from './components/KRALetterLayout';
 import { GeneralLetterLayout } from './components/GeneralLetterLayout';
 import { LetterControls } from './components/LetterControls';
+import { generateLetterWithLetterhead, downloadBlob } from './utils/letterheadMerge';
+import * as mammoth from 'mammoth';
 
 import {
     FileText, Download,
@@ -45,9 +48,16 @@ export default function LetterGenerationModule() {
     const [valediction, setValediction] = useState('Yours faithfully,');
     const [letterDate, setLetterDate] = useState(todayStr());
     const [useLetterhead, setUseLetterhead] = useState(false);
+    const [selectedLetterheadId, setSelectedLetterheadId] = useState<string>('');
+    const [headerImageUrl, setHeaderImageUrl] = useState<string>('');
+    const [footerImageUrl, setFooterImageUrl] = useState<string>('');
+    const [loadingPreview, setLoadingPreview] = useState(false);
 
     const { companies, individuals, availableSignatories } = useLetterData(tab, companyId);
     const { headerUrl, footerUrl, hasLetterhead } = useLetterheadData(companyId);
+    const { letterheads, loading: letterheadsLoading, getDefaultLetterhead } = useLetterheads(
+        tab === 'companies' && companyId ? parseInt(companyId) : undefined
+    );
 
     const selectedCompany = useMemo(() => companies.find(c => c.id.toString() === companyId), [companies, companyId]);
     const selectedIndividual = useMemo(() => individuals.find(i => i.id.toString() === individualId), [individuals, individualId]);
@@ -102,6 +112,64 @@ export default function LetterGenerationModule() {
         }
     }, [hasLetterhead]);
 
+    // Auto-select default letterhead when company changes
+    useEffect(() => {
+        if (letterheads.length > 0 && !selectedLetterheadId) {
+            const defaultLh = getDefaultLetterhead();
+            if (defaultLh) {
+                setSelectedLetterheadId(defaultLh.id);
+            } else if (letterheads.length > 0) {
+                setSelectedLetterheadId(letterheads[0].id);
+            }
+        }
+    }, [letterheads, companyId]);
+
+    // Load letterhead preview when selected
+    useEffect(() => {
+        const loadLetterheadPreview = async () => {
+            if (!selectedLetterheadId || !useLetterhead) {
+                setHeaderImageUrl('');
+                setFooterImageUrl('');
+                return;
+            }
+
+            const selectedLh = letterheads.find(lh => lh.id === selectedLetterheadId);
+            if (!selectedLh) return;
+
+            // Check if header/footer images already exist in metadata
+            if (selectedLh.metadata?.header_image_url && selectedLh.metadata?.footer_image_url) {
+                setHeaderImageUrl(selectedLh.metadata.header_image_url);
+                setFooterImageUrl(selectedLh.metadata.footer_image_url);
+                return;
+            }
+
+            // Extract header/footer if not exists
+            setLoadingPreview(true);
+            try {
+                const response = await fetch('/api/letterheads/extract-header-footer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        letterheadId: selectedLh.id,
+                        filePath: selectedLh.file_path,
+                    }),
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    setHeaderImageUrl(data.header_image_url);
+                    setFooterImageUrl(data.footer_image_url);
+                }
+            } catch (error) {
+                console.error('Error loading letterhead preview:', error);
+            } finally {
+                setLoadingPreview(false);
+            }
+        };
+
+        loadLetterheadPreview();
+    }, [selectedLetterheadId, useLetterhead, letterheads]);
+
     const exportToPDF = async () => {
         if (!paperRef.current) return;
         const canvas = await html2canvas(paperRef.current, { scale: 2, useCORS: true });
@@ -118,6 +186,44 @@ export default function LetterGenerationModule() {
         const contactEmail = tab === 'companies' ? email : selectedIndividual?.contact_details?.email;
         const contactPhone = tab === 'companies' ? phone : selectedIndividual?.contact_details?.phone;
 
+        // If using letterhead, merge with template
+        if (useLetterhead && selectedLetterheadId) {
+            const selectedLh = letterheads.find(lh => lh.id === selectedLetterheadId);
+            if (selectedLh) {
+                try {
+                    const letterContent = {
+                        body: letterType === 'kra'
+                            ? 'We hereby apply for a Tax Compliance Certificate for the above-mentioned company.\n\nAll relevant returns have been filed and payments made up to date.\n\nYour prompt assistance in this matter will be highly appreciated.'
+                            : 'We are writing to request a bank statement for our account.\n\nKindly provide the statement for the period as indicated.\n\nThank you for your assistance.',
+                        recipient: recipient,
+                        subject: subject,
+                        date: letterDate,
+                        reference: reference,
+                        salutation: 'Dear Sir/Madam,',
+                        valediction: valediction,
+                        signatory: {
+                            name: activeSignatory?.name || '',
+                            title: activeSignatory?.title || activeSignatory?.role || '',
+                        },
+                    };
+
+                    const mergedDoc = await generateLetterWithLetterhead(
+                        selectedLh.file_path,
+                        letterContent
+                    );
+
+                    if (mergedDoc) {
+                        downloadBlob(mergedDoc, `${companyName || 'Letter'}_${new Date().toISOString().split('T')[0]}.docx`);
+                        return;
+                    }
+                } catch (error) {
+                    console.error('Error generating letter with letterhead:', error);
+                    alert('Failed to generate letter with letterhead. Generating without letterhead instead.');
+                }
+            }
+        }
+
+        // Fallback: Generate without letterhead
         const doc = new Document({
             sections: [{
                 properties: {},
@@ -318,6 +424,8 @@ export default function LetterGenerationModule() {
                                                             useLetterhead={useLetterhead}
                                                             headerUrl={headerUrl}
                                                             footerUrl={footerUrl}
+                                                            headerImageUrl={headerImageUrl}
+                                                            footerImageUrl={footerImageUrl}
                                                         />
                                                     )}
                                                 </div>
@@ -360,9 +468,12 @@ export default function LetterGenerationModule() {
                                     signatoryId={signatoryId}
                                     setSignatoryId={setSignatoryId}
                                     activeSignatory={activeSignatory}
+                                    hasLetterhead={hasLetterhead || letterheads.length > 0}
                                     useLetterhead={useLetterhead}
                                     setUseLetterhead={setUseLetterhead}
-                                    hasLetterhead={hasLetterhead}
+                                    availableLetterheads={letterheads}
+                                    selectedLetterheadId={selectedLetterheadId}
+                                    setSelectedLetterheadId={setSelectedLetterheadId}
                                 />
                             </ResizablePanel>
                         </ResizablePanelGroup>

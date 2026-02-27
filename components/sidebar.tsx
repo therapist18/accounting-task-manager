@@ -127,10 +127,20 @@ const navItems = [
     href: "/dashboard/master-fields",
     icon: FileText,
   },
-    {
-    title: "Letters",
-    href: "/dashboard/letters",
-    icon: FileText,
+  {
+    category: "Letters",
+    items: [
+      {
+        title: "Letter Generation",
+        href: "/dashboard/letters",
+        icon: FileText,
+      },
+      {
+        title: "Letterheads",
+        href: "/dashboard/letters/letterheads",
+        icon: FileText,
+      },
+    ],
   },
   {
     title: "Diary",
