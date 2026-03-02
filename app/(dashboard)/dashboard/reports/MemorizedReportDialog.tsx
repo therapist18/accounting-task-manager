@@ -786,14 +786,21 @@ export function MemorizedReportDialog({
     const isNA = stageId ? nonApplicableStageIds.has(stageId) : false;
 
     return (
-      <AccordionItem value={sectionId} className={`border-b border-slate-200 last:border-0 ${isNA ? 'opacity-50' : ''}`}>
-        <AccordionTrigger className={`w-full py-0 hover:no-underline group bg-slate-50/80 [&>svg]:hidden ${isNA ? 'cursor-default pointer-events-none' : ''}`} onClick={() => !isNA && toggleSection(sectionId)}>
+      <AccordionItem value={sectionId} className={cn(
+        "border-b border-slate-200 last:border-0 transition-opacity",
+        isNA && "bg-slate-50/50"
+      )}>
+        <AccordionTrigger className="w-full py-0 hover:no-underline group bg-white">
           <div className="grid grid-cols-12 w-full gap-0 text-left">
-            <div className="col-span-12 px-4 py-2.5 flex justify-between items-center gap-2">
+            <div className="col-span-12 px-4 py-3 flex justify-between items-center">
               <div className="flex items-center gap-2">
-                <span className={`font-bold text-sm ${isNA ? 'text-slate-400' : 'text-slate-800'}`}>{title}</span>
+                <span className={cn("font-bold text-sm", isNA ? "text-slate-400" : "text-slate-800")}>
+                  {title}
+                </span>
                 {isNA && (
-                  <Badge variant="outline" className="text-[10px] text-slate-400 border-slate-300 bg-slate-50">N/A</Badge>
+                  <Badge variant="outline" className="text-[10px] bg-white text-amber-600 border-amber-200">
+                    N/A for Job Level
+                  </Badge>
                 )}
               </div>
               <div className="h-5 w-5 rounded border border-slate-300 bg-white flex items-center justify-center text-slate-500 shadow-sm">

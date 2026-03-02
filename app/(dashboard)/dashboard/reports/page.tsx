@@ -110,46 +110,42 @@ const safeRender = (content: any) => {
   return String(content);
 };
 
-/**
- * Core per-task stage applicability — identical logic to
- * DepartmentTasksManager.isStageApplicableToTask and
- * EditableStageCell's local copy.
- *
- * Walks:  dept → subdept → class (→ subclass not needed here)
- * Returns true  when no explicit override is found (fail-open / default applicable).
- */
+// Add/Verify this helper in both ReportsPage.tsx and MemorizedReportDialog.tsx
 const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boolean => {
   if (!task || !stage || !departments?.length) return true;
   try {
-    const dept = departments.find(d => d?.id === (task.department?.id || task.department_id));
+    const dept = departments.find(d => d.id === (task.department?.id || task.department_id));
     if (!dept) return true;
 
     const subdept = dept.tm_subdepartments?.find((s: any) =>
-      s?.id === (task.subdepartment?.id || task.subdepartment_id)
+      s.id === (task.subdepartment?.id || task.subdepartment_id)
     );
     if (!subdept) return true;
 
-    // Class-level check takes priority
+    // 1. Subclass Level (Highest Priority)
+    if (task.subclass_id) {
+      const cls = subdept.classes?.find((c: any) => c.id.toString() === task.class_id?.toString());
+      const subCls = cls?.subClasses?.find((sc: any) => sc.id.toString() === task.subclass_id?.toString());
+      const subClassStage = subCls?.stages?.find((s: any) => s.stage_id === stage.id);
+      if (subClassStage && typeof subClassStage.applicable === 'boolean') return subClassStage.applicable;
+    }
+
+    // 2. Class Level
     if (task.class_id) {
-      const cls = subdept.classes?.find((c: any) => c?.id?.toString() === task.class_id?.toString());
+      const cls = subdept.classes?.find((c: any) => c.id.toString() === task.class_id?.toString());
       const classStage = cls?.stages?.find((s: any) => s.stage_id === stage.id);
       if (classStage && typeof classStage.applicable === 'boolean') return classStage.applicable;
     }
 
-    // Subdept-level fallback
+    // 3. Sub-Department Level
     const subdeptStage = subdept.stages?.find((s: any) => s.stage_id === stage.id);
     if (subdeptStage && typeof subdeptStage.applicable === 'boolean') return subdeptStage.applicable;
 
-    return true; // No override → applicable
-  } catch {
+    return true; // Default
+  } catch (error) {
     return true;
   }
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Component
-// ─────────────────────────────────────────────────────────────────────────────
-
 export default function ReportsPage() {
   // ── Report state ───────────────────────────────────────────────────────────
   const [activeReport, setActiveReport] = useState<any | null>(null);
@@ -711,11 +707,16 @@ export default function ReportsPage() {
       const stage = stages.find(s => s.id === col.stageId);
       if (!stage) return <span className="text-slate-300">-</span>;
 
-      // PER-TASK applicability check — mirrors EditableStageCell's guard
+      // Around line 512 in your provided file
       if (!checkStageApplicableForTask(stage, task)) {
-        return <span className="text-sm text-gray-400 italic">N/A</span>;
+        return (
+          <div className="flex items-center justify-center w-full">
+            <span className="text-[10px] font-medium text-slate-400 italic bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
+              N/A
+            </span>
+          </div>
+        );
       }
-
       const stageData = task.stages?.[col.stageId];
       const estimatedMinutes = stage.estimated_time;
 
@@ -873,8 +874,15 @@ export default function ReportsPage() {
       if (!stage) return <span className="text-slate-300">-</span>;
 
       // PER-TASK applicability
+      // Around line 512 in your provided file
       if (!checkStageApplicableForTask(stage, task)) {
-        return <span className="text-sm text-gray-400 italic">N/A</span>;
+        return (
+          <div className="flex items-center justify-center w-full">
+            <span className="text-[10px] font-medium text-slate-400 italic bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
+              N/A
+            </span>
+          </div>
+        );
       }
 
       if (col.isAutoAdded) {
