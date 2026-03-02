@@ -6,6 +6,7 @@ import { toast } from "@/hooks/use-toast"
 export interface Task {
   id: number;
   applicant_name: string;
+  company_name: string;
   company_id: number;
   department_id: number;
   subdepartment_id: number;
@@ -83,40 +84,40 @@ const transformKycFields = (fields: any[]): any[] => {
       transformedField.arrayConfig = {
         maxItems: field.arrayConfig.maxItems,
         fields: transformKycFields(field.arrayConfig.fields)
-        }
       }
-
-      return transformedField
-    })
-  }
-
-  /**
-   * Fetch all companies from the database
-   */
-  export const fetchCompanies = async (): Promise<Map<number, string>> => {
-    try {
-      const { data, error } = await supabase
-        .from('acc_portal_company_duplicate')
-        .select('id, company_name')
-
-      if (error) throw error
-
-      const companyMap = new Map(data?.map(c => [c.id, c.company_name]) || [])
-      return companyMap
-    } catch (error) {
-      console.error('Error fetching companies:', error)
-      toast({
-        title: "Error",
-        description: "Failed to load company data.",
-        variant: "destructive"
-      })
-      return new Map()
     }
-  }
 
-  /**
-   * Fetch tasks with related data
-   */
+    return transformedField
+  })
+}
+
+/**
+ * Fetch all companies from the database
+ */
+export const fetchCompanies = async (): Promise<Map<number, string>> => {
+  try {
+    const { data, error } = await supabase
+      .from('acc_portal_company_duplicate')
+      .select('id, company_name')
+
+    if (error) throw error
+
+    const companyMap = new Map(data?.map(c => [c.id, c.company_name]) || [])
+    return companyMap
+  } catch (error) {
+    console.error('Error fetching companies:', error)
+    toast({
+      title: "Error",
+      description: "Failed to load company data.",
+      variant: "destructive"
+    })
+    return new Map()
+  }
+}
+
+/**
+ * Fetch tasks with related data
+ */
 // Update the fetchTasks function
 export const fetchTasks = async (departmentId?: string, subdepartmentId?: string): Promise<Task[]> => {
   try {
@@ -149,8 +150,18 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
     // Process the data to ensure consistent structure
     const processedTasks = (data || []).map(task => {
       const jobLevel = task.job_level || {};
+
+      // Extract information from participants_details
+      const officer = task.participants_details?.find((p: any) => p.role?.includes('officer'));
+      const taskManager = task.participants_details?.find((p: any) => p.role?.includes('task_manager'));
+      const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
+
       const processedTask: Task = {
         ...task,
+        // Extract applicant name from applicant_details
+        applicant_name: task.applicant_details?.name || task.applicant_name || '',
+        // Extract company name from participants_details
+        company_name: company?.name || '',
         // Map job_level properties to top-level for backward compatibility
         department_id: jobLevel.department_id || task.department_id,
         subdepartment_id: jobLevel.subdepartment_id || task.subdepartment_id,
@@ -164,14 +175,25 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
           department_id: jobLevel.department_id || task.department_id,
           subdepartment_id: jobLevel.subdepartment_id || task.subdepartment_id
         },
-        // Rest of the processing remains the same
-        officer: task.officer || (task.officer_id ? {
+        // Extract officer from participants_details
+        officer: officer ? {
+          id: officer.id,
+          name: officer.name,
+          email: officer.email || '',
+          phone: officer.phone || ''
+        } : (task.officer_id ? {
           id: task.officer_id,
           name: task.officer_name || '',
           email: '',
           phone: ''
         } : undefined),
-        task_manager: task.task_manager || (task.task_manager_id ? {
+        // Extract task manager from participants_details
+        task_manager: taskManager ? {
+          id: taskManager.id,
+          name: taskManager.name,
+          email: taskManager.email || '',
+          phone: taskManager.phone || ''
+        } : (task.task_manager_id ? {
           id: task.task_manager_id,
           name: task.task_manager_name || '',
           email: '',
@@ -193,210 +215,210 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
     return processedTasks;
   } catch (error) {
     console.error('Error fetching tasks:', error);
-    toast({ 
-      title: "Error", 
-      description: "Failed to load tasks.", 
-      variant: "destructive" 
+    toast({
+      title: "Error",
+      description: "Failed to load tasks.",
+      variant: "destructive"
     });
     return [];
   }
 };
-  /**
-   * Fetch and process stages for a department
-   */
-  export const fetchStages = async (departmentId: string, departments: Department[]): Promise<any[]> => {
-    try {
-      const department = departments.find(d => d.id.toString() === departmentId.toString())
-      if (!department) {
-        console.warn(`Department with id ${departmentId} not found`)
-        return []
-      }
-
-      const stages = department.stages || [];
-      const uniqueStages = new Map();
-      
-      stages.forEach(stage => {
-        if (!uniqueStages.has(stage.id)) {
-          uniqueStages.set(stage.id, { 
-            ...stage, 
-            departmentId: department.id, 
-            departmentName: department.name 
-          })
-        }
-      })
-      
-      const allStages = Array.from(uniqueStages.values())
-        .sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
-      
-      return allStages
-    } catch (error) {
-      console.error('Error fetching stages:', error)
-      toast({ 
-        title: "Error", 
-        description: "Failed to load stages.", 
-        variant: "destructive" 
-      })
+/**
+ * Fetch and process stages for a department
+ */
+export const fetchStages = async (departmentId: string, departments: Department[]): Promise<any[]> => {
+  try {
+    const department = departments.find(d => d.id.toString() === departmentId.toString())
+    if (!department) {
+      console.warn(`Department with id ${departmentId} not found`)
       return []
     }
-  }
 
-  /**
-   * Fetch all documents from the database
-   */
-  export const fetchAllDocuments = async (): Promise<DirectorDocument[]> => {
-    try {
-      const { data, error } = await supabase
-        .from('acc_portal_directors_documents')
-        .select('*')
-        .order('director_id', { ascending: true })
+    const stages = department.stages || [];
+    const uniqueStages = new Map();
 
-      if (error) throw error
-      
-      return data || []
-    } catch (error) {
-      console.error('Error fetching documents:', error)
-      toast({
-        title: "Error",
-        description: "Failed to load documents data.",
-        variant: "destructive"
-      })
-      return []
-    }
-  }
-
-  /**
-   * Fetch all KYC fields for all document types
-   */
-  export const fetchAllKycFields = async (): Promise<{
-    fieldsMap: Record<string, any[]>;
-    kycDocsMap: Map<string, KycDocument>;
-  }> => {
-    try {
-      console.log('Fetching all KYC fields...')
-      const { data, error } = await supabase
-        .from('acc_portal_kyc')
-        .select('id, fields, name, display_name')
-        .order('display_name', { ascending: true })
-
-      if (error) throw error
-
-      const fieldsMap: Record<string, any[]> = {}
-      const kycDocsMap = new Map<string, KycDocument>()
-
-      // Transform and store fields by kycId and cache KYC documents
-      data?.forEach(doc => {
-        if (doc.id && doc.fields) {
-          fieldsMap[doc.id] = transformKycFields(doc.fields)
-          kycDocsMap.set(doc.id, {
-            id: doc.id,
-            name: doc.name,
-            display_name: doc.display_name,
-            fields: transformKycFields(doc.fields)
-          })
-        }
-      })
-
-      console.log(`Fetched KYC fields for ${Object.keys(fieldsMap).length} document types`)
-      
-      return { fieldsMap, kycDocsMap }
-    } catch (error) {
-      console.error('Error fetching KYC fields:', error)
-      toast({
-        title: 'Error',
-        description: 'Failed to load KYC fields',
-        variant: 'destructive',
-      })
-      return { fieldsMap: {}, kycDocsMap: new Map() }
-    }
-  }
-
-  /**
-   * Fetch single KYC document by kycId
-   */
-  export const fetchKycDocument = async (kycId: string): Promise<KycDocument | null> => {
-    try {
-      const { data, error } = await supabase
-        .from('acc_portal_kyc')
-        .select('id, fields, name, display_name')
-        .eq('id', kycId)
-        .single()
-
-      if (error) throw error
-
-      return {
-        id: data.id,
-        name: data.name,
-        display_name: data.display_name,
-        fields: transformKycFields(data.fields || [])
+    stages.forEach(stage => {
+      if (!uniqueStages.has(stage.id)) {
+        uniqueStages.set(stage.id, {
+          ...stage,
+          departmentId: department.id,
+          departmentName: department.name
+        })
       }
-    } catch (error) {
-      console.error('Error fetching KYC document:', error)
-      return null
-    }
+    })
+
+    const allStages = Array.from(uniqueStages.values())
+      .sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
+
+    return allStages
+  } catch (error) {
+    console.error('Error fetching stages:', error)
+    toast({
+      title: "Error",
+      description: "Failed to load stages.",
+      variant: "destructive"
+    })
+    return []
   }
+}
 
-  /**
-   * Helper function to check if document is older than task creation
-   */
-  export const isDocumentOlderThanTask = (documentDate: string, taskDate: string): boolean => {
-    try {
-      const docDate = new Date(documentDate)
-      const tskDate = new Date(taskDate)
-      return docDate < tskDate
-    } catch (error) {
-      console.error('Error comparing dates:', error)
-      return false
-    }
+/**
+ * Fetch all documents from the database
+ */
+export const fetchAllDocuments = async (): Promise<DirectorDocument[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('acc_portal_directors_documents')
+      .select('*')
+      .order('director_id', { ascending: true })
+
+    if (error) throw error
+
+    return data || []
+  } catch (error) {
+    console.error('Error fetching documents:', error)
+    toast({
+      title: "Error",
+      description: "Failed to load documents data.",
+      variant: "destructive"
+    })
+    return []
   }
+}
 
-  /**
-   * Format date to dd/MM/yyyy HH:mm format
-   */
-  export const formatDateValue = (dateString: string | Date | null | undefined): string => {
-    if (!dateString) return 'N/A'
-    
-    try {
-      let date: Date
+/**
+ * Fetch all KYC fields for all document types
+ */
+export const fetchAllKycFields = async (): Promise<{
+  fieldsMap: Record<string, any[]>;
+  kycDocsMap: Map<string, KycDocument>;
+}> => {
+  try {
+    console.log('Fetching all KYC fields...')
+    const { data, error } = await supabase
+      .from('acc_portal_kyc')
+      .select('id, fields, name, display_name')
+      .order('display_name', { ascending: true })
 
-      if (typeof dateString === 'string') {
-        // If it's already in the expected format, return as is
-        if (dateString.includes('/') && dateString.includes(':')) {
-          return dateString
-        }
-        date = new Date(dateString)
-      } else {
-        date = dateString
+    if (error) throw error
+
+    const fieldsMap: Record<string, any[]> = {}
+    const kycDocsMap = new Map<string, KycDocument>()
+
+    // Transform and store fields by kycId and cache KYC documents
+    data?.forEach(doc => {
+      if (doc.id && doc.fields) {
+        fieldsMap[doc.id] = transformKycFields(doc.fields)
+        kycDocsMap.set(doc.id, {
+          id: doc.id,
+          name: doc.name,
+          display_name: doc.display_name,
+          fields: transformKycFields(doc.fields)
+        })
       }
+    })
 
-      const day = String(date.getDate()).padStart(2, '0')
-      const month = String(date.getMonth() + 1).padStart(2, '0')
-      const year = date.getFullYear()
-      const hours = String(date.getHours()).padStart(2, '0')
-      const minutes = String(date.getMinutes()).padStart(2, '0')
+    console.log(`Fetched KYC fields for ${Object.keys(fieldsMap).length} document types`)
 
-      return `${day}/${month}/${year} ${hours}:${minutes}`
-    } catch (e) {
-      console.error('Error formatting date:', dateString, e)
-      return 'Invalid Date'
+    return { fieldsMap, kycDocsMap }
+  } catch (error) {
+    console.error('Error fetching KYC fields:', error)
+    toast({
+      title: 'Error',
+      description: 'Failed to load KYC fields',
+      variant: 'destructive',
+    })
+    return { fieldsMap: {}, kycDocsMap: new Map() }
+  }
+}
+
+/**
+ * Fetch single KYC document by kycId
+ */
+export const fetchKycDocument = async (kycId: string): Promise<KycDocument | null> => {
+  try {
+    const { data, error } = await supabase
+      .from('acc_portal_kyc')
+      .select('id, fields, name, display_name')
+      .eq('id', kycId)
+      .single()
+
+    if (error) throw error
+
+    return {
+      id: data.id,
+      name: data.name,
+      display_name: data.display_name,
+      fields: transformKycFields(data.fields || [])
     }
+  } catch (error) {
+    console.error('Error fetching KYC document:', error)
+    return null
   }
+}
 
-  /**
-   * Get document for task and stage
-   */
-  export const getDocumentForTaskStage = (
-    task: Task, 
-    stage: any, 
-    documents: DirectorDocument[] = []
-  ): DirectorDocument | null => {
-    if (!task.individual_id || !stage.documents?.[0]?.kycId) return null
-
-    const relevantDocs = documents.filter(doc =>
-      doc.director_id === task.individual_id &&
-      doc.document_id === stage.documents[0].kycId
-    )
-
-    if (relevantDocs.length === 0) return null
-
-    return relevantDocs[0] // Already sorted by created_at desc
+/**
+ * Helper function to check if document is older than task creation
+ */
+export const isDocumentOlderThanTask = (documentDate: string, taskDate: string): boolean => {
+  try {
+    const docDate = new Date(documentDate)
+    const tskDate = new Date(taskDate)
+    return docDate < tskDate
+  } catch (error) {
+    console.error('Error comparing dates:', error)
+    return false
   }
+}
+
+/**
+ * Format date to dd/MM/yyyy HH:mm format
+ */
+export const formatDateValue = (dateString: string | Date | null | undefined): string => {
+  if (!dateString) return 'N/A'
+
+  try {
+    let date: Date
+
+    if (typeof dateString === 'string') {
+      // If it's already in the expected format, return as is
+      if (dateString.includes('/') && dateString.includes(':')) {
+        return dateString
+      }
+      date = new Date(dateString)
+    } else {
+      date = dateString
+    }
+
+    const day = String(date.getDate()).padStart(2, '0')
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const year = date.getFullYear()
+    const hours = String(date.getHours()).padStart(2, '0')
+    const minutes = String(date.getMinutes()).padStart(2, '0')
+
+    return `${day}/${month}/${year} ${hours}:${minutes}`
+  } catch (e) {
+    console.error('Error formatting date:', dateString, e)
+    return 'Invalid Date'
+  }
+}
+
+/**
+ * Get document for task and stage
+ */
+export const getDocumentForTaskStage = (
+  task: Task,
+  stage: any,
+  documents: DirectorDocument[] = []
+): DirectorDocument | null => {
+  if (!task.individual_id || !stage.documents?.[0]?.kycId) return null
+
+  const relevantDocs = documents.filter(doc =>
+    doc.director_id === task.individual_id &&
+    doc.document_id === stage.documents[0].kycId
+  )
+
+  if (relevantDocs.length === 0) return null
+
+  return relevantDocs[0] // Already sorted by created_at desc
+}
