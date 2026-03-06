@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { SearchableSelect } from "@/components/ui/searchable-select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Check, ChevronsUpDown, Loader2, User, Users, Building2, FileText, UserPlus, UserCheck, Shield, HelpCircle, Calendar, MessageSquare, ListTodo, Phone, Database, Folder, Search, HeartHandshake, Split, X } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -42,6 +43,7 @@ interface JobQuestion {
         id: string
         operator: 'equals' | 'not_equals' | 'is_not_empty' | 'is_empty'
         value: any
+        auto_assign_value?: string
     }
 }
 
@@ -136,6 +138,48 @@ export function EnquiryDialog({
     const [availableAssistants, setAvailableAssistants] = useState<any[]>([]);
     const [isIndividualPopoverOpen, setIsIndividualPopoverOpen] = useState(false);
     const [isSponsorPopoverOpen, setIsSponsorPopoverOpen] = useState(false);
+    const availableSubdepartments = useMemo(() => {
+        const dept = departments.find(d => d.id.toString() === formData.department_id)
+        return dept?.tm_subdepartments || []
+    }, [formData.department_id, departments])
+
+    const availableClasses = useMemo(() => {
+        const sub = availableSubdepartments.find(s => s.id.toString() === formData.subdepartment_id)
+        return sub?.classes || []
+    }, [availableSubdepartments, formData.subdepartment_id])
+
+    // Create options arrays for SearchableSelect
+    const companyOptions = useMemo(() => {
+        return companies.map(c => ({ value: c.id.toString(), label: c.company_name }));
+    }, [companies]);
+
+    const understudyOptions = useMemo(() => {
+        return understudies.map(u => ({ value: u.id.toString(), label: u.full_name }));
+    }, [understudies]);
+
+    const departmentOptions = useMemo(() => {
+        return departments.map(d => ({ value: d.id.toString(), label: d.name }));
+    }, [departments]);
+
+    const subdepartmentOptions = useMemo(() => {
+        return availableSubdepartments.map(s => ({ value: s.id.toString(), label: s.name }));
+    }, [availableSubdepartments]);
+
+    const classOptions = useMemo(() => {
+        return availableClasses.map(c => ({ value: c.id.toString(), label: c.name }));
+    }, [availableClasses]);
+
+    const officerOptions = useMemo(() => {
+        return availableOfficers.map(o => ({ value: o.id.toString(), label: o.full_name || o.name }));
+    }, [availableOfficers]);
+
+    const managerOptions = useMemo(() => {
+        return availableManagers.map(m => ({ value: m.id.toString(), label: m.full_name || m.name }));
+    }, [availableManagers]);
+
+    const assistantOptions = useMemo(() => {
+        return availableAssistants.map(a => ({ value: a.id.toString(), label: a.full_name || a.name }));
+    }, [availableAssistants]);
 
     // Helper function to construct Supabase storage URL
     const getSupabaseImageUrl = useCallback((filePath: string | null): string | null => {
@@ -297,6 +341,62 @@ export function EnquiryDialog({
         }
     }, [jobAnswers]);
 
+    // Auto-assignment logic - triggers when any question answer changes
+    const handleAutoAssignment = useCallback((changedQuestionId: string, newValue: any) => {
+        // Find all questions that depend on the changed question
+        const dependentQuestions = jobQuestions.filter(q =>
+            q.depends_on?.id === changedQuestionId &&
+            q.depends_on?.auto_assign_value
+        );
+
+        if (dependentQuestions.length === 0) return;
+
+        const newAnswers = { ...jobAnswers };
+        let hasChanges = false;
+
+        dependentQuestions.forEach(q => {
+            const parentVal = newValue;
+            const targetVal = q.depends_on?.value;
+            const assignValue = q.depends_on?.auto_assign_value;
+
+            if (!assignValue) return;
+
+            let shouldAssign = false;
+
+            switch (q.depends_on?.operator) {
+                case 'equals':
+                    shouldAssign = String(parentVal) === String(targetVal);
+                    break;
+                case 'not_equals':
+                    shouldAssign = String(parentVal) !== String(targetVal);
+                    break;
+                case 'is_not_empty':
+                    if (Array.isArray(parentVal)) {
+                        shouldAssign = parentVal.length > 0;
+                    } else {
+                        shouldAssign = parentVal !== undefined && parentVal !== null && parentVal !== '';
+                    }
+                    break;
+                case 'is_empty':
+                    if (Array.isArray(parentVal)) {
+                        shouldAssign = parentVal.length === 0;
+                    } else {
+                        shouldAssign = parentVal === undefined || parentVal === null || parentVal === '';
+                    }
+                    break;
+            }
+
+            if (shouldAssign) {
+                newAnswers[q.id] = assignValue;
+                hasChanges = true;
+            }
+        });
+
+        if (hasChanges) {
+            setJobAnswers(newAnswers);
+        }
+    }, [jobQuestions, jobAnswers]);
+
     const groupedQuestions = useMemo(() => {
         const visible = jobQuestions.filter(q => checkVisibility(q));
         return visible.reduce((acc, q) => {
@@ -307,15 +407,6 @@ export function EnquiryDialog({
         }, {} as Record<string, JobQuestion[]>);
     }, [jobQuestions, checkVisibility]);
 
-    const availableSubdepartments = useMemo(() => {
-        const dept = departments.find(d => d.id.toString() === formData.department_id)
-        return dept?.tm_subdepartments || []
-    }, [formData.department_id, departments])
-
-    const availableClasses = useMemo(() => {
-        const sub = availableSubdepartments.find(s => s.id.toString() === formData.subdepartment_id)
-        return sub?.classes || []
-    }, [availableSubdepartments, formData.subdepartment_id])
 
     const fetchJobQuestions = useCallback(async (levelObj: any) => {
         setLoadingQuestions(true)
@@ -535,8 +626,7 @@ export function EnquiryDialog({
         setSelectedUnderstudy('');
     }
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault()
+    const handleSubmit = async () => {
         if (!selectedIndividual || !formData.department_id) return
 
         setLoading(true)
@@ -684,8 +774,8 @@ export function EnquiryDialog({
                 </DialogHeader>
 
                 {/* SCROLLABLE CONTENT AREA */}
-                <ScrollArea className="flex-1 w-full overflow-y-auto bg-slate-50/50">
-                    <form id="enquiry-form" onSubmit={handleSubmit} className="p-6 space-y-4 grid grid-cols-2 gap-4">
+                <ScrollArea className="flex-1 w-full h-full bg-slate-50/50">
+                    <div className="p-6 space-y-4 grid grid-cols-2 gap-4">
                         <div className="col-span-1">
                             {/* CLIENT IDENTIFICATION SECTION */}
                             <Card className="border-blue-100 shadow-sm overflow-hidden bg-white mb-4">
@@ -752,10 +842,13 @@ export function EnquiryDialog({
                                                             <Search className="h-4 w-4 opacity-30" />
                                                         </Button>
                                                     </PopoverTrigger>
-                                                    <PopoverContent className="w-[400px] p-0" align="start">
-                                                        <Command>
+                                                    <PopoverContent className="w-[400px] p-0 max-h-[400px]" align="start">
+                                                        <Command className="h-full rounded-lg border shadow-md">
                                                             <CommandInput placeholder="Search name..." />
-                                                            <CommandList className="max-h-[300px] overflow-y-auto">
+                                                            <CommandList
+                                                                className="max-h-[350px] overflow-y-auto overscroll-contain"
+                                                                onWheel={(e) => e.stopPropagation()}
+                                                            >
                                                                 <CommandEmpty>No individuals found.</CommandEmpty>
                                                                 <CommandGroup>
                                                                     {individuals.map(ind => (
@@ -776,14 +869,17 @@ export function EnquiryDialog({
                                     <TableRow label="Employment Entity">
                                         <div className="flex items-center gap-2 w-full">
                                             <div className="flex-1">
-                                                <Select value={selectedCompany} onValueChange={handleCompanyChange}>
-                                                    <SelectTrigger className="h-11 border-slate-200 bg-white w-full">
-                                                        <SelectValue placeholder="Select Company..." />
-                                                    </SelectTrigger>
-                                                    <SelectContent className="max-h-[300px]">
-                                                        {companies.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.company_name}</SelectItem>)}
-                                                    </SelectContent>
-                                                </Select>
+                                                <SearchableSelect
+                                                    value={selectedCompany}
+                                                    onValueChange={handleCompanyChange}
+                                                    options={companyOptions}
+                                                    placeholder="Select Company..."
+                                                    disabled={companyOptions.length === 0}
+                                                    emptyMessage="No companies found."
+                                                    searchPlaceholder="Search company..."
+                                                    buttonClassName="h-11 border-slate-200 bg-white w-full"
+                                                    popoverClassName="w-[--radix-popover-trigger-width]"
+                                                />
                                             </div>
                                             {/* CLEAR BUTTON FOR COMPANY */}
                                             {selectedCompany && (
@@ -869,14 +965,18 @@ export function EnquiryDialog({
                                             {loadingRelations ? (
                                                 <div className="flex items-center gap-2 text-slate-400 text-xs italic"><Loader2 className="h-3 w-3 animate-spin" /> Loading available understudies...</div>
                                             ) : understudies.length > 0 ? (
-                                                <Select value={selectedUnderstudy} onValueChange={setSelectedUnderstudy}>
-                                                    <SelectTrigger className="h-11 border-amber-200 bg-amber-50/20">
-                                                        <SelectValue placeholder="Select understudy..." />
-                                                    </SelectTrigger>
-                                                    <SelectContent className="max-h-[200px]">
-                                                        {understudies.map(u => <SelectItem key={u.id} value={u.id.toString()}>{u.full_name}</SelectItem>)}
-                                                    </SelectContent>
-                                                </Select>
+                                                <SearchableSelect
+                                                    value={selectedUnderstudy}
+                                                    onValueChange={setSelectedUnderstudy}
+                                                    options={understudyOptions}
+                                                    placeholder="Select understudy..."
+                                                    disabled={understudyOptions.length === 0}
+                                                    emptyMessage="No understudies found."
+                                                    searchPlaceholder="Search understudy..."
+                                                    buttonClassName="h-11 border-amber-200 bg-amber-50/20"
+                                                    popoverClassName="w-[--radix-popover-trigger-width]"
+                                                    allowClear={true}
+                                                />
                                             ) : (
                                                 <div className="text-xs text-amber-600 bg-amber-50 p-2 rounded border border-amber-100 italic">
                                                     No understudies linked to the selected company.
@@ -894,10 +994,13 @@ export function EnquiryDialog({
                                                         <Users className="h-4 w-4 text-emerald-400" />
                                                     </Button>
                                                 </PopoverTrigger>
-                                                <PopoverContent className="w-[400px] p-0" align="start">
-                                                    <Command>
+                                                <PopoverContent className="w-[400px] p-0 max-h-[400px]" align="start">
+                                                    <Command className="rounded-lg border shadow-md">
                                                         <CommandInput placeholder="Search sponsors..." />
-                                                        <CommandList className="max-h-[300px] overflow-y-auto">
+                                                        <CommandList
+                                                            className="max-h-[350px] overflow-y-auto overscroll-contain"
+                                                            onWheel={(e) => e.stopPropagation()}
+                                                        >
                                                             <CommandEmpty>No sponsors found.</CommandEmpty>
                                                             <CommandGroup>
                                                                 {sponsors.map(s => (
@@ -926,36 +1029,48 @@ export function EnquiryDialog({
                                 </CardHeader>
                                 <CardContent className="p-6 space-y-0">
                                     <TableRow label="Department" required>
-                                        <Select value={formData.department_id} onValueChange={id => setFormData(prev => ({ ...prev, department_id: id, subdepartment_id: '', class_id: '' }))}>
-                                            <SelectTrigger className="h-11 bg-white border-slate-200">
-                                                <SelectValue placeholder="Choose Department" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {departments.map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
+                                        <SearchableSelect
+                                            value={formData.department_id}
+                                            onValueChange={id => setFormData(prev => ({ ...prev, department_id: id, subdepartment_id: '', class_id: '' }))}
+                                            options={departmentOptions}
+                                            placeholder="Choose Department"
+                                            disabled={departmentOptions.length === 0}
+                                            emptyMessage="No departments found."
+                                            searchPlaceholder="Search department..."
+                                            buttonClassName="h-11 bg-white border-slate-200"
+                                            popoverClassName="w-[--radix-popover-trigger-width]"
+                                            allowClear={true}
+                                        />
                                     </TableRow>
 
                                     <TableRow label="Sub-Department">
-                                        <Select value={formData.subdepartment_id} onValueChange={id => setFormData(prev => ({ ...prev, subdepartment_id: id, class_id: '' }))} disabled={!formData.department_id}>
-                                            <SelectTrigger className="h-11 bg-white border-slate-200">
-                                                <SelectValue placeholder="Choose Sub-Department" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {availableSubdepartments.map(s => <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
+                                        <SearchableSelect
+                                            value={formData.subdepartment_id}
+                                            onValueChange={id => setFormData(prev => ({ ...prev, subdepartment_id: id, class_id: '' }))}
+                                            options={subdepartmentOptions}
+                                            placeholder="Choose Sub-Department"
+                                            disabled={!formData.department_id || subdepartmentOptions.length === 0}
+                                            emptyMessage="No sub-departments found."
+                                            searchPlaceholder="Search sub-department..."
+                                            buttonClassName="h-11 bg-white border-slate-200"
+                                            popoverClassName="w-[--radix-popover-trigger-width]"
+                                            allowClear={true}
+                                        />
                                     </TableRow>
 
                                     <TableRow label="Service Class">
-                                        <Select value={formData.class_id} onValueChange={id => setFormData(prev => ({ ...prev, class_id: id }))} disabled={!formData.subdepartment_id}>
-                                            <SelectTrigger className="h-11 bg-white border-slate-200">
-                                                <SelectValue placeholder="Choose Service Class" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {availableClasses.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
+                                        <SearchableSelect
+                                            value={formData.class_id}
+                                            onValueChange={id => setFormData(prev => ({ ...prev, class_id: id }))}
+                                            options={classOptions}
+                                            placeholder="Choose Service Class"
+                                            disabled={!formData.subdepartment_id || classOptions.length === 0}
+                                            emptyMessage="No service classes found."
+                                            searchPlaceholder="Search service class..."
+                                            buttonClassName="h-11 bg-white border-slate-200"
+                                            popoverClassName="w-[--radix-popover-trigger-width]"
+                                            allowClear={true}
+                                        />
                                     </TableRow>
                                 </CardContent>
                             </Card>
@@ -970,25 +1085,33 @@ export function EnquiryDialog({
                                 </CardHeader>
                                 <CardContent className="p-6 space-y-0">
                                     <TableRow label="Assigned Officer">
-                                        <Select value={formData.officer_id} onValueChange={id => setFormData(prev => ({ ...prev, officer_id: id }))}>
-                                            <SelectTrigger className="h-11 bg-white border-slate-200">
-                                                <SelectValue placeholder="Select Officer" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {availableOfficers.map(o => <SelectItem key={o.id} value={o.id.toString()}>{o.full_name || o.name}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
+                                        <SearchableSelect
+                                            value={formData.officer_id}
+                                            onValueChange={id => setFormData(prev => ({ ...prev, officer_id: id }))}
+                                            options={officerOptions}
+                                            placeholder="Select Officer"
+                                            disabled={officerOptions.length === 0}
+                                            emptyMessage="No officers found."
+                                            searchPlaceholder="Search officer..."
+                                            buttonClassName="h-11 bg-white border-slate-200"
+                                            popoverClassName="w-[--radix-popover-trigger-width]"
+                                            allowClear={true}
+                                        />
                                     </TableRow>
 
                                     <TableRow label="Task Manager">
-                                        <Select value={formData.task_manager_id} onValueChange={id => setFormData(prev => ({ ...prev, task_manager_id: id }))}>
-                                            <SelectTrigger className="h-11 bg-white border-slate-200">
-                                                <SelectValue placeholder="Select Manager" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {availableManagers.map(m => <SelectItem key={m.id} value={m.id.toString()}>{m.full_name || m.name}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
+                                        <SearchableSelect
+                                            value={formData.task_manager_id}
+                                            onValueChange={id => setFormData(prev => ({ ...prev, task_manager_id: id }))}
+                                            options={managerOptions}
+                                            placeholder="Select Manager"
+                                            disabled={managerOptions.length === 0}
+                                            emptyMessage="No managers found."
+                                            searchPlaceholder="Search manager..."
+                                            buttonClassName="h-11 bg-white border-slate-200"
+                                            popoverClassName="w-[--radix-popover-trigger-width]"
+                                            allowClear={true}
+                                        />
                                     </TableRow>
 
                                     <TableRow label="Enquiry Date">
@@ -1150,7 +1273,7 @@ export function EnquiryDialog({
                                 </CardContent>
                             </Card>
                         </div>
-                    </form>
+                    </div>
                 </ScrollArea>
 
                 {/* STATIC FOOTER */}
@@ -1172,8 +1295,7 @@ export function EnquiryDialog({
                                 Cancel
                             </Button>
                             <Button
-                                type="submit"
-                                form="enquiry-form"
+                                onClick={handleSubmit}
                                 disabled={loading || !selectedIndividual || !formData.department_id}
                                 className="px-10 bg-blue-600 hover:bg-blue-700 h-11 text-white font-bold uppercase text-xs tracking-wide transition-all"
                             >
@@ -1184,6 +1306,6 @@ export function EnquiryDialog({
                     </div>
                 </DialogFooter>
             </DialogContent>
-        </Dialog>
+        </Dialog >
     )
 }

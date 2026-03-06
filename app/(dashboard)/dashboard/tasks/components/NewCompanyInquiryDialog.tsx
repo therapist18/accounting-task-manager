@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { SearchableSelect } from "@/components/ui/searchable-select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Check, ChevronsUpDown, User, Users, Building2, Loader2, FileText, Briefcase, Shield, Info, Search, X, Calendar, ListTodo, HelpCircle, Folder } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -29,7 +30,7 @@ interface Company {
     id: number
     company_name: string
 }
-
+ 
 interface Official {
     id: number
     full_name: string
@@ -119,6 +120,71 @@ export function NewCompanyInquiryDialog({
             subclass_id: null
         }
     });
+    const availableSubdepartments = useMemo(() => {
+        const dept = departments.find(d => String(d.id) === String(formData.department_id));
+        return dept?.tm_subdepartments || [];
+    }, [departments, formData.department_id]);
+
+    const availableClasses = useMemo(() => {
+        const subdept = availableSubdepartments.find(s => String(s.id) === String(formData.subdepartment_id));
+        return subdept?.classes?.filter(cls => !cls.parentId) || [];
+    }, [availableSubdepartments, formData.subdepartment_id]);
+
+    const availableSubclasses = useMemo(() => {
+        const subdept = availableSubdepartments.find(s => String(s.id) === String(formData.subdepartment_id));
+        if (!subdept?.classes) return [];
+        const findClass = (classes: any[]): any[] => {
+            for (const cls of classes) {
+                if (String(cls.id) === String(formData.class_id)) return cls.subClasses || [];
+                if (cls.subClasses?.length) {
+                    const found = findClass(cls.subClasses);
+                    if (found) return found;
+                }
+            }
+            return [];
+        };
+        return findClass(subdept.classes);
+    }, [availableSubdepartments, formData.subdepartment_id, formData.class_id]);
+    // Memoized options arrays for SearchableSelect components
+    const companyOptions = useMemo(() =>
+        companies.map(c => ({ value: c.id.toString(), label: c.company_name })),
+        [companies]
+    );
+
+    const departmentOptions = useMemo(() =>
+        departments.map(d => ({ value: d.id.toString(), label: d.name })),
+        [departments]
+    );
+
+    const subdepartmentOptions = useMemo(() =>
+        availableSubdepartments.map(sd => ({ value: sd.id.toString(), label: sd.name })),
+        [availableSubdepartments]
+    );
+
+    const classOptions = useMemo(() =>
+        availableClasses.map(c => ({ value: c.id.toString(), label: c.name })),
+        [availableClasses]
+    );
+
+    const subclassOptions = useMemo(() =>
+        availableSubclasses.map(sc => ({ value: sc.id.toString(), label: sc.name })),
+        [availableSubclasses]
+    );
+
+    const officerOptions = useMemo(() => [
+        { value: 'none', label: 'No Officer' },
+        ...localOfficers.map(o => ({ value: o.id.toString(), label: o.name }))
+    ], [localOfficers]);
+
+    const managerOptions = useMemo(() => [
+        { value: 'none', label: 'No Manager' },
+        ...localUsers.map(m => ({ value: m.id.toString(), label: m.name }))
+    ], [localUsers]);
+
+    const assistantOptions = useMemo(() => [
+        { value: 'none', label: 'No Assistant' },
+        ...localUsers.map(a => ({ value: a.id.toString(), label: a.name }))
+    ], [localUsers]);
 
     // Helper function to construct Supabase storage URL
     const getSupabaseImageUrl = useCallback((filePath: string | null): string | null => {
@@ -489,31 +555,6 @@ export function NewCompanyInquiryDialog({
         if (open && localUsers.length === 0) loadStaffData();
     }, [open, localUsers.length, loadStaffData]);
 
-    const availableSubdepartments = useMemo(() => {
-        const dept = departments.find(d => String(d.id) === String(formData.department_id));
-        return dept?.tm_subdepartments || [];
-    }, [departments, formData.department_id]);
-
-    const availableClasses = useMemo(() => {
-        const subdept = availableSubdepartments.find(s => String(s.id) === String(formData.subdepartment_id));
-        return subdept?.classes?.filter(cls => !cls.parentId) || [];
-    }, [availableSubdepartments, formData.subdepartment_id]);
-
-    const availableSubclasses = useMemo(() => {
-        const subdept = availableSubdepartments.find(s => String(s.id) === String(formData.subdepartment_id));
-        if (!subdept?.classes) return [];
-        const findClass = (classes: any[]): any[] => {
-            for (const cls of classes) {
-                if (String(cls.id) === String(formData.class_id)) return cls.subClasses || [];
-                if (cls.subClasses?.length) {
-                    const found = findClass(cls.subClasses);
-                    if (found) return found;
-                }
-            }
-            return [];
-        };
-        return findClass(subdept.classes);
-    }, [availableSubdepartments, formData.subdepartment_id, formData.class_id]);
 
     const handleOfficialSelection = (officialId: number) => {
         setSelectedOfficialIds(prev => {
@@ -789,10 +830,13 @@ export function NewCompanyInquiryDialog({
                                                             <Search className="h-4 w-4 opacity-30" />
                                                         </Button>
                                                     </PopoverTrigger>
-                                                    <PopoverContent className="w-[400px] p-0" align="start">
-                                                        <Command>
+                                                    <PopoverContent className="w-[400px] p-0 max-h-[400px]" align="start">
+                                                        <Command className="h-full rounded-lg border shadow-md">
                                                             <CommandInput placeholder="Type company name..." />
-                                                            <CommandList className="max-h-[300px] overflow-y-auto">
+                                                            <CommandList
+                                                                className="max-h-[350px] overflow-y-auto overscroll-contain"
+                                                                onWheel={(e) => e.stopPropagation()}
+                                                            >
                                                                 <CommandEmpty>No companies found.</CommandEmpty>
                                                                 <CommandGroup>
                                                                     {loadingCompanies ? (
@@ -955,62 +999,63 @@ export function NewCompanyInquiryDialog({
                                 </CardHeader>
                                 <CardContent className="p-6 space-y-0">
                                     <TableRow label="Department" required>
-                                        <Select
+                                        <SearchableSelect
                                             value={formData.department_id}
                                             onValueChange={(v) => setFormData(prev => ({ ...prev, department_id: v, subdepartment_id: '', class_id: '', subclass_id: '' }))}
-                                        >
-                                            <SelectTrigger className="h-11 bg-white border-slate-200">
-                                                <SelectValue placeholder="Select Department" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {departments.map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
+                                            options={departmentOptions}
+                                            placeholder="Select Department"
+                                            disabled={departmentOptions.length === 0}
+                                            emptyMessage="No departments found."
+                                            searchPlaceholder="Search department..."
+                                            buttonClassName="h-11 bg-white border-slate-200"
+                                            popoverClassName="w-[--radix-popover-trigger-width]"
+                                            allowClear={true}
+                                        />
                                     </TableRow>
 
                                     <TableRow label="Sub-Department">
-                                        <Select
+                                        <SearchableSelect
                                             value={formData.subdepartment_id}
                                             onValueChange={(v) => setFormData(prev => ({ ...prev, subdepartment_id: v, class_id: '', subclass_id: '' }))}
-                                            disabled={!formData.department_id}
-                                        >
-                                            <SelectTrigger className="h-11 bg-white border-slate-200">
-                                                <SelectValue placeholder="Select Sub-Department" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {availableSubdepartments.map(sd => <SelectItem key={sd.id} value={sd.id.toString()}>{sd.name}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
+                                            options={subdepartmentOptions}
+                                            placeholder="Select Sub-Department"
+                                            disabled={!formData.department_id || subdepartmentOptions.length === 0}
+                                            emptyMessage="No sub-departments found."
+                                            searchPlaceholder="Search sub-department..."
+                                            buttonClassName="h-11 bg-white border-slate-200"
+                                            popoverClassName="w-[--radix-popover-trigger-width]"
+                                            allowClear={true}
+                                        />
                                     </TableRow>
 
                                     <TableRow label="Class">
-                                        <Select
+                                        <SearchableSelect
                                             value={formData.class_id}
                                             onValueChange={(v) => setFormData(prev => ({ ...prev, class_id: v, subclass_id: '' }))}
-                                            disabled={!formData.subdepartment_id}
-                                        >
-                                            <SelectTrigger className="h-11 bg-white border-slate-200">
-                                                <SelectValue placeholder="Select Class" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {availableClasses.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
+                                            options={classOptions}
+                                            placeholder="Select Class"
+                                            disabled={!formData.subdepartment_id || classOptions.length === 0}
+                                            emptyMessage="No classes found."
+                                            searchPlaceholder="Search class..."
+                                            buttonClassName="h-11 bg-white border-slate-200"
+                                            popoverClassName="w-[--radix-popover-trigger-width]"
+                                            allowClear={true}
+                                        />
                                     </TableRow>
 
                                     <TableRow label="Subclass">
-                                        <Select
+                                        <SearchableSelect
                                             value={formData.subclass_id}
                                             onValueChange={(v) => setFormData(p => ({ ...p, subclass_id: v }))}
-                                            disabled={!formData.class_id}
-                                        >
-                                            <SelectTrigger className="h-11 bg-white border-slate-200">
-                                                <SelectValue placeholder="Select Subclass" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {availableSubclasses.map(sc => <SelectItem key={sc.id} value={sc.id.toString()}>{sc.name}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
+                                            options={subclassOptions}
+                                            placeholder="Select Subclass"
+                                            disabled={!formData.class_id || subclassOptions.length === 0}
+                                            emptyMessage="No subclasses found."
+                                            searchPlaceholder="Search subclass..."
+                                            buttonClassName="h-11 bg-white border-slate-200"
+                                            popoverClassName="w-[--radix-popover-trigger-width]"
+                                            allowClear={true}
+                                        />
                                     </TableRow>
                                 </CardContent>
                             </Card>
@@ -1025,39 +1070,48 @@ export function NewCompanyInquiryDialog({
                                 </CardHeader>
                                 <CardContent className="p-6 space-y-0">
                                     <TableRow label="Assigned Officer">
-                                        <Select value={formData.officer_id} onValueChange={(v) => setFormData(p => ({ ...p, officer_id: v }))}>
-                                            <SelectTrigger className="h-11 bg-white border-slate-200">
-                                                <SelectValue placeholder="Select Officer" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="none">No Officer</SelectItem>
-                                                {localOfficers.map(o => <SelectItem key={o.id} value={o.id.toString()}>{o.name}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
+                                        <SearchableSelect
+                                            value={formData.officer_id}
+                                            onValueChange={(v) => setFormData(p => ({ ...p, officer_id: v }))}
+                                            options={officerOptions}
+                                            placeholder="Select Officer"
+                                            disabled={officerOptions.length === 0}
+                                            emptyMessage="No officers found."
+                                            searchPlaceholder="Search officer..."
+                                            buttonClassName="h-11 bg-white border-slate-200"
+                                            popoverClassName="w-[--radix-popover-trigger-width]"
+                                            allowClear={true}
+                                        />
                                     </TableRow>
 
                                     <TableRow label="Task Manager">
-                                        <Select value={formData.task_manager_id} onValueChange={(v) => setFormData(p => ({ ...p, task_manager_id: v }))}>
-                                            <SelectTrigger className="h-11 bg-white border-slate-200">
-                                                <SelectValue placeholder="Select Manager" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="none">No Manager</SelectItem>
-                                                {localUsers.map(m => <SelectItem key={m.id} value={m.id.toString()}>{m.name}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
+                                        <SearchableSelect
+                                            value={formData.task_manager_id}
+                                            onValueChange={(v) => setFormData(p => ({ ...p, task_manager_id: v }))}
+                                            options={managerOptions}
+                                            placeholder="Select Manager"
+                                            disabled={managerOptions.length === 0}
+                                            emptyMessage="No managers found."
+                                            searchPlaceholder="Search manager..."
+                                            buttonClassName="h-11 bg-white border-slate-200"
+                                            popoverClassName="w-[--radix-popover-trigger-width]"
+                                            allowClear={true}
+                                        />
                                     </TableRow>
 
                                     <TableRow label="Task Assistant">
-                                        <Select value={formData.task_assistant_id} onValueChange={(v) => setFormData(p => ({ ...p, task_assistant_id: v }))}>
-                                            <SelectTrigger className="h-11 bg-white border-slate-200">
-                                                <SelectValue placeholder="Select Assistant" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="none">No Assistant</SelectItem>
-                                                {localUsers.map(a => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
+                                        <SearchableSelect
+                                            value={formData.task_assistant_id}
+                                            onValueChange={(v) => setFormData(p => ({ ...p, task_assistant_id: v }))}
+                                            options={assistantOptions}
+                                            placeholder="Select Assistant"
+                                            disabled={assistantOptions.length === 0}
+                                            emptyMessage="No assistants found."
+                                            searchPlaceholder="Search assistant..."
+                                            buttonClassName="h-11 bg-white border-slate-200"
+                                            popoverClassName="w-[--radix-popover-trigger-width]"
+                                            allowClear={true}
+                                        />
                                     </TableRow>
 
                                     <TableRow label="Enquiry Date" required>

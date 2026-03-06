@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import React, { useEffect, useState, useMemo, useRef, useCallback } from "react"
 import { cn } from "@/lib/utils"
-import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff, Zap, FileType, Database, Code, HelpCircle, Folder, Split } from "lucide-react"
+import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff, Zap, FileType, Database, Code, HelpCircle, Folder, Split, Building2, ChevronsUpDown } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -18,7 +18,7 @@ import { Separator } from "@/components/ui/separator"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import supabase from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
 import { DepartmentSidebar } from "@/app/(dashboard)/dashboard/departments/main-shared-components/department-sidebar"
@@ -151,6 +151,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
   const [masterFields, setMasterFields] = useState<any[]>([])
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [banks, setBanks] = useState<any[]>([]);
+  const [selectedBank, setSelectedBank] = useState<any | null>(null);
   const sidebarPanelRef = useRef(null);
 
   // Add the programmatic toggle handler
@@ -195,12 +197,14 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [kycRes, mfRes] = await Promise.all([
+        const [kycRes, mfRes, banksRes] = await Promise.all([
           supabase.from('acc_portal_kyc').select('id, name, display_name').order('name'),
-          supabase.from('tm_job_fields').select('id, label')
+          supabase.from('tm_job_fields').select('id, label'),
+          supabase.from('banks').select('id, bank_name').order('bank_name')
         ])
         setKycDocuments(kycRes.data || [])
         setMasterFields(mfRes.data || [])
+        setBanks(banksRes.data || [])
       } catch (error) { console.error(error) }
     }
     fetchData()
@@ -375,6 +379,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     setActiveSubdept(prev => ({ ...prev, [String(deptId)]: String(subdeptId) }))
     setActiveDept(String(deptId))
   }
+
   const handleSubclassClick = (deptId: string, subdeptId: string, classId: string, subclassId: string) => {
     const activeClassKey = `${String(deptId)}-${String(subdeptId)}`
     const activeSubclassKey = `${activeClassKey}-${String(classId)}`
@@ -397,20 +402,107 @@ export default function UploadRequirements({ departments: initialDepartments }: 
 
     return (
       <div className="space-y-8">
+        {/* Bank Selector for BANKS Department */}
+        {String(activeDept) === "14" && (
+          <Card className="bg-blue-50 border-blue-200">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Building2 className="h-5 w-5 text-blue-600" />
+                Bank Selection
+              </CardTitle>
+              <CardDescription>
+                Select a bank to define bank-specific requirements and job questions.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="w-full justify-between bg-white">
+                    {selectedBank ? (
+                      <div className="flex items-center gap-2">
+                        <Building2 className="h-4 w-4" />
+                        <span>{selectedBank.bank_name}</span>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground">Select a bank...</span>
+                    )}
+                    <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[300px] p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search bank..." />
+                    <CommandList>
+                      <CommandEmpty>No bank found.</CommandEmpty>
+                      <CommandGroup>
+                        {banks.map((bank) => (
+                          <CommandItem
+                            key={bank.id}
+                            onSelect={() => setSelectedBank(bank)}
+                            className="flex items-center gap-2"
+                          >
+                            <div className={cn(
+                              "mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary",
+                              selectedBank?.id === bank.id
+                                ? "bg-primary text-primary-foreground"
+                                : "opacity-50 [&_svg]:invisible"
+                            )}>
+                              <Check className="h-4 w-4" />
+                            </div>
+                            <Building2 className="h-4 w-4" />
+                            {bank.bank_name}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+              {selectedBank && (
+                <div className="mt-3 flex items-center gap-2 text-sm">
+                  <Badge variant="secondary" className="bg-blue-100 text-blue-700">
+                    <Building2 className="h-3 w-3 mr-1" />
+                    {selectedBank.bank_name}
+                  </Badge>
+                  <span className="text-muted-foreground">Bank-specific requirements will be applied.</span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         <div className="flex items-center justify-between border-b pb-4">
           <div>
             <h2 className="text-xl font-bold flex items-center gap-2">
               {currentSubclass ? <Layers className="h-5 w-5 text-orange-500" /> : currentClass ? <Layers className="h-5 w-5 text-purple-500" /> : <FileText className="h-5 w-5 text-green-500" />}
               {currentSubclass ? currentSubclass.name : currentClass ? currentClass.name : currentSubdept.name}
+              {String(activeDept) === "14" && selectedBank && (
+                <>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-blue-600">{selectedBank.bank_name}</span>
+                </>
+              )}
             </h2>
             <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
               <Badge variant="outline" className="bg-slate-100">{currentDept.name}</Badge>
               <span>&rsaquo;</span><span>{currentSubdept.name}</span>
               {currentClass && <><span className="text-slate-300">&rsaquo;</span><span>{currentClass.name}</span></>}
               {currentSubclass && <><span className="text-slate-300">&rsaquo;</span><span>{currentSubclass.name}</span></>}
+              {String(activeDept) === "14" && selectedBank && (
+                <>
+                  <span className="text-slate-300">&rsaquo;</span>
+                  <Badge variant="outline" className="bg-blue-100 text-blue-700">
+                    <Building2 className="h-3 w-3 mr-1" />
+                    {selectedBank.bank_name}
+                  </Badge>
+                </>
+              )}
             </div>
           </div>
-          <Button onClick={() => { setAddContext(targetContext); setIsAddDialogOpen(true); }}>
+          <Button
+            onClick={() => { setAddContext(targetContext); setIsAddDialogOpen(true); }}
+            disabled={String(activeDept) === "14" && !selectedBank}
+          >
             <Plus className="h-4 w-4 mr-2" /> Add Items
           </Button>
         </div>
@@ -448,7 +540,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                 <TableHead className="w-12 text-center border-r">#</TableHead>
                 <TableHead className="min-w-[200px] border-r">Question Label</TableHead>
                 <TableHead className="border-r">Input Type</TableHead>
-                <TableHead className="border-r">Default Value</TableHead> {/* New Column */}
+                <TableHead className="border-r">Default Value</TableHead>
                 <TableHead className="border-r">Required</TableHead>
                 <TableHead className="border-r">Applies To</TableHead>
                 <TableHead className="border-r">Configuration</TableHead>
@@ -458,7 +550,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
             <TableBody>
               {Object.entries(grouped).map(([category, items]) => (
                 <React.Fragment key={category}>
-                  <TableRow className="bg-slate-50 border-y"><TableCell colSpan={4} className="py-2 px-4 font-bold text-xs uppercase text-slate-500">{category}</TableCell></TableRow>
+                  <TableRow className="bg-slate-50 border-y"><TableCell colSpan={8} className="py-2 px-4 font-bold text-xs uppercase text-slate-500">{category}</TableCell></TableRow>
                   {items.map((q, idx) => {
                     const linkedMasterField = q.linked_field_id
                       ? masterFields.find(mf => String(mf.id) === String(q.linked_field_id))
@@ -469,8 +561,6 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                         <TableCell className="text-center font-mono text-xs text-muted-foreground border-r">{idx + 1}</TableCell>
                         <TableCell className="border-r font-medium">{q.label}</TableCell>
                         <TableCell className="border-r"><Badge variant="outline" className="capitalize bg-slate-100">{q.type}</Badge></TableCell>
-
-                        {/* New Default Value Cell */}
                         <TableCell className="border-r">
                           {q.default_value ? (
                             <span className="text-xs font-mono bg-slate-50 px-1.5 py-0.5 rounded border text-slate-600">
@@ -480,7 +570,6 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                             <span className="text-[10px] text-slate-400 italic">None</span>
                           )}
                         </TableCell>
-
                         <TableCell className="border-r">
                           {q.required ? <Badge className="bg-red-50 text-red-600 hover:bg-red-100">Required</Badge> : <span className="text-xs text-slate-400">Optional</span>}
                         </TableCell>
@@ -517,8 +606,6 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                             >
                               <ArrowUp className="h-3.5 w-3.5" />
                             </Button>
-
-                            {/* MOVE DOWN */}
                             <Button
                               variant="ghost" size="icon" className="h-8 w-8 text-slate-400"
                               disabled={absoluteIndex === questions.length - 1 || isSubmitting}
@@ -526,9 +613,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                             >
                               <ArrowDown className="h-3.5 w-3.5" />
                             </Button>
-
                             <Separator orientation="vertical" className="h-4 mx-1 my-auto" />
-
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600" onClick={() => {
                               setEditingQuestion(q);
                               setEditingContext(context);
@@ -710,9 +795,9 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                 </TableRow>
               )}
             </TableBody>
-          </Table>
-        </div>
-      </div>
+          </Table >
+        </div >
+      </div >
     )
   }
 
