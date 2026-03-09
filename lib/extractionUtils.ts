@@ -4,14 +4,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import dayjs from 'dayjs'; // Import dayjs library
 import { supabase } from "@/utils/supabase/client";
 
-// Initialize the Gemini API with environment variable
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-
-console.log('Environment variables check:', {
-  NEXT_PUBLIC_GEMINI_API_KEY: process.env.NEXT_PUBLIC_GEMINI_API_KEY ? 'SET' : 'NOT SET',
-  GEMINI_API_KEY: process.env.GEMINI_API_KEY ? 'SET' : 'NOT SET',
-  FINAL_VALUE: GEMINI_API_KEY ? 'SET' : 'NOT SET'
-});
 
 if (!GEMINI_API_KEY) {
   throw new Error('GEMINI_API_KEY environment variable is not set. Please check your .env.local file.');
