@@ -35,6 +35,8 @@ import { OtherDialog } from "./components/OtherDialog"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import EditableStageCell from "./components/EditableStageCell"
 import { NewCompanyInquiryDialog } from "./components/NewCompanyInquiryDialog"
+import { ExtractionPreviewDialog } from "./components/ExtractionPreviewDialog"
+import { ClassSelectionDialog } from "./components/ClassSelectionDialog"
 
 export default function DepartmentTasksManager({
   error,
@@ -328,7 +330,25 @@ export default function DepartmentTasksManager({
     }
   }, [])
 
+  // Cache for tasks data to avoid re-fetching
+  const [tasksCache, setTasksCache] = useState<Map<string, { tasks: UtilTask[], stages: any[], timestamp: number }>>(new Map())
+  const [tableRowsCache, setTableRowsCache] = useState<Map<string, { rows: any[], timestamp: number }>>(new Map())
+  const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
+
   const loadTasksData = useCallback(async (departmentId?: string, subdepartmentId?: string) => {
+    if (!departmentId) return;
+
+    const cacheKey = `${departmentId}-${subdepartmentId || 'all'}`;
+    const cached = tasksCache.get(cacheKey);
+    const now = Date.now();
+
+    // Return cached data if still valid
+    if (cached && (now - cached.timestamp) < CACHE_DURATION) {
+      setTasks(cached.tasks);
+      setStages(cached.stages);
+      return;
+    }
+
     try {
       const [tasksData, stagesData] = await Promise.all([
         fetchTasks(departmentId, subdepartmentId),
@@ -338,6 +358,13 @@ export default function DepartmentTasksManager({
       setTasks(tasksData)
       setStages(stagesData)
 
+      // Cache the results
+      setTasksCache(prev => new Map(prev).set(cacheKey, {
+        tasks: tasksData,
+        stages: stagesData,
+        timestamp: now
+      }));
+
     } catch (error) {
       console.error('Error loading tasks data:', error)
       toast({
@@ -346,7 +373,7 @@ export default function DepartmentTasksManager({
         variant: "destructive"
       })
     }
-  }, [departments])
+  }, [departments, tasksCache])
 
   const refreshAllData = useCallback(async () => {
     try {
@@ -897,9 +924,8 @@ export default function DepartmentTasksManager({
         };
       }
 
-      // Use the new function from tableUtils
-      const { dependantsMap } = await fetchAndEnhanceIndividuals([task]);
-      const dependants = [];
+      // Use existing data from component state instead of making redundant queries
+      const dependants = taskDependants.get(task.id.toString()) || [];
       let skippedMinors = 0;
 
       if (isReEntry) {
@@ -937,15 +963,7 @@ export default function DepartmentTasksManager({
         }
 
         if (task.dependant_member && Array.isArray(task.dependant_member)) {
-          task.dependant_member.forEach(dep => {
-            if (dep?.id && dependantsMap.has(dep.id)) {
-              dependants.push({
-                ...dependantsMap.get(dep.id),
-                relationship: dep.relationship || 'Dependant'
-              });
-            }
-          });
-
+          // Use existing dependants data from component state
           for (const dependant of dependants) {
             tasksToCreate.push({
               status: 'in_progress',
@@ -1014,15 +1032,7 @@ export default function DepartmentTasksManager({
         tasksToCreate.push(baseTaskData);
 
         if (task.dependant_member && Array.isArray(task.dependant_member)) {
-          task.dependant_member.forEach(dep => {
-            if (dep?.id && dependantsMap.has(dep.id)) {
-              dependants.push({
-                ...dependantsMap.get(dep.id),
-                relationship: dep.relationship || 'Dependant'
-              });
-            }
-          });
-
+          // Use existing dependants data from component state
           for (const dependant of dependants) {
             if (isAlien) {
               const age = dependant.age;
@@ -1276,6 +1286,24 @@ export default function DepartmentTasksManager({
   const generateEnhancedTableRows = useCallback(async (tasks: UtilTask[]) => {
     if (!tasks.length) return [];
 
+    // Create cache key based on tasks, stages, and visibility settings
+    const cacheKey = JSON.stringify({
+      taskIds: tasks.map(t => t.id).sort(),
+      stageIds: stages.map(s => s.id).sort(),
+      visibleStageIds: Array.from(visibleStageIds).sort(),
+      showNAStages,
+      expandedSections: Array.from(expandedSections).sort(),
+      visibleStats: Array.from(visibleStats).sort()
+    });
+
+    const cached = tableRowsCache.get(cacheKey);
+    const now = Date.now();
+
+    // Return cached rows if still valid
+    if (cached && (now - cached.timestamp) < CACHE_DURATION) {
+      return cached.rows;
+    }
+
     console.log('Generating table rows with stages:', {
       allStages: stages?.map(s => ({ id: s.id, name: s.name, status: s.status })),
       visibleStageIds: Array.from(visibleStageIds),
@@ -1462,8 +1490,14 @@ export default function DepartmentTasksManager({
       rows.push({ key: 'actions_row', type: 'actions', label: 'Actions', id: 'actions' })
     }
 
+    // Cache the generated rows
+    setTableRowsCache(prev => new Map(prev).set(cacheKey, {
+      rows,
+      timestamp: now
+    }));
+
     return rows
-  }, [stages, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleStats, kycDocuments, allDocuments, visibleStageIds, getDocumentForTaskStage, departments])
+  }, [stages, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleStats, kycDocuments, allDocuments, visibleStageIds, getDocumentForTaskStage, departments, tableRowsCache])
 
   const handleStageDocumentUpload = useCallback((task: any, stage: any) => {
     const enrichedTask = {
@@ -1524,6 +1558,13 @@ export default function DepartmentTasksManager({
       });
     }
   }, [activeDepartmentTab, activeSubdepartmentTab, loadTasksData]);
+
+  // Clear cache when manually refreshing
+  const clearCacheAndRefresh = useCallback(() => {
+    setTasksCache(new Map());
+    setTableRowsCache(new Map());
+    refreshAllData();
+  }, [refreshAllData]);
 
   const handleViewDocument = useCallback(async (task: any, stage: any) => {
     try {
@@ -2310,9 +2351,18 @@ export default function DepartmentTasksManager({
     performInitialLoad();
   }, []);
 
+  // Debounced tab change handler to prevent excessive API calls
+  const [pendingTabChange, setPendingTabChange] = useState<{ dept: string, sub: string } | null>(null);
+
   useEffect(() => {
     if (activeDepartmentTab && departments.length > 0) {
-      loadTasksData(activeDepartmentTab, activeSubdepartmentTab)
+      // Clear any pending timeout
+      if (pendingTabChange) {
+        setPendingTabChange(null);
+      }
+
+      // Only load data if not already loading the same tab
+      loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
     }
   }, [activeDepartmentTab, activeSubdepartmentTab, loadTasksData])
 
@@ -2740,6 +2790,7 @@ export default function DepartmentTasksManager({
                             loading={false}
                             error={error}
                             kycDocuments={kycDocuments}
+                            enhancedTasksData={enhancedTasksData}
                             getCellContent={getCellContentWrapper}
                             renderCellContent={renderCellContent}
                             toggleSectionExpansion={toggleSectionExpansion}
@@ -2928,297 +2979,25 @@ export default function DepartmentTasksManager({
         />
       )}
 
-      {/* Extraction Preview Dialog */}
-      <Dialog open={!!previewDocument} onOpenChange={(isOpen) => !isOpen && setPreviewDocument(null)}>
-        <DialogContent className="max-w-none w-full h-full p-0 m-0">
-          <DialogHeader className="sr-only">
-            <DialogTitle>Document Preview</DialogTitle>
-            <DialogDescription>Preview of the extracted document data</DialogDescription>
-          </DialogHeader>
-          {previewDocument && (
-            <ExtractionPreview
-              documentId={previewDocument.documentId}
-              documentName={previewDocument.documentName}
-              fileUrl={previewDocument.fileUrl}
-              fileName={previewDocument.fileName}
-              extractedData={previewDocument.extractedData || {}}
-              fields={previewDocument.fields || []}
-              // Handle data changes
-              onDataChange={(field, value) => {
-                console.log(`Field ${field} updated to:`, value);
-                // Optional: Update local preview state if needed
-              }}
-              // Handle Deletion - explicitly pass the handler
-              onDelete={async (doc) => {
-                try {
-                  const docId = previewDocument.documentId || previewDocument.id;
-                  if (docId) {
-                    await handleDeleteDocument(docId);
-                    setPreviewDocument(null);
-                    setIsDocumentPreviewOpen(false);
-                  }
-                } catch (error) {
-                  console.error('Error deleting document:', error);
-                  // toast is handled in handleDeleteDocument or ExtractionPreview wrapper
-                }
-              }}
-              // Handle Retry - explicitly pass the handler
-              onRetryExtraction={async (doc) => {
-                try {
-                  const docId = previewDocument.documentId || previewDocument.id;
-                  if (docId) {
-                    handleTaskAction({
-                      type: 'retry-extraction',
-                      documentId: docId,
-                      taskId: previewDocument.taskId
-                    });
-                    toast({ title: "Processing", description: "Retry extraction request sent." });
-                  }
-                } catch (error) {
-                  console.error('Error retrying extraction:', error);
-                  toast({ title: "Error", description: "Failed to retry extraction", variant: "destructive" });
-                }
-              }}
-              // Handle Save
-              onSave={async (data) => {
-                try {
-                  // Add your save logic here. Example:
-                  // await supabase.from('extracted_data').update(data).eq('id', previewDocument.documentId);
-                  console.log('Saving document data:', data);
-                  toast({ title: "Success", description: "Document details saved." });
-                  // Optionally close preview
-                  // setPreviewDocument(null); 
-                } catch (error) {
-                  console.error('Error saving document:', error);
-                  toast({ title: "Error", description: "Failed to save document", variant: "destructive" });
-                }
-              }}
-              file={previewDocument.file}
-              type={previewDocument.type}
-              expanded={true}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
+      <ExtractionPreviewDialog
+        open={!!previewDocument}
+        onOpenChange={(isOpen) => !isOpen && setPreviewDocument(null)}
+        previewDocument={previewDocument}
+        handleDeleteDocument={handleDeleteDocument}
+        handleTaskAction={handleTaskAction}
+        setIsDocumentPreviewOpen={setIsDocumentPreviewOpen}
+        setPreviewDocument={setPreviewDocument}
+      />
 
-      {/* Enhanced Class Selection Dialog for Alien Cases */}
-      <Dialog open={isClassSelectionOpen} onOpenChange={setIsClassSelectionOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Select Classes for Alien Case</DialogTitle>
-            <DialogDescription>
-              Choose the appropriate classes for {selectedTaskForPush?.task.applicant_name} and dependants under Alien subdepartment.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-6">
-            {(selectedTaskForPush?.applicantAge === null || selectedTaskForPush?.applicantAge === undefined) ? (
-              <div className="p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded-r">
-                <div className="flex">
-                  <div className="flex-shrink-0">
-                    <AlertCircle className="h-5 w-5 text-yellow-400" />
-                  </div>
-                  <div className="ml-3">
-                    <p className="text-sm text-yellow-700">
-                      Age verification required for applicant: <strong>{selectedTaskForPush?.task.applicant_name}</strong>
-                      <br />
-                      Please update the applicant's date of birth in the case details before selecting a class.
-                      <br />
-                      <span className="text-xs text-gray-600">
-                        Current DOB: {selectedTaskForPush?.task.date_of_birth || 'Not specified'}
-                      </span>
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <h4 className="font-medium text-sm">
-                  Class for Applicant: {selectedTaskForPush?.task.applicant_name}
-                  <span className="text-muted-foreground font-normal"> (Age: {selectedTaskForPush?.applicantAge})</span>
-                </h4>
-                <div className="grid gap-2">
-                  {availableClasses.map((classItem) => (
-                    <Button
-                      key={`applicant-${classItem.id}`}
-                      variant="outline"
-                      className="w-full justify-start h-auto p-3 text-left"
-                      onClick={() => {
-                        setSelectedTaskForPush(prev => prev ? { ...prev, applicantClassId: classItem.id.toString() } : null);
-                      }}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className={`w-4 h-4 rounded-full border-2 ${selectedTaskForPush?.applicantClassId === classItem.id.toString()
-                          ? 'bg-blue-500 border-blue-500'
-                          : 'border-gray-300'
-                          }`}>
-                          {selectedTaskForPush?.applicantClassId === classItem.id.toString() && (
-                            <div className="w-2 h-2 bg-white rounded-full m-0.5" />
-                          )}
-                        </div>
-                        <div>
-                          <div className="font-semibold">{classItem.name}</div>
-                          {classItem.description && (
-                            <div className="text-sm text-muted-foreground">
-                              {classItem.description}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Dependants Class Selection */}
-            {(() => {
-              const taskDeps = taskDependants.get(selectedTaskForPush?.task.id.toString() || '') || [];
-              // Only include dependants with known age >= 18
-              const adultDependants = taskDeps.filter(dep => dep.age !== null && dep.age >= 18);
-              const unknownAgeDependants = taskDeps.filter(dep => dep.age === null);
-
-              return (
-                <div className="space-y-6">
-                  {/* Known Adult Dependants */}
-                  {adultDependants.length > 0 && (
-                    <div className="space-y-3">
-                      <h4 className="font-medium text-sm border-b pb-1">
-                        Adult Dependants
-                      </h4>
-                      {adultDependants.map((dependant, index) => (
-                        <div key={`adult-${dependant.id}`} className="space-y-2">
-                          <div className="font-medium text-sm">
-                            {dependant.full_name} (Age: {dependant.age})
-                          </div>
-                          <div className="grid gap-2 pl-4">
-                            {availableClasses.map((classItem) => (
-                              <Button
-                                key={`adult-${dependant.id}-${classItem.id}`}
-                                variant="outline"
-                                className="w-full justify-start h-auto p-3 text-left"
-                                onClick={() => {
-                                  setSelectedTaskForPush(prev => {
-                                    if (!prev) return null;
-                                    const updatedDependantClasses = new Map(prev.dependantClasses || new Map());
-                                    updatedDependantClasses.set(dependant.id, classItem.id.toString());
-                                    return { ...prev, dependantClasses: updatedDependantClasses };
-                                  });
-                                }}
-                              >
-                                <div className="flex items-center gap-3">
-                                  <div className={`w-4 h-4 rounded-full border-2 ${selectedTaskForPush?.dependantClasses?.get(dependant.id) === classItem.id.toString()
-                                    ? 'bg-orange-500 border-orange-500'
-                                    : 'border-gray-300'
-                                    }`}>
-                                    {selectedTaskForPush?.dependantClasses?.get(dependant.id) === classItem.id.toString() && (
-                                      <div className="w-2 h-2 bg-white rounded-full m-0.5" />
-                                    )}
-                                  </div>
-                                  <div>
-                                    <div className="font-semibold">{classItem.name}</div>
-                                    {classItem.description && (
-                                      <div className="text-sm text-muted-foreground">
-                                        {classItem.description}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              </Button>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Unknown Age Dependants */}
-                  {unknownAgeDependants.length > 0 && (
-                    <div className="space-y-3">
-                      <h4 className="font-medium text-sm text-amber-600 border-b border-amber-200 pb-1">
-                        Dependants with Unknown Age
-                      </h4>
-                      <div className="text-sm text-amber-700 bg-amber-50 p-3 rounded-md">
-                        <p className="font-medium mb-2">Age Verification Required</p>
-                        <p>Please verify the age for these dependants before proceeding:</p>
-                        <ul className="list-disc pl-5 mt-1 space-y-1">
-                          {unknownAgeDependants.map(dep => (
-                            <li key={`unknown-${dep.id}`}>
-                              {dep.full_name} (Age not specified)
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-          </div>
-
-          <div className="flex justify-end gap-2 pt-4">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setIsClassSelectionOpen(false);
-                setSelectedTaskForPush(null);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={async () => {
-                if (selectedTaskForPush) {
-                  setIsClassSelectionOpen(false);
-                  const adultDependants = (taskDependants.get(selectedTaskForPush.task.id.toString()) || [])
-                    .filter(dep => dep.age !== null && dep.age >= 18);
-                  const anyAdultWithoutClass = adultDependants.some(dep =>
-                    !selectedTaskForPush?.dependantClasses?.has(dep.id)
-                  );
-                  const unknownAgeDependants = (taskDependants.get(selectedTaskForPush.task.id.toString()) || [])
-                    .filter(dep => dep.age === null);
-                  const isPushDisabled =
-                    selectedTaskForPush?.applicantAge === null ||
-                    !selectedTaskForPush?.applicantClassId ||
-                    anyAdultWithoutClass ||
-                    unknownAgeDependants.length > 0;
-                  if (!isPushDisabled) {
-                    await executePushCase(
-                      selectedTaskForPush.task,
-                      selectedTaskForPush.targetDeptId,
-                      selectedTaskForPush.targetSubDeptId,
-                      selectedTaskForPush.targetSubDeptName,
-                      selectedTaskForPush.applicantClassId || null,
-                      selectedTaskForPush.dependantClassId || selectedTaskForPush.applicantClassId || null
-                    );
-                  }
-                  setSelectedTaskForPush(null);
-                }
-              }}
-              disabled={
-                !selectedTaskForPush ||
-                selectedTaskForPush.applicantAge === null ||
-                selectedTaskForPush.applicantAge === undefined ||
-                !selectedTaskForPush.applicantClassId ||
-                (() => {
-                  const deps = taskDependants.get(selectedTaskForPush.task.id.toString()) || [];
-                  // Check for any unknown age dependants
-                  if (deps.some(dep => dep.age === null || dep.age === undefined)) return true;
-
-                  // Check for adult dependants without selected classes
-                  const adultDeps = deps.filter(dep => dep.age !== null && dep.age !== undefined && dep.age >= 18);
-                  if (adultDeps.length === 0) return false;
-
-                  return !selectedTaskForPush.dependantClasses ||
-                    adultDeps.some(dep => !selectedTaskForPush.dependantClasses?.has(dep.id));
-                })()
-              }
-            >
-              Push Case
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ClassSelectionDialog
+        open={isClassSelectionOpen}
+        onOpenChange={setIsClassSelectionOpen}
+        selectedTaskForPush={selectedTaskForPush}
+        availableClasses={availableClasses}
+        taskDependants={taskDependants}
+        setSelectedTaskForPush={setSelectedTaskForPush}
+        executePushCase={executePushCase}
+      />
     </div>
   )
 }

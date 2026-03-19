@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import { useState, useRef, useEffect, useCallback, useMemo } from "react"
+import { useState, useRef, useEffect, useCallback, useMemo, memo } from "react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
@@ -22,7 +22,6 @@ import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { formatDuration, getTimeStatus, isDocumentApplicable, parseDate } from "../overall-view/tableUtils"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { calculateStageDate } from "../utils/dateUtils"
-import { AutomationMappingDialog } from "./AutomationMappingDialog"
 
 interface EditableStageCellProps {
   stage: any
@@ -44,6 +43,19 @@ interface EditableStageCellProps {
   clientName?: string
   onFetchData?: () => Promise<void>;
 }
+
+// Memoized child components to prevent unnecessary re-renders
+const MemoizedTooltipProvider = memo(({ children }: { children: React.ReactNode }) => (
+  <TooltipProvider>{children}</TooltipProvider>
+));
+MemoizedTooltipProvider.displayName = "MemoizedTooltipProvider";
+
+const MemoizedButton = memo(Button);
+MemoizedButton.displayName = "MemoizedButton";
+
+// Cache for document fields to avoid repeated API calls
+const documentFieldsCache = new Map<string, { fields: any[], timestamp: number }>();
+const CACHE_DURATION = 2 * 60 * 1000; // 2 minutes
 
 const isStageApplicableToTask = (stage: any, task: any, departments: any[] = []): boolean => {
   if (!task || !stage || !Array.isArray(departments) || departments.length === 0) {
@@ -166,26 +178,47 @@ export default function EditableStageCell({
     return firstDoc;
   }, [linkedDocuments, requiresUpload, stage.id, stage.name]);
 
+  // Optimized document fields fetching with caching
   useEffect(() => {
     const fetchDocumentFields = async () => {
-      if (linkedDocument?.document_type_id && getKycFields) {
-        try {
-          console.log('[EditableStageCell] Fetching document fields for type:', linkedDocument.document_type_id);
-          setIsLoadingFields(true);
-          const fields = await getKycFields(linkedDocument.document_type_id);
-          console.log('[EditableStageCell] Fetched document fields:', fields);
-          setDocumentFields(fields);
-        } catch (error) {
-          console.error('[EditableStageCell] Error fetching document fields:', error);
-          setDocumentFields([]);
-        } finally {
-          setIsLoadingFields(false);
-        }
-      } else {
+      if (!linkedDocument?.document_type_id || !getKycFields) {
         setDocumentFields([]);
+        setIsLoadingFields(false);
+        return;
+      }
+
+      const cacheKey = linkedDocument.document_type_id;
+      const cached = documentFieldsCache.get(cacheKey);
+      const now = Date.now();
+
+      // Return cached data if still valid
+      if (cached && (now - cached.timestamp) < CACHE_DURATION) {
+        setDocumentFields(cached.fields);
+        setIsLoadingFields(false);
+        return;
+      }
+
+      try {
+        console.log('[EditableStageCell] Fetching document fields for type:', linkedDocument.document_type_id);
+        setIsLoadingFields(true);
+        const fields = await getKycFields(linkedDocument.document_type_id);
+        console.log('[EditableStageCell] Fetched document fields:', fields);
+
+        // Cache the results
+        documentFieldsCache.set(cacheKey, {
+          fields: fields || [],
+          timestamp: now
+        });
+
+        setDocumentFields(fields || []);
+      } catch (error) {
+        console.error('[EditableStageCell] Error fetching document fields:', error);
+        setDocumentFields([]);
+      } finally {
         setIsLoadingFields(false);
       }
     };
+
     fetchDocumentFields();
   }, [linkedDocument?.document_type_id, getKycFields]);
 
@@ -212,9 +245,12 @@ export default function EditableStageCell({
     return true;
   }, [linkedDocument, task]);
 
-  // --- CHANGED: Uses the utility function now ---
+  // Memoized stage date calculation with dependencies optimized
   const stageDate = useMemo(() => {
-    const stageData = task?.stages?.[stage.id];
+    if (!task?.stages || !stage?.id) return null;
+
+    const stageData = task.stages[stage.id];
+    if (!stageData) return null;
 
     return calculateStageDate(
       stage,
@@ -224,54 +260,38 @@ export default function EditableStageCell({
       value,
       isLoadingFields
     );
-  }, [
-    stage,
-    task,
-    linkedDocument,
-    documentFields,
-    value,
-    isLoadingFields
-  ]);
+  }, [stage?.id, task?.stages, linkedDocument, documentFields, value, isLoadingFields]);
 
   const isStageApplicable = useMemo(() => isStageApplicableToTask(stage, task, departments), [stage, task, departments]);
 
+  // Optimized stage completion check
   const isStageCompleted = useMemo(() => {
-    return task.stages?.[stage.id]?.status === 'completed' || task.stages?.[stage.id]?.status === 'skipped';
-  }, [task.stages, stage.id]);
+    const stageStatus = task?.stages?.[stage?.id]?.status;
+    return stageStatus === 'completed' || stageStatus === 'skipped';
+  }, [task?.stages, stage?.id]);
 
   // --- Time Calculation Logic ---
   const effectiveStartTime = useMemo(() => {
-    if (!stages || stages.length === 0) return task.created_at || task.date_initiated;
+    if (!stages?.length || !task?.created_at) return task.date_initiated;
 
     const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-    const currentStageIndex = sortedStages.findIndex(s => s.id === stage.id);
+    const currentIndex = sortedStages.findIndex(s => s.id === stage.id);
 
-    // If first stage, use task start time
-    if (currentStageIndex === 0) {
-      return task.date_initiated || task.created_at;
+    if (currentIndex <= 0) return task.created_at || task.date_initiated;
+
+    let previousStage = sortedStages[currentIndex - 1];
+    while (previousStage && !task.stages?.[previousStage.id]?.date_completed) {
+      const prevIndex = sortedStages.findIndex(s => s.id === previousStage.id);
+      if (prevIndex <= 0) break;
+      previousStage = sortedStages[prevIndex - 1];
     }
 
-    // For subsequent stages, check the previous stage
-    if (currentStageIndex > 0) {
-      const prevStage = sortedStages[currentStageIndex - 1];
-      const prevStageData = task.stages?.[prevStage.id];
-
-      // If previous stage is completed/skipped, use its completion time as start time
-      if (prevStageData?.completedAt) return prevStageData.completedAt;
-      if (prevStageData?.date) return prevStageData.date;
-      if (prevStageData?.status === 'skipped' && prevStageData.skippedAt) return prevStageData.skippedAt;
-
-      // If previous stage is NOT complete, the current stage hasn't started
-      return null;
-    }
-
-    return null;
-  }, [task, stage.id, stages]);
+    return previousStage?.id ? task.stages?.[previousStage.id]?.date_completed : task.created_at || task.date_initiated;
+  }, [stages, stage?.id, task?.created_at, task?.date_initiated, task?.stages]);
 
   const timeStatus = useMemo(() => {
     return getTimeStatus(effectiveStartTime, stage.estimated_time);
   }, [effectiveStartTime, stage.estimated_time]);
-
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -363,89 +383,42 @@ export default function EditableStageCell({
       return;
     }
 
-    if (isSkipped) {
-      await onSave(stage.id, task.id, '', {
-        ...(linkedDocument?.extracted_details || {}),
-        status: 'skipped',
-        skippedAt: new Date().toISOString(),
-        skippedBy: 'userId',
-        reason: skipReason || selectedSkipReason || 'Not specified',
-      });
-      setIsEditing(false);
-      setIsSkipDialogOpen(false);
-      toast({ title: "Success", description: "Stage marked as skipped" });
-      return;
-    }
+    setIsLoading(true);
 
     try {
-      let dateToSave = valueOverride !== undefined ? valueOverride : editValue;
-      if (!dateToSave) {
-        toast({
-          title: "Error",
-          description: "Please select a date",
-          variant: "destructive"
-        });
-        return;
+      const finalValue = valueOverride || editValue;
+      const updatedExtractedDetails: Record<string, any> = {};
+
+      if (linkedDocument && previewDocuments.length > 0) {
+        const currentDoc = previewDocuments[currentPreviewIndex];
+        if (currentDoc?.extractedData) {
+          updatedExtractedDetails.extracted_details = currentDoc.extractedData;
+        }
       }
 
-      let dateObj: Date;
-      if (/^\d{4}-\d{2}-\d{2}$/.test(dateToSave)) {
-        dateToSave = `${dateToSave}T00:00`;
-        dateObj = new Date(dateToSave);
-      }
-      // If date and time are provided (YYYY-MM-DDTHH:MM)
-      else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(dateToSave)) {
-        dateObj = new Date(dateToSave);
-      }
-      // If date and partial time (YYYY-MM-DDTHH)
-      else if (/^\d{4}-\d{2}-\d{2}T\d{2}$/.test(dateToSave)) {
-        dateToSave = `${dateToSave}:00`;
-        dateObj = new Date(dateToSave);
-      }
-      // Fallback: try to parse as is
-      else {
-        dateObj = new Date(dateToSave);
+      if (isSkipped) {
+        updatedExtractedDetails.status = 'skipped';
+        updatedExtractedDetails.skip_reason = skipReason || selectedSkipReason;
       }
 
-      // Check if the date is valid
-      if (isNaN(dateObj.getTime())) {
-        throw new Error('Invalid date');
-      }
-
-      // Format the date as DD/MM/YYYY HH:mm
-      const day = String(dateObj.getDate()).padStart(2, '0');
-      const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-      const year = dateObj.getFullYear();
-      const hours = String(dateObj.getHours()).padStart(2, '0');
-      const minutes = String(dateObj.getMinutes()).padStart(2, '0');
-
-      const formattedDate = `${day}/${month}/${year} ${hours}:${minutes}`;
-
-      console.log('Saving date:', formattedDate);
-
-      setIsLoading(true);
-      await onSave(stage.id, task.id, formattedDate, {
-        ...(linkedDocument?.extracted_details || {}),
-        status: 'completed',
-      });
-
+      await onSave(stage.id, task.id, finalValue, updatedExtractedDetails);
       setIsEditing(false);
+
       toast({
         title: "Success",
-        description: "Date saved successfully"
+        description: isSkipped ? "Stage marked as skipped" : "Stage updated successfully",
       });
-
     } catch (error) {
-      console.error('Error saving date:', error, 'Input value:', valueOverride || editValue);
+      console.error('Error saving stage:', error);
       toast({
         title: "Error",
-        description: `Please enter a valid date (current value: "${valueOverride || editValue}")`,
+        description: "Failed to save stage. Please try again.",
         variant: "destructive"
       });
     } finally {
       setIsLoading(false);
     }
-  }, [editValue, onSave, stage.id, task.id, linkedDocument, selectedSkipReason]);
+  }, [editValue, onSave, stage?.id, task?.id, linkedDocument, selectedSkipReason, previewDocuments, currentPreviewIndex]);
 
   const checkPreviousStages = useCallback(async () => {
     if (!task.stages || !stages || stages.length === 0) return true;
@@ -627,6 +600,7 @@ export default function EditableStageCell({
       setEditValue('');
     }
   }, [stageDate]);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -1297,19 +1271,6 @@ export default function EditableStageCell({
         </DialogContent>
       </Dialog>
 
-      <AutomationMappingDialog
-        isOpen={automationDialogOpen}
-        onClose={() => setAutomationDialogOpen(false)}
-        automationId={currentAutomationConfig?.automationId}
-        classId={task?.class_id || ''}
-        requirementId={stage?.id || ''}
-        taskId={task?.id}
-        task={task}
-        individualId={task?.individual_id || task?.principal_member}
-        stageDocuments={stage?.documents || []}
-        allDocuments={allDocuments}
-        stage={stage}
-      />
     </>
   );
 }

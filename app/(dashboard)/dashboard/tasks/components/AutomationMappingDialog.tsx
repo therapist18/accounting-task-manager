@@ -52,6 +52,7 @@ interface AutomationMappingDialogProps {
   stage?: any;
   relationshipData?: any;
   refreshDocuments?: () => void;
+  enhancedTasksData?: Map<string, any>;
 }
 
 interface EntityAutomationMapping {
@@ -259,7 +260,8 @@ export const AutomationMappingDialog = ({
   allDocuments = [],
   stage,
   relationshipData,
-  refreshDocuments
+  refreshDocuments,
+  enhancedTasksData = new Map()
 }: AutomationMappingDialogProps) => {
   useEffect(() => {
     if (isOpen && relationshipData) {
@@ -940,10 +942,30 @@ export const AutomationMappingDialog = ({
       if (!currentIndividualId) return;
       if (relationshipData?.principal?.full_name) { setIndividualName(relationshipData.principal.full_name); return; }
       if (relationshipData?.principal?.first_name && relationshipData?.principal?.last_name) { setIndividualName(`${relationshipData.principal.first_name} ${relationshipData.principal.last_name}`); return; }
-      try { const { data: individual } = await supabase.from('registry_individuals').select('first_name, last_name, full_name').eq('id', currentIndividualId).single(); if (individual) { const name = individual.full_name || (individual.first_name && individual.last_name ? `${individual.first_name} ${individual.last_name}` : currentIndividualId); setIndividualName(name); } } catch (error) { console.error('Error fetching individual name:', error); setIndividualName(currentIndividualId); }
+
+      // Use bulk-fetched data instead of individual query
+      const taskData = enhancedTasksData.get(task?.id?.toString());
+      const individualData = taskData?.applicant_data;
+      if (individualData) {
+        const name = individualData.full_name || (individualData.first_name && individualData.last_name ? `${individualData.first_name} ${individualData.last_name}` : currentIndividualId);
+        setIndividualName(name);
+        return;
+      }
+
+      // Fallback to individual query only if bulk data not available
+      try {
+        const { data: individual } = await supabase.from('registry_individuals').select('first_name, last_name, full_name').eq('id', currentIndividualId).single();
+        if (individual) {
+          const name = individual.full_name || (individual.first_name && individual.last_name ? `${individual.first_name} ${individual.last_name}` : currentIndividualId);
+          setIndividualName(name);
+        }
+      } catch (error) {
+        console.error('Error fetching individual name:', error);
+        setIndividualName(currentIndividualId);
+      }
     };
     fetchIndividualName();
-  }, [currentIndividualId, relationshipData]);
+  }, [currentIndividualId, relationshipData, enhancedTasksData, task?.id]);
 
   useEffect(() => {
     const runComputation = async () => {

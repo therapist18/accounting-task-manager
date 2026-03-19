@@ -79,7 +79,7 @@ export const ENHANCED_TABLE_HEADERS_IMMIGRATION: TableHeader[] = [
   { id: 'officer', label: 'Officer', default: false, width: 'w-32' },
   { id: 'task_assistant', label: 'Task Assistant', default: false, width: 'w-32' },
   { id: 'r_number', label: 'R Number', default: false, width: 'w-32' },
-  
+
 ];
 
 export const ENHANCED_TABLE_HEADERS: TableHeader[] = [
@@ -537,7 +537,7 @@ export const fetchAndEnhanceIndividuals = async (
 
     const { data, error } = await supabase
       .from('registry_individuals')
-      .select('id, full_name, nationality, date_of_birth, relationships, r_number')
+      .select('id, first_name, last_name, full_name, nationality, date_of_birth, relationships, r_number, employment_data')
       .in('id', individualIds);
 
     if (error) {
@@ -982,7 +982,7 @@ export const filterTasksBySearch = (
     const dependants = taskDependants.get(task.id.toString()) || [];
     if (dependants.length > 0) {
       const dependantText = dependants
-        .map(dep => [dep.full_name, dep.nationality, dep.age,dep.r_number, dep.relationship].filter(Boolean).join(' '))
+        .map(dep => [dep.full_name, dep.nationality, dep.age, dep.r_number, dep.relationship].filter(Boolean).join(' '))
         .join(' ').toLowerCase();
       if (dependantText.includes(term)) return true;
     }
