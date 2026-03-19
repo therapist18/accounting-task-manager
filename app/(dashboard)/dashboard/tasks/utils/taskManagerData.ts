@@ -118,29 +118,27 @@ export const fetchCompanies = async (): Promise<Map<number, string>> => {
 /**
  * Fetch tasks with related data
  */
-// Update the fetchTasks function
 export const fetchTasks = async (departmentId?: string, subdepartmentId?: string): Promise<Task[]> => {
   try {
     let query = supabase
-      .from('tm_tasks')
-      .select(`
-        *,
-        department:department_id (id, name),
-        subdepartment:subdepartment_id (id, name),
-        job_level,
-        officer:officer_id (id, name, email),
-        task_manager:task_manager_id (id, name, email)
-      `)
+      .from('tm_tasks_duplicate')
+      .select('*')
       .order('id', { ascending: true });
 
     if (departmentId) {
-      // Filter using job_level->>department_id
-      query = query.eq('job_level->>department_id', departmentId);
+      // Convert to number and filter using job_level->>department_id
+      const deptId = parseInt(departmentId, 10);
+      if (!isNaN(deptId)) {
+        query = query.eq('job_level->>department_id', deptId);
+      }
     }
 
     if (subdepartmentId) {
-      // Filter using job_level->>subdepartment_id
-      query = query.eq('job_level->>subdepartment_id', subdepartmentId);
+      // Convert to number and filter using job_level->>subdepartment_id
+      const subdeptId = parseInt(subdepartmentId, 10);
+      if (!isNaN(subdeptId)) {
+        query = query.eq('job_level->>subdepartment_id', subdeptId);
+      }
     }
 
     const { data, error } = await query;
@@ -162,18 +160,18 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
         applicant_name: task.applicant_details?.name || task.applicant_name || '',
         // Extract company name from participants_details
         company_name: company?.name || '',
-        // Map job_level properties to top-level for backward compatibility
-        department_id: jobLevel.department_id || task.department_id,
-        subdepartment_id: jobLevel.subdepartment_id || task.subdepartment_id,
-        class_id: jobLevel.class_id || task.class_id,
-        subclass_id: jobLevel.subclass_id || task.subclass_id,
+        // Use job_level for hierarchy data
+        department_id: jobLevel.department_id,
+        subdepartment_id: jobLevel.subdepartment_id,
+        class_id: jobLevel.class_id,
+        subclass_id: jobLevel.subclass_id,
         // Ensure job_level has the correct structure
         job_level: {
           level: jobLevel.level || 0,
           class_id: jobLevel.class_id || '',
           subclass_id: jobLevel.subclass_id || null,
-          department_id: jobLevel.department_id || task.department_id,
-          subdepartment_id: jobLevel.subdepartment_id || task.subdepartment_id
+          department_id: jobLevel.department_id,
+          subdepartment_id: jobLevel.subdepartment_id
         },
         // Extract officer from participants_details
         officer: officer ? {
@@ -181,24 +179,14 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
           name: officer.name,
           email: officer.email || '',
           phone: officer.phone || ''
-        } : (task.officer_id ? {
-          id: task.officer_id,
-          name: task.officer_name || '',
-          email: '',
-          phone: ''
-        } : undefined),
+        } : undefined,
         // Extract task manager from participants_details
         task_manager: taskManager ? {
           id: taskManager.id,
           name: taskManager.name,
           email: taskManager.email || '',
           phone: taskManager.phone || ''
-        } : (task.task_manager_id ? {
-          id: task.task_manager_id,
-          name: task.task_manager_name || '',
-          email: '',
-          phone: ''
-        } : undefined)
+        } : undefined
       };
 
       // Handle mock dependants for demonstration
@@ -223,6 +211,7 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
     return [];
   }
 };
+
 /**
  * Fetch and process stages for a department
  */

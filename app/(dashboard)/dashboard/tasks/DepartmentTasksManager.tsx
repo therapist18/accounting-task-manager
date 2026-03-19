@@ -645,13 +645,13 @@ export default function DepartmentTasksManager({
 
     let filteredTasks = tasks.filter(task =>
       task &&
-      task.department?.id?.toString() === currentDept.id.toString() &&
+      task.department_id?.toString() === currentDept.id.toString() &&
       (!status || task.status === status)
     )
 
     if (activeSubdepartmentTab) {
       filteredTasks = filteredTasks.filter(task =>
-        task.subdepartment?.id?.toString() === activeSubdepartmentTab
+        task.subdepartment_id?.toString() === activeSubdepartmentTab
       )
     }
 
