@@ -186,11 +186,11 @@ const MemoizedTableRow = React.memo(({
 
   return (
     <TableRow className={`${rowBg} ${hoverBg} group border-b border-slate-200`}>
-      <TableCell className={`sticky left-0 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 text-center w-20`}>
+      <TableCell className={`sticky left-0 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 text-center w-14 min-w-14 max-w-14`}>
         {safeRender(row.stageOrder) || (row.type !== 'stage' && row.type !== 'document' && row.type !== 'field' && row.type !== 'actions' ? (rowIndex + 1) : '')}
       </TableCell>
 
-      <TableCell className={`sticky left-20 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 min-w-[300px]`}>
+      <TableCell className={`sticky left-14 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 w-[280px] min-w-[280px] max-w-[280px]`}>
         <div className="flex items-center gap-2 justify-between">
           <div style={{ paddingLeft: row.isSubSubRow ? '32px' : row.isSubRow ? '16px' : '0px' }} className="flex items-center gap-2">
             <span className={row.type === 'stage' ? 'font-semibold' : ''}>{safeRender(row.label)}</span>
@@ -499,10 +499,10 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
           <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
             {expandedSections.has('case_details') && visibleCaseDetailHeaders.map((header, index) => (
               <TableRow key={header.id} className="bg-blue-600 text-white group border-b border-slate-200">
-                <TableCell className="sticky left-0 z-10 bg-blue-600 text-white group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm p-2 text-center w-20">
+                <TableCell className="sticky left-0 z-10 bg-blue-600 text-white group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm p-2 text-center w-14 min-w-14 max-w-14">
                   {index + 1}
                 </TableCell>
-                <TableCell className="sticky left-20 z-10 bg-blue-600 text-white group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm p-2 min-w-[300px]">
+                <TableCell className="sticky left-14 z-10 bg-blue-600 text-white group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm p-2 w-[280px] min-w-[280px] max-w-[280px]">
                   {header.label}
                 </TableCell>
 
