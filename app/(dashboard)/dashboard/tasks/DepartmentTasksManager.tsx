@@ -2510,9 +2510,9 @@ export default function DepartmentTasksManager({
 
       <Tabs value={activeDepartmentTab} onValueChange={setActiveDepartmentTab} className="space-y-2">
         {areTabsVisible && (
-          <TabsList className="grid w-full rounded-lg p-1 shadow-sm" style={{ gridTemplateColumns: `repeat(${departments.length}, 1fr)` }}>
+          <TabsList className="grid w-full rounded-lg p-1 shadow-sm bg-gradient-to-r from-slate-50 to-slate-100 border border-slate-200" style={{ gridTemplateColumns: `repeat(${departments.length}, 1fr)` }}>
             {departments.map(dept => (
-              <TabsTrigger key={dept.id} value={dept.id.toString()} className="text-sm font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
+              <TabsTrigger key={dept.id} value={dept.id.toString()} className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600 data-[state=active]:to-indigo-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
                 {dept.name}
               </TabsTrigger>
             ))}
@@ -2524,12 +2524,12 @@ export default function DepartmentTasksManager({
             {/* Subdepartment Tabs */}
             {areTabsVisible && defaultSubdepartments.length > 0 && (
               <Tabs value={activeSubdepartmentTab} onValueChange={setActiveSubdepartmentTab}>
-                <TabsList className="rounded-lg p-1 shadow-sm bg-slate-100">
-                  <TabsTrigger value="" className="text-sm font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">
+                <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-gray-50 to-gray-100 border border-gray-200">
+                  <TabsTrigger value="" className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-gray-600 data-[state=active]:to-gray-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
                     All Subdepartments
                   </TabsTrigger>
                   {defaultSubdepartments.map(subdept => (
-                    <TabsTrigger key={subdept.id} value={subdept.id.toString()} className="text-sm font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">
+                    <TabsTrigger key={subdept.id} value={subdept.id.toString()} className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-teal-600 data-[state=active]:to-teal-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
                       {subdept.name}
                     </TabsTrigger>
                   ))}
