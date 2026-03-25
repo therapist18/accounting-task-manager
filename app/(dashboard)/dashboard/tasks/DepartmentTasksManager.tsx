@@ -88,9 +88,15 @@ export default function DepartmentTasksManager({
     const headers = activeDepartmentTab === '1'
       ? ENHANCED_TABLE_HEADERS_IMMIGRATION
       : ENHANCED_TABLE_HEADERS;
-    setCurrentTableHeaders(headers);
-    setVisibleHeaders(new Set(headers.filter(h => h.default).map(h => h.id)));
-  }, [activeDepartmentTab]);
+
+    // Filter headers based on whether cancelled tab is active
+    const filteredHeaders = activeSubTab === 'cancelled'
+      ? headers
+      : headers.filter(h => h.id !== 'cancellation_reason');
+
+    setCurrentTableHeaders(filteredHeaders);
+    setVisibleHeaders(new Set(filteredHeaders.filter(h => h.default && h.id !== 'cancellation_reason').map(h => h.id)));
+  }, [activeDepartmentTab, activeSubTab]);
   const [tmUsers, setTmUsers] = useState<Map<number, any>>(new Map())
   const [activeOfficerTab, setActiveOfficerTab] = useState<string | null>(null)
   const [activeManagerTab, setActiveManagerTab] = useState<string | null>(null)
@@ -761,6 +767,7 @@ export default function DepartmentTasksManager({
   const enquiryTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('enquiry')), [getFilteredTasks, filterTasksBySearchWrapper])
   const wipTasks = useMemo(() => filterTasksBySearchWrapper(getWIPTasksByFollowUp(activeFollowUpFilter)), [getWIPTasksByFollowUp, activeFollowUpFilter, filterTasksBySearchWrapper])
   const completedTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('write_up_completed')), [getFilteredTasks, filterTasksBySearchWrapper])
+  const cancelledTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('cancelled')), [getFilteredTasks, filterTasksBySearchWrapper])
 
   const handleExport = useCallback(async (tasks: any[], tableType: string) => {
     if (!tasks.length) {
@@ -2532,29 +2539,33 @@ export default function DepartmentTasksManager({
 
             <Tabs value={activeSubTab} onValueChange={setActiveSubTab}>
               {areTabsVisible && (
-                <TabsList className="rounded-lg p-1 shadow-sm">
-                  <TabsTrigger value="enquiries" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
-                    Enquiries <Badge variant="secondary">{enquiryTasks.length}</Badge>
+                <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-slate-50 to-slate-100 border border-slate-200">
+                  <TabsTrigger value="enquiries" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
+                    Enquiries <Badge variant="secondary" className="bg-blue-100 text-blue-800">{enquiryTasks.length}</Badge>
                   </TabsTrigger>
-                  <TabsTrigger value="wip-stages" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
-                    WIP Stages <Badge variant="secondary">{wipTasks.length}</Badge>
+                  <TabsTrigger value="wip-stages" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-amber-600 data-[state=active]:to-amber-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
+                    WIP Stages <Badge variant="secondary" className="bg-amber-100 text-amber-800">{wipTasks.length}</Badge>
                   </TabsTrigger>
-                  <TabsTrigger value="write_up_completed" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
-                    Write Up Completed <Badge variant="secondary">{completedTasks.length}</Badge>
+                  <TabsTrigger value="write_up_completed" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-green-600 data-[state=active]:to-green-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
+                    Write Up Completed <Badge variant="secondary" className="bg-green-100 text-green-800">{completedTasks.length}</Badge>
                   </TabsTrigger>
-                  <TabsTrigger value="endorsed" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
-                    Endorsement Completed <Badge variant="secondary">{getFilteredTasks('endorsed').length}</Badge>
+                  <TabsTrigger value="endorsed" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
+                    Endorsement Completed <Badge variant="secondary" className="bg-purple-100 text-purple-800">{getFilteredTasks('endorsed').length}</Badge>
+                  </TabsTrigger>
+                  <TabsTrigger value="cancelled" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-red-600 data-[state=active]:to-red-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
+                    Cancelled <Badge variant="secondary" className="bg-red-100 text-red-800">{getFilteredTasks('cancelled').length}</Badge>
                   </TabsTrigger>
                 </TabsList>
               )}
 
               {/* All Tabs Content */}
-              {['enquiries', 'wip-stages', 'write_up_completed', 'endorsed'].map(tabValue => {
+              {['enquiries', 'wip-stages', 'write_up_completed', 'endorsed', 'cancelled'].map(tabValue => {
                 const isWipTab = tabValue === 'wip-stages';
                 let tasksToRender, title;
                 if (tabValue === 'enquiries') { tasksToRender = enquiryTasks; title = 'Enquiries'; }
                 else if (tabValue === 'wip-stages') { tasksToRender = wipTasks; title = 'WIP Stages'; }
                 else if (tabValue === 'endorsed') { tasksToRender = getFilteredTasks('endorsed'); title = 'Endorsement Completed'; }
+                else if (tabValue === 'cancelled') { tasksToRender = getFilteredTasks('cancelled'); title = 'Cancelled'; }
                 else { tasksToRender = completedTasks; title = 'Write Up Completed'; }
 
                 return (
@@ -2705,12 +2716,13 @@ export default function DepartmentTasksManager({
                                       variant="outline"
                                       size="sm"
                                       onClick={() => {
-                                        setVisibleHeaders(new Set(currentTableHeaders.filter(h => h.default).map(h => h.id)))
+                                        const defaultHeaders = currentTableHeaders.filter(h => h.default && (activeSubTab === 'cancelled' || h.id !== 'cancellation_reason'));
+                                        setVisibleHeaders(new Set(defaultHeaders.map(h => h.id)))
                                         if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.filter(s => s.default).map(s => s.id)))
                                         setVisibleStageIds(new Set(stages.map(s => s.id.toString())))
                                       }}
                                     >
-                                      Show All
+                                      Show Default Columns
                                     </Button>
                                     <Button
                                       variant="outline"

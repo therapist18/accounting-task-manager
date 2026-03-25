@@ -58,15 +58,15 @@ const DATE_FIELDS = [
 ] as const;
 
 export const ENHANCED_TABLE_HEADERS_IMMIGRATION: TableHeader[] = [
-  { id: 'id', label: 'Task ID', default: true, width: 'w-20' },
-  { id: 'applicant_name', label: 'Applicant Name', default: true, width: 'w-48' },
+  { id: 'id', label: 'Task Reference', default: true, width: 'w-20' },
+  { id: 'applicant_name', label: 'Applicant Full Name', default: true, width: 'w-48' },
   { id: 'company_name', label: 'Company Name', default: true, width: 'w-48' },
   { id: 'sub_department', label: 'Sub Department', default: true, width: 'w-32' }, // New column
-  { id: 'job_level', label: 'Class', default: true, width: 'w-32' },
+  { id: 'job_level', label: 'Job Title', default: true, width: 'w-32' },
   { id: 'renewal_new', label: 'Renewal/New', default: true, width: 'w-28' },
-  { id: 'immigration_document_type', label: 'Current Immigration Doc Type', default: false, width: 'w-48' },
+  { id: 'immigration_document_type', label: 'Current Immigration Document Type', default: false, width: 'w-48' },
   { id: 'immigration_expiry_date', label: 'Current Immigration Expiry Date', default: false, width: 'w-40' },
-  { id: 'immigration_days_to_go', label: 'Days To Go', default: false, width: 'w-32' }, // New Column
+  { id: 'immigration_days_to_go', label: 'Days Remaining', default: false, width: 'w-32' }, // New Column
   // { id: 'immigration_status', label: 'Current Immigration Status', default: true, width: 'w-48' },
   { id: 'current_stage_name', label: 'Current Stage Name', default: true, width: 'w-48' },
   { id: 'current_stage_status_value', label: 'Current Stage Status', default: true, width: 'w-48' },
@@ -79,18 +79,23 @@ export const ENHANCED_TABLE_HEADERS_IMMIGRATION: TableHeader[] = [
   { id: 'officer', label: 'Officer', default: false, width: 'w-32' },
   { id: 'task_assistant', label: 'Task Assistant', default: false, width: 'w-32' },
   { id: 'r_number', label: 'R Number', default: false, width: 'w-32' },
-
+  { id: 'cancellation_reason', label: 'Cancellation Reason', default: true, width: 'w-48' },
+  { id: 'cancellation_date', label: 'Cancellation Date', default: true, width: 'w-40' },
+  { id: 'cancelled_by', label: 'Cancelled By', default: true, width: 'w-32' },
 ];
 
 export const ENHANCED_TABLE_HEADERS: TableHeader[] = [
-  { id: 'id', label: 'Task ID', default: true, width: 'w-20' },
-  { id: 'applicant_name', label: 'Applicant Name', default: true, width: 'w-48' },
+  { id: 'id', label: 'Task Reference', default: true, width: 'w-20' },
+  { id: 'applicant_name', label: 'Applicant Full Name', default: true, width: 'w-48' },
   { id: 'job_description', label: 'Job Description', default: true, width: 'w-32' },
   { id: 'job_level', label: 'Job Level', default: true, width: 'w-32' },
   { id: 'renewal_new', label: 'Renewal/New', default: false, width: 'w-28' },
   { id: 'task_manager', label: 'Task Manager', default: false, width: 'w-32' },
   { id: 'officer', label: 'Officer', default: false, width: 'w-32' },
   { id: 'task_assistant', label: 'Task Assistant', default: false, width: 'w-32' },
+  { id: 'cancellation_reason', label: 'Cancellation Reason', default: true, width: 'w-48' },
+  { id: 'cancellation_date', label: 'Cancellation Date', default: true, width: 'w-40' },
+  { id: 'cancelled_by', label: 'Cancelled By', default: true, width: 'w-32' },
 ];
 
 export const STATS_HEADERS = [
@@ -330,8 +335,35 @@ export const getJobLevelDisplay = (task: any, departments: any[]): string => {
   return 'N/A';
 };
 
+export const getCompanyNameFromParticipants = (task: any): string => {
+  if (!task?.participants_details || !Array.isArray(task.participants_details)) {
+    return 'N/A';
+  }
+
+  const company = task.participants_details.find((p: any) =>
+    p.role === 'company' || p.role === 'sponsor'
+  );
+
+  return company?.name || 'N/A';
+};
+
+export const getStaffFromParticipants = (task: any, role: string): string | null => {
+  if (!task?.participants_details || !Array.isArray(task.participants_details)) {
+    return null;
+  }
+
+  const staff = task.participants_details.find((p: any) => p.role === role);
+  return staff?.name || null;
+};
+
 export const getCompanyName = (task: any, companies: Map<number, string>): string => {
-  if (!task.company_id) return 'N/A';
+  // First try participants_details
+  const participantsName = getCompanyNameFromParticipants(task);
+  if (participantsName !== 'N/A') {
+    return participantsName;
+  }
+
+  // Fallback to companies map
   if (companies instanceof Map) {
     return companies.get(task.company_id) || 'N/A';
   }
@@ -832,7 +864,7 @@ export const getCellContent = (
     immigration_days_to_go: formatImmigrationDaysToGo(task, getEnhancedStatus),
     current_stage_name: getStageStatus(task).stageName || 'N/A',
     current_stage_follow_up: getCurrentStageFollowUp(task, getStageStatus),
-    company_name: getCompanyName(task, companies),
+    company_name: getCompanyNameFromParticipants(task),
     sub_department: getSubDepartmentDisplay(task, departments),
     job_level: getJobLevelDisplay(task, departments),
     job_description: task.job_description || 'N/A',
@@ -841,9 +873,12 @@ export const getCellContent = (
     full_name: enhancedTask.full_name || 'N/A',
     age: enhancedTask.age?.toString() || 'N/A',
     r_number: enhancedTask.r_number?.toString() || 'N/A',
-    task_manager: task.task_manager_id ? getStaffName(task.task_manager_id) : <span className="text-red-500 font-semibold">Unallocated</span>,
-    officer: task.officer_id ? getStaffName(task.officer_id) : <span className="text-red-500 font-semibold">Unallocated</span>,
-    task_assistant: task.task_assistant_id ? getStaffName(task.task_assistant_id) : <span className="text-red-500 font-semibold">Unallocated</span>
+    task_manager: getStaffFromParticipants(task, 'task_manager') || <span className="text-red-500 font-semibold">Unallocated</span>,
+    officer: getStaffFromParticipants(task, 'officer') || <span className="text-red-500 font-semibold">Unallocated</span>,
+    task_assistant: getStaffFromParticipants(task, 'task_assistant') || <span className="text-red-500 font-semibold">Unallocated</span>,
+    cancellation_reason: task.cancellation_details?.reason || 'N/A',
+    cancellation_date: task.cancellation_details?.cancelled_at ? format(new Date(task.cancellation_details.cancelled_at), 'dd MMM yyyy HH:mm') : 'N/A',
+    cancelled_by: task.cancellation_details?.cancelled_by || 'N/A'
   };
 
   if (headerId in simpleCellMap) return simpleCellMap[headerId];
@@ -896,7 +931,7 @@ export const getRawCellValue = (
     current_stage_name: getStageStatus(task).stageName || 'N/A',
     current_stage_status_value: getStageStatus(task).stageStatus || 'N/A',
     current_stage_follow_up: getCurrentStageFollowUp(task, getStageStatus),
-    company_name: getCompanyName(task, companies),
+    company_name: getCompanyNameFromParticipants(task),
     sub_department: getSubDepartmentDisplay(task, departments),
     job_level: getJobLevelDisplay(task, departments),
     job_description: task.job_description || 'N/A',
@@ -905,9 +940,12 @@ export const getRawCellValue = (
     full_name: enhancedTask.full_name || 'N/A',
     age: enhancedTask.age?.toString() || 'N/A',
     r_number: enhancedTask.r_number?.toString() || 'N/A',
-    task_manager: task.task_manager_id ? getStaffName(task.task_manager_id) : 'N/A',
-    officer: task.officer_id ? getStaffName(task.officer_id) : 'N/A',
-    task_assistant: task.task_assistant_id ? getStaffName(task.task_assistant_id) : 'N/A'
+    task_manager: getStaffFromParticipants(task, 'task_manager') || 'N/A',
+    officer: getStaffFromParticipants(task, 'officer') || 'N/A',
+    task_assistant: getStaffFromParticipants(task, 'task_assistant') || 'N/A',
+    cancellation_reason: task.cancellation_details?.reason || 'N/A',
+    cancellation_date: task.cancellation_details?.cancelled_at ? format(new Date(task.cancellation_details.cancelled_at), 'dd MMM yyyy HH:mm') : 'N/A',
+    cancelled_by: task.participants_details?.cancelled_by || 'N/A' // Fix: changed cancellation_details to participants_details
   };
 
   return valueMap[headerId] || task[headerId]?.toString() || 'N/A';
@@ -917,7 +955,7 @@ export const sortTasks = (
   tasks: any[],
   sortConfig: { key: string; direction: 'asc' | 'desc' } | null,
   companies: Map<number, string>
-) => {
+): any[] => {
   if (!sortConfig) return [...tasks];
 
   return [...tasks].sort((a, b) => {
