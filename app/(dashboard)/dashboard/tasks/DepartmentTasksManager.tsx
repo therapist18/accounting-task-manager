@@ -84,6 +84,7 @@ export default function DepartmentTasksManager({
   const [isAllExpanded, setIsAllExpanded] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [stageDialogKey, setStageDialogKey] = useState(0);
+  const [realtimeSubscription, setRealtimeSubscription] = useState<any>(null);
   useEffect(() => {
     const headers = activeDepartmentTab === '1'
       ? ENHANCED_TABLE_HEADERS_IMMIGRATION
@@ -340,6 +341,21 @@ export default function DepartmentTasksManager({
   const [tasksCache, setTasksCache] = useState<Map<string, { tasks: UtilTask[], stages: any[], timestamp: number }>>(new Map())
   const [tableRowsCache, setTableRowsCache] = useState<Map<string, { rows: any[], timestamp: number }>>(new Map())
   const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
+
+  // Function to clear cache for specific department/subdepartment
+  const clearTasksCache = useCallback((departmentId?: string, subdepartmentId?: string) => {
+    const cacheKey = `${departmentId || 'all'}-${subdepartmentId || 'all'}`;
+    setTasksCache(prev => {
+      const newCache = new Map(prev);
+      newCache.delete(cacheKey);
+      return newCache;
+    });
+    setTableRowsCache(prev => {
+      const newCache = new Map(prev);
+      newCache.delete(cacheKey);
+      return newCache;
+    });
+  }, []);
 
   const loadTasksData = useCallback(async (departmentId?: string, subdepartmentId?: string) => {
     if (!departmentId) return;
@@ -2372,6 +2388,196 @@ export default function DepartmentTasksManager({
       loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
     }
   }, [activeDepartmentTab, activeSubdepartmentTab, loadTasksData])
+
+  // Realtime subscription for tm_tasks_duplicate table
+  useEffect(() => {
+    // Set up realtime subscription
+    const subscription = supabase
+      .channel('tm_tasks_duplicate_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'tm_tasks_duplicate'
+        },
+        async (payload) => {
+          console.log('Realtime update received:', payload);
+
+          // Handle different event types
+          if (payload.eventType === 'INSERT') {
+            // New task inserted - add to local state if it matches current filters
+            const newTask = payload.new;
+            const taskDeptId = newTask.job_level?.department_id;
+            const taskSubdeptId = newTask.job_level?.subdepartment_id;
+
+            // Check if the new task matches the current department/subdepartment filter
+            if (activeDepartmentTab &&
+              (!taskDeptId || taskDeptId.toString() === activeDepartmentTab) &&
+              (!activeSubdepartmentTab || !taskSubdeptId || taskSubdeptId.toString() === activeSubdepartmentTab)) {
+
+              // Process the new task using the same logic as fetchTasks
+              const jobLevel = newTask.job_level || {};
+              const officer = newTask.participants_details?.find((p: any) => p.role?.includes('officer'));
+              const taskManager = newTask.participants_details?.find((p: any) => p.role?.includes('task_manager'));
+              const company = newTask.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
+
+              const processedTask: UtilTask = {
+                ...newTask,
+                applicant_name: newTask.applicant_details?.name || newTask.applicant_name || '',
+                company_name: company?.name || '',
+                department_id: jobLevel.department_id,
+                subdepartment_id: jobLevel.subdepartment_id,
+                class_id: jobLevel.class_id,
+                subclass_id: jobLevel.subclass_id,
+                job_level: {
+                  level: jobLevel.level || 0,
+                  class_id: jobLevel.class_id || '',
+                  subclass_id: jobLevel.subclass_id || null,
+                  department_id: jobLevel.department_id,
+                  subdepartment_id: jobLevel.subdepartment_id
+                },
+                officer: officer ? {
+                  id: officer.id,
+                  name: officer.name,
+                  email: officer.email || '',
+                  phone: officer.phone || ''
+                } : undefined,
+                task_manager: taskManager ? {
+                  id: taskManager.id,
+                  name: taskManager.name,
+                  email: taskManager.email || '',
+                  phone: taskManager.phone || ''
+                } : undefined
+              };
+
+              setTasks(prevTasks => [processedTask, ...prevTasks]);
+
+              // Clear cache for this department to ensure fresh data on manual refresh
+              clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
+
+              toast({
+                title: "New Task Added",
+                description: `Task "${processedTask.applicant_name}" has been added.`,
+                variant: "default"
+              });
+            }
+          } else if (payload.eventType === 'UPDATE') {
+            // Task updated - update local state
+            const updatedTask = payload.new;
+            const oldTask = payload.old;
+
+            setTasks(prevTasks => {
+              return prevTasks.map(task => {
+                if (task.id === updatedTask.id) {
+                  // Process the updated task using the same logic as fetchTasks
+                  const jobLevel = updatedTask.job_level || {};
+                  const officer = updatedTask.participants_details?.find((p: any) => p.role?.includes('officer'));
+                  const taskManager = updatedTask.participants_details?.find((p: any) => p.role?.includes('task_manager'));
+                  const company = updatedTask.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
+
+                  const processedTask: UtilTask = {
+                    ...updatedTask,
+                    applicant_name: updatedTask.applicant_details?.name || updatedTask.applicant_name || '',
+                    company_name: company?.name || '',
+                    department_id: jobLevel.department_id,
+                    subdepartment_id: jobLevel.subdepartment_id,
+                    class_id: jobLevel.class_id,
+                    subclass_id: jobLevel.subclass_id,
+                    job_level: {
+                      level: jobLevel.level || 0,
+                      class_id: jobLevel.class_id || '',
+                      subclass_id: jobLevel.subclass_id || null,
+                      department_id: jobLevel.department_id,
+                      subdepartment_id: jobLevel.subdepartment_id
+                    },
+                    officer: officer ? {
+                      id: officer.id,
+                      name: officer.name,
+                      email: officer.email || '',
+                      phone: officer.phone || ''
+                    } : undefined,
+                    task_manager: taskManager ? {
+                      id: taskManager.id,
+                      name: taskManager.name,
+                      email: taskManager.email || '',
+                      phone: taskManager.phone || ''
+                    } : undefined
+                  };
+
+                  // Clear cache for this department to ensure fresh data on manual refresh
+                  clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
+
+                  // Show notification for significant changes
+                  if (oldTask.status !== updatedTask.status) {
+                    toast({
+                      title: "Task Status Updated",
+                      description: `Task "${processedTask.applicant_name}" status changed to "${updatedTask.status}".`,
+                      variant: "default"
+                    });
+                  }
+
+                  return processedTask;
+                }
+                return task;
+              });
+            });
+          } else if (payload.eventType === 'DELETE') {
+            // Task deleted - remove from local state
+            const deletedTask = payload.old;
+
+            setTasks(prevTasks => {
+              const updatedTasks = prevTasks.filter(task => task.id !== deletedTask.id);
+
+              // Clear cache for this department to ensure fresh data on manual refresh
+              clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
+
+              if (prevTasks.length > updatedTasks.length) {
+                toast({
+                  title: "Task Deleted",
+                  description: `Task has been removed.`,
+                  variant: "default"
+                });
+              }
+
+              return updatedTasks;
+            });
+          }
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('Realtime subscription established for tm_tasks_duplicate');
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('Realtime subscription error for tm_tasks_duplicate');
+          toast({
+            title: "Realtime Error",
+            description: "Failed to establish realtime connection. Refreshing data manually.",
+            variant: "destructive"
+          });
+        }
+      });
+
+    setRealtimeSubscription(subscription);
+
+    // Cleanup subscription on unmount
+    return () => {
+      if (subscription) {
+        supabase.removeChannel(subscription);
+        console.log('Realtime subscription cleaned up');
+      }
+    };
+  }, [activeDepartmentTab, activeSubdepartmentTab, clearTasksCache]); // Re-subscribe when filters change
+
+  // Cleanup realtime subscription when component unmounts or filters change
+  useEffect(() => {
+    return () => {
+      if (realtimeSubscription) {
+        supabase.removeChannel(realtimeSubscription);
+        console.log('Realtime subscription cleaned up on filter change');
+      }
+    };
+  }, [activeDepartmentTab, activeSubdepartmentTab, realtimeSubscription]);
 
   useEffect(() => {
     if (activeDepartmentTab && departments.length > 0) {

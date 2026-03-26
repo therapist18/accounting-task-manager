@@ -3,273 +3,315 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { useState, useEffect } from "react"
 import {
   BarChart3,
-  Calculator,
+  Calendar,
   CheckSquare,
-  ChevronDown,
-  Cog,
+  ChevronRight,
+  Command,
+  Database,
   FileText,
-  Home,
   LayoutDashboard,
+  Loader2,
+  LogOut,
+  Mail,
+  AppWindow,
+  Moon,
+  Settings,
+  Sun,
+  Settings2,
   Users,
-  Zap,
 } from "lucide-react"
+
+import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
-  SidebarGroupContent,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarRail,
+  useSidebar
 } from "@/components/ui/sidebar"
-import { useState } from "react"
-import { motion, AnimatePresence } from "framer-motion"
+import type { AuthUser } from "@/lib/auth/types"
 
-// Updated data structure to support categories and nesting
 const navItems = [
+  { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   {
-    title: "Dashboard",
-    href: "/dashboard",
-    icon: LayoutDashboard,
-  },
-  {
-    category: "Task Management",
+    title: "Task Management",
+    icon: CheckSquare,
     items: [
-      {
-        title: "Tasks Requirements",
-        href: "/dashboard/tasks-requirements",
-        icon: CheckSquare,
-      },
-      {
-        title: "Tasks Tracking",
-        href: "/dashboard/tasks",
-        icon: CheckSquare,
-      },
-      {
-        title: "Reports Dashboard",
-        href: "/dashboard/reports",
-        icon: CheckSquare,
-      },
+      { title: "Tasks Requirements", href: "/dashboard/tasks-requirements" },
+      { title: "Tasks Tracking", href: "/dashboard/tasks" },
+      { title: "Reports Dashboard", href: "/dashboard/reports" },
     ],
   },
   {
-    category: "Administration",
+    title: "Administration",
+    icon: Users,
+    items: [{ title: "Users", href: "/dashboard/users-management" }],
+  },
+  {
+    title: "Settings",
+    icon: Settings2,
     items: [
-      {
-        title: "Users",
-        href: "/dashboard/users-management",
-        icon: Users,
-      }
+      { title: "Departments", href: "/dashboard/departments/departments" },
+      { title: "Stages", href: "/dashboard/departments/stages" },
+      { title: "Rates", href: "/dashboard/departments/rates" },
+      { title: "Webdata", href: "/dashboard/departments/webdata" },
+      { title: "GOVT Upload Req", href: "/dashboard/departments/upload-requirements" },
+      { title: "Guidelines", href: "/dashboard/departments/guidelines" },
+      { title: "Job Specific Questions", href: "/dashboard/departments/job-specific-questions" },
+      { title: "Documents + Fields", href: "/dashboard/departments/documents+fields" },
+      { title: "Automations", href: "/dashboard/departments/automation" }
     ],
   },
+  { title: "Templates", href: "/dashboard/templates", icon: FileText },
+  { title: "Master Fields", href: "/dashboard/master-fields", icon: Database },
   {
-    category: "Settings",
+    title: "Letters",
+    icon: Mail,
     items: [
-      {
-        title: "Departments",
-        href: "/dashboard/departments/departments",
-        icon: LayoutDashboard,
-      },
-      {
-        title: "Stages",
-        href: "/dashboard/departments/stages",
-        icon: Cog,
-      },
-      {
-        title: "Rates",
-        href: "/dashboard/departments/rates",
-        icon: Calculator,
-      },
-      {
-        title: "Webdata",
-        href: "/dashboard/departments/webdata",
-        icon: FileText,
-      },
-      {
-        title: "GOVT Upload Req",
-        href: "/dashboard/departments/upload-requirements",
-        icon: FileText,
-      },
-      {
-        title: "Guidelines",
-        href: "/dashboard/departments/guidelines",
-        icon: FileText,
-      },
-      {
-        title: "Job Specific Questions",
-        href: "/dashboard/departments/job-specific-questions",
-        icon: FileText,
-      },
-      {
-        title: "Documents + Fields",
-        href: "/dashboard/departments/documents+fields",
-        icon: FileText,
-      },
-      {
-        title: "Automations",
-        href: "/dashboard/departments/automation",
-        icon: Zap,
-      }
+      { title: "Letter Generation", href: "/dashboard/letters" },
+      { title: "Letterheads", href: "/dashboard/letters/letterheads" },
     ],
   },
-  {
-    title: "Templates",
-    href: "/dashboard/templates",
-    icon: FileText,
-  },
-  {
-    title: "Master Fields",
-    href: "/dashboard/master-fields",
-    icon: FileText,
-  },
-  {
-    category: "Letters",
-    items: [
-      {
-        title: "Letter Generation",
-        href: "/dashboard/letters",
-        icon: FileText,
-      },
-      {
-        title: "Letterheads",
-        href: "/dashboard/letters/letterheads",
-        icon: FileText,
-      },
-    ],
-  },
-  {
-    title: "Diary",
-    href: "/dashboard/diary",
-    icon: FileText,
-  },
-  {
-    title: "Applications",
-    href: "/dashboard/applications",
-    icon: FileText,
-  },
-  {
-    title: "Reports",
-    href: "/dashboard/reports",
-    icon: BarChart3,
-  },
+  { title: "Diary", href: "/dashboard/diary", icon: Calendar },
+  { title: "Applications", href: "/dashboard/applications", icon: AppWindow },
+  { title: "Reports", href: "/dashboard/reports", icon: BarChart3 },
 ]
+
+function useCurrentUser() {
+  const [user, setUser] = useState<AuthUser | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const response = await fetch("/api/auth/session")
+        const json = await response.json()
+        if (json?.authenticated && json?.user) setUser(json.user)
+      } catch (error) { console.error(error) } finally { setLoading(false) }
+    }
+    fetchUser()
+  }, [])
+  return { user, loading }
+}
 
 export function AppSidebar() {
   const pathname = usePathname()
-  const [openCategories, setOpenCategories] = useState<string[]>([])
+  const { user, loading } = useCurrentUser()
+  const { state } = useSidebar()
+  const [isDark, setIsDark] = useState(false)
+  const [isSigningOut, setIsSigningOut] = useState(false)
 
-  const toggleCategory = (category: string) => {
-    setOpenCategories((prev) =>
-      prev.includes(category)
-        ? prev.filter((c) => c !== category)
-        : [...prev, category]
-    )
+  const isCollapsed = state === "collapsed"
+
+  useEffect(() => {
+    const stored = localStorage.getItem("theme")
+    if (stored === "dark") {
+      setIsDark(true)
+      document.documentElement.classList.add("dark")
+    }
+  }, [])
+
+  const toggleDark = () => {
+    setIsDark((prev) => {
+      const next = !prev
+      if (next) {
+        document.documentElement.classList.add("dark")
+        localStorage.setItem("theme", "dark")
+      } else {
+        document.documentElement.classList.remove("dark")
+        localStorage.setItem("theme", "light")
+      }
+      return next
+    })
   }
 
+  const userInitials = user
+    ? (
+      (user.firstName?.[0] && user.lastName?.[0])
+        ? (user.firstName[0] + user.lastName[0]).toUpperCase()
+        : (user.displayName === "Super Admin"
+          ? "SA"
+          : (user.displayName?.slice(0, 2) ?? "U").toUpperCase())
+    )
+    : "U"
+
   return (
-    <Sidebar collapsible="icon">
-      <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild>
-              <Link href="/dashboard">
-                <span className="font-bold text-xl">BCL Task Manager</span>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarHeader>
-      <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {navItems.map((item, index) =>
-                item.category ? (
-                  // Render a collapsible category group
-                  <SidebarGroup key={index} className="py-2">
-                    <SidebarMenuButton
-                      onClick={() => toggleCategory(item.category)}
-                      className="flex justify-between"
-                    >
-                      <span>{item.category}</span>
-                      <ChevronDown
-                        className={`h-4 w-4 transition-transform ${openCategories.includes(item.category)
-                          ? "rotate-180"
-                          : ""
-                          }`}
-                      />
-                    </SidebarMenuButton>
-                    <AnimatePresence initial={false}>
-                      {openCategories.includes(item.category) && (
-                        <motion.div
-                          initial="collapsed"
-                          animate="open"
-                          exit="collapsed"
-                          variants={{
-                            open: { opacity: 1, height: "auto" },
-                            collapsed: { opacity: 0, height: 0 },
-                          }}
-                          transition={{ duration: 0.3, ease: "easeInOut" }}
-                          className="overflow-hidden"
-                        >
-                          <SidebarGroupContent className="pt-2">
-                            {item.items.map((subItem) => (
-                              <SidebarMenuItem key={subItem.title}>
-                                <SidebarMenuButton
-                                  asChild
-                                  isActive={pathname === subItem.href}
-                                >
-                                  <Link href={subItem.href}>
-                                    <subItem.icon />
-                                    <span>{subItem.title}</span>
-                                  </Link>
-                                </SidebarMenuButton>
-                              </SidebarMenuItem>
+    <>
+      {isSigningOut && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/45 backdrop-blur-sm">
+          <div className="flex min-w-[280px] items-center gap-3 rounded-2xl border border-white/20 bg-white px-5 py-4 shadow-2xl text-slate-900 font-semibold">
+            <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+            Signing you out securely...
+          </div>
+        </div>
+      )}
+
+      <Sidebar collapsible="icon" className="transition-all duration-300">
+
+        {/* ─── Brand ─── */}
+        <SidebarHeader className={cn("h-20 border-b border-sidebar-border/50 flex items-center px-0 transition-all", isCollapsed ? "justify-center" : "px-4")}>
+          <Link href="/dashboard" className="flex items-center gap-3">
+            <div className="flex aspect-square size-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-lg shrink-0">
+              <Command className="size-5" />
+            </div>
+            {!isCollapsed && (
+              <div className="flex flex-col gap-0.5 leading-none">
+                <span className="font-bold text-xl text-slate-900 dark:text-white">BCL Task</span>
+                <span className="text-[12px] font-bold uppercase tracking-widest text-blue-500">Manager</span>
+              </div>
+            )}
+          </Link>
+        </SidebarHeader>
+
+        {/* ─── Navigation ─── */}
+        <SidebarContent className="py-4">
+          <SidebarGroup>
+            <SidebarMenu className="gap-1.5">
+              {navItems.map((item) => {
+                const hasChildren = !!item.items
+                const isActiveParent = hasChildren && item.items.some(sub => pathname === sub.href)
+                const isActiveStandalone = pathname === item.href
+
+                // ─── Case 1: Collapsed Sidebar + Sub-items ───
+                // Render as a DropdownMenu flyout
+                if (isCollapsed && hasChildren) {
+                  return (
+                    <SidebarMenuItem key={item.title}>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <SidebarMenuButton
+                            tooltip={item.title}
+                            isActive={isActiveParent}
+                            className="min-h-[44px] h-auto py-2.5 px-3"
+                          >
+                            {item.icon && <item.icon className="size-4 shrink-0 opacity-70" />}
+                          </SidebarMenuButton>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent side="right" align="start" sideOffset={12} className="w-56 rounded-xl border border-slate-200 p-2 shadow-xl">
+                          <DropdownMenuLabel className="text-[12px] uppercase font-bold text-slate-400 px-3 py-2 tracking-widest">
+                            {item.title}
+                          </DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          {item.items.map((sub) => (
+                            <DropdownMenuItem key={sub.title} asChild className="rounded-lg">
+                              <Link href={sub.href} className={cn("w-full cursor-pointer px-3 py-2", pathname === sub.href && "bg-white text-blue-700 font-semibold border-l-2 border-l-blue-600")}>
+                                {sub.title}
+                              </Link>
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </SidebarMenuItem>
+                  )
+                }
+
+                // ─── Case 2: Expanded Sidebar + Sub-items ───
+                // Render as a Collapsible accordion
+                if (!isCollapsed && hasChildren) {
+                  return (
+                    <Collapsible key={item.title} asChild defaultOpen={isActiveParent} className="group/collapsible">
+                      <SidebarMenuItem>
+                        <CollapsibleTrigger asChild>
+                          <SidebarMenuButton isActive={isActiveParent} className="min-h-[44px] h-auto py-2.5 px-3">
+                            {item.icon && <item.icon className="size-4 shrink-0 opacity-70" />}
+                            <span className="font-medium text-sm ml-1 flex-1">{item.title}</span>
+                            <ChevronRight className="ml-auto size-3.5 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90 opacity-40" />
+                          </SidebarMenuButton>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <SidebarMenuSub className="ml-4 pl-3 border-l border-slate-200 dark:border-white/10 mt-1 mb-2 space-y-1">
+                            {item.items.map((sub) => (
+                              <SidebarMenuSubItem key={sub.title}>
+                                <SidebarMenuSubButton asChild isActive={pathname === sub.href} className="min-h-[34px] h-auto py-2 px-3 text-[13px]">
+                                  <Link href={sub.href} className={cn("w-full", pathname === sub.href && "bg-white text-blue-700 font-semibold border-l-2 border-l-blue-600")}><span>{sub.title}</span></Link>
+                                </SidebarMenuSubButton>
+                              </SidebarMenuSubItem>
                             ))}
-                          </SidebarGroupContent>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </SidebarGroup>
-                ) : (
-                  // Render a standalone menu item
+                          </SidebarMenuSub>
+                        </CollapsibleContent>
+                      </SidebarMenuItem>
+                    </Collapsible>
+                  )
+                }
+
+                // ─── Case 3: Standalone items (Expanded or Collapsed) ───
+                return (
                   <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={pathname === item.href}
-                    >
-                      <Link href={item.href}>
-                        <item.icon />
-                        <span>{item.title}</span>
+                    <SidebarMenuButton asChild isActive={isActiveStandalone} tooltip={item.title} className="min-h-[44px] h-auto py-2.5 px-3">
+                      <Link href={item.href} className={cn("w-full", isActiveStandalone && "bg-white text-blue-700 font-semibold border-l-2 border-l-blue-600")}>
+                        {item.icon && <item.icon className="size-4 shrink-0 opacity-70" />}
+                        {!isCollapsed && <span className="font-medium text-sm ml-1">{item.title}</span>}
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 )
-              )}
+              })}
             </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      </SidebarContent>
-      <SidebarFooter>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton>
-              <div className="flex items-center gap-2">
-                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-muted">
-                  <Users className="h-3 w-3" />
-                </div>
-                <span className="text-lg">Demo User</span>
-              </div>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarFooter>
-      <SidebarRail />
-    </Sidebar>
+          </SidebarGroup>
+        </SidebarContent>
+
+        {/* ─── Footer ─── */}
+        <div className={cn("p-4 border-t flex gap-3 transition-all duration-300 bg-slate-50/50 dark:bg-transparent", isCollapsed ? "flex-col items-center py-6" : "px-6 py-4 flex-row items-center")}>
+          <button onClick={toggleDark} className={cn("flex items-center justify-center rounded-xl w-10 h-10 shrink-0 transition-all", isDark ? "bg-slate-800 text-yellow-400" : "bg-white text-blue-600 border border-slate-200 shadow-sm")}>
+            {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+          </button>
+
+          {!isCollapsed && <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400 flex-1">{isDark ? "Light Mode" : "Dark Mode"}</span>}
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className={cn("relative h-10 w-10 rounded-xl font-bold text-xs p-0 shrink-0", isDark ? "bg-blue-600 text-white hover:bg-blue-500" : "bg-slate-900 text-white hover:bg-slate-800")}>
+                {userInitials}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align={isCollapsed ? "center" : "end"} side={isCollapsed ? "right" : "top"} sideOffset={12} className="z-50 w-64 rounded-2xl border border-slate-200 p-2 shadow-xl">
+              {user && (
+                <>
+                  <DropdownMenuLabel className="px-2 py-2 font-normal">
+                    <div className="flex items-start gap-3 rounded-xl bg-slate-50 dark:bg-slate-900 px-3 py-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-sm font-bold text-white">{userInitials}</div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold">{user.displayName}</p>
+                        <p className="text-[10px] uppercase font-bold text-blue-500 mt-1">{user.role.replace(/_/g, " ")}</p>
+                      </div>
+                    </div>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              <DropdownMenuItem asChild className="rounded-lg"><Link href="/settings" className="w-full cursor-pointer flex items-center gap-2 px-3 py-2"><Settings className="size-4" /> Settings</Link></DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => { setIsSigningOut(true); window.location.replace("/login"); }} className="rounded-lg text-red-600 cursor-pointer flex items-center gap-2 px-3 py-2"><LogOut className="size-4" /> Sign Out</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+        <SidebarRail />
+      </Sidebar>
+    </>
   )
 }
