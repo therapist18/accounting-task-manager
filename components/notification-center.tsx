@@ -24,7 +24,7 @@ export function NotificationCenter() {
     {
       id: "1",
       title: "New Task Assigned",
-      message: "You have been assigned as Task Manager for Tax Filing - ABC Corp",
+      message: "You have been assigned as Task Manager for Tax Filing - ABC Corp in BCL Task Manager",
       type: "info",
       isRead: false,
       relatedTaskId: "task-1",

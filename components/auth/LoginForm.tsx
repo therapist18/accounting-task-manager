@@ -212,14 +212,14 @@ export function LoginForm() {
               Signing in...
             </span>
           ) : (
-            "Sign in to Task Manager"
+            "Sign in to BCL Task Manager"
           )}
         </button>
 
         {/* Additional options */}
         <div className="text-center pt-4 border-t border-gray-200">
           <p className="text-gray-600 text-sm">
-            New to Task Manager?{" "}
+            New to BCL Task Manager?{" "}
             <button className="text-blue-600 hover:text-blue-700 font-medium transition-colors">
               Get started
             </button>

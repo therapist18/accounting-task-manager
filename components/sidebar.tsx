@@ -174,15 +174,15 @@ export function AppSidebar() {
       <Sidebar collapsible="icon" className="transition-all duration-300">
 
         {/* ─── Brand ─── */}
-        <SidebarHeader className={cn("h-20 border-b border-sidebar-border/50 flex items-center px-0 transition-all", isCollapsed ? "justify-center" : "px-4")}>
+        <SidebarHeader className={cn("h-24 px-2 transition-all", isCollapsed ? "justify-center" : "px-4")}>
           <Link href="/dashboard" className="flex items-center gap-3">
-            <div className="flex aspect-square size-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-lg shrink-0">
-              <Command className="size-5" />
+            <div className="flex aspect-square size-16 items-center justify-center rounded-xl text-white shadow-lg shrink-0 overflow-hidden">
+              <img src="/BCL logo.png" alt="BCL Logo" className="h-10 w-10 object-contain" />
             </div>
             {!isCollapsed && (
-              <div className="flex flex-col gap-0.5 leading-none">
-                <span className="font-bold text-xl text-slate-900 dark:text-white">BCL Task</span>
-                <span className="text-[12px] font-bold uppercase tracking-widest text-blue-500">Manager</span>
+              <div className="flex flex-col gap-0.25 leading-none">
+                <span className="font-bold text-2xl text-slate-900 dark:text-white">BCL Task</span>
+                <span className="text-[14px] font-bold uppercase tracking-widest text-blue-500">Manager</span>
               </div>
             )}
           </Link>
@@ -306,7 +306,16 @@ export function AppSidebar() {
               )}
               <DropdownMenuItem asChild className="rounded-lg"><Link href="/settings" className="w-full cursor-pointer flex items-center gap-2 px-3 py-2"><Settings className="size-4" /> Settings</Link></DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => { setIsSigningOut(true); window.location.replace("/login"); }} className="rounded-lg text-red-600 cursor-pointer flex items-center gap-2 px-3 py-2"><LogOut className="size-4" /> Sign Out</DropdownMenuItem>
+              <DropdownMenuItem onClick={async () => {
+                setIsSigningOut(true)
+                try {
+                  await fetch("/api/auth/logout", { method: "POST" })
+                  window.location.replace("/login")
+                } catch (error) {
+                  setIsSigningOut(false)
+                  console.error("Logout failed:", error)
+                }
+              }} className="rounded-lg text-red-600 cursor-pointer flex items-center gap-2 px-3 py-2"><LogOut className="size-4" /> Sign Out</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

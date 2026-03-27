@@ -26,13 +26,11 @@ export default async function LoginPage() {
           <div className="hidden lg:block space-y-8">
             {/* Logo and title */}
             <div className="space-y-6">
-              <div className="inline-flex items-center gap-3 rounded-full border border-blue-200 bg-blue-50/80 backdrop-blur-sm px-6 py-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500">
-                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                  </svg>
+              <div className="inline-flex items-center gap-6 rounded-3xl border border-blue-200 bg-blue-50/80 backdrop-blur-sm px-12 py-6">
+                <div className="flex h-16 w-16 items-center justify-center rounded-3xl overflow-hidden">
+                  <img src="/BCL logo.png" alt="BCL Logo" className="h-14 w-14 object-contain" />
                 </div>
-                <span className="text-blue-900 font-semibold">Task Manager</span>
+                <span className="text-blue-900 font-bold text-2xl">BCL Task Manager</span>
               </div>
 
               <div className="space-y-4">
@@ -122,12 +120,10 @@ export default async function LoginPage() {
             <div className="bg-white/90 backdrop-blur-xl border border-blue-200 rounded-3xl p-8 shadow-2xl">
               {/* Mobile logo */}
               <div className="lg:hidden text-center mb-8">
-                <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-2xl shadow-lg mb-4">
-                  <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                  </svg>
+                <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-2xl shadow-lg mb-4 overflow-hidden">
+                  <img src="/BCL logo.png" alt="BCL Logo" className="h-14 w-14 object-contain" />
                 </div>
-                <h1 className="text-2xl font-bold text-gray-900 mb-2">Task Manager</h1>
+                <h1 className="text-3xl font-bold text-gray-900 mb-2">BCL Task Manager</h1>
               </div>
 
               <div className="mb-8">
@@ -140,7 +136,7 @@ export default async function LoginPage() {
               {/* Footer links */}
               <div className="mt-8 pt-6 border-t border-blue-200 flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div className="text-gray-600 text-sm">
-                  &copy; 2024 Task Manager
+                  &copy; 2024 BCL Task Manager
                 </div>
                 <div className="flex gap-6">
                   <button className="text-gray-600 hover:text-gray-900 text-sm transition-colors">
