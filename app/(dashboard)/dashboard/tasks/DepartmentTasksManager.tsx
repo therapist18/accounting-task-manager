@@ -37,6 +37,7 @@ import EditableStageCell from "./components/EditableStageCell"
 import { NewCompanyInquiryDialog } from "./components/NewCompanyInquiryDialog"
 import { ExtractionPreviewDialog } from "./components/ExtractionPreviewDialog"
 import { ClassSelectionDialog } from "./components/ClassSelectionDialog"
+import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, taskBundleService } from "./utils/workflowBundleHelpers"
 
 export default function DepartmentTasksManager({
   error,
@@ -915,185 +916,166 @@ export default function DepartmentTasksManager({
     dependantClassId: string | null
   ) => {
     setIsPushingCase(true);
-    toast({ title: "Pushing Case...", description: `Creating new task(s) in ${targetSubDeptName}.` });
-    const isReEntry = targetSubDeptId === 7;
-    const isPrincipalMember = task.applicant_type === 'principal' || task.principal_member === true;
-    const isAlien = targetSubDeptId === 6;
+    toast({ title: "Pushing Case...", description: `Creating bundle task(s) in ${targetSubDeptName}.` });
 
     try {
-      const tasksToCreate = [];
       const currentDate = new Date().toISOString();
-      const stages = {};
-
-      // Update stage statuses based on the target department
-      if (isAlien || isReEntry) {
-        stages['1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa'] = {
-          date: currentDate,
-          status: 'write_up_completed',
-          completedAt: currentDate,
-          updatedAt: currentDate
-        };
-        stages['a19b270e-6d1e-4e6d-b2bc-f21db72cde08'] = {
-          date: currentDate,
-          status: 'in_progress',
-          completedAt: currentDate,
-          updatedAt: currentDate
-        };
-        stages['9ccdbfa6-8d76-49db-b8d4-09742c734905'] = {
-          date: currentDate,
-          status: 'write_up_completed',
-          completedAt: currentDate,
-          updatedAt: currentDate
-        };
+      const triggerJobLevel = {
+        level: applicantClassId ? 3 : 2,
+        department_id: Number(targetDeptId),
+        subdepartment_id: Number(targetSubDeptId),
+        class_id: applicantClassId ? Number(applicantClassId) : null,
+        subclass_id: null,
+      };
+      const bundle = await taskBundleService.fetchForJobLevel(triggerJobLevel);
+      if (!bundle?.task_rules?.length) {
+        throw new Error(`No task bundle is configured for ${targetSubDeptName}.`);
       }
 
-      // Use existing data from component state instead of making redundant queries
       const dependants = taskDependants.get(task.id.toString()) || [];
-      let skippedMinors = 0;
+      const isPrincipalMember = task.applicant_type === 'principal' || task.principal_member === true;
+      const sharedParticipants = Array.isArray(task.participants_details)
+        ? task.participants_details.filter((participant: any) =>
+          !['principal', 'dependant'].includes(String(participant.role || '').toLowerCase())
+        )
+        : [];
+      const stages = {
+        '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa': {
+          date: currentDate,
+          status: 'completed',
+          completedAt: currentDate,
+          updatedAt: currentDate
+        },
+        'a19b270e-6d1e-4e6d-b2bc-f21db72cde08': {
+          date: currentDate,
+          status: 'completed',
+          completedAt: currentDate,
+          updatedAt: currentDate
+        },
+        '9ccdbfa6-8d76-49db-b8d4-09742c734905': {
+          date: currentDate,
+          status: 'completed',
+          completedAt: currentDate,
+          updatedAt: currentDate
+        }
+      };
 
-      if (isReEntry) {
-        if (!isPrincipalMember) {
-          tasksToCreate.push({
-            status: 'in_progress',
-            department_id: targetDeptId,
-            subdepartment_id: targetSubDeptId,
-            class_id: applicantClassId ? Number(applicantClassId) : null,
-            subclass_id: null,
-            created_by: 'system',
-            date_initiated: currentDate,
-            stages: { ...stages },
-            task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null,
-            task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null,
-            officer_id: task.officer_id ? Number(task.officer_id) : null,
-            account_used: task.account_used ? String(task.account_used) : null,
-            batch: task.batch ? String(task.batch) : null,
-            applied_by: task.applied_by ? String(task.applied_by) : null,
-            applicant_type: 'dependant',
-            r_number: task.r_number ? String(task.r_number) : null,
-            principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null,
-            renewal_status: task.renewal_status ? String(task.renewal_status) : null,
-            selections: task.selections ? JSON.stringify(task.selections) : null,
-            company_id: task.company_id ? Number(task.company_id) : null,
-            principal_member: false,
-            understudy: task.understudy ? String(task.understudy) : null,
-            references: task.references ? JSON.stringify(task.references) : '[]',
-            job_description: task.job_description ? String(task.job_description) : null,
-            document_id: null,
-            source_document_id: null,
-            applicant_name: String(task.applicant_name || ''),
-            individual_id: String(task.individual_id || '')
+      const taskRows = [];
+      const skippedDuplicates: any[] = [];
+      const skippedWorkflowRestrictions: any[] = [];
+
+      const buildTaskRow = async (target: any, applicantType: 'principal' | 'dependant', rule: any) => {
+        const workflowSummary = await detectExistingWorkflowForIndividual(Number(target.individual_id || target.id));
+        const restrictionSummary = evaluateWorkflowRestrictionsForBundle(workflowSummary?.workflowLogs || [], bundle);
+        if (restrictionSummary.hasBlockingWorkflow) {
+          skippedWorkflowRestrictions.push({
+            targetName: target.full_name || target.applicant_name || task.applicant_name,
+            ruleLabel: rule.label || rule.job_type,
+            blockingReasons: restrictionSummary.blockingReasons,
           });
+          return;
         }
 
-        if (task.dependant_member && Array.isArray(task.dependant_member)) {
-          // Use existing dependants data from component state
-          for (const dependant of dependants) {
-            tasksToCreate.push({
-              status: 'in_progress',
-              department_id: Number(targetDeptId) || null,
-              subdepartment_id: Number(targetSubDeptId) || null,
-              class_id: dependantClassId || applicantClassId ? Number(dependantClassId || applicantClassId) : null,
-              subclass_id: null,
-              created_by: 'system',
-              date_initiated: currentDate,
-              stages: { ...stages },
-              task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null,
-              task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null,
-              officer_id: task.officer_id ? Number(task.officer_id) : null,
-              account_used: task.account_used ? String(task.account_used) : null,
-              batch: task.batch ? String(task.batch) : null,
-              applied_by: task.applied_by ? String(task.applied_by) : null,
-              applicant_type: 'dependant',
-              r_number: task.r_number ? String(task.r_number) : null,
-              principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null,
-              renewal_status: task.renewal_status ? String(task.renewal_status) : null,
-              selections: task.selections ? JSON.stringify(task.selections) : null,
-              company_id: task.company_id ? Number(task.company_id) : null,
-              principal_member: false,
-              understudy: task.understudy ? String(task.understudy) : null,
-              references: task.references ? JSON.stringify(task.references) : '[]',
-              job_description: task.job_description ? String(task.job_description) : null,
-              document_id: null,
-              source_document_id: null,
-              applicant_name: String(dependant.full_name || ''),
-              individual_id: String(dependant.individual_id || '')
-            });
-          }
+        const conflicts = await detectTaskConflictsForJobLevel(Number(target.individual_id || target.id), rule.job_level || triggerJobLevel);
+        if (conflicts.length > 0) {
+          skippedDuplicates.push({
+            targetName: target.full_name || target.applicant_name || task.applicant_name,
+            ruleLabel: rule.label || rule.job_type,
+            conflictIds: conflicts.map((item: any) => item.id),
+          });
+          return;
         }
-      } else {
-        const baseTaskData = {
+
+        taskRows.push({
           status: 'in_progress',
-          department_id: Number(targetDeptId) || null,
-          subdepartment_id: Number(targetSubDeptId) || null,
-          class_id: applicantClassId ? Number(applicantClassId) : null,
-          subclass_id: null,
-          created_by: 'system',
+          created_by: 'bundle_push',
           date_initiated: currentDate,
+          applied_by: target.full_name || target.applicant_name || task.applicant_name,
+          applicant_type: applicantType,
+          individual_id: Number(target.individual_id || target.id),
           stages: { ...stages },
-          task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null,
-          task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null,
-          officer_id: task.officer_id ? Number(task.officer_id) : null,
-          account_used: task.account_used ? String(task.account_used) : null,
-          batch: task.batch ? String(task.batch) : null,
-          applied_by: task.applied_by ? String(task.applied_by) : null,
-          applicant_type: isPrincipalMember ? 'principal' : 'dependant',
-          r_number: task.r_number ? String(task.r_number) : null,
-          principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null,
-          renewal_status: task.renewal_status ? String(task.renewal_status) : null,
-          selections: task.selections ? JSON.stringify(task.selections) : null,
-          company_id: task.company_id ? Number(task.company_id) : null,
-          principal_member: Boolean(isPrincipalMember),
-          understudy: task.understudy ? String(task.understudy) : null,
-          references: task.references ? JSON.stringify(task.references) : '[]',
-          job_description: task.job_description ? String(task.job_description) : null,
-          document_id: null,
-          source_document_id: null,
-          applicant_name: String(task.applicant_name || ''),
-          individual_id: String(task.individual_id || '')
-        };
+          job_description: rule.job_type || task.job_description || targetSubDeptName,
+          job_level: rule.job_level || triggerJobLevel,
+          applicant_details: {
+            id: Number(target.individual_id || target.id),
+            name: target.full_name || target.applicant_name || task.applicant_name,
+            role: applicantType,
+            type: 'individual',
+            full_name: target.full_name || target.applicant_name || task.applicant_name,
+          },
+          participants_details: sharedParticipants,
+          job_specific_answers: task.job_specific_answers || null,
+          registry_metadata: {
+            triggered_from: 'department_tasks_push',
+            triggered_at: currentDate,
+            source_task_id: task.id,
+            bundle_id: bundle.id,
+            bundle_rule_id: rule.id,
+            push_target_subdepartment_id: targetSubDeptId,
+            push_target_subdepartment_name: targetSubDeptName,
+          },
+        });
+      };
 
-        tasksToCreate.push(baseTaskData);
+      for (const rule of bundle.task_rules) {
+        const appliesToPrincipal = rule.targets?.some((target: any) => target.type === 'principal');
+        const dependantTarget = rule.targets?.find((target: any) => target.type === 'dependant' || target.type === 'dependant_all');
 
-        if (task.dependant_member && Array.isArray(task.dependant_member)) {
-          // Use existing dependants data from component state
+        if (appliesToPrincipal && isPrincipalMember) {
+          await buildTaskRow({
+            id: task.individual_id,
+            full_name: task.applicant_name,
+          }, 'principal', rule);
+        }
+
+        if (dependantTarget && dependants.length > 0) {
           for (const dependant of dependants) {
-            if (isAlien) {
-              const age = dependant.age;
-              if (age === null || age < 18) {
-                skippedMinors++;
-                continue;
-              }
+            const age = dependant.age;
+            if (dependantTarget.type === 'dependant') {
+              if (age === null || age === undefined) continue;
+              if (dependantTarget.ageFrom && age < dependantTarget.ageFrom) continue;
+              if (dependantTarget.ageTo && age > dependantTarget.ageTo) continue;
             }
 
-            tasksToCreate.push({
-              ...baseTaskData,
-              class_id: dependantClassId || applicantClassId,
-              applicant_name: dependant.full_name,
-              individual_id: dependant.individual_id,
-              applicant_type: 'dependant',
-              principal_member: false
-            });
+            await buildTaskRow({
+              id: dependant.individual_id || dependant.id,
+              full_name: dependant.full_name,
+              individual_id: dependant.individual_id || dependant.id,
+            }, 'dependant', rule);
           }
         }
+
+        if (!isPrincipalMember && appliesToPrincipal === false && (!dependantTarget || dependants.length === 0)) {
+          await buildTaskRow({
+            id: task.individual_id,
+            full_name: task.applicant_name,
+          }, 'dependant', rule);
+        }
+      }
+
+      if (!taskRows.length) {
+        throw new Error(
+          skippedWorkflowRestrictions.length > 0
+            ? 'All bundle-generated tasks were skipped because related document workflows are in blocking states.'
+            : skippedDuplicates.length > 0
+              ? 'All bundle-generated tasks were skipped because active duplicates already exist.'
+              : 'The configured bundle did not produce any tasks for this case.'
+        );
       }
 
       const { data: newTasks, error } = await supabase
-        .from('tm_tasks')
-        .insert(tasksToCreate)
+        .from('tm_tasks_duplicate')
+        .insert(taskRows)
         .select();
 
       if (error) throw error;
 
-      const mainTask = newTasks[0];
-      const dependantTasks = newTasks.slice(1);
-      let successMessage = `Main case pushed to ${targetSubDeptName} successfully. New Task ID: ${mainTask.id}`;
-
-      if (dependantTasks.length > 0) {
-        successMessage += `\n${dependantTasks.length} dependant task(s) also created.`;
+      let successMessage = `Created ${newTasks.length} bundle task(s) for ${targetSubDeptName}.`;
+      if (skippedDuplicates.length > 0) {
+        successMessage += `\n${skippedDuplicates.length} duplicate target(s) were skipped.`;
       }
-
-      if (targetSubDeptId === 6 && skippedMinors > 0) {
-        successMessage += `\nNote: ${skippedMinors} minor dependant(s) were skipped for Alien cases.`;
+      if (skippedWorkflowRestrictions.length > 0) {
+        successMessage += `\n${skippedWorkflowRestrictions.length} target(s) were skipped because document workflow restrictions are active.`;
       }
 
       toast({
@@ -1113,7 +1095,7 @@ export default function DepartmentTasksManager({
     } finally {
       setIsPushingCase(false);
     }
-  }, [refreshAllData]);
+  }, [refreshAllData, taskDependants]);
 
   const handleDownloadZip = useCallback(async (task: UtilTask) => {
     setIsDownloading(true);

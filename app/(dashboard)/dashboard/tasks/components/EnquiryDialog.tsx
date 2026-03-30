@@ -21,6 +21,7 @@ import supabase from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
 import { format } from "date-fns"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, taskBundleService } from "../utils/workflowBundleHelpers"
 
 const CLASS_D_ID = '1750687058159';
 const SPONSOR_SUBDEPT_ID = '26';
@@ -89,6 +90,7 @@ export function EnquiryDialog({
     const [loadingStaff, setLoadingStaff] = useState(false)
     const [applicantPhoto, setApplicantPhoto] = useState<string | null>(null)
     const [loadingPhoto, setLoadingPhoto] = useState(false)
+    const [checkingWorkflow, setCheckingWorkflow] = useState(false)
 
     // Data lists
     const [individuals, setIndividuals] = useState<Individual[]>([])
@@ -96,6 +98,10 @@ export function EnquiryDialog({
     const [jobQuestions, setJobQuestions] = useState<JobQuestion[]>([])
     const [jobAnswers, setJobAnswers] = useState<Record<string, any>>({})
     const [masterFieldsData, setMasterFieldsData] = useState<Record<string, any[]>>({})
+    const [existingWorkflowSummary, setExistingWorkflowSummary] = useState<any | null>(null)
+    const [duplicateTaskConflicts, setDuplicateTaskConflicts] = useState<any[]>([])
+    const [selectedJobLevelBundle, setSelectedJobLevelBundle] = useState<any | null>(null)
+    const [workflowRestrictionSummary, setWorkflowRestrictionSummary] = useState<any | null>(null)
 
     // Selection State
     const [applicantType, setApplicantType] = useState<'principal' | 'dependant'>('principal')
@@ -263,6 +269,10 @@ export function EnquiryDialog({
         setSelectedReferences([])
         setIncludeReferences(false)
         setApplicantPhoto(null)
+        setExistingWorkflowSummary(null)
+        setDuplicateTaskConflicts([])
+        setSelectedJobLevelBundle(null)
+        setWorkflowRestrictionSummary(null)
     }, [])
 
     useEffect(() => {
@@ -619,6 +629,76 @@ export function EnquiryDialog({
         fetchUnderstudies(value)
     }
 
+    useEffect(() => {
+        let cancelled = false;
+
+        const checkWorkflowState = async () => {
+            if (!open || !selectedIndividual?.id) {
+                setExistingWorkflowSummary(null);
+                setDuplicateTaskConflicts([]);
+                setSelectedJobLevelBundle(null);
+                setWorkflowRestrictionSummary(null);
+                return;
+            }
+
+            setCheckingWorkflow(true);
+            try {
+                const workflowSummary = await detectExistingWorkflowForIndividual(selectedIndividual.id);
+                if (!cancelled) {
+                    setExistingWorkflowSummary(workflowSummary);
+                }
+
+                if (!formData.department_id) {
+                    if (!cancelled) {
+                        setDuplicateTaskConflicts([]);
+                        setSelectedJobLevelBundle(null);
+                        setWorkflowRestrictionSummary(null);
+                    }
+                    return;
+                }
+
+                const selectedJobLevel = {
+                    level: formData.class_id ? 3 : formData.subdepartment_id ? 2 : 1,
+                    department_id: formData.department_id ? Number(formData.department_id) : null,
+                    subdepartment_id: formData.subdepartment_id ? Number(formData.subdepartment_id) : null,
+                    class_id: formData.class_id ? Number(formData.class_id) : null,
+                    subclass_id: null,
+                };
+
+                const bundle = await taskBundleService.fetchForJobLevel(selectedJobLevel);
+                const restrictionSummary = evaluateWorkflowRestrictionsForBundle(workflowSummary?.workflowLogs || [], bundle);
+
+                const conflicts = await detectTaskConflictsForJobLevel(selectedIndividual.id, {
+                    ...selectedJobLevel,
+                });
+
+                if (!cancelled) {
+                    const filteredConflicts = taskToEdit
+                        ? conflicts.filter((task: any) => String(task.id) !== String(taskToEdit.id))
+                        : conflicts;
+                    setSelectedJobLevelBundle(bundle);
+                    setWorkflowRestrictionSummary(restrictionSummary);
+                    setDuplicateTaskConflicts(filteredConflicts);
+                }
+            } catch (error) {
+                console.error("[EnquiryDialog] workflow/task conflict check failed", error);
+                if (!cancelled) {
+                    setExistingWorkflowSummary(null);
+                    setDuplicateTaskConflicts([]);
+                    setSelectedJobLevelBundle(null);
+                    setWorkflowRestrictionSummary(null);
+                }
+            } finally {
+                if (!cancelled) setCheckingWorkflow(false);
+            }
+        };
+
+        checkWorkflowState();
+        return () => {
+            cancelled = true;
+        };
+    }, [open, selectedIndividual?.id, formData.department_id, formData.subdepartment_id, formData.class_id, taskToEdit?.id]);
+
     // --- New Handler: Clear Company Selection ---
     const handleClearCompany = () => {
         setSelectedCompany('');
@@ -628,6 +708,24 @@ export function EnquiryDialog({
 
     const handleSubmit = async () => {
         if (!selectedIndividual || !formData.department_id) return
+
+        if (!taskToEdit && duplicateTaskConflicts.length > 0) {
+            toast({
+                title: "Duplicate task detected",
+                description: "An active task already exists for this applicant and selected job level.",
+                variant: "destructive"
+            })
+            return
+        }
+
+        if (!taskToEdit && workflowRestrictionSummary?.hasBlockingWorkflow) {
+            toast({
+                title: "Workflow restriction detected",
+                description: "The related document workflow is in a blocking state for this job level.",
+                variant: "destructive"
+            })
+            return
+        }
 
         setLoading(true)
         try {
@@ -703,7 +801,7 @@ export function EnquiryDialog({
             let result;
             if (taskToEdit) {
                 // UPDATE
-                const { data, error } = await supabase.from('tm_tasks')
+                const { data, error } = await supabase.from('tm_tasks_duplicate')
                     .update(payload)
                     .eq('id', taskToEdit.id)
                     .select()
@@ -718,9 +816,23 @@ export function EnquiryDialog({
                     status: 'enquiry',
                     date_initiated: new Date(formData.enquiry_date).toISOString(),
                     applied_by: "11",
+                    created_by: "enquiry_dialog",
+                    job_level: {
+                        level: formData.class_id ? 3 : formData.subdepartment_id ? 2 : 1,
+                        department_id: Number(formData.department_id),
+                        subdepartment_id: formData.subdepartment_id ? Number(formData.subdepartment_id) : null,
+                        class_id: formData.class_id ? Number(formData.class_id) : null,
+                        subclass_id: null
+                    },
+                    registry_metadata: {
+                        triggered_from: "enquiry_dialog",
+                        triggered_at: new Date().toISOString(),
+                        existing_workflow_detected: !!workflowRestrictionSummary?.matchedDocumentTypes?.length,
+                        workflow_blocking_reasons: workflowRestrictionSummary?.blockingReasons || []
+                    },
                     stages: { '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa': { status: "completed", date: format(new Date(), 'dd/MM/yyyy') } }
                 };
-                const { data, error } = await supabase.from('tm_tasks').insert([insertPayload]).select().single();
+                const { data, error } = await supabase.from('tm_tasks_duplicate').insert([insertPayload]).select().single();
                 if (error) throw error;
                 result = data;
                 toast({ title: "Success", description: "Enquiry created successfully." });
@@ -957,6 +1069,49 @@ export function EnquiryDialog({
                                                     No principal associated (or selected) with this dependant.
                                                 </div>
                                             )}
+                                        </TableRow>
+                                    )}
+
+                                    {selectedIndividual && (
+                                        <TableRow label="Workflow Check">
+                                            <div className="space-y-2">
+                                                {checkingWorkflow ? (
+                                                    <div className="flex items-center gap-2 text-slate-400 text-xs italic">
+                                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                                        Checking existing workflows and active tasks...
+                                                    </div>
+                                                ) : duplicateTaskConflicts.length > 0 ? (
+                                                    <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                                                        <div className="flex items-start gap-2">
+                                                            <AlertCircle className="mt-0.5 h-4 w-4 text-red-600" />
+                                                            <div className="space-y-1 text-xs text-red-700">
+                                                                <p className="font-semibold">Active task already exists for this job level.</p>
+                                                                {duplicateTaskConflicts.slice(0, 3).map((conflict: any) => (
+                                                                    <p key={conflict.id}>
+                                                                        #{conflict.id} · {conflict.job_description || "Untitled task"} · {conflict.status}
+                                                                    </p>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ) : duplicateTaskConflicts.length === 0 && workflowRestrictionSummary?.hasBlockingWorkflow ? (
+                                                    <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                                                        Workflow restriction detected for this selected job level.
+                                                        {` Blocking state(s): ${(workflowRestrictionSummary.blockingReasons || []).join(", ")}.`}
+                                                    </div>
+                                                ) : formData.department_id && selectedJobLevelBundle && workflowRestrictionSummary?.matchedDocumentTypes?.length > 0 ? (
+                                                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+                                                        Workflow history exists for this selected job level.
+                                                        {` ${workflowRestrictionSummary.matchedDocumentTypes.length} related workflow target(s) detected for the matched bundle.`}
+                                                    </div>
+                                                ) : (
+                                                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700">
+                                                        {formData.department_id
+                                                            ? "No workflow or active task conflict detected for the selected job level."
+                                                            : "Select a job level to run the workflow check."}
+                                                    </div>
+                                                )}
+                                            </div>
                                         </TableRow>
                                     )}
 

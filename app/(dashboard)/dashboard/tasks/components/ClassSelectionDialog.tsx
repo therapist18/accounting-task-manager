@@ -48,17 +48,11 @@ export function ClassSelectionDialog({
   const handlePushCase = async () => {
     if (selectedTaskForPush) {
       onOpenChange(false)
-      const adultDependants = (taskDependants.get(selectedTaskForPush.task.id.toString()) || [])
-        .filter(dep => dep.age !== null && dep.age >= 18)
-      const anyAdultWithoutClass = adultDependants.some(dep =>
-        !selectedTaskForPush?.dependantClasses?.has(dep.id)
-      )
       const unknownAgeDependants = (taskDependants.get(selectedTaskForPush.task.id.toString()) || [])
         .filter(dep => dep.age === null)
       const isPushDisabled =
         selectedTaskForPush?.applicantAge === null ||
         !selectedTaskForPush?.applicantClassId ||
-        anyAdultWithoutClass ||
         unknownAgeDependants.length > 0
       if (!isPushDisabled) {
         await executePushCase(
@@ -80,15 +74,8 @@ export function ClassSelectionDialog({
     !selectedTaskForPush.applicantClassId ||
     (() => {
       const deps = taskDependants.get(selectedTaskForPush.task.id.toString()) || []
-      // Check for any unknown age dependants
       if (deps.some(dep => dep.age === null || dep.age === undefined)) return true
-
-      // Check for adult dependants without selected classes
-      const adultDeps = deps.filter(dep => dep.age !== null && dep.age !== undefined && dep.age >= 18)
-      if (adultDeps.length === 0) return false
-
-      return !selectedTaskForPush.dependantClasses ||
-        adultDeps.some(dep => !selectedTaskForPush.dependantClasses?.has(dep.id))
+      return false
     })()
 
   return (
@@ -161,68 +148,30 @@ export function ClassSelectionDialog({
             </div>
           )}
 
-          {/* Dependants Class Selection */}
+          {/* Dependants preview */}
           {(() => {
             const taskDeps = taskDependants.get(selectedTaskForPush?.task.id.toString() || '') || []
-            // Only include dependants with known age >= 18
             const adultDependants = taskDeps.filter(dep => dep.age !== null && dep.age >= 18)
             const unknownAgeDependants = taskDeps.filter(dep => dep.age === null)
 
             return (
               <div className="space-y-6">
-                {/* Known Adult Dependants */}
                 {adultDependants.length > 0 && (
                   <div className="space-y-3">
                     <h4 className="font-medium text-sm border-b pb-1">
                       Adult Dependants
                     </h4>
-                    {adultDependants.map((dependant, index) => (
-                      <div key={`adult-${dependant.id}`} className="space-y-2">
-                        <div className="font-medium text-sm">
-                          {dependant.full_name} (Age: {dependant.age})
-                        </div>
-                        <div className="grid gap-2 pl-4">
-                          {availableClasses.map((classItem) => (
-                            <Button
-                              key={`adult-${dependant.id}-${classItem.id}`}
-                              variant="outline"
-                              className="w-full justify-start h-auto p-3 text-left"
-                              onClick={() => {
-                                setSelectedTaskForPush((prev: any) => {
-                                  if (!prev) return null
-                                  const updatedDependantClasses = new Map(prev.dependantClasses || new Map())
-                                  updatedDependantClasses.set(dependant.id, classItem.id.toString())
-                                  return { ...prev, dependantClasses: updatedDependantClasses }
-                                })
-                              }}
-                            >
-                              <div className="flex items-center gap-3">
-                                <div className={`w-4 h-4 rounded-full border-2 ${selectedTaskForPush?.dependantClasses?.get(dependant.id) === classItem.id.toString()
-                                  ? 'bg-orange-500 border-orange-500'
-                                  : 'border-gray-300'
-                                  }`}>
-                                  {selectedTaskForPush?.dependantClasses?.get(dependant.id) === classItem.id.toString() && (
-                                    <div className="w-2 h-2 bg-white rounded-full m-0.5" />
-                                  )}
-                                </div>
-                                <div>
-                                  <div className="font-semibold">{classItem.name}</div>
-                                  {classItem.description && (
-                                    <div className="text-sm text-muted-foreground">
-                                      {classItem.description}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </Button>
-                          ))}
-                        </div>
+                    <div className="text-sm text-muted-foreground bg-slate-50 p-3 rounded-md">
+                      Bundle rules will decide whether adult dependants receive follow-on tasks.
+                    </div>
+                    {adultDependants.map((dependant) => (
+                      <div key={`adult-${dependant.id}`} className="font-medium text-sm pl-1">
+                        {dependant.full_name} (Age: {dependant.age})
                       </div>
                     ))}
                   </div>
                 )}
 
-                {/* Unknown Age Dependants */}
                 {unknownAgeDependants.length > 0 && (
                   <div className="space-y-3">
                     <h4 className="font-medium text-sm text-amber-600 border-b border-amber-200 pb-1">
@@ -257,7 +206,7 @@ export function ClassSelectionDialog({
             onClick={handlePushCase}
             disabled={isDisabled}
           >
-            Push Case
+            Push Using Bundle
           </Button>
         </div>
       </DialogContent>
