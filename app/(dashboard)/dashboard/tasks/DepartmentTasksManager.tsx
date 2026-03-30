@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertCircle, Plus, Minus, Download, Edit, Trash2, ChevronDown, Send, DownloadCloud, Eye, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, EyeOff, CheckCircle2, XCircle, Briefcase } from "lucide-react"
+import { Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertCircle, Plus, Minus, Download, Edit, Trash2, ChevronDown, Send, DownloadCloud, Eye, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, EyeOff, CheckCircle2, XCircle, Briefcase, Loader2 } from "lucide-react"
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog"
 import { EnquiryDialog } from "./components/EnquiryDialog"
 import { format } from 'date-fns';
@@ -37,7 +37,7 @@ import EditableStageCell from "./components/EditableStageCell"
 import { NewCompanyInquiryDialog } from "./components/NewCompanyInquiryDialog"
 import { ExtractionPreviewDialog } from "./components/ExtractionPreviewDialog"
 import { ClassSelectionDialog } from "./components/ClassSelectionDialog"
-import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, taskBundleService } from "./utils/workflowBundleHelpers"
+import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, formatWorkflowRestrictionReason, taskBundleService } from "./utils/workflowBundleHelpers"
 
 export default function DepartmentTasksManager({
   error,
@@ -111,6 +111,8 @@ export default function DepartmentTasksManager({
   const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
   const [selectedAutomation, setSelectedAutomation] = useState<any>(null);
   const [isClassSelectionOpen, setIsClassSelectionOpen] = useState(false);
+  const [availableBundles, setAvailableBundles] = useState<any[]>([]);
+  const [loadingBundles, setLoadingBundles] = useState(false);
   const [selectedTaskForPush, setSelectedTaskForPush] = useState<{
     task: UtilTask;
     targetDeptId: number;
@@ -120,6 +122,7 @@ export default function DepartmentTasksManager({
     applicantAge: number | null;
     applicantClassId?: string;
     dependantClasses?: Map<string, string>;
+    bundle?: any; // Add bundle field
   } | null>(null);
   const [availableClasses, setAvailableClasses] = useState<any[]>([]);
   const [tableRows, setTableRows] = useState([]);
@@ -888,9 +891,71 @@ export default function DepartmentTasksManager({
     return subdepartment?.classes || [];
   }, [departments]);
 
-  const handlePushCase = useCallback(async (task: UtilTask, targetSubDeptId: number, targetSubDeptName: string) => {
+  // Fetch available task bundles
+  const fetchAvailableBundles = useCallback(async () => {
+    if (!departments.length) return;
+
+    setLoadingBundles(true);
+    try {
+      const bundles: any[] = [];
+
+      // Fetch bundles for department 1 (Immigration)
+      const { data: allBundles } = await supabase
+        .from('tm_task_bundles')
+        .select('*')
+        .contains('trigger_job_level', { department_id: 1 });
+
+      if (allBundles) {
+        for (const bundle of allBundles) {
+          const triggerJobLevel = bundle.trigger_job_level;
+          if (triggerJobLevel?.department_id === 1) {
+            const department = departments.find(d => d.id === 1);
+            const subdepartment = department?.tm_subdepartments?.find(s => s.id === triggerJobLevel.subdepartment_id);
+            const classInfo = triggerJobLevel.class_id
+              ? subdepartment?.classes?.find(c => c.id === triggerJobLevel.class_id)
+              : null;
+
+            bundles.push({
+              ...bundle,
+              displayName: classInfo
+                ? `${subdepartment?.name || 'Unknown'} - ${classInfo.name || 'Class'}`
+                : subdepartment?.name || 'Unknown Subdepartment',
+              subdepartmentName: subdepartment?.name || 'Unknown',
+              className: classInfo?.name || null,
+              targetSubDeptId: triggerJobLevel.subdepartment_id,
+              targetClassId: triggerJobLevel.class_id || null,
+            });
+          }
+        }
+      }
+
+      setAvailableBundles(bundles);
+    } catch (error) {
+      console.error('Error fetching bundles:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load available task bundles.",
+        variant: "destructive"
+      });
+    } finally {
+      setLoadingBundles(false);
+    }
+  }, [departments]);
+
+  // Load bundles when departments are loaded
+  useEffect(() => {
+    if (departments.length > 0) {
+      fetchAvailableBundles();
+    }
+  }, [departments, fetchAvailableBundles]);
+
+  const handlePushCase = useCallback(async (task: UtilTask, bundle: any) => {
     const targetDeptId = 1;
-    if (targetSubDeptId === 6) { // Alien subdepartment
+    const targetSubDeptId = bundle.targetSubDeptId;
+    const targetSubDeptName = bundle.subdepartmentName;
+
+    // Check if this bundle requires class selection
+    if (bundle.targetClassId === null && bundle.trigger_job_level?.subdepartment_id) {
       const classes = getClassesForSubdepartment(targetDeptId, targetSubDeptId);
       if (classes.length > 0) {
         const enhancedTask = enhancedTasksData.get(task.id.toString()) || task;
@@ -898,13 +963,24 @@ export default function DepartmentTasksManager({
         if (applicantAge === undefined || applicantAge === null) {
           applicantAge = calculateAge(task.date_of_birth);
         }
-        setSelectedTaskForPush({ task, targetDeptId, targetSubDeptId, targetSubDeptName, isApplicant: true, applicantAge, applicantClassId: undefined, dependantClasses: new Map() });
+        setSelectedTaskForPush({
+          task,
+          targetDeptId,
+          targetSubDeptId,
+          targetSubDeptName,
+          isApplicant: true,
+          applicantAge,
+          applicantClassId: undefined,
+          dependantClasses: new Map(),
+          bundle: bundle // Pass the bundle information
+        });
         setAvailableClasses(classes);
         setIsClassSelectionOpen(true);
         return;
       }
     }
-    await executePushCase(task, targetDeptId, targetSubDeptId, targetSubDeptName, null, null);
+
+    await executePushCase(task, targetDeptId, targetSubDeptId, targetSubDeptName, bundle.targetClassId, null, bundle);
   }, [getClassesForSubdepartment, enhancedTasksData]);
 
   const executePushCase = useCallback(async (
@@ -913,23 +989,18 @@ export default function DepartmentTasksManager({
     targetSubDeptId: number,
     targetSubDeptName: string,
     applicantClassId: string | null,
-    dependantClassId: string | null
+    dependantClassId: string | null,
+    bundle: any
   ) => {
     setIsPushingCase(true);
     toast({ title: "Pushing Case...", description: `Creating bundle task(s) in ${targetSubDeptName}.` });
 
     try {
       const currentDate = new Date().toISOString();
-      const triggerJobLevel = {
-        level: applicantClassId ? 3 : 2,
-        department_id: Number(targetDeptId),
-        subdepartment_id: Number(targetSubDeptId),
-        class_id: applicantClassId ? Number(applicantClassId) : null,
-        subclass_id: null,
-      };
-      const bundle = await taskBundleService.fetchForJobLevel(triggerJobLevel);
+
+      // Use the provided bundle instead of fetching
       if (!bundle?.task_rules?.length) {
-        throw new Error(`No task bundle is configured for ${targetSubDeptName}.`);
+        throw new Error(`No task rules configured for ${targetSubDeptName}.`);
       }
 
       const dependants = taskDependants.get(task.id.toString()) || [];
@@ -963,20 +1034,95 @@ export default function DepartmentTasksManager({
       const taskRows = [];
       const skippedDuplicates: any[] = [];
       const skippedWorkflowRestrictions: any[] = [];
+      const workflowSummaryCache = new Map<number, any>();
+      const duplicateConflictCache = new Map<string, any[]>();
+
+      const getWorkflowSummaryForTarget = async (personId: number) => {
+        if (!workflowSummaryCache.has(personId)) {
+          workflowSummaryCache.set(personId, await detectExistingWorkflowForIndividual(personId));
+        }
+        return workflowSummaryCache.get(personId);
+      };
+
+      const getConflictCacheKey = (personId: number, jobLevel: any) => {
+        const normalizedLevel = jobLevel || {};
+        return JSON.stringify({
+          personId,
+          department_id: normalizedLevel.department_id ?? null,
+          subdepartment_id: normalizedLevel.subdepartment_id ?? null,
+          class_id: normalizedLevel.class_id ?? null,
+          subclass_id: normalizedLevel.subclass_id ?? null,
+          level: normalizedLevel.level ?? null,
+        });
+      };
+
+      const getTaskConflictsForTarget = async (personId: number, jobLevel: any) => {
+        const cacheKey = getConflictCacheKey(personId, jobLevel);
+        if (!duplicateConflictCache.has(cacheKey)) {
+          duplicateConflictCache.set(cacheKey, await detectTaskConflictsForJobLevel(personId, jobLevel));
+        }
+        return duplicateConflictCache.get(cacheKey) || [];
+      };
+
+      const allTargets = [
+        ...(isPrincipalMember ? [{ id: task.individual_id, full_name: task.applicant_name, applicantType: 'principal' as const }] : []),
+        ...dependants.map((dependant: any) => ({
+          id: dependant.individual_id || dependant.id,
+          full_name: dependant.full_name,
+          applicantType: 'dependant' as const,
+        })),
+        ...(!isPrincipalMember && dependants.length === 0 ? [{ id: task.individual_id, full_name: task.applicant_name, applicantType: 'dependant' as const }] : []),
+      ];
+      const uniqueTargets = Array.from(new Map(allTargets.map((item) => [Number(item.id), item])).values());
+
+      const workflowSummaries = await Promise.all(
+        uniqueTargets.map(async (target: any) => [Number(target.id), await getWorkflowSummaryForTarget(Number(target.id))] as const)
+      );
+      const workflowSummaryLookup = new Map<number, any>(workflowSummaries);
+      const existingWorkflowDocTypes = new Set<string>();
+      workflowSummaryLookup.forEach((summary: any) => {
+        if (!summary?.documentTypeSummary) return;
+        Array.from(summary.documentTypeSummary.keys()).forEach((docTypeId: string) => existingWorkflowDocTypes.add(String(docTypeId)));
+      });
 
       const buildTaskRow = async (target: any, applicantType: 'principal' | 'dependant', rule: any) => {
-        const workflowSummary = await detectExistingWorkflowForIndividual(Number(target.individual_id || target.id));
-        const restrictionSummary = evaluateWorkflowRestrictionsForBundle(workflowSummary?.workflowLogs || [], bundle);
-        if (restrictionSummary.hasBlockingWorkflow) {
+        const personId = Number(target.individual_id || target.id);
+        const workflowSummary = workflowSummaryLookup.get(personId) || await getWorkflowSummaryForTarget(personId);
+        const relatedDocumentTypeId = rule.related_document_type_id ? String(rule.related_document_type_id) : null;
+        const hasWorkflowForDocumentElsewhere = relatedDocumentTypeId ? existingWorkflowDocTypes.has(relatedDocumentTypeId) : false;
+        const hasWorkflowForDocumentOnTarget = relatedDocumentTypeId
+          ? workflowSummary?.documentTypeSummary?.has(relatedDocumentTypeId)
+          : false;
+
+        if (relatedDocumentTypeId && applicantType === 'dependant' && hasWorkflowForDocumentElsewhere && !hasWorkflowForDocumentOnTarget) {
           skippedWorkflowRestrictions.push({
             targetName: target.full_name || target.applicant_name || task.applicant_name,
             ruleLabel: rule.label || rule.job_type,
-            blockingReasons: restrictionSummary.blockingReasons,
+            blockingReasons: ['not_involved_existing_workflow'],
           });
           return;
         }
 
-        const conflicts = await detectTaskConflictsForJobLevel(Number(target.individual_id || target.id), rule.job_level || triggerJobLevel);
+        if (relatedDocumentTypeId) {
+          const restrictionSummary = evaluateWorkflowRestrictionsForBundle(
+            workflowSummary?.workflowLogs || [],
+            {
+              trigger_document_type_id: relatedDocumentTypeId,
+              task_rules: [],
+            } as any
+          );
+
+          if (restrictionSummary.hasBlockingWorkflow) {
+            skippedWorkflowRestrictions.push({
+              targetName: target.full_name || target.applicant_name || task.applicant_name,
+              ruleLabel: rule.label || rule.job_type,
+              blockingReasons: restrictionSummary.blockingReasons,
+            });
+            return;
+          }
+        }
+
+        const conflicts = await getTaskConflictsForTarget(personId, rule.job_level || bundle.trigger_job_level);
         if (conflicts.length > 0) {
           skippedDuplicates.push({
             targetName: target.full_name || target.applicant_name || task.applicant_name,
@@ -992,12 +1138,12 @@ export default function DepartmentTasksManager({
           date_initiated: currentDate,
           applied_by: target.full_name || target.applicant_name || task.applicant_name,
           applicant_type: applicantType,
-          individual_id: Number(target.individual_id || target.id),
+          individual_id: personId,
           stages: { ...stages },
           job_description: rule.job_type || task.job_description || targetSubDeptName,
-          job_level: rule.job_level || triggerJobLevel,
+          job_level: rule.job_level || bundle.trigger_job_level,
           applicant_details: {
-            id: Number(target.individual_id || target.id),
+            id: personId,
             name: target.full_name || target.applicant_name || task.applicant_name,
             role: applicantType,
             type: 'individual',
@@ -1075,7 +1221,14 @@ export default function DepartmentTasksManager({
         successMessage += `\n${skippedDuplicates.length} duplicate target(s) were skipped.`;
       }
       if (skippedWorkflowRestrictions.length > 0) {
-        successMessage += `\n${skippedWorkflowRestrictions.length} target(s) were skipped because document workflow restrictions are active.`;
+        const workflowReasons = Array.from(
+          new Set(
+            skippedWorkflowRestrictions.flatMap((item: any) =>
+              (item.blockingReasons || []).map(formatWorkflowRestrictionReason)
+            )
+          )
+        );
+        successMessage += `\n${skippedWorkflowRestrictions.length} target(s) were skipped because document workflow restrictions are active${workflowReasons.length ? `: ${workflowReasons.join(", ")}` : ""}.`;
       }
 
       toast({
@@ -1990,18 +2143,28 @@ export default function DepartmentTasksManager({
   const ActionMenuItems = ({ task }: { task: any }) => {
     return (
       <DropdownMenuContent align="end">
-        <DropdownMenuItem
-          onClick={() => handlePushCase(task, 6, 'Alien')}
-          disabled={isPushingCase}
-        >
-          <Send className="mr-2 h-4 w-4" /> Push to Alien
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => handlePushCase(task, 7, 'Re-Entry Pass')}
-          disabled={isPushingCase}
-        >
-          <Send className="mr-2 h-4 w-4" /> Push to Re-Entry
-        </DropdownMenuItem>
+        {loadingBundles ? (
+          <DropdownMenuItem disabled>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Loading bundles...
+          </DropdownMenuItem>
+        ) : availableBundles.length > 0 ? (
+          availableBundles.map((bundle) => (
+            <DropdownMenuItem
+              key={bundle.id}
+              onClick={() => handlePushCase(task, bundle)}
+              disabled={isPushingCase}
+            >
+              <Send className="mr-2 h-4 w-4" />
+              Push to {bundle.displayName}
+            </DropdownMenuItem>
+          ))
+        ) : (
+          <DropdownMenuItem disabled>
+            <AlertCircle className="mr-2 h-4 w-4" />
+            No task bundles available
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem
           onClick={() => handleDownloadZip(task)}
           disabled={isDownloading}

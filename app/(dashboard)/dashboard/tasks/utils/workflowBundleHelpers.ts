@@ -46,6 +46,29 @@ export interface WorkflowRestrictionSummary {
   }>;
 }
 
+export function formatWorkflowRestrictionReason(reason: string) {
+  switch (String(reason || "").toLowerCase()) {
+    case "active_hold":
+      return "Active hold";
+    case "pending_reminder":
+      return "Pending reminder";
+    case "reminder_response":
+      return "Reminder response";
+    case "task_pushed":
+      return "Task pushed";
+    case "task_created":
+      return "Task created";
+    case "not_involved_existing_workflow":
+      return "Existing workflow on related document";
+    case "resolution":
+      return "Resolution";
+    case "deactivation":
+      return "Deactivation";
+    default:
+      return String(reason || "").replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+}
+
 const ACTIVE_TASK_STATUSES = new Set([
   "new",
   "pending",
@@ -101,7 +124,10 @@ const RESTRICTIVE_RESOLUTION_OUTCOMES = new Set([
   "no_action_required",
 ]);
 
-function getWorkflowPayloadEntries(payload: any, section: "holds" | "comments" | "reminders" | "tasks" | "resolutions") {
+function getWorkflowPayloadEntries(source: any, section: "holds" | "comments" | "reminders" | "tasks" | "resolutions") {
+  if (Array.isArray(source?.[section])) return [...source[section]];
+
+  const payload = source?.payload || source || {};
   const workflowState = payload?.workflow && typeof payload.workflow === "object" ? payload.workflow : payload || {};
   const entries = workflowState?.[section];
   if (Array.isArray(entries)) return [...entries];
@@ -163,10 +189,10 @@ export function evaluateWorkflowRestrictionsForBundle(workflowLogs: any[], bundl
     .filter((log: any) => log.document_type_id && relatedDocumentTypeIds.includes(String(log.document_type_id)))
     .forEach((log: any) => {
       const documentTypeId = String(log.document_type_id);
-      const reminders = getWorkflowPayloadEntries(log.payload, "reminders");
-      const holds = getWorkflowPayloadEntries(log.payload, "holds");
-      const tasks = getWorkflowPayloadEntries(log.payload, "tasks");
-      const resolutions = getWorkflowPayloadEntries(log.payload, "resolutions");
+      const reminders = getWorkflowPayloadEntries(log, "reminders");
+      const holds = getWorkflowPayloadEntries(log, "holds");
+      const tasks = getWorkflowPayloadEntries(log, "tasks");
+      const resolutions = getWorkflowPayloadEntries(log, "resolutions");
 
       const latestHold = holds[holds.length - 1];
       if (latestHold && !latestHold.dismissed && latestHold.holdUntil && new Date(latestHold.holdUntil) > new Date()) {
@@ -186,7 +212,7 @@ export function evaluateWorkflowRestrictionsForBundle(workflowLogs: any[], bundl
           matchedEntries.push({
             documentTypeId,
             reason: "pending_reminder",
-            action: "reminder_sent",
+            action: log.action_type === 'reminder_sent' ? 'reminder_sent' : 'reminder_response', // Use actual action type
             date: latestReminder.sentAt || log.updated_at || log.created_at,
           });
         } else if (String(latestReminder.response).toLowerCase() !== "task") {
@@ -202,12 +228,20 @@ export function evaluateWorkflowRestrictionsForBundle(workflowLogs: any[], bundl
       }
 
       const latestTask = tasks[tasks.length - 1];
-      if (latestTask && !latestTask.dismissed && getActiveTaskIds(latestTask).length > 0) {
+      const hasLinkedCreatedTasks = getActiveTaskIds(latestTask).length > 0;
+      if (
+        latestTask &&
+        !latestTask.dismissed &&
+        (
+          hasLinkedCreatedTasks ||
+          (log.action_type === "task_pushed" && (!latestTask.taskIds || latestTask.taskIds.length === 0))
+        )
+      ) {
         matchedDocumentTypes.add(documentTypeId);
         matchedEntries.push({
           documentTypeId,
-          reason: "active_task_push",
-          action: "task_pushed",
+          reason: log.action_type === "task_created" ? "task_created" : "task_pushed",
+          action: log.action_type === 'task_created' ? 'task_created' : 'task_pushed', // Use actual action type
           date: latestTask.createdAt || log.updated_at || log.created_at,
         });
       }
@@ -254,9 +288,9 @@ export async function detectExistingWorkflowForIndividual(individualId: number) 
   const [workflowResult, taskResult] = await Promise.all([
     supabase
       .from("document_workflow_logs")
-      .select("id, individual_id, document_type_id, uploaded_doc_id, action_type, payload, created_at, updated_at")
+      .select("id, individual_id, document_type_id, uploaded_doc_id, action_type, payload, holds, comments, reminders, tasks, resolutions, created_at, updated_at")
       .eq("individual_id", individualId)
-      .in("action_type", ["hold", "comment", "reminder_sent", "reminder_response", "task_pushed", "resolution", "deactivation"])
+      .in("action_type", ["hold", "comment", "reminder_sent", "reminder_response", "task_pushed", "task_created", "resolution", "deactivation"])
       .order("updated_at", { ascending: false })
       .limit(200),
     supabase

@@ -21,7 +21,7 @@ import supabase from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
 import { format } from "date-fns"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, taskBundleService } from "../utils/workflowBundleHelpers"
+import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, formatWorkflowRestrictionReason, taskBundleService } from "../utils/workflowBundleHelpers"
 
 const CLASS_D_ID = '1750687058159';
 const SPONSOR_SUBDEPT_ID = '26';
@@ -1097,12 +1097,12 @@ export function EnquiryDialog({
                                                 ) : duplicateTaskConflicts.length === 0 && workflowRestrictionSummary?.hasBlockingWorkflow ? (
                                                     <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
                                                         Workflow restriction detected for this selected job level.
-                                                        {` Blocking state(s): ${(workflowRestrictionSummary.blockingReasons || []).join(", ")}.`}
+                                                        {` Blocking state(s): ${(workflowRestrictionSummary.blockingReasons || []).map(formatWorkflowRestrictionReason).join(", ")}.`}
                                                     </div>
                                                 ) : formData.department_id && selectedJobLevelBundle && workflowRestrictionSummary?.matchedDocumentTypes?.length > 0 ? (
                                                     <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
                                                         Workflow history exists for this selected job level.
-                                                        {` ${workflowRestrictionSummary.matchedDocumentTypes.length} related workflow target(s) detected for the matched bundle.`}
+                                                        {` ${workflowRestrictionSummary.matchedDocumentTypes.length} related workflow target(s) detected for the matched bundle, including pushed-only task workflow states.`}
                                                     </div>
                                                 ) : (
                                                     <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700">
