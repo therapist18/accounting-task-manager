@@ -92,6 +92,11 @@ const formatDateTimeForDisplay = (date: any): string => {
   try { return format(d, 'dd/MM/yyyy HH:mm'); } catch { return '-'; }
 };
 
+const getElapsedMinutes = (from: Date | null, to: Date = new Date()): number | null => {
+  if (!from || Number.isNaN(from.getTime())) return null;
+  return Math.max(0, Math.floor((to.getTime() - from.getTime()) / 60000));
+};
+
 const safeRender = (content: any) => {
   if (React.isValidElement(content)) return content;
   if (typeof content === 'string' || typeof content === 'number') return content;
@@ -184,7 +189,7 @@ export default function ReportsPage() {
   const [view, setView] = useState<'standard' | 'transposed'>('standard');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(100);
-  const [expandedSections, setExpandedSections] = useState(() => new Set(['task_details']));
+  const [expandedSections, setExpandedSections] = useState(() => new Set(['task_details', 'time_tracking']));
   const [showTimeStatuses, setShowTimeStatuses] = useState(false);
   const [showNARows, setShowNARows] = useState(true);
 
@@ -429,18 +434,6 @@ export default function ReportsPage() {
     }).filter(Boolean);
   }, [allDocuments]);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Applicability helpers
-  // ─────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Per-task check — used when rendering individual cells.
-   * This is the primary applicability gate, consistent with EditableStageCell.
-   */
-  const checkStageApplicableForTask = useCallback((stage: any, task: any): boolean => {
-    return isStageApplicableToTask(stage, task, departments);
-  }, [departments]);
-
   const isDocumentApplicable = useCallback((doc: any, task: any): boolean => {
     if (!doc || !task) return false;
     if (doc.isSpecial !== true) return true;
@@ -453,6 +446,69 @@ export default function ReportsPage() {
       return classMatch && subdeptMatch;
     });
   }, []);
+
+  const getTaskInitiatedDate = useCallback((task: any) => {
+    return parseDate(task?.date_initiated || task?.created_at || null);
+  }, []);
+
+  const getStageHandledDate = useCallback((task: any, stage: any) => {
+    const stageData = task?.stages?.[stage?.id];
+    if (!stageData) return null;
+
+    const directDate = parseDate(
+      stageData.completedAt ||
+      stageData.skippedAt ||
+      stageData.date_completed ||
+      stageData.date ||
+      stageData.lastUpdated ||
+      null
+    );
+
+    if (directDate) return directDate;
+
+    let linkedDocs: any[] = [];
+    if (stage?.documents?.length > 0) {
+      linkedDocs = stage.documents.flatMap((docConfig: any) => {
+        if (!isDocumentApplicable(docConfig, task)) return [];
+        return getDocumentForTaskStage(task, { ...stage, documents: [docConfig] });
+      }).filter((d: any) => d && !d.indicator);
+    }
+
+    const primaryDoc = linkedDocs[0];
+    const docFields = primaryDoc ? kycDocuments.get(primaryDoc.kyc_id || primaryDoc.document_id)?.fields : [];
+    const completionDateStr = calculateStageDate(stage, stageData, primaryDoc, docFields, null, false);
+    return parseDate(completionDateStr);
+  }, [getDocumentForTaskStage, isDocumentApplicable, kycDocuments]);
+
+  const getCurrentStageTracking = useCallback((task: any) => {
+    const applicableStages = [...stages]
+      .filter(stage => checkStageApplicableForTask(stage, task))
+      .sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
+
+    let latest: { stage: any; handledAt: Date } | null = null;
+
+    applicableStages.forEach(stage => {
+      const handledAt = getStageHandledDate(task, stage);
+      if (!handledAt) return;
+      if (!latest || handledAt.getTime() > latest.handledAt.getTime()) {
+        latest = { stage, handledAt };
+      }
+    });
+
+    return latest;
+  }, [stages, checkStageApplicableForTask, getStageHandledDate]);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Applicability helpers
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Per-task check — used when rendering individual cells.
+   * This is the primary applicability gate, consistent with EditableStageCell.
+   */
+  function checkStageApplicableForTask(stage: any, task: any): boolean {
+    return isStageApplicableToTask(stage, task, departments);
+  }
 
   /**
    * Column-level check — determines whether to show a stage column in the
@@ -560,12 +616,19 @@ export default function ReportsPage() {
     if (col.type === 'task') {
       return getRawCellValue(departments, task, col.field, enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper);
     }
+    if (col.type === 'current_stage_age') {
+      const tracking = getCurrentStageTracking(task);
+      return getElapsedMinutes(tracking?.handledAt || null) ?? -1;
+    }
+    if (col.type === 'total_process_age') {
+      return getElapsedMinutes(getTaskInitiatedDate(task)) ?? -1;
+    }
     if (col.type === 'stage_date') {
       const d = task.stages?.[col.stageId]?.date;
       return d ? parseDate(d)?.getTime() || 0 : 0;
     }
     return '';
-  }, [departments, enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, kycDocuments]);
+  }, [departments, enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, kycDocuments, getCurrentStageTracking, getTaskInitiatedDate]);
 
   const handleSort = (columnId: string) => {
     setSortConfig(cur => {
@@ -595,6 +658,18 @@ export default function ReportsPage() {
     fieldsToDisplay.forEach((fieldId: string) => {
       if (!fieldId) return;
       cols.push({ id: `task_${fieldId}`, label: getLabel(fieldId), type: 'task', field: fieldId });
+    });
+
+    cols.push({
+      id: 'current_stage_age',
+      label: 'Days In Current Stage',
+      type: 'current_stage_age'
+    });
+
+    cols.push({
+      id: 'total_process_age',
+      label: 'Total Process Time',
+      type: 'total_process_age'
     });
 
     const activeStageIds = Object.keys(activeReport.configuration?.stages || {});
@@ -702,6 +777,58 @@ export default function ReportsPage() {
   // ─────────────────────────────────────────────────────────────────────────
 
   const renderCellValue = useCallback((task: any, col: any) => {
+    if (col.type === 'current_stage_age') {
+      const tracking = getCurrentStageTracking(task);
+      const elapsedMinutes = getElapsedMinutes(tracking?.handledAt || null);
+
+      if (!tracking || elapsedMinutes == null) {
+        return <span className="text-slate-300">-</span>;
+      }
+
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="flex items-center gap-1.5 text-xs font-medium text-blue-700">
+              <Clock3 className="h-3.5 w-3.5" />
+              <span>{formatDuration(elapsedMinutes)}</span>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent className="border border-blue-200 bg-blue-50 text-slate-900 shadow-md">
+            <div className="space-y-1 text-xs">
+              <div><span className="font-semibold">Stage:</span> {tracking.stage?.name || '-'}</div>
+              <div><span className="font-semibold">Handled:</span> {formatDateTimeForDisplay(tracking.handledAt)}</div>
+              <div><span className="font-semibold">Elapsed:</span> {formatDuration(elapsedMinutes)}</div>
+            </div>
+          </TooltipContent>
+        </Tooltip>
+      );
+    }
+
+    if (col.type === 'total_process_age') {
+      const initiatedAt = getTaskInitiatedDate(task);
+      const elapsedMinutes = getElapsedMinutes(initiatedAt);
+
+      if (!initiatedAt || elapsedMinutes == null) {
+        return <span className="text-slate-300">-</span>;
+      }
+
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="flex items-center gap-1.5 text-xs font-medium text-violet-700">
+              <Timer className="h-3.5 w-3.5" />
+              <span>{formatDuration(elapsedMinutes)}</span>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent className="border border-violet-200 bg-violet-50 text-slate-900 shadow-md">
+            <div className="space-y-1 text-xs">
+              <div><span className="font-semibold">Initiated:</span> {formatDateTimeForDisplay(initiatedAt)}</div>
+              <div><span className="font-semibold">Elapsed:</span> {formatDuration(elapsedMinutes)}</div>
+            </div>
+          </TooltipContent>
+        </Tooltip>
+      );
+    }
     // ── Stage date column ────────────────────────────────────────────────
     if (col.type === 'stage_date') {
       const stage = stages.find(s => s.id === col.stageId);
@@ -936,7 +1063,8 @@ export default function ReportsPage() {
     stages, departments, kycDocuments, allDocuments, companies,
     enhancedTasksData, taskDependants, showTimeStatuses,
     checkStageApplicableForTask, isDocumentApplicable, getDocumentForTaskStage,
-    getStaffName, getTaskHierarchy, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper
+    getStaffName, getTaskHierarchy, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper,
+    getCurrentStageTracking, getTaskInitiatedDate
   ]);
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -947,6 +1075,20 @@ export default function ReportsPage() {
     if (col.type === 'task') {
       const val = getRawCellValue(departments, task, col.field, enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper);
       return val == null ? '' : String(val);
+    }
+
+    if (col.type === 'current_stage_age') {
+      const tracking = getCurrentStageTracking(task);
+      const elapsedMinutes = getElapsedMinutes(tracking?.handledAt || null);
+      if (!tracking || elapsedMinutes == null) return '-';
+      return `${formatDuration(elapsedMinutes)} (${tracking.stage?.name || 'Stage'} since ${formatDateTimeForDisplay(tracking.handledAt)})`;
+    }
+
+    if (col.type === 'total_process_age') {
+      const initiatedAt = getTaskInitiatedDate(task);
+      const elapsedMinutes = getElapsedMinutes(initiatedAt);
+      if (!initiatedAt || elapsedMinutes == null) return '-';
+      return `${formatDuration(elapsedMinutes)} (since ${formatDateTimeForDisplay(initiatedAt)})`;
     }
 
     if (col.type === 'stage_date') {
@@ -995,9 +1137,8 @@ export default function ReportsPage() {
       if ((foundDoc as any).indicator) return 'Indicator';
       return (col.fieldType === 'Date' || col.fieldType === 'date') ? formatDateForDisplay(foundValue) : String(foundValue || '-');
     }
-
     return '';
-  }, [departments, stages, kycDocuments, companies, enhancedTasksData, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, checkStageApplicableForTask, isDocumentApplicable, getDocumentForTaskStage]);
+  }, [departments, stages, kycDocuments, companies, enhancedTasksData, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, checkStageApplicableForTask, isDocumentApplicable, getDocumentForTaskStage, getCurrentStageTracking, getTaskInitiatedDate]);
 
   const handleExport = async (type: 'excel' | 'pdf') => {
     if (type !== 'excel') {
@@ -1098,9 +1239,11 @@ export default function ReportsPage() {
     const groups: any[] = [];
     const taskCols = filteredColumns.filter(c => c.type === 'task');
     if (taskCols.length) groups.push({ id: 'task_info', label: 'Task Details', span: taskCols.length, applicable: true });
+    const trackingCols = filteredColumns.filter(c => c.type === 'current_stage_age' || c.type === 'total_process_age');
+    if (trackingCols.length) groups.push({ id: 'time_tracking', label: 'Time Tracking', span: trackingCols.length, applicable: true });
 
     const stageMap = new Map<string, { id: string; label: string; count: number; applicable: boolean }>();
-    filteredColumns.filter(c => c.type !== 'task').forEach(col => {
+    filteredColumns.filter(c => c.type !== 'task' && c.type !== 'current_stage_age' && c.type !== 'total_process_age').forEach(col => {
       if (!stageMap.has(col.stageId)) {
         stageMap.set(col.stageId, {
           id: col.stageId,
@@ -1130,7 +1273,17 @@ export default function ReportsPage() {
     if (expandedSections.has('task_details')) {
       filteredColumns.filter(c => c.type === 'task').forEach(c => rows.push({ ...c, isSubRow: true }));
     }
-    const stageGroups = new Set(filteredColumns.filter(c => c.type !== 'task').map(c => c.stageId));
+    rows.push({ type: 'section_header', id: 'time_tracking', label: 'Time Tracking', icon: Clock3 });
+    if (expandedSections.has('time_tracking')) {
+      filteredColumns
+        .filter(c => c.type === 'current_stage_age' || c.type === 'total_process_age')
+        .forEach(c => rows.push({ ...c, isSubRow: true }));
+    }
+    const stageGroups = new Set(
+      filteredColumns
+        .filter(c => c.type !== 'task' && c.type !== 'current_stage_age' && c.type !== 'total_process_age')
+        .map(c => c.stageId)
+    );
     stageGroups.forEach(stageId => {
       const stage = stages.find(s => s.id === stageId);
       if (!stage) return;

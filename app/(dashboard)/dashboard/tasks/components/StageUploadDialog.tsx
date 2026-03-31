@@ -17,6 +17,16 @@ import { UploadModal } from "@/app/generic-components/UploadModal"
 import { v4 as uuidv4 } from 'uuid'
 import { performExtraction } from '@/lib/extractionUtils'
 import supabase from "@/lib/supabase/client";
+import {
+  updateDocumentWorkflow,
+  shouldTriggerWorkflowUpdate,
+  WORKFLOW_OUTCOME_LABELS,
+  TASK_STAGE_WORKFLOW_MAPPING,
+  getWorkflowLogsForIndividual,
+  setupWorkflowRealtimeSubscription,
+  setupTaskRealtimeSubscription,
+  cleanupRealtimeSubscriptions
+} from "../utils/workflowSyncService";
 
 const sanitizeFilename = (filename: string): string => {
   return filename
@@ -176,7 +186,8 @@ const DocumentTabPanel = ({
   onPreviewExisting,
   onUseExistingLink,
   messageState,
-  onMessageStateChange
+  onMessageStateChange,
+  workflowDocuments = {}
 }) => {
   const [useExisting, setUseExisting] = useState(false);
   const [selectedExistingId, setSelectedExistingId] = useState("");
@@ -332,8 +343,18 @@ const DocumentTabPanel = ({
                                 Source
                               </span>
                             )}
+                            {workflowDocuments[ed.id] && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                {workflowDocuments[ed.id].workflowOutcome || 'Workflow Document'}
+                              </span>
+                            )}
                           </div>
                           <p className="text-xs text-slate-500">{format(parseISO(ed.created_at), 'dd MMM yyyy')}</p>
+                          {workflowDocuments[ed.id] && (
+                            <p className="text-xs text-slate-400 mt-1">
+                              Workflow: {workflowDocuments[ed.id].workflowAction} - {format(parseISO(workflowDocuments[ed.id].created_at), 'dd MMM yyyy')}
+                            </p>
+                          )}
                         </div>
                         <Button
                           variant="ghost"
@@ -463,6 +484,8 @@ export function StageUploadDialog({
   const [linkedDocuments, setLinkedDocuments] = useState<Record<string, any>>({});
   const [pendingDocuments, setPendingDocuments] = useState<Record<string, any>>({});
   const [selectedSourceDocs, setSelectedSourceDocs] = useState<Record<string, any[]>>({ selected: [] });
+  const [workflowDocuments, setWorkflowDocuments] = useState<Record<string, any>>({});
+  const [realtimeSubscriptions, setRealtimeSubscriptions] = useState<any[]>([]);
   const [previewState, setPreviewState] = useState({
     isOpen: false,
     loading: false,
@@ -560,10 +583,16 @@ export function StageUploadDialog({
             .order('created_at', { ascending: false })
         );
 
-        const [kycRes, userDocsRes] = await Promise.all(promises);
+        // NEW: Fetch workflow logs to understand existing workflow documents
+        promises.push(
+          getWorkflowLogsForIndividual(task.individual_id).then(logs => ({ data: logs }))
+        );
+
+        const [kycRes, userDocsRes, workflowRes] = await Promise.all(promises);
 
         const newKycMap = new Map();
         const newDocFieldsMap: Record<string, any[]> = {};
+        const workflowDocMap: Record<string, any> = {};
 
         if (kycRes.data) {
           kycRes.data.forEach((kycData: any) => {
@@ -599,6 +628,35 @@ export function StageUploadDialog({
           newDocFieldsMap[doc.id] = fields;
         });
 
+        // Process workflow documents to understand existing workflow context
+        if (workflowRes.data) {
+          workflowRes.data.forEach((log: any) => {
+            // Check if this log represents a completed workflow
+            const isCompleted = log.resolutions && log.resolutions.length > 0;
+
+            // For completed workflows, use the resolution outcome
+            if (isCompleted && log.resolutions[0]) {
+              workflowDocMap[log.uploaded_doc_id] = {
+                ...log,
+                isWorkflowDocument: true,
+                workflowAction: log.action_type,
+                workflowOutcome: log.resolutions[0].outcome,
+                isCompleted: true
+              };
+            }
+            // Also track the document type for workflow detection
+            if (log.document_type_id) {
+              workflowDocMap[log.document_type_id] = {
+                ...log,
+                isWorkflowDocument: true,
+                workflowAction: log.action_type,
+                workflowOutcome: isCompleted ? log.resolutions[0].outcome : log.action_type,
+                isCompleted: isCompleted
+              };
+            }
+          });
+        }
+
         const groupedDocs: Record<string, any[]> = {};
         if (userDocsRes.data) {
           applicableDocuments.forEach((stageDoc: any) => {
@@ -612,6 +670,7 @@ export function StageUploadDialog({
         setKycDocuments(newKycMap);
         setDocFieldsMap(newDocFieldsMap);
         setExistingDocuments(groupedDocs);
+        setWorkflowDocuments(workflowDocMap);
 
       } catch (error) {
         console.error("Error initializing stage upload dialog:", error);
@@ -905,6 +964,62 @@ export function StageUploadDialog({
         stageId: stage.id,
         source: 'stage-upload'
       });
+
+      // NEW: Update document workflow if this stage should trigger it
+      if (shouldTriggerWorkflowUpdate(stage.id)) {
+        try {
+          // Get the final uploaded document for this stage
+          const finalDocId = uploadedDocIds.size > 0 ?
+            Object.values(updatedLinkedDocs).find(doc => doc)?.id : null;
+
+          // Check if there's already a completed workflow for this document type
+          const existingWorkflowDoc = Object.values(workflowDocuments).find(
+            (doc: any) => {
+              // Check for completed workflows by looking at resolutions
+              return doc.document_type_id === task.linked_document_type_id &&
+                doc.isCompleted === true &&
+                ['renewed_by_client', 'task_completed', 'task_endorsed'].includes(doc.workflowOutcome)
+            }
+          );
+
+          let workflowOutcome = WORKFLOW_OUTCOME_LABELS[TASK_STAGE_WORKFLOW_MAPPING[stage.id]];
+
+          // If there's already a completed workflow, use a more specific outcome
+          if (existingWorkflowDoc && stage.id === 'writeup_completed') {
+            workflowOutcome = 'Document Write-up Updated';
+          }
+
+          const workflowResult = await updateDocumentWorkflow(
+            task.id,
+            stage.id,
+            finalDocId,
+            workflowOutcome
+          );
+
+          if (workflowResult.success) {
+            toast({
+              title: 'Workflow Updated',
+              description: `Document workflow updated: ${workflowResult.data.outcome}`,
+              variant: 'default'
+            });
+          } else {
+            console.error('Workflow update failed:', workflowResult.error);
+            toast({
+              title: 'Workflow Update Failed',
+              description: 'Task was saved but workflow update failed',
+              variant: 'destructive'
+            });
+          }
+        } catch (workflowError) {
+          console.error('Error updating workflow:', workflowError);
+          toast({
+            title: 'Workflow Update Error',
+            description: 'Task was saved but workflow update encountered an error',
+            variant: 'destructive'
+          });
+        }
+      }
+
       onOpenChange(false);
     } catch (error) {
       console.error('Error saving documents:', error);
@@ -1103,6 +1218,7 @@ export function StageUploadDialog({
                         onUseExistingLink={handleUseExisting}
                         messageState={tabMessageStates[doc.id]}
                         onMessageStateChange={(docId, message) => setTabMessageStates(prev => ({ ...prev, [docId]: message }))}
+                        workflowDocuments={workflowDocuments}
                       />
                     </div>
                   ))

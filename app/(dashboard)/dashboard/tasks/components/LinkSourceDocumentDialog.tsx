@@ -9,6 +9,9 @@ import { format, parseISO } from "date-fns";
 import { supabase } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import {
+  getWorkflowLogsForIndividual
+} from "../utils/workflowSyncService";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -193,7 +196,7 @@ const getDocumentsLinkedToOtherTasks = async (
     if (error) throw error;
 
     const linkedDocIds = new Set<string>();
-    
+
     if (tasks) {
       tasks.forEach((task: TaskDocumentLink) => {
         if (task.source_document_id && typeof task.source_document_id === "object") {
@@ -233,6 +236,7 @@ export function LinkSourceDocumentDialog({
   const [loadingPreviewId, setLoadingPreviewId] = useState<number | null>(null);
   const [documentsLinkedToOtherTasks, setDocumentsLinkedToOtherTasks] = useState<Set<string>>(new Set());
   const [isLoadingLinkedDocs, setIsLoadingLinkedDocs] = useState(false);
+  const [workflowDocuments, setWorkflowDocuments] = useState<Record<string, any>>({});
 
   const initialSelectedDocs = useMemo(() => {
     const normalized: Record<string, SelectedDoc[]> = {};
@@ -267,6 +271,50 @@ export function LinkSourceDocumentDialog({
         .finally(() => setIsLoadingLinkedDocs(false));
     }
   }, [open, task?.id, task?.individual_id]);
+
+  // Fetch workflow documents when dialog opens
+  useEffect(() => {
+    if (open && task?.individual_id) {
+      getWorkflowLogsForIndividual(task.individual_id)
+        .then((logs) => {
+          const workflowDocMap: Record<string, any> = {};
+
+          // Process workflow logs to understand existing workflow context
+          if (logs) {
+            logs.forEach((log: any) => {
+              // Check if this log represents a completed workflow
+              const isCompleted = log.resolutions && log.resolutions.length > 0;
+
+              // For completed workflows, use resolution outcome
+              if (isCompleted && log.resolutions[0]) {
+                workflowDocMap[log.uploaded_doc_id] = {
+                  ...log,
+                  isWorkflowDocument: true,
+                  workflowAction: log.action_type,
+                  workflowOutcome: log.resolutions[0].outcome,
+                  isCompleted: true
+                };
+              }
+              // Also track the document type for workflow detection
+              if (log.document_type_id) {
+                workflowDocMap[log.document_type_id] = {
+                  ...log,
+                  isWorkflowDocument: true,
+                  workflowAction: log.action_type,
+                  workflowOutcome: isCompleted ? log.resolutions[0].outcome : log.action_type,
+                  isCompleted: isCompleted
+                };
+              }
+            });
+          }
+
+          setWorkflowDocuments(workflowDocMap);
+        })
+        .catch((error) => {
+          console.error("Error loading workflow documents:", error);
+        });
+    }
+  }, [open, task?.individual_id]);
 
   useEffect(() => {
     if (open) {
@@ -319,7 +367,7 @@ export function LinkSourceDocumentDialog({
       return { ...prev, [stageId]: currentSelections };
     });
   }, []);
-  
+
   const fetchKycDocumentData = useCallback(async (kycId: string): Promise<KycDocument | null> => {
     try {
       const { data, error } = await supabase
@@ -350,7 +398,7 @@ export function LinkSourceDocumentDialog({
       } : undefined,
     }));
   }, []);
-  
+
   const handlePreviewClick = useCallback(async (doc: Document) => {
     setLoadingPreviewId(doc.id);
     try {
@@ -362,7 +410,7 @@ export function LinkSourceDocumentDialog({
 
       // Get the file name from the path
       const fileName = doc.file_path?.split('/').pop() || 'document.pdf';
-      
+
       const fileUrl = doc.file_path ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${doc.file_path}` : null;
       if (!fileUrl) {
         throw new Error('No file URL available for preview');
@@ -387,10 +435,10 @@ export function LinkSourceDocumentDialog({
       setIsPreviewOpen(true);
     } catch (error) {
       console.error("Error preparing preview:", error);
-      toast({ 
-        title: 'Error', 
-        description: 'Failed to prepare document for preview.', 
-        variant: 'destructive' 
+      toast({
+        title: 'Error',
+        description: 'Failed to prepare document for preview.',
+        variant: 'destructive'
       });
     } finally {
       setLoadingPreviewId(null);
@@ -417,13 +465,13 @@ export function LinkSourceDocumentDialog({
                 <div className="space-y-6 py-4">
                   {applicableStages.map((stage) => {
                     // Filter stage documents to only those applicable to this task
-                    const applicableDocuments = stage.documents?.filter((doc) => 
+                    const applicableDocuments = stage.documents?.filter((doc) =>
                       isDocumentApplicableToTask(doc, task)
                     ) || [];
-                    
+
                     // Get KYC IDs only from applicable documents
                     const stageDocTypes = new Set(applicableDocuments.map((d) => d.kycId));
-                    
+
                     const availableDocs = allDocuments
                       .filter(
                         (d) =>
@@ -477,7 +525,12 @@ export function LinkSourceDocumentDialog({
                                     </Button>
                                     <div className="text-xs text-slate-500 text-right">
                                       <p>Uploaded:</p>
-                                      <p>{format(parseISO(doc.created_at), "dd MMM yyyy")}</p>
+                                      <p>{format(parseISO(doc.created_at), 'dd MMM yyyy')}</p>
+                                      {workflowDocuments[doc.id.toString()] && (
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 ml-2">
+                                          {workflowDocuments[doc.id.toString()].workflowOutcome || 'Workflow Document'}
+                                        </span>
+                                      )}
                                     </div>
                                   </div>
                                 </div>
@@ -507,7 +560,7 @@ export function LinkSourceDocumentDialog({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      
+
       <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
         <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col">
           <DialogHeader>
