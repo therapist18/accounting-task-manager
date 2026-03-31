@@ -1137,6 +1137,7 @@ export default function EditableStageCell({
                   <DialogTitle className="text-lg">
                     <div className="flex items-center justify-between">
                       <div>
+                        {stage?.name && <span>{stage.name}: </span>}
                         {task?.name}
                         {task?.client_name && ` - ${task.client_name}`}
                       </div>

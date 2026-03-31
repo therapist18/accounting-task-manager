@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, Send, FileText, MessageSquare, Star, Eye, Check } from "lucide-react"
+import { Loader2, Send, FileText, MessageSquare, Star, Eye, Check, FileUp, Trash2, CheckCircle2 } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { toast } from "@/hooks/use-toast"
@@ -31,9 +31,9 @@ const transformKycFields = (fields: any[]): any[] => {
     const isArray = field.type === 'array' || field.isArray === true
     const fieldName = field.name || field.fieldName || '';
     const transformedField: any = {
-      id: field.id || fieldName,  // Keep the ID for internal reference
-      fieldName: fieldName,       // Use the name as the primary identifier
-      name: fieldName,            // Ensure name is set for consistency
+      id: field.id || fieldName,
+      fieldName: fieldName,
+      name: fieldName,
       description: field.description || '',
       isRequired: field.isRequired !== false,
       fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
@@ -51,27 +51,27 @@ const transformKycFields = (fields: any[]): any[] => {
 }
 
 const processExtractedData = (data: any, fields: any[]): any => {
-  if (!data || typeof data !== 'object') return data;
-  
-  // Create a new object to store the processed data
+  if (!data || typeof data !== 'object') {
+    return data;
+  }
+
   const result: Record<string, any> = {};
-  
-  // First, handle all fields to ensure we process them in the correct order
-  fields.forEach(field => {
+
+  fields.forEach((field, index) => {
     const fieldId = field.id;
     const fieldName = field.name || field.fieldName;
-    
-    if (!fieldName) return; // Skip if no valid field name
-    
-    // Check if the data exists with either ID or name as key
-    const value = data[fieldId] !== undefined ? data[fieldId] : 
-                 data[fieldName] !== undefined ? data[fieldName] : 
-                 undefined;
-    
+
+    if (!fieldName) {
+      return;
+    }
+
+    const value = data[fieldId] !== undefined ? data[fieldId] :
+      data[fieldName] !== undefined ? data[fieldName] :
+        undefined;
+
     if (value !== undefined) {
-      // Process nested objects and arrays
       if (field.isArray && Array.isArray(value)) {
-        result[fieldName] = value.map((item: any) => {
+        result[fieldName] = value.map((item: any, itemIndex: number) => {
           if (field.arrayConfig?.fields) {
             return processExtractedData(item, field.arrayConfig.fields);
           }
@@ -84,33 +84,44 @@ const processExtractedData = (data: any, fields: any[]): any => {
       }
     }
   });
-  
-  // Copy any remaining fields that weren't in our field definitions
+
   Object.entries(data).forEach(([key, value]) => {
-    // Skip if we've already processed this field
     if (!(key in result)) {
-      // Only copy if it's not an ID-based key
       if (!fields.some(f => f.id === key)) {
         result[key] = value;
       }
     }
   });
-  
+
   return result;
 };
 
-// Filter documents applicable to the current task context
 const isDocumentApplicableToTask = (doc: any, task: any, childContext: any = null) => {
-  if (!doc.isSpecial) return true;
+  if (!doc.isSpecial) {
+    return true;
+  }
 
   if (doc.targetEntities?.length > 0) {
     const matchesTarget = doc.targetEntities.some((entity: any) => {
-      const classMatch = entity.class_id ? entity.class_id.toString() === task.class_id?.toString() : true;
-      const subdeptMatch = entity.subdept_id ? entity.subdept_id.toString() === task.subdepartment?.id?.toString() : true;
-      return classMatch && subdeptMatch;
+      const taskClassId = task.class_id?.toString();
+      const taskSubdeptId = task.subdepartment_id?.toString();
+      const entityClassId = entity.job_level?.class_id?.toString();
+      const entitySubdeptId = entity.job_level?.subdepartment_id?.toString();
+      const entityDeptId = entity.job_level?.department_id?.toString();
+
+      const deptMatch = !entityDeptId || entityDeptId === task.department_id?.toString();
+      if (!deptMatch) return false;
+
+      const subdeptMatch = !entitySubdeptId || entitySubdeptId === taskSubdeptId;
+      if (!subdeptMatch) return false;
+
+      const classMatch = !entityClassId || entityClassId === taskClassId;
+      if (!classMatch) return false;
+
+      return true;
     });
-    if (!matchesTarget) return false;
-    return true;
+
+    return matchesTarget;
   }
 
   const taskClassId = task.class_id?.toString();
@@ -148,7 +159,7 @@ const isDocumentApplicableToTask = (doc: any, task: any, childContext: any = nul
   }
 
   return false;
-}
+};
 
 // --- Sub-Component: Document Tab Panel ---
 const DocumentTabPanel = ({
@@ -163,15 +174,25 @@ const DocumentTabPanel = ({
   isSourceDocSelected,
   onUploadSuccess,
   onPreviewExisting,
-  onUseExistingLink
+  onUseExistingLink,
+  messageState,
+  onMessageStateChange
 }) => {
   const [useExisting, setUseExisting] = useState(false);
   const [selectedExistingId, setSelectedExistingId] = useState("");
-  const [messageText, setMessageText] = useState("");
+  const [messageText, setMessageText] = useState(messageState || "");
   const [isConverting, setIsConverting] = useState(false);
   const [generatedFile, setGeneratedFile] = useState<File | null>(null);
 
-  // Sync with locked state
+  useEffect(() => {
+    setMessageText(messageState || "");
+  }, [messageState]);
+
+  const handleMessageTextChange = (value: string) => {
+    setMessageText(value);
+    onMessageStateChange?.(doc.id, value);
+  };
+
   useEffect(() => {
     if (isLocked && linkedDocInstanceId) {
       setUseExisting(true);
@@ -182,31 +203,28 @@ const DocumentTabPanel = ({
   const documentName = kycData?.display_name || kycData?.name || doc.name || 'Document';
   const inputType = doc.inputType || (doc.isSpecial ? 'file' : 'both');
 
-  // Convert Text to PDF and pass to UploadModal
   const handleConvertAndUpload = async () => {
     if (!messageText.trim()) return;
     setIsConverting(true);
 
     try {
-      // Convert text to PDF
       const response = await fetch('/api/convert-message-to-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          message: messageText, 
-          documentType: documentName 
+        body: JSON.stringify({
+          message: messageText,
+          documentType: documentName
         })
       });
 
       if (!response.ok) throw new Error('Failed to convert text to PDF');
-      
+
       const blob = await response.blob();
       const fileName = `${documentName.replace(/\s+/g, '_')}_${Date.now()}.pdf`;
       const file = new File([blob], fileName, { type: 'application/pdf' });
-      
-      // Set the generated file - UploadModal will handle extraction and preview
+
       setGeneratedFile(file);
-      
+
       toast({
         title: 'Success',
         description: 'PDF generated successfully. Review the document below.',
@@ -224,27 +242,53 @@ const DocumentTabPanel = ({
   };
 
   const handlePendingChange = useCallback((docs: any[]) => {
-    console.log('[DocumentTabPanel] handlePendingChange called:', docs);
     if (docs && docs.length > 0) {
-      const activeDoc = docs[0];
-      console.log('[DocumentTabPanel] Active doc:', activeDoc);
-      
-      if (activeDoc.file) {
-        const payload = {
-          file: activeDoc.file,
-          extractedData: activeDoc.extractedData || {},
-          kycId: doc.kycId,
-          name: doc.name
-        };
-        console.log('[DocumentTabPanel] Calling onUploadSuccess with payload:', payload);
-        onUploadSuccess(payload, doc);
+      // Only extract docs that are fully validated and extracted successfully
+      const readyDocs = docs.filter(d =>
+        (d.validationStatus === 'valid' || d.validationStatus === 'warning') &&
+        d.extractedData && Object.keys(d.extractedData).length > 0
+      );
+
+      if (readyDocs.length > 0) {
+        onUploadSuccess({ files: readyDocs }, doc);
+      } else {
+        onUploadSuccess(null, doc);
       }
+    } else {
+      onUploadSuccess(null, doc);
     }
   }, [doc, onUploadSuccess]);
 
+  const selectedDocMemo = useMemo(() => ({
+    id: doc.kycId,
+    name: documentName,
+    display_name: documentName,
+    fields: activeDocFields
+  }), [doc.kycId, documentName, activeDocFields]);
+
+  const selectedMemberMemo = useMemo(() => ({
+    id: task?.individual_id,
+    name: individualName,
+    full_name: individualName
+  }), [task?.individual_id, individualName]);
+
+  const additionalFieldsMemo = useMemo(() => ({ expiry_date: null, isFormContext: true }), []);
+
+  const handleClose = useCallback(() => { }, []);
+  const handleSuccess = useCallback((newDoc: any) => {
+    setGeneratedFile(null);
+    setMessageText("");
+  }, []);
+
+  const handleExternalFileClear = useCallback(() => setGeneratedFile(null), []);
+
+  const handleBeforeUpload = useCallback(async (recordData: any) => {
+    if (doc.onBeforeUpload) return doc.onBeforeUpload(recordData);
+    return null;
+  }, [doc]);
+
   return (
     <div className="space-y-4 p-4 rounded-lg border h-full overflow-y-auto">
-      {/* Existing Documents Section */}
       {(existingDocs.length > 0 || isLocked) && (
         <div className={`mb-4 p-4 rounded-lg border ${isLocked ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-200'}`}>
           <div className="flex-1">
@@ -324,7 +368,6 @@ const DocumentTabPanel = ({
         </div>
       )}
 
-      {/* Main Upload / Message Section */}
       {isLocked ? (
         <div className="text-center p-6 bg-slate-50 border-dashed border-2 border-slate-200 rounded-lg">
           <FileText className="h-8 w-8 mx-auto mb-2 opacity-40 text-slate-500" />
@@ -332,61 +375,60 @@ const DocumentTabPanel = ({
         </div>
       ) : !useExisting && (
         <>
-          {/* File Upload Component - Receives generated file if available */}
           {activeDocFields ? (
             <UploadModal
+              isOpen={true}
+              renderAsDialog={false}
+              showSaveButton={false}
+              onClose={handleClose}
               documentName={documentName}
               documentFields={activeDocFields}
-              selectedDoc={{ id: doc.kycId, name: documentName, display_name: documentName, fields: activeDocFields }}
-              selectedMember={{ id: task?.individual_id, name: individualName, full_name: individualName }}
+              selectedDoc={selectedDocMemo}
+              selectedMember={selectedMemberMemo}
               entityId={task?.individual_id}
               entityName={individualName}
-              onSuccess={(newDoc) => {
-                onUploadSuccess(newDoc, doc);
-                setGeneratedFile(null); // Clear generated file after success
-                setMessageText(""); // Clear text
-              }}
+              onSuccess={handleSuccess}
               targetTable="acc_portal_directors_documents"
               idFieldName="director_id"
               documentIdFieldName="document_id"
               isCompanyUpload={false}
-              additionalFields={{ expiry_date: null }}
-              hideSaveButton={true}
-              onPendingChange={handlePendingChange}
-              
-              // Pass generated file to trigger modal logic
+              additionalFields={additionalFieldsMemo}
               externalFile={generatedFile}
-              onExternalFileClear={() => setGeneratedFile(null)}
-              
-              onBeforeUpload={async (recordData) => {
-                if (doc.onBeforeUpload) return doc.onBeforeUpload(recordData);
-                return null;
-              }}
+              onExternalFileClear={handleExternalFileClear}
+              onBeforeUpload={handleBeforeUpload}
+              onPendingChange={handlePendingChange} // <--- Added missing link here
             />
           ) : (
-            <div className="flex justify-center p-10 text-muted-foreground">Initializing fields...</div>
+            <div className="flex justify-center p-10 text-muted-foreground">
+              Initializing fields...
+              <br />
+              <small className="text-xs mt-2">
+                Doc KYC ID: {doc.kycId || 'missing'} |
+                Task ID: {task?.id || 'missing'} |
+                Individual ID: {task?.individual_id || 'missing'}
+              </small>
+            </div>
           )}
 
-          {/* Text Input Section */}
           {(inputType === 'message' || inputType === 'both') && (
             <div className="mt-6 pt-6 border-t space-y-4">
               <Label className="font-medium flex items-center gap-2">
                 <MessageSquare className="h-4 w-4" />
                 Write Message & Convert to PDF
               </Label>
-              
+
               <Textarea
                 placeholder={`Type your message here...`}
                 className="min-h-[120px] resize-none font-mono text-sm"
                 value={messageText}
-                onChange={(e) => setMessageText(e.target.value)}
+                onChange={(e) => handleMessageTextChange(e.target.value)}
               />
 
               <div className="flex gap-2">
-                <Button 
-                  onClick={handleConvertAndUpload} 
-                  disabled={!messageText.trim() || isConverting} 
-                  variant="outline" 
+                <Button
+                  onClick={handleConvertAndUpload}
+                  disabled={!messageText.trim() || isConverting}
+                  variant="outline"
                   className="w-full border-dashed border-2 hover:bg-slate-50"
                 >
                   {isConverting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
@@ -411,7 +453,6 @@ export function StageUploadDialog({
   onTaskAction,
   onStageCompleted
 }: any) {
-  // State
   const [activeDocumentTab, setActiveDocumentTab] = useState<string>("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -428,9 +469,15 @@ export function StageUploadDialog({
     data: null as any
   });
 
+  const [tabMessageStates, setTabMessageStates] = useState<Record<string, string>>({});
+
   const { task, stage } = selectedStageTask || {};
 
-  // Initialize Source Docs
+  const jobLevelDisplay = useMemo(() => {
+    if (!task?.job_description) return '';
+    return `${task.job_description}`;
+  }, [task]);
+
   useEffect(() => {
     if (open && task?.source_document_id) {
       setSelectedSourceDocs(prev => ({
@@ -448,7 +495,6 @@ export function StageUploadDialog({
     return Boolean(lockedDocuments[docId]);
   }, [lockedDocuments]);
 
-  // Determine which documents apply to this specific task
   const applicableDocuments = useMemo(() => {
     if (!stage?.documents || !task) return [];
     const childContext = {
@@ -462,7 +508,6 @@ export function StageUploadDialog({
     task?.applicant_name || task?.principal_member_name || 'Individual',
     [task]);
 
-  // Set initial tab
   useEffect(() => {
     if (open && applicableDocuments.length > 0 && !activeDocumentTab) {
       const firstDocId = applicableDocuments[0]?.id;
@@ -472,40 +517,30 @@ export function StageUploadDialog({
     }
   }, [open, applicableDocuments.length]);
 
-  // Clean up
   useEffect(() => {
     if (!open) {
-      // Reset states when dialog closes
       const resetStates = () => {
         setActiveDocumentTab('');
         setPreviewState({ isOpen: false, data: null, loading: false });
         setPendingDocuments({});
+        setTabMessageStates({});
       };
-
-      // Use requestAnimationFrame to batch state updates
-      requestAnimationFrame(() => {
-        resetStates();
-      });
+      requestAnimationFrame(() => resetStates());
     }
   }, [open]);
 
-  // --- Optimized Data Fetching ---
-  // Fetches ALL necessary data for the stage in parallel when dialog opens
   useEffect(() => {
     if (!open || !stage?.documents || !task?.individual_id) return;
 
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        // 1. Identify all KYC IDs required by applicable documents
         const uniqueKycIds = [...new Set(applicableDocuments
           .map((d: any) => d.kycId)
           .filter(Boolean))];
 
-        // 2. Prepare parallel fetches
         const promises: Promise<any>[] = [];
 
-        // Fetch KYC Definitions
         if (uniqueKycIds.length > 0) {
           promises.push(
             supabase
@@ -517,7 +552,6 @@ export function StageUploadDialog({
           promises.push(Promise.resolve({ data: [] }));
         }
 
-        // Fetch Existing User Documents
         promises.push(
           supabase
             .from('acc_portal_directors_documents')
@@ -526,14 +560,11 @@ export function StageUploadDialog({
             .order('created_at', { ascending: false })
         );
 
-        // Execute fetches
         const [kycRes, userDocsRes] = await Promise.all(promises);
 
-        // 3. Process KYC Definitions & Fields
         const newKycMap = new Map();
         const newDocFieldsMap: Record<string, any[]> = {};
 
-        // Process fetched KYC data
         if (kycRes.data) {
           kycRes.data.forEach((kycData: any) => {
             const transformed = { ...kycData, fields: transformKycFields(kycData.fields || []) };
@@ -541,7 +572,6 @@ export function StageUploadDialog({
           });
         }
 
-        // Map fields to stage document IDs
         applicableDocuments.forEach((doc: any) => {
           let fields = [];
           if (doc.kycId && newKycMap.has(doc.kycId)) {
@@ -558,7 +588,6 @@ export function StageUploadDialog({
               }));
             }
           } else if (doc.extractionSpecs) {
-            // Fallback to extractionSpecs if no KYC ID
             fields = doc.extractionSpecs.map((spec: any) => ({
               id: spec.id || spec.fieldName || `field-${Date.now()}`,
               name: spec.fieldName || spec.name || 'Field',
@@ -570,7 +599,6 @@ export function StageUploadDialog({
           newDocFieldsMap[doc.id] = fields;
         });
 
-        // 4. Process Existing Documents
         const groupedDocs: Record<string, any[]> = {};
         if (userDocsRes.data) {
           applicableDocuments.forEach((stageDoc: any) => {
@@ -596,13 +624,12 @@ export function StageUploadDialog({
     fetchData();
   }, [open, stage?.documents, task?.individual_id, applicableDocuments]);
 
-  // Check for locked documents
   useEffect(() => {
     if (!stage?.id || !applicableDocuments.length || !task?.id) return;
 
     const checkLockedDocuments = async () => {
       const { data: taskData } = await supabase
-        .from('tm_tasks')
+        .from('tm_tasks_duplicate')
         .select('source_document_id')
         .eq('id', task.id)
         .single();
@@ -643,14 +670,13 @@ export function StageUploadDialog({
       updated_at: currentDate
     };
 
-    // Update pending documents state
     setPendingDocuments(prev => ({
       ...prev,
       [docId]: docToAdd
     }));
   }, [stage?.id, task?.id]);
 
-const saveAllDocuments = useCallback(async () => {
+  const saveAllDocuments = useCallback(async () => {
     if (!stage?.id || !task?.id) {
       toast({ title: 'Error', description: 'Missing stage or task information', variant: 'destructive' });
       return;
@@ -664,17 +690,13 @@ const saveAllDocuments = useCallback(async () => {
       const updatedSourceDocs = { ...selectedSourceDocs };
       const uploadedDocIds = new Set<string>();
 
-      // --- 1. Process all pending documents (Upload & Link) ---
       for (const [docId, docData] of Object.entries(pendingDocuments)) {
         if (!docData) continue;
 
-        console.log(`[saveAllDocuments] Processing doc ${docId}:`, docData);
-
-        const docConfig = applicableDocuments.find(doc => doc.id === docId);
-        if (!docConfig) {
-          console.warn(`Document config not found for ID: ${docId}`);
-          continue;
-        }
+        // Extract base ID to retrieve configurations
+        const baseDocId = docId.split('_')[0];
+        const docConfig = applicableDocuments.find(doc => doc.id === baseDocId);
+        if (!docConfig) continue;
 
         try {
           const file = docData.file;
@@ -694,57 +716,42 @@ const saveAllDocuments = useCallback(async () => {
               });
 
             if (uploadError) throw uploadError;
-          } else {  
-             filePath = docData.file_path || '';
+          } else {
+            filePath = docData.file_path || '';
           }
 
           let insertedDoc;
           if (file) {
-            
-            // Clean up extracted data logic
             const rawDetails = docData.extractedData || {};
-            console.log(`[saveAllDocuments] Raw extracted details for ${docId}:`, rawDetails);
-            
             const cleanedDetails = {};
-            
-            // Build map of ID -> Name to resolve UUID keys
             const fieldIdToName = new Map();
             const validFieldNames = new Set();
-            
+
             const collectFieldInfo = (fields) => {
               if (!Array.isArray(fields)) return;
               fields.forEach(field => {
                 if (field.id && field.name) fieldIdToName.set(field.id, field.name);
                 if (field.name) validFieldNames.add(field.name);
-                
+
                 if (field.fields) collectFieldInfo(field.fields);
                 if (field.arrayConfig?.fields) collectFieldInfo(field.arrayConfig.fields);
               });
             };
 
-            // FIX: Use docFieldsMap instead of docConfig.fields to ensure we have the full field definitions
-            const fullDocFields = docFieldsMap[docId];
+            const fullDocFields = docFieldsMap[baseDocId];
             if (fullDocFields) {
-               collectFieldInfo(fullDocFields);
+              collectFieldInfo(fullDocFields);
             }
-            
-            // Map the data
+
             Object.entries(rawDetails).forEach(([key, value]) => {
-              // Case 1: Key is a UUID that maps to a Field Name
               if (fieldIdToName.has(key)) {
                 cleanedDetails[fieldIdToName.get(key)] = value;
-              }
-              // Case 2: Key is already a valid Field Name
-              else if (validFieldNames.has(key)) {
+              } else if (validFieldNames.has(key)) {
                 cleanedDetails[key] = value;
-              }
-              // Case 3: Key is not a UUID (allow custom metadata fields or non-config fields)
-              else if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)) {
+              } else if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)) {
                 cleanedDetails[key] = value;
               }
             });
-            
-            console.log(`[saveAllDocuments] Cleaned details for ${docId}:`, cleanedDetails);
 
             const { data: newDoc, error: insertError } = await supabase
               .from('acc_portal_directors_documents')
@@ -774,7 +781,7 @@ const saveAllDocuments = useCallback(async () => {
             linked_at: docData.linked_at || currentDate,
             updated_at: currentDate
           };
-          updatedLockedDocs[docId] = true;
+          updatedLockedDocs[baseDocId] = true;
           uploadedDocIds.add(docId);
 
           if (!updatedSourceDocs[stage.id]) {
@@ -793,7 +800,7 @@ const saveAllDocuments = useCallback(async () => {
 
         } catch (error) {
           console.error(`Error processing document ${docId}:`, error);
-          continue; 
+          continue;
         }
       }
 
@@ -804,7 +811,6 @@ const saveAllDocuments = useCallback(async () => {
         'endorsed': 3
       };
 
-      // Map Stage IDs to Target Statuses
       const STAGE_STATUS_MAPPING: Record<string, string> = {
         'a19b270e-6d1e-4e6d-b2bc-f21db72cde08': 'in_progress',
         '072b9710-45df-4a05-ba65-01b4ef29d61d': 'write_up_completed',
@@ -827,21 +833,11 @@ const saveAllDocuments = useCallback(async () => {
         const currentPriority = STATUS_PRIORITY[currentStatusKey] ?? 0;
         const newPriority = STATUS_PRIORITY[potentialNewStatus] ?? 0;
 
-        console.log('📊 Status Priority Check:', {
-          current: { key: currentStatusKey, priority: currentPriority },
-          new: { key: potentialNewStatus, priority: newPriority }
-        });
-
-        // Only update if new priority is strictly greater
         if (newPriority > currentPriority) {
           taskStatusUpdate = { status: potentialNewStatus };
-          console.log(`✅ Applying Status Update: ${potentialNewStatus}`);
-        } else {
-          console.log(`ℹ️ Skipping Status Update: ${newPriority} <= ${currentPriority}`);
         }
       }
 
-      // --- 3. Prepare Stages JSON ---
       const updatedStages = {
         ...task.stages,
         [stage.id]: {
@@ -855,7 +851,8 @@ const saveAllDocuments = useCallback(async () => {
             ...(task.stages?.[stage.id]?.documents || {}),
             ...Object.fromEntries(
               Array.from(uploadedDocIds).map(docId => {
-                const docConfig = applicableDocuments.find(doc => doc.id === docId);
+                const baseDocId = docId.split('_')[0];
+                const docConfig = applicableDocuments.find(doc => doc.id === baseDocId);
                 return [docId, {
                   id: updatedLinkedDocs[docId]?.id,
                   document_id: docConfig?.kycId,
@@ -869,27 +866,31 @@ const saveAllDocuments = useCallback(async () => {
         }
       };
 
-      // --- 4. Execute DB Update ---
       const updateData = {
-        ...taskStatusUpdate, // Includes 'status' only if priority check passed
+        ...taskStatusUpdate,
         stages: updatedStages,
         source_document_id: updatedSourceDocs,
         updated_at: currentDate
       };
 
-      console.log('🚀 Sending Payload:', updateData);
-
       const { error: updateError } = await supabase
-        .from('tm_tasks')
+        .from('tm_tasks_duplicate')
         .update(updateData)
         .eq('id', task.id);
 
       if (updateError) throw updateError;
 
-      // Show success message
-      const successMsg = ('status' in taskStatusUpdate) 
+      const successMsg = ('status' in taskStatusUpdate)
         ? `Documents saved & Status updated to ${taskStatusUpdate.status}`
         : `Successfully uploaded ${uploadedDocIds.size} document(s)`;
+
+      const updatedTask = {
+        ...task,
+        ...taskStatusUpdate,
+        stages: updatedStages,
+        source_document_id: updatedSourceDocs,
+        updated_at: currentDate
+      };
 
       toast({
         title: 'Success',
@@ -897,8 +898,13 @@ const saveAllDocuments = useCallback(async () => {
         variant: 'default'
       });
 
-      // Refresh task data
-      onTaskAction?.({ type: 'refresh', taskId: task.id });
+      onTaskAction?.({
+        type: 'task-updated',
+        taskId: task.id,
+        task: updatedTask,
+        stageId: stage.id,
+        source: 'stage-upload'
+      });
       onOpenChange(false);
     } catch (error) {
       console.error('Error saving documents:', error);
@@ -909,44 +915,51 @@ const saveAllDocuments = useCallback(async () => {
       });
     } finally {
       setIsSaving(false);
-      console.groupEnd();
     }
   }, [stage, task, pendingDocuments, linkedDocuments, selectedSourceDocs, onTaskAction, onOpenChange, applicableDocuments, lockedDocuments, docFieldsMap]);
-  
+
   const handleUploadSuccess = useCallback((newDocument: any, originatingDoc: any) => {
-    console.log('[StageUploadDialog] handleUploadSuccess called:', { newDocument, originatingDoc });
-    
-    if (!originatingDoc?.id) {
-      console.warn('[StageUploadDialog] No originating doc ID');
-      return;
-    }
+    if (!originatingDoc?.id) return;
 
     setPendingDocuments(prev => {
-      // Only update if the document is new or changed
-      const existingDoc = prev[originatingDoc.id];
-      
-      const newPendingDoc = {
-        ...newDocument,
-        kycId: originatingDoc.kycId,
-        name: originatingDoc.name
-      };
-      
-      console.log('[StageUploadDialog] Updating pending doc:', {
-        docId: originatingDoc.id,
-        existingDoc,
-        newPendingDoc,
-        extractedData: newDocument.extractedData
+      const updated = { ...prev };
+
+      // Remove any existing files for THIS specific tab so we don't accumulate stale documents 
+      // if the user drops a new file or deletes one.
+      Object.keys(updated).forEach(key => {
+        if (key === originatingDoc.id || key.startsWith(`${originatingDoc.id}_`)) {
+          delete updated[key];
+        }
       });
-      
-      if (existingDoc && JSON.stringify(existingDoc) === JSON.stringify(newPendingDoc)) {
-        console.log('[StageUploadDialog] No change needed');
-        return prev; // No change needed
+
+      // If document payload is cleared entirely
+      if (!newDocument || Object.keys(newDocument).length === 0 || (newDocument.files && newDocument.files.length === 0)) {
+        return updated;
       }
 
-      return {
-        ...prev,
-        [originatingDoc.id]: newPendingDoc
-      };
+      // Add fresh documents sent from UploadModal back in
+      if (newDocument.files && Array.isArray(newDocument.files)) {
+        newDocument.files.forEach((fileData: any, index: number) => {
+          if (fileData.file && fileData.extractedData) {
+            const docId = `${originatingDoc.id}_${index}`;
+            updated[docId] = {
+              ...fileData,
+              id: docId,
+              document_id: originatingDoc.kycId,
+              kycId: originatingDoc.kycId,
+              name: originatingDoc.name
+            };
+          }
+        });
+      } else {
+        updated[originatingDoc.id] = {
+          ...newDocument,
+          kycId: originatingDoc.kycId,
+          name: originatingDoc.name
+        };
+      }
+
+      return updated;
     });
   }, []);
 
@@ -996,7 +1009,12 @@ const saveAllDocuments = useCallback(async () => {
             <div className="flex-1">
               <DialogHeader>
                 <DialogTitle className="flex justify-between">
-                  <h2>Upload {stage?.name} for {individualName}</h2>
+                  <div>
+                    <h2>Upload {stage?.name} for {individualName}</h2>
+                    {jobLevelDisplay && (
+                      <p className="text-sm text-muted-foreground mt-1">{jobLevelDisplay}</p>
+                    )}
+                  </div>
                   <div>
                     {applicableDocuments.some((doc: any) => doc.isSpecial) && (
                       <div className="p-2 flex gap-3">
@@ -1083,7 +1101,8 @@ const saveAllDocuments = useCallback(async () => {
                         onUploadSuccess={(newDoc) => handleUploadSuccess(newDoc, doc)}
                         onPreviewExisting={handlePreview}
                         onUseExistingLink={handleUseExisting}
-                        hideSaveButton={true}
+                        messageState={tabMessageStates[doc.id]}
+                        onMessageStateChange={(docId, message) => setTabMessageStates(prev => ({ ...prev, [docId]: message }))}
                       />
                     </div>
                   ))

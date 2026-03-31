@@ -1880,6 +1880,25 @@ export default function DepartmentTasksManager({
 
   const handleTaskAction = useCallback((action: { type: string; taskId?: string | number;[key: string]: any }) => {
     switch (action.type) {
+      case 'task-updated':
+        if (action.task?.id) {
+          setTasks(prevTasks =>
+            prevTasks.map(existingTask =>
+              existingTask.id === action.task.id
+                ? {
+                  ...existingTask,
+                  ...action.task,
+                  stages: action.task.stages || existingTask.stages,
+                  source_document_id: action.task.source_document_id ?? existingTask.source_document_id,
+                  updated_at: action.task.updated_at || existingTask.updated_at
+                }
+                : existingTask
+            )
+          );
+          clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
+          void loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
+        }
+        break
       case 'refresh':
       case 'refresh-data':
         refreshAllData()
@@ -1887,7 +1906,7 @@ export default function DepartmentTasksManager({
       default:
         onTaskAction?.(action)
     }
-  }, [onTaskAction, refreshAllData])
+  }, [onTaskAction, refreshAllData, activeDepartmentTab, activeSubdepartmentTab, loadTasksData])
 
   const renderCellContent = useCallback((row: any, task: any, columnType?: 'date' | 'actions') => {
     const value = row.getValue?.(task) ?? '';

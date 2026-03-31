@@ -1345,39 +1345,32 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     }
   }, [allCompanyDocuments, allIndividualDocuments]);
 
-  // Helper function to render status icon and badge
+  // Enhanced helper function to render unified status badge
   const renderStatusBadge = (status: any) => {
     if (!status) return null;
 
     let Icon;
     switch (status.status) {
-      case 'valid':
-        Icon = CheckCircle2;
-        break;
-      case 'expiring':
-        Icon = AlertCircle;
-        break;
-      case 'expired':
-        Icon = XCircle;
-        break;
-      default:
-        Icon = Calendar;
+      case 'valid': Icon = CheckCircle2; break;
+      case 'expiring': Icon = AlertCircle; break;
+      case 'expired': Icon = XCircle; break;
+      default: Icon = Calendar;
     }
 
+    const borderColorClass = status.color ? status.color.replace('text-', 'border-') : 'border-gray-200';
+
     return (
-      <div className="flex flex-col items-center gap-1">
-        <div className={`flex items-center gap-1 px-2 py-1 rounded-md ${status.bgColor}`}>
-          <Icon className={`h-3 w-3 ${status.color}`} />
-          <span className={`text-[10px] font-semibold ${status.color}`}>
+      <div className="flex items-center gap-1.5 w-full">
+        <div className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-md border ${status.bgColor} ${borderColorClass} shadow-sm w-fit`}>
+          <Icon className={`h-3.5 w-3.5 shrink-0 ${status.color}`} />
+          <span className={`text-[10px] font-bold uppercase tracking-wider ${status.color}`}>
             {status.label}
           </span>
         </div>
         {status.expiryDate && (
-          <div className={`flex items-center gap-1 px-2 py-0.5 rounded ${status.bgColor}`}>
-            <Calendar className={`h-2.5 w-2.5 ${status.color}`} />
-            <span className={`text-[9px] ${status.color}`}>
-              {status.expiryDate}
-            </span>
+          <div className={`inline-flex items-center justify-center gap-1 px-2 py-0.5 rounded text-[9.5px] font-medium ${status.color} bg-white border ${borderColorClass} shadow-sm w-fit`}>
+            <Calendar className="h-3 w-3 opacity-70" />
+            {status.expiryDate}
           </div>
         )}
       </div>
@@ -1424,12 +1417,12 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
           {Object.keys(groupedByCategory).length > 1 && (
             <TableRow className="bg-blue-50/50 border-b">
               <TableCell colSpan={totalColumns} className="py-2 px-4 font-semibold text-blue-700 text-xs uppercase tracking-wider">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                <span className="flex items-center gap-2">
+                  <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
                   {/* Clean up labels dynamically */}
                   {category.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())} Requirements
                   <span className="text-blue-500 font-normal ml-1">({categoryReqs.length})</span>
-                </div>
+                </span>
               </TableCell>
             </TableRow>
           )}
@@ -1453,23 +1446,12 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                     {reqIndex + 1}
                   </TableCell>
                   <TableCell className={`sticky left-16 border-r z-10 ${reqIndex % 2 === 0 ? 'bg-white group-hover:bg-gray-50' : 'bg-gray-50/30 group-hover:bg-gray-100'}`}>
-                    <div className="flex flex-col">
-                      <div className="flex justify-between items-center gap-2">
+                    <span className="flex">
+                      <span className="flex justify-between items-center gap-2">
                         <span className="truncate max-w-[250px] font-medium text-slate-700">
                           {reqItem.name}
                         </span>
-                        {/* Computed Function Badge */}
-                        {reqItem.computed_function && reqItem.computed_function !== 'none' && (
-                          (() => {
-                            const functionItem = COMPUTED_FUNCTIONS.find(fn => fn.value === reqItem.computed_function);
-                            return functionItem ? (
-                              <Badge variant="outline" className="text-[8px] px-1.5 py-0.5 ml-2" title={`Function: ${functionItem.label}`}>
-                                {functionItem.label}
-                              </Badge>
-                            ) : null;
-                          })()
-                        )}
-                        <div className="flex">
+                        <span className="flex">
                           {isComposite && (
                             <Badge variant="solid" color="blue" className="ml-2">
                               {reqItem.documentCount}
@@ -1490,26 +1472,26 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                               {isCompositeExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                             </Button>
                           )}
-                        </div>
-                      </div>
+                        </span>
+                      </span>
 
                       {/* Template and Automation Indicators */}
-                      <div className="flex items-center gap-2 mt-1">
+                      <span className="flex items-center gap-2 mt-1">
                         {reqItem.hasTemplate && (
-                          <div className="flex items-center gap-1 text-orange-600" title="Has Template">
+                          <span className="flex items-center gap-1 text-orange-600" title="Has Template">
                             <FileType className="h-3 w-3 fill-current" />
                             <span className="text-[9px] font-medium">Template</span>
-                          </div>
+                          </span>
                         )}
 
                         {reqItem.web_automation?.automationId && (
-                          <div className="flex items-center gap-1 text-blue-600" title={`Web Form: ${reqItem.web_automation.automationName}`}>
+                          <span className="flex items-center gap-1 text-blue-600" title={`Web Form: ${reqItem.web_automation.automationName}`}>
                             <Zap className="h-3 w-3 fill-current" />
                             <span className="text-[9px] font-medium truncate max-w-[100px]">{reqItem.web_automation.automationName}</span>
-                          </div>
+                          </span>
                         )}
-                      </div>
-                    </div>
+                      </span>
+                    </span>
                   </TableCell>
 
                   {columnDefinitions.map((col, colIdx) => {
@@ -1518,8 +1500,10 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
                     if (!isApplicable) {
                       return (
-                        <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-2">
-                          <span className="text-[10px] text-gray-300 font-medium italic">N/A</span>
+                        <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-3 align-middle bg-slate-50/30">
+                          <span className="inline-flex items-center justify-center px-2.5 py-1 text-[10px] text-slate-400 font-medium italic shadow-sm">
+                            N/A
+                          </span>
                         </TableCell>
                       );
                     }
@@ -1528,98 +1512,95 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                     if (isComposite) {
                       const cacheKey = `${col.task.id}-${reqItem.id || reqItem.uniqueId}-${col.type}-${col.id}`;
                       const compositeStatus = compositeStatusCache.get(cacheKey);
-
-                      // Get status (this will return a loading state if not yet in cache)
                       const statusToDisplay = compositeStatus || getCompositeRequirementStatus(reqItem, col.task, col.type, col.id);
 
                       return (
-                        <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-2">
-                          <div className="flex flex-col items-center justify-center gap-1">
-                            {reqItem.hasTemplate && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
-                                onClick={() => handleGenerateTemplate(reqItem, col.task, col.type, col.id)}
-                                title={`Generate ${reqItem.name} Template`}
-                                disabled={isPreparingTemplate}
-                              >
-                                {isPreparingTemplate ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3 mr-1" />}
-                                <span className="text-[10px] font-bold uppercase">Generate</span>
-                              </Button>
+                        <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-3 align-middle">
+                          <div className="flex items-center justify-center gap-2.5 w-full">
+                            {statusToDisplay ? (
+                              <div className="flex items-center gap-2 w-full">
+                                {statusToDisplay.latestStatus ? (
+                                  <>
+                                    {renderStatusBadge(statusToDisplay.latestStatus)}
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 w-full max-w-[120px] bg-white text-blue-600 border-blue-200 hover:bg-blue-50 shadow-sm flex items-center justify-center gap-1.5"
+                                      onClick={() => {
+                                        const latestDocId = reqItem.document_ids?.find((docId: string) => {
+                                          const docs = isCompanyType(col.type)
+                                            ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.document_id === docId)
+                                            : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === docId);
+                                          return docs && docs.length > 0;
+                                        });
+                                        if (latestDocId) {
+                                          const docs = isCompanyType(col.type)
+                                            ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.document_id === latestDocId)
+                                            : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === latestDocId);
+                                          if (docs && docs.length > 0) {
+                                            setPreviewingDocuments(docs);
+                                            setShowPreviewModal(true);
+                                          }
+                                        }
+                                      }}
+                                      title="Preview Latest Document"
+                                    >
+                                      <Eye className="h-3.5 w-3.5" />
+                                      <span className="text-[10px] font-bold uppercase tracking-wider">View Docs</span>
+                                    </Button>
+                                  </>
+                                ) : (
+                                  <Badge variant="outline" className={`text-[10px] uppercase font-bold px-2.5 py-1 shadow-sm ${statusToDisplay.type === 'missing' ? 'border-amber-200 text-amber-600 bg-amber-50' :
+                                    statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'border-red-200 text-red-600 bg-red-50' :
+                                      'border-amber-200 text-amber-600 bg-amber-50'
+                                    }`}>
+                                    {statusToDisplay.type === 'missing' ? 'Missing' :
+                                      statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'Invalid' :
+                                        'No Status'}
+                                  </Badge>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" title="Checking status..." />
                             )}
 
-                            <div className="flex items-center gap-3">
-                              {statusToDisplay ? (
-                                <>
-                                  {statusToDisplay.latestStatus ? (
-                                    <div className="flex items-center gap-2">
-                                      {renderStatusBadge(statusToDisplay.latestStatus)}
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-8 w-8 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
-                                        onClick={() => {
-                                          const latestDocId = reqItem.document_ids?.find((docId: string) => {
-                                            const docs = isCompanyType(col.type)
-                                              ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.document_id === docId)
-                                              : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === docId);
-                                            return docs && docs.length > 0;
-                                          });
-                                          if (latestDocId) {
-                                            const docs = isCompanyType(col.type)
-                                              ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.document_id === latestDocId)
-                                              : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === latestDocId);
-                                            if (docs && docs.length > 0) {
-                                              setPreviewingDocuments(docs);
-                                              setShowPreviewModal(true);
-                                            }
-                                          }
-                                        }}
-                                        title="Preview Latest Document"
-                                      >
-                                        <Eye className="h-4 w-4" />
-                                      </Button>
-                                    </div>
-                                  ) : (
-                                    <span className={`text-xs font-bold uppercase ${statusToDisplay.type === 'missing' ? 'text-amber-600' :
-                                      statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'text-red-600' :
-                                        'text-amber-600'
-                                      }`}>
-                                      {statusToDisplay.type === 'missing' ? 'Missing' :
-                                        statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'Invalid' :
-                                          'No Status'}
-                                    </span>
-                                  )}
-                                </>
-                              ) : (
-                                <div className="w-4 h-4 bg-gray-300 rounded-full animate-pulse" title="Checking status..." />
-                              )}
-                            </div>
+                            {reqItem.hasTemplate && (
+                              <Button
+                                variant="default"
+                                size="sm"
+                                className="h-7 w-full max-w-[120px] bg-indigo-50 text-indigo-600 hover:bg-indigo-100 hover:text-indigo-700 border border-indigo-200 shadow-sm flex items-center justify-center gap-1.5"
+                                onClick={() => handleGenerateTemplate(reqItem, col.task, col.type, col.id)}
+                                disabled={isPreparingTemplate}
+                              >
+                                {isPreparingTemplate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                                <span className="text-[10px] font-bold uppercase tracking-wider">Generate</span>
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                       );
                     }
 
-                    // For non-composite requirements, use existing logic
+                    // For non-composite requirements, use existing logic formatted cleanly
                     return (
-                      <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-2">
-                        <div className="flex items-center justify-center gap-1">
+                      <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-3 align-middle">
+                        <div className="flex items-center justify-center gap-2.5 w-full">
+                          <div className="flex items-center justify-center w-full min-h-[32px]">
+                            {renderDocumentStatus(col.task, reqItem, col.type, col.id, groupRelationshipData)}
+                          </div>
+
                           {reqItem.hasTemplate && (
                             <Button
-                              variant="ghost"
+                              variant="default"
                               size="sm"
-                              className="h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                              className="h-7 w-full max-w-[120px] bg-indigo-50 text-indigo-600 hover:bg-indigo-100 hover:text-indigo-700 border border-indigo-200 shadow-sm flex items-center justify-center gap-1.5"
                               onClick={() => handleGenerateTemplate(reqItem, col.task, col.type, col.id)}
-                              title={`Generate ${reqItem.documentDefinition?.display_name || reqItem.name} Template`}
                               disabled={isPreparingTemplate}
                             >
-                              {isPreparingTemplate ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3 mr-1" />}
-                              <span className="text-[10px] font-bold uppercase">Generate</span>
+                              {isPreparingTemplate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                              <span className="text-[10px] font-bold uppercase tracking-wider">Generate</span>
                             </Button>
                           )}
-
-                          {renderDocumentStatus(col.task, reqItem, col.type, col.id, groupRelationshipData)}
                         </div>
                       </TableCell>
                     );
@@ -1637,19 +1618,21 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                         {reqIndex + 1}.{docIdx + 1}
                       </TableCell>
                       <TableCell className="sticky left-16 bg-blue-50/50 border-r pl-8">
-                        <div className="flex items-center gap-2">
+                        <span className="flex items-center gap-2">
                           <FileText className="h-3 w-3 text-blue-600" />
                           <span className="text-[11px] text-slate-700 font-medium">
                             {docMetadata.display_name || docMetadata.name}
                           </span>
-                        </div>
+                        </span>
                       </TableCell>
                       {columnDefinitions.map((col, colIdx) => {
                         const isApplicable = checkApplicability(col.type, reqItem);
                         if (!isApplicable) {
                           return (
-                            <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-1">
-                              <span className="text-[10px] text-gray-300">-</span>
+                            <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-3 align-middle">
+                              <span className="inline-flex items-center justify-center px-2 py-1 rounded border border-slate-100 bg-slate-50 text-[10px] text-gray-300 italic">
+                                -
+                              </span>
                             </TableCell>
                           );
                         }
@@ -1657,31 +1640,40 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                         const docs = getDocumentsByType(docId, col.task, col.type, col.id);
 
                         return (
-                          <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-1">
-                            <div className="flex items-center justify-center gap-1">
+                          <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-3 align-middle">
+                            <div className="flex items-center justify-between gap-2.5 w-full">
                               {docs.length > 0 ? (
-                                <div className="flex flex-col items-center gap-1">
-                                  <div className="flex items-center gap-1">
+                                <>
+                                  {(() => {
+                                    const personId = isCompanyType(col.type) ? col.task.company_id : isIndividualType(col.type) ? col.task.individual_id : col.id;
+                                    const statusKey = `${col.task.id}-${docId}-${col.type}-${personId}`;
+                                    if (!documentStatusCache.has(statusKey)) {
+                                      const latestDoc = docs.reduce((prev, curr) => (new Date(curr.created_at) > new Date(prev.created_at)) ? curr : prev);
+                                      getDocumentStatus(col.task, docId, col.type, personId, latestDoc);
+                                      return <span className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" title="Checking status..." />;
+                                    }
+                                    const status = documentStatusCache.get(statusKey);
+                                    return status ? renderStatusBadge(status) : null;
+                                  })()}
+
+                                  <div className="flex items-center gap-1 bg-white border border-slate-200 p-1 rounded-md shadow-sm">
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      className="h-6 w-6 p-0 text-green-600 hover:bg-green-100"
+                                      className="h-6 w-9 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded"
                                       onClick={() => handleViewDocuments(docs, docMetadata, col, requirementId)}
                                       title={`View ${docs.length} document(s)`}
                                     >
-                                      <Eye className="h-3 w-3" />
+                                      <Eye className="h-4 w-4" />
+                                      {docs.length > 1 && <span className="text-[10px] font-bold ml-1">{docs.length}</span>}
                                     </Button>
-                                    {docs.length > 1 && (
-                                      <span className="text-[9px] text-green-600 font-bold">{docs.length}</span>
-                                    )}
+                                    <div className="w-[1px] h-4 bg-slate-200" />
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      className="h-6 w-6 p-0 text-blue-600 hover:bg-blue-50"
+                                      className="h-6 w-9 p-0 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
                                       onClick={(e) => {
                                         e.stopPropagation();
-
-                                        // Get a better person name
                                         let personName = col.label;
                                         if (!personName || personName === 'Unknown Person') {
                                           personName = individualNames[col.task?.individual_id] ||
@@ -1689,28 +1681,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                             col.task?.applicant_details?.name ||
                                             'Individual';
                                         }
-
-                                        // Get document name with comprehensive fallbacks
-                                        let documentName = docMetadata?.display_name ||
-                                          docMetadata?.name ||
-                                          docMetadata?.document_name ||
-                                          docMetadata?.main_category ||
-                                          docMetadata?.sub_category ||
-                                          docMetadata?.id ||
-                                          'Document';
-
-                                        // Trigger upload for this specific document type
+                                        let documentName = docMetadata?.display_name || docMetadata?.name || docMetadata?.document_name || docMetadata?.main_category || docMetadata?.sub_category || docMetadata?.id || 'Document';
                                         setSelectedDocForUpload({
-                                          doc: {
-                                            ...docMetadata,
-                                            display_name: documentName // Ensure we have a display_name
-                                          },
+                                          doc: { ...docMetadata, display_name: documentName },
                                           fields: docMetadata.fields,
-                                          person: {
-                                            full_name: personName,
-                                            id: col.id,  // This is the director ID!
-                                            type: 'individual'
-                                          },
+                                          person: { full_name: personName, id: col.id, type: 'individual' },
                                           task: col.task,
                                           columnType: col.type,
                                           columnId: col.id
@@ -1719,77 +1694,45 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                       }}
                                       title={`Upload additional ${docMetadata.display_name || docMetadata.name}`}
                                     >
-                                      <UploadCloud className="h-3 w-3" />
+                                      <UploadCloud className="h-4 w-4" />
                                     </Button>
                                   </div>
-
-                                  {/* Document Status Badge */}
-                                  {(() => {
-                                    const personId = isCompanyType(col.type) ? col.task.company_id :
-                                      isIndividualType(col.type) ? col.task.individual_id :
-                                        col.id;
-                                    const statusKey = `${col.task.id}-${docId}-${col.type}-${personId}`;
-
-                                    // Trigger status calculation and show loading state initially
-                                    if (!documentStatusCache.has(statusKey)) {
-                                      getDocumentStatus(col.task, docId, col.type, personId);
-                                      return (
-                                        <div className="w-2 h-2 bg-gray-300 rounded-full animate-pulse" title="Checking status..." />
-                                      );
-                                    }
-
-                                    const status = documentStatusCache.get(statusKey);
-                                    return status ? renderStatusBadge(status) : null;
-                                  })()}
-                                </div>
+                                </>
                               ) : (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-6 w-6 p-0 text-amber-600 hover:bg-amber-50"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-
-                                    // Get a better person name
-                                    let personName = col.label;
-                                    if (!personName || personName === 'Unknown Person') {
-                                      personName = individualNames[col.task?.individual_id] ||
-                                        individualNames[col.task?.applicant_details?.id] ||
-                                        col.task?.applicant_details?.name ||
-                                        'Individual';
-                                    }
-
-                                    // Get document name with comprehensive fallbacks
-                                    let documentName = docMetadata?.display_name ||
-                                      docMetadata?.name ||
-                                      docMetadata?.document_name ||
-                                      docMetadata?.main_category ||
-                                      docMetadata?.sub_category ||
-                                      docMetadata?.id ||
-                                      'Document';
-
-                                    // Trigger upload for this specific document type
-                                    setSelectedDocForUpload({
-                                      doc: {
-                                        ...docMetadata,
-                                        display_name: documentName // Ensure we have a display_name
-                                      },
-                                      fields: docMetadata.fields,
-                                      person: {
-                                        full_name: personName,
-                                        id: col.id,  // This is the director ID!
-                                        type: 'individual'
-                                      },
-                                      task: col.task,
-                                      columnType: col.type,
-                                      columnId: col.id
-                                    });
-                                    setShowUploadModal(true);
-                                  }}
-                                  title={`Upload ${docMetadata.display_name || docMetadata.name}`}
-                                >
-                                  <UploadCloud className="h-3 w-3" />
-                                </Button>
+                                <>
+                                  <Badge variant="outline" className="text-[10px] uppercase font-bold px-2.5 py-1 border-amber-200 text-amber-600 bg-amber-50 shadow-sm">
+                                    Missing
+                                  </Badge>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 w-full max-w-[100px] text-amber-600 border-amber-200 hover:bg-amber-50 shadow-sm flex items-center justify-center gap-1.5"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      let personName = col.label;
+                                      if (!personName || personName === 'Unknown Person') {
+                                        personName = individualNames[col.task?.individual_id] ||
+                                          individualNames[col.task?.applicant_details?.id] ||
+                                          col.task?.applicant_details?.name ||
+                                          'Individual';
+                                      }
+                                      let documentName = docMetadata?.display_name || docMetadata?.name || docMetadata?.document_name || docMetadata?.main_category || docMetadata?.sub_category || docMetadata?.id || 'Document';
+                                      setSelectedDocForUpload({
+                                        doc: { ...docMetadata, display_name: documentName },
+                                        fields: docMetadata.fields,
+                                        person: { full_name: personName, id: col.id, type: 'individual' },
+                                        task: col.task,
+                                        columnType: col.type,
+                                        columnId: col.id
+                                      });
+                                      setShowUploadModal(true);
+                                    }}
+                                    title={`Upload ${docMetadata.display_name || docMetadata.name}`}
+                                  >
+                                    <UploadCloud className="h-3.5 w-3.5" />
+                                    <span className="text-[10px] font-bold uppercase tracking-wider">Upload</span>
+                                  </Button>
+                                </>
                               )}
                             </div>
                           </TableCell>
@@ -1870,8 +1813,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       const fieldsToRender = docDef?.fields || [];
       const isComposite = reqItem.isMultiDocument && reqItem.document_ids?.length > 1;
 
-      if (!isComposite) {
-      }
       return (
         <React.Fragment key={`${reqItem.category}-${requirementId}`}>
           <TableRow className={`group hover:bg-gray-50 ${reqIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
@@ -1879,22 +1820,12 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
               {reqIndex + 1}
             </TableCell>
             <TableCell className={`sticky left-16 border-r z-10 ${reqIndex % 2 === 0 ? 'bg-white group-hover:bg-gray-50' : 'bg-gray-50/30 group-hover:bg-gray-100'}`}>
-              <div className="flex flex-col">
-                <div className="flex justify-between items-center gap-2">
+              <span className="flex">
+                <span className="flex justify-between items-center gap-2">
                   <span className="truncate max-w-[250px] font-medium text-slate-700">
                     {reqItem.name}
                   </span>
-                  {reqItem.computed_function && reqItem.computed_function !== 'none' && (
-                    (() => {
-                      const functionItem = COMPUTED_FUNCTIONS.find(fn => fn.value === reqItem.computed_function);
-                      return functionItem ? (
-                        <Badge variant="outline" className="text-[8px] px-1.5 py-0.5 ml-2" title={`Function: ${functionItem.label}`}>
-                          {functionItem.label}
-                        </Badge>
-                      ) : null;
-                    })()
-                  )}
-                  <div className="flex">
+                  <span className="flex">
                     {isComposite && (
                       <Badge variant="solid" color="blue" className="ml-2">
                         {reqItem.documentCount}
@@ -1915,25 +1846,25 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                         {isCompositeExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                       </Button>
                     )}
-                  </div>
-                </div>
+                  </span>
+                </span>
 
-                <div className="flex items-center gap-2 mt-1">
+                <span className="flex items-center gap-2 mt-1">
                   {reqItem.hasTemplate && (
-                    <div className="flex items-center gap-1 text-orange-600" title="Has Template">
+                    <span className="flex items-center gap-1 text-orange-600" title="Has Template">
                       <FileType className="h-3 w-3 fill-current" />
                       <span className="text-[9px] font-medium">Template</span>
-                    </div>
+                    </span>
                   )}
 
                   {reqItem.web_automation?.automationId && (
-                    <div className="flex items-center gap-1 text-blue-600" title={`Web Form: ${reqItem.web_automation.automationName}`}>
+                    <span className="flex items-center gap-1 text-blue-600" title={`Web Form: ${reqItem.web_automation.automationName}`}>
                       <Zap className="h-3 w-3 fill-current" />
                       <span className="text-[9px] font-medium truncate max-w-[100px]">{reqItem.web_automation.automationName}</span>
-                    </div>
+                    </span>
                   )}
-                </div>
-              </div>
+                </span>
+              </span>
             </TableCell>
 
             {columnDefinitions.map((col, colIdx) => {
@@ -1942,8 +1873,10 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
               if (!isApplicable) {
                 return (
-                  <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-2">
-                    <span className="text-[10px] text-gray-300 font-medium italic">N/A</span>
+                  <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-3 align-middle bg-slate-50/30">
+                    <span className="inline-flex items-center justify-center px-2.5 py-1 text-[10px] text-slate-400 font-medium italic shadow-sm">
+                      N/A
+                    </span>
                   </TableCell>
                 );
               }
@@ -1954,92 +1887,91 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                 const statusToDisplay = compositeStatus || getCompositeRequirementStatus(reqItem, col.task, col.type, col.id);
 
                 return (
-                  <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-2">
-                    <div className="flex flex-col items-center justify-center gap-1">
-                      {reqItem.hasTemplate && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
-                          onClick={() => handleGenerateTemplate(reqItem, col.task, col.type, col.id)}
-                          title={`Generate ${reqItem.name} Template`}
-                          disabled={isPreparingTemplate}
-                        >
-                          {isPreparingTemplate ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3 mr-1" />}
-                          <span className="text-[10px] font-bold uppercase">Generate</span>
-                        </Button>
+                  <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-3 align-middle">
+                    <div className="flex items-center justify-between w-full">
+                      {statusToDisplay ? (
+                        <div className="flex items-center gap-2 w-full">
+                          {statusToDisplay.latestStatus ? (
+                            <>
+                              {renderStatusBadge(statusToDisplay.latestStatus)}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 w-full max-w-[120px] bg-white text-blue-600 border-blue-200 hover:bg-blue-50 shadow-sm flex items-center justify-center gap-1.5"
+                                onClick={() => {
+                                  const latestDocId = reqItem.document_ids?.find((docId: string) => {
+                                    const docs = isCompanyType(col.type)
+                                      ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.document_id === docId)
+                                      : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === docId);
+                                    return docs && docs.length > 0;
+                                  });
+                                  if (latestDocId) {
+                                    const docs = isCompanyType(col.type)
+                                      ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.document_id === latestDocId)
+                                      : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === latestDocId);
+                                    if (docs && docs.length > 0) {
+                                      setPreviewingDocuments(docs);
+                                      setShowPreviewModal(true);
+                                    }
+                                  }
+                                }}
+                                title="Preview Latest Document"
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                <span className="text-[10px] font-bold uppercase tracking-wider">View Docs</span>
+                              </Button>
+                            </>
+                          ) : (
+                            <Badge variant="outline" className={`text-[10px] uppercase font-bold px-2.5 py-1 shadow-sm ${statusToDisplay.type === 'missing' ? 'border-amber-200 text-amber-600 bg-amber-50' :
+                              statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'border-red-200 text-red-600 bg-red-50' :
+                                'border-amber-200 text-amber-600 bg-amber-50'
+                              }`}>
+                              {statusToDisplay.type === 'missing' ? 'Missing' :
+                                statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'Invalid' :
+                                  'No Status'}
+                            </Badge>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" title="Checking status..." />
                       )}
 
-                      <div className="flex items-center gap-3">
-                        {statusToDisplay ? (
-                          <>
-                            {statusToDisplay.latestStatus ? (
-                              <div className="flex items-center gap-2">
-                                {renderStatusBadge(statusToDisplay.latestStatus)}
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 w-8 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
-                                  onClick={() => {
-                                    const latestDocId = reqItem.document_ids?.find((docId: string) => {
-                                      const docs = isCompanyType(col.type)
-                                        ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.document_id === docId)
-                                        : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === docId);
-                                      return docs && docs.length > 0;
-                                    });
-                                    if (latestDocId) {
-                                      const docs = isCompanyType(col.type)
-                                        ? allCompanyDocuments[col.task.company_id || col.task.participants_details?.find((p: any) => p.type === 'company')?.id]?.filter(doc => doc.document_id === latestDocId)
-                                        : allIndividualDocuments[col.task.individual_id || col.task.applicant_details?.id || col.id]?.filter(doc => doc.document_id === latestDocId);
-                                      if (docs && docs.length > 0) {
-                                        setPreviewingDocuments(docs);
-                                        setShowPreviewModal(true);
-                                      }
-                                    }
-                                  }}
-                                  title="Preview Latest Document"
-                                >
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            ) : (
-                              <span className={`text-xs font-bold uppercase ${statusToDisplay.type === 'missing' ? 'text-amber-600' :
-                                statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'text-red-600' :
-                                  'text-amber-600'
-                                }`}>
-                                {statusToDisplay.type === 'missing' ? 'Missing' :
-                                  statusToDisplay.validCount === 0 && statusToDisplay.count > 0 ? 'Invalid' :
-                                    'No Status'}
-                              </span>
-                            )}
-                          </>
-                        ) : (
-                          <div className="w-4 h-4 bg-gray-300 rounded-full animate-pulse" title="Checking status..." />
-                        )}
-                      </div>
+                      {reqItem.hasTemplate && (
+                        <Button
+                          variant="default"
+                          size="sm"
+                          className="h-7 w-full max-w-[120px] bg-indigo-50 text-indigo-600 hover:bg-indigo-100 hover:text-indigo-700 border border-indigo-200 shadow-sm flex items-center justify-center gap-1.5"
+                          onClick={() => handleGenerateTemplate(reqItem, col.task, col.type, col.id)}
+                          disabled={isPreparingTemplate}
+                        >
+                          {isPreparingTemplate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                          <span className="text-[10px] font-bold uppercase tracking-wider">Generate</span>
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 );
               }
 
               return (
-                <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-2">
-                  <div className="flex items-center justify-center gap-1">
+                <TableCell key={`${requirementId}-col-${colIdx}`} className="text-center border p-3 align-middle">
+                  <div className="flex items-center justify-center gap-2.5 w-full">
+                    <div className="flex items-center justify-center w-full min-h-[32px]">
+                      {renderDocumentStatus(col.task, reqItem, col.type, col.id, groupRelationshipData)}
+                    </div>
+
                     {reqItem.hasTemplate && (
                       <Button
-                        variant="ghost"
+                        variant="default"
                         size="sm"
-                        className="h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                        className="h-7 w-full max-w-[120px] bg-indigo-50 text-indigo-600 hover:bg-indigo-100 hover:text-indigo-700 border border-indigo-200 shadow-sm flex items-center justify-center gap-1.5"
                         onClick={() => handleGenerateTemplate(reqItem, col.task, col.type, col.id)}
-                        title={`Generate ${reqItem.documentDefinition?.display_name || reqItem.name} Template`}
                         disabled={isPreparingTemplate}
                       >
-                        {isPreparingTemplate ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3 mr-1" />}
-                        <span className="text-[10px] font-bold uppercase">Generate</span>
+                        {isPreparingTemplate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Generate</span>
                       </Button>
                     )}
-
-                    {renderDocumentStatus(col.task, reqItem, col.type, col.id, groupRelationshipData)}
                   </div>
                 </TableCell>
               );
@@ -2057,19 +1989,21 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                   {reqIndex + 1}.{docIdx + 1}
                 </TableCell>
                 <TableCell className="sticky left-16 bg-blue-50/50 border-r pl-8">
-                  <div className="flex items-center gap-2">
+                  <span className="flex items-center gap-2">
                     <FileText className="h-3 w-3 text-blue-600" />
                     <span className="text-[11px] text-slate-700 font-medium">
                       {docMetadata.display_name || docMetadata.name}
                     </span>
-                  </div>
+                  </span>
                 </TableCell>
                 {columnDefinitions.map((col, colIdx) => {
                   const isApplicable = checkApplicability(col.type, reqItem);
                   if (!isApplicable) {
                     return (
-                      <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-1">
-                        <span className="text-[10px] text-gray-300">-</span>
+                      <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-3 align-middle">
+                        <span className="inline-flex items-center justify-center px-2 py-1 rounded border border-slate-100 bg-slate-50 text-[10px] text-gray-300 italic">
+                          -
+                        </span>
                       </TableCell>
                     );
                   }
@@ -2077,27 +2011,40 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                   const docs = getDocumentsByType(docId, col.task, col.type, col.id);
 
                   return (
-                    <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-1">
-                      <div className="flex items-center justify-center gap-1">
+                    <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-3 align-middle">
+                      <div className="flex items-center justify-center gap-2.5 w-full">
                         {docs.length > 0 ? (
-                          <div className="flex flex-col items-center gap-1">
-                            <div className="flex items-center gap-1">
+                          <>
+                            {(() => {
+                              const personId = isCompanyType(col.type) ? col.task.company_id :
+                                isIndividualType(col.type) ? col.task.individual_id :
+                                  col.id;
+                              const statusKey = `${col.task.id}-${docId}-${col.type}-${personId}`;
+                              if (!documentStatusCache.has(statusKey)) {
+                                const latestDoc = docs.reduce((prev, curr) => (new Date(curr.created_at) > new Date(prev.created_at)) ? curr : prev);
+                                getDocumentStatus(col.task, docId, col.type, personId, latestDoc);
+                                return <span className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" title="Checking status..." />;
+                              }
+                              const status = documentStatusCache.get(statusKey);
+                              return status ? renderStatusBadge(status) : null;
+                            })()}
+
+                            <div className="flex items-center gap-1 bg-white border border-slate-200 p-1 rounded-md shadow-sm">
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                className="h-6 w-6 p-0 text-green-600 hover:bg-green-100"
+                                className="h-6 w-9 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded"
                                 onClick={() => handleViewDocuments(docs, docMetadata, col, requirementId)}
                                 title={`View ${docs.length} document(s)`}
                               >
-                                <Eye className="h-3 w-3" />
+                                <Eye className="h-4 w-4" />
+                                {docs.length > 1 && <span className="text-[10px] font-bold ml-1">{docs.length}</span>}
                               </Button>
-                              {docs.length > 1 && (
-                                <span className="text-[9px] text-green-600 font-bold">{docs.length}</span>
-                              )}
+                              <div className="w-[1px] h-4 bg-slate-200" />
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                className="h-6 w-6 p-0 text-blue-600 hover:bg-blue-50"
+                                className="h-6 w-9 p-0 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
                                 onClick={(e) => {
                                   e.stopPropagation();
 
@@ -2115,19 +2062,8 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                       'Individual';
                                   }
 
-                                  let documentName = docMetadata?.display_name ||
-                                    docMetadata?.name ||
-                                    docMetadata?.document_name ||
-                                    docMetadata?.main_category ||
-                                    docMetadata?.sub_category ||
-                                    docMetadata?.id ||
-                                    'Document';
-
                                   setSelectedDocForUpload({
-                                    doc: {
-                                      ...docMetadata,
-                                      display_name: documentName
-                                    },
+                                    doc: docMetadata,
                                     fields: docMetadata?.fields || [],
                                     person: {
                                       full_name: personName,
@@ -2140,64 +2076,58 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                   });
                                   setShowUploadModal(true);
                                 }}
-                                title={`Upload additional ${docMetadata?.display_name || docMetadata?.name || 'Document'}`}
+                                title={`Upload additional ${docMetadata?.display_name || 'Document'}`}
                               >
-                                <UploadCloud className="h-3 w-3" />
+                                <UploadCloud className="h-4 w-4" />
                               </Button>
                             </div>
-                            {(() => {
-                              const personId = isCompanyType(col.type) ? col.task.company_id :
-                                isIndividualType(col.type) ? col.task.individual_id :
-                                  col.id;
-                              const statusKey = `${col.task.id}-${docId}-${col.type}-${personId}`;
-                              if (!documentStatusCache.has(statusKey)) {
-                                // Find the latest document of this type to pass to getDocumentStatus
-                                const latestDoc = docs.reduce((prev, curr) => (new Date(curr.created_at) > new Date(prev.created_at)) ? curr : prev);
-                                getDocumentStatus(col.task, docId, col.type, personId, latestDoc);
-                                return (
-                                  <div className="w-2 h-2 bg-gray-300 rounded-full animate-pulse" title="Checking status..." />
-                                );
-                              }
-                              const status = documentStatusCache.get(statusKey);
-                              return status ? renderStatusBadge(status) : null;
-                            })()}
-                          </div>
+                          </>
                         ) : (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0 text-amber-600 hover:bg-amber-50"
-                            onClick={(e) => {
-                              e.stopPropagation();
+                          <>
+                            <Badge variant="outline" className="text-[10px] uppercase font-bold px-2.5 py-1 border-amber-200 text-amber-600 bg-amber-50 shadow-sm">
+                              Missing
+                            </Badge>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 w-full max-w-[100px] text-amber-600 border-amber-200 hover:bg-amber-50 shadow-sm flex items-center justify-center gap-1.5"
+                              onClick={(e) => {
+                                e.stopPropagation();
 
-                              console.log('DEBUG: Composite Sub-Doc Upload Clicked', {
-                                parentRequirement: reqItem.name,
-                                targetDocMetadata: docMetadata,
-                                docId: docId
-                              });
+                                console.log('DEBUG: Composite Sub-Doc Upload Clicked', {
+                                  parentRequirement: reqItem.name,
+                                  targetDocMetadata: docMetadata,
+                                  docId: docId
+                                });
 
-                              let personName = col.label;
-                              // ... (name resolution logic)
+                                let personName = col.label;
+                                if (!personName || personName === 'Unknown Person') {
+                                  personName = individualNames[col.task?.individual_id] ||
+                                    individualNames[col.task?.applicant_details?.id] ||
+                                    col.task?.applicant_details?.name ||
+                                    'Individual';
+                                }
 
-                              setSelectedDocForUpload({
-                                // CRITICAL: We pass docMetadata which contains the specific fields/config for THIS doc type
-                                doc: docMetadata,
-                                fields: docMetadata?.fields || [],
-                                person: {
-                                  full_name: personName,
-                                  id: col.id,
-                                  type: isCompanyType(col.type) ? 'company' : 'individual'
-                                },
-                                task: col.task,
-                                columnType: col.type,
-                                columnId: col.id
-                              });
-                              setShowUploadModal(true);
-                            }}
-                            title={`Upload ${docMetadata?.display_name || 'Document'}`}
-                          >
-                            <UploadCloud className="h-3 w-3" />
-                          </Button>
+                                setSelectedDocForUpload({
+                                  doc: docMetadata,
+                                  fields: docMetadata?.fields || [],
+                                  person: {
+                                    full_name: personName,
+                                    id: col.id,
+                                    type: isCompanyType(col.type) ? 'company' : 'individual'
+                                  },
+                                  task: col.task,
+                                  columnType: col.type,
+                                  columnId: col.id
+                                });
+                                setShowUploadModal(true);
+                              }}
+                              title={`Upload ${docMetadata?.display_name || 'Document'}`}
+                            >
+                              <UploadCloud className="h-3.5 w-3.5" />
+                              <span className="text-[10px] font-bold uppercase tracking-wider">Upload</span>
+                            </Button>
+                          </>
                         )}
                       </div>
                     </TableCell>
@@ -2262,29 +2192,17 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         idFieldName={selectedDocForUpload?.person?.type === 'company' ? 'company_id' : 'director_id'}
         documentIdFieldName='document_id'
         isCompanyUpload={selectedDocForUpload?.person?.type === 'company'}
-
         onBeforeUpload={async (recordData) => {
-
-          // Custom handling before upload if needed
-
           if (selectedDocForUpload?.onBeforeUpload) {
-
             return selectedDocForUpload.onBeforeUpload(recordData);
-
           }
-
           return null;
-
         }}
-
       />
 
       <Dialog open={showPreviewModal} onOpenChange={setShowPreviewModal}>
-
-        <DialogContent className="max-w-[95vw] w-full max-h-[95vh] flex flex-col p-0 overflow-hidden bg-slate-50">
-
+        <DialogContent className="max-w-[95vw] w-full max-h-[95vh] flex p-0 overflow-hidden bg-slate-50">
           {showPreviewModal && previewingDocuments && (
-
             <>
               <DialogHeader className="p-4 border-b bg-white shrink-0">
                 <div className="flex items-center justify-between">
@@ -2294,7 +2212,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                         <div className="bg-white p-2 rounded-lg border shadow-sm">
                           <FileText className="h-5 w-5 text-blue-600" />
                         </div>
-                        <div className="flex flex-col">
+                        <div className="flex">
                           <p className="text-xl font-bold text-slate-800 line-clamp-1">{previewingDocuments?.document_display_name || 'Document'}</p>
                         </div>
                       </div>
@@ -2381,12 +2299,12 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                       key={`header-${idx}`}
                       className={`${bgColor} text-white border-r border-white/10 min-w-[180px] p-2 text-center transition-colors`}
                     >
-                      <div className="flex flex-col items-center gap-1">
+                      <span className="flex items-center gap-1">
                         <Icon className="h-4 w-4 opacity-70 mb-1" />
                         <span className="text-[11px] font-bold uppercase line-clamp-1 px-1">
                           {col.label}
                         </span>
-                        <div className="flex justify-between items-center gap-6">
+                        <span className="flex justify-between items-center gap-6">
                           <span className="text-[9px] bg-black/20 rounded px-1.5 py-0.5 font-medium tracking-wider">
                             {col.subLabel}
                           </span>
@@ -2404,7 +2322,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                             if (dependants.length > 0) {
                               const isExpanded = expandedDependants.has(col.groupIndex);
                               return (
-                                <div className="flex items-center gap-1">
+                                <span className="flex items-center gap-1">
                                   {!isExpanded && (
                                     <span className="text-[10px] bg-amber-500 text-white rounded-full px-2.5 py-0.5 font-bold">
                                       {dependants.length}
@@ -2423,13 +2341,13 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                                       <ChevronRight className="h-3 w-3" />
                                     )}
                                   </Button>
-                                </div>
+                                </span>
                               );
                             }
                             return null;
                           })()}
-                        </div>
-                      </div>
+                        </span>
+                      </span>
                     </TableHead>
                   );
                 })}
@@ -2446,11 +2364,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                     <>
                       <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('general')}>
                         <TableCell colSpan={totalColumns} className="py-3 px-4">
-                          <div className="flex items-center gap-3">
+                          <span className="flex items-center gap-3">
                             {expandedSections.general ? <Minus className="h-4 w-4 text-slate-500" /> : <Plus className="h-4 w-4 text-slate-500" />}
-                            <div className="h-6 w-1 bg-blue-600 rounded-full" />
+                            <span className="h-6 w-1 bg-blue-600 rounded-full" />
                             <span className="font-bold text-slate-700 uppercase text-xs tracking-wider">General Requirements ({groupedRequirements.general.length})</span>
-                          </div>
+                          </span>
                         </TableCell>
                       </TableRow>
                       {expandedSections.general && renderRequirementRows(groupedRequirements.general)}
@@ -2462,11 +2380,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                     <>
                       <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('processing')}>
                         <TableCell colSpan={totalColumns} className="py-3 px-4">
-                          <div className="flex items-center gap-3">
+                          <span className="flex items-center gap-3">
                             {expandedSections.processing ? <Minus className="h-4 w-4 text-slate-500" /> : <Plus className="h-4 w-4 text-slate-500" />}
-                            <div className="h-6 w-1 bg-amber-500 rounded-full" />
+                            <span className="h-6 w-1 bg-amber-500 rounded-full" />
                             <span className="font-bold text-slate-700 uppercase text-xs tracking-wider">Processing Requirements ({groupedRequirements.processing.length})</span>
-                          </div>
+                          </span>
                         </TableCell>
                       </TableRow>
                       {expandedSections.processing && renderRequirementRows(groupedRequirements.processing)}
@@ -2478,11 +2396,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                     <>
                       <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('issuance')}>
                         <TableCell colSpan={totalColumns} className="py-3 px-4">
-                          <div className="flex items-center gap-3">
+                          <span className="flex items-center gap-3">
                             {expandedSections.issuance ? <Minus className="h-4 w-4 text-slate-500" /> : <Plus className="h-4 w-4 text-slate-500" />}
-                            <div className="h-6 w-1 bg-emerald-500 rounded-full" />
+                            <span className="h-6 w-1 bg-emerald-500 rounded-full" />
                             <span className="font-bold text-slate-700 uppercase text-xs tracking-wider">Issuance Requirements ({groupedRequirements.issuance.length})</span>
-                          </div>
+                          </span>
                         </TableCell>
                       </TableRow>
                       {expandedSections.issuance && renderRequirementRows(groupedRequirements.issuance)}
@@ -2494,11 +2412,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                     <>
                       <TableRow className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSectionExpansion('other')}>
                         <TableCell colSpan={totalColumns} className="py-3 px-4">
-                          <div className="flex items-center gap-3">
+                          <span className="flex items-center gap-3">
                             {expandedSections.other ? <Minus className="h-4 w-4 text-slate-500" /> : <Plus className="h-4 w-4 text-slate-500" />}
-                            <div className="h-6 w-1 bg-slate-400 rounded-full" />
+                            <span className="h-6 w-1 bg-slate-400 rounded-full" />
                             <span className="font-bold text-slate-700 uppercase text-xs tracking-wider">Other Requirements ({groupedRequirements.other.length})</span>
-                          </div>
+                          </span>
                         </TableCell>
                       </TableRow>
                       {expandedSections.other && renderRequirementRows(groupedRequirements.other)}
