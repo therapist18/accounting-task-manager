@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, Send, FileText, MessageSquare, Star, Eye, Check, FileUp, Trash2, CheckCircle2 } from "lucide-react"
+import { Loader2, Send, FileText, MessageSquare, Star, Eye, Check, FileUp, Trash2, CheckCircle2, RotateCcw } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { toast } from "@/hooks/use-toast"
@@ -187,7 +187,8 @@ const DocumentTabPanel = ({
   onUseExistingLink,
   messageState,
   onMessageStateChange,
-  workflowDocuments = {}
+  workflowDocuments = {},
+  onRevertResolution
 }) => {
   const [useExisting, setUseExisting] = useState(false);
   const [selectedExistingId, setSelectedExistingId] = useState("");
@@ -254,7 +255,6 @@ const DocumentTabPanel = ({
 
   const handlePendingChange = useCallback((docs: any[]) => {
     if (docs && docs.length > 0) {
-      // Only extract docs that are fully validated and extracted successfully
       const readyDocs = docs.filter(d =>
         (d.validationStatus === 'valid' || d.validationStatus === 'warning') &&
         d.extractedData && Object.keys(d.extractedData).length > 0
@@ -324,50 +324,72 @@ const DocumentTabPanel = ({
             {useExisting && (
               <div className="ml-6 space-y-2">
                 <RadioGroup value={selectedExistingId} onValueChange={(val) => !isLocked && setSelectedExistingId(val)}>
-                  {existingDocs.map((ed) => {
+                  {existingDocs.filter(ed => !ed.hasNoTaskOutcome).map((ed) => {
                     const isSelected = selectedExistingId === ed.id;
                     const fileName = ed.file_path?.split('/').pop() || documentName;
+
+                    // Identify if this doc has a bypass workflow outcome making it invalid for task linking
+                    const isBypassed = ed.hasNoTaskOutcome;
+                    const isDisabled = isLocked || isBypassed;
+
                     return (
-                      <div key={ed.id} className={`flex items-center gap-3 p-2 border rounded transition-colors ${isSelected ? 'bg-blue-50 border-blue-200' : 'hover:bg-slate-50'}`}>
-                        <RadioGroupItem
-                          value={ed.id}
-                          id={ed.id}
-                          disabled={isLocked}
-                          className={`${isLocked ? 'opacity-50' : ''}`}
-                        />
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <Label htmlFor={ed.id} className="text-sm cursor-pointer">{fileName}</Label>
-                            {isSourceDocSelected(ed.id) && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                Source
-                              </span>
-                            )}
-                            {workflowDocuments[ed.id] && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-                                {workflowDocuments[ed.id].workflowOutcome || 'Workflow Document'}
-                              </span>
-                            )}
+                      <div key={ed.id} className={`flex flex-col gap-2 p-3 border rounded-lg transition-colors ${isSelected ? 'bg-blue-50 border-blue-200' : 'bg-white hover:bg-slate-50'} ${isBypassed ? 'opacity-80 bg-slate-50/50' : ''}`}>
+                        <div className="flex items-center gap-3">
+                          <RadioGroupItem
+                            value={ed.id}
+                            id={ed.id}
+                            disabled={isDisabled}
+                            className={`${isDisabled ? 'opacity-50' : ''}`}
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <Label htmlFor={ed.id} className={`text-sm ${isDisabled ? 'cursor-default text-slate-500' : 'cursor-pointer font-medium'}`}>{fileName}</Label>
+                              {isSourceDocSelected(ed.id) && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-100 text-blue-800">
+                                  Source
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-500 mt-0.5">{format(parseISO(ed.created_at), 'dd MMM yyyy')}</p>
                           </div>
-                          <p className="text-xs text-slate-500">{format(parseISO(ed.created_at), 'dd MMM yyyy')}</p>
-                          {workflowDocuments[ed.id] && (
-                            <p className="text-xs text-slate-400 mt-1">
-                              Workflow: {workflowDocuments[ed.id].workflowAction} - {format(parseISO(workflowDocuments[ed.id].created_at), 'dd MMM yyyy')}
-                            </p>
-                          )}
+
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-slate-400 hover:text-slate-700 bg-white shadow-sm border border-slate-100"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onPreviewExisting(ed, kycData);
+                            }}
+                            type="button"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-gray-500 hover:text-gray-700"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onPreviewExisting(ed, kycData);
-                          }}
-                          type="button"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
+
+                        {/* Rendering the bypass UI with revert button */}
+                        {isBypassed && (
+                          <div className="mt-1 flex items-center justify-between bg-amber-50 p-2.5 rounded-md border border-amber-200 ml-7">
+                            <div className="flex items-center gap-2">
+                              <CheckCircle2 className="h-4 w-4 text-amber-600" />
+                              <span className="text-xs text-amber-900 font-medium">
+                                Resolved: {ed.workflowOutcome?.replace(/_/g, ' ').toUpperCase()}
+                              </span>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs bg-white hover:bg-amber-100 text-amber-700 border-amber-300"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onRevertResolution(ed.workflowLogId);
+                              }}
+                              type="button"
+                            >
+                              <RotateCcw className="h-3 w-3 mr-1.5" /> Revert
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     )
                   })}
@@ -376,11 +398,11 @@ const DocumentTabPanel = ({
                 {!isLocked && selectedExistingId && (
                   <Button
                     onClick={() => onUseExistingLink(doc.id, selectedExistingId, doc.kycId)}
-                    className="ml-6 mt-2"
+                    className="ml-6 mt-3 shadow-sm"
                     size="sm"
                   >
                     <Check className="mr-2 h-4 w-4" />
-                    Use Selected
+                    Use Selected Document
                   </Button>
                 )}
               </div>
@@ -417,7 +439,7 @@ const DocumentTabPanel = ({
               externalFile={generatedFile}
               onExternalFileClear={handleExternalFileClear}
               onBeforeUpload={handleBeforeUpload}
-              onPendingChange={handlePendingChange} // <--- Added missing link here
+              onPendingChange={handlePendingChange}
             />
           ) : (
             <div className="flex justify-center p-10 text-muted-foreground">
@@ -486,6 +508,7 @@ export function StageUploadDialog({
   const [selectedSourceDocs, setSelectedSourceDocs] = useState<Record<string, any[]>>({ selected: [] });
   const [workflowDocuments, setWorkflowDocuments] = useState<Record<string, any>>({});
   const [realtimeSubscriptions, setRealtimeSubscriptions] = useState<any[]>([]);
+  const [refreshTrigger, setRefreshTrigger] = useState(0); // Trigger to reload data after revert
   const [previewState, setPreviewState] = useState({
     isOpen: false,
     loading: false,
@@ -583,7 +606,6 @@ export function StageUploadDialog({
             .order('created_at', { ascending: false })
         );
 
-        // NEW: Fetch workflow logs to understand existing workflow documents
         promises.push(
           getWorkflowLogsForIndividual(task.individual_id).then(logs => ({ data: logs }))
         );
@@ -631,10 +653,8 @@ export function StageUploadDialog({
         // Process workflow documents to understand existing workflow context
         if (workflowRes.data) {
           workflowRes.data.forEach((log: any) => {
-            // Check if this log represents a completed workflow
             const isCompleted = log.resolutions && log.resolutions.length > 0;
 
-            // For completed workflows, use the resolution outcome
             if (isCompleted && log.resolutions[0]) {
               workflowDocMap[log.uploaded_doc_id] = {
                 ...log,
@@ -644,7 +664,6 @@ export function StageUploadDialog({
                 isCompleted: true
               };
             }
-            // Also track the document type for workflow detection
             if (log.document_type_id) {
               workflowDocMap[log.document_type_id] = {
                 ...log,
@@ -654,15 +673,47 @@ export function StageUploadDialog({
                 isCompleted: isCompleted
               };
             }
+
+            if (log.uploaded_doc_id) {
+              workflowDocMap[log.uploaded_doc_id] = {
+                ...log,
+                isWorkflowDocument: true,
+                workflowAction: log.action_type,
+                workflowOutcome: isCompleted ? log.resolutions[0]?.outcome : log.action_type,
+                isCompleted: isCompleted
+              };
+            }
           });
         }
+
+        // Check if document has tasks marked as not_applicable
+        const hasNotApplicableTask = (workflowDoc: any) => {
+          const tasks = Array.isArray(workflowDoc?.tasks) ? workflowDoc.tasks : [];
+          return tasks.some((task: any) => task.status === 'not_applicable');
+        };
 
         const groupedDocs: Record<string, any[]> = {};
         if (userDocsRes.data) {
           applicableDocuments.forEach((stageDoc: any) => {
             if (stageDoc.kycId) {
               const matching = userDocsRes.data.filter((d: any) => d.document_id === stageDoc.kycId);
-              if (matching.length > 0) groupedDocs[stageDoc.id] = matching;
+
+              const processedMatching = matching.map((doc: any) => {
+                // Only use direct document ID mapping - avoid document_type_id fallback to prevent cross-contamination
+                const workflowDoc = workflowDocMap[doc.id];
+                const hasNotApplicableTaskStatus = workflowDoc && hasNotApplicableTask(workflowDoc);
+
+                return {
+                  ...doc,
+                  hasNoTaskOutcome: hasNotApplicableTaskStatus, // Use tasks array status instead of outcome
+                  workflowLogId: workflowDoc?.id,
+                  workflowOutcome: workflowDoc?.workflowOutcome
+                };
+              });
+
+              if (processedMatching.length > 0) {
+                groupedDocs[stageDoc.id] = processedMatching;
+              }
             }
           });
         }
@@ -681,7 +732,7 @@ export function StageUploadDialog({
     };
 
     fetchData();
-  }, [open, stage?.documents, task?.individual_id, applicableDocuments]);
+  }, [open, stage?.documents, task?.individual_id, applicableDocuments, refreshTrigger]);
 
   useEffect(() => {
     if (!stage?.id || !applicableDocuments.length || !task?.id) return;
@@ -735,6 +786,67 @@ export function StageUploadDialog({
     }));
   }, [stage?.id, task?.id]);
 
+  // Handle reverting a resolution that hides it from standard task flow
+  const handleRevertResolution = async (logId: number) => {
+    setIsLoading(true);
+    try {
+      const { data: log, error } = await supabase
+        .from('document_workflow_logs')
+        .select('*')
+        .eq('id', logId)
+        .single();
+
+      if (error) throw error;
+      if (!log) return;
+
+      const resolutions = Array.isArray(log.resolutions) ? log.resolutions : [];
+      // Remove the last resolution
+      const updatedResolutions = resolutions.slice(0, -1);
+
+      const hasHolds = Array.isArray(log.holds) && log.holds.length > 0;
+      const hasComments = Array.isArray(log.comments) && log.comments.length > 0;
+      const hasReminders = Array.isArray(log.reminders) && log.reminders.length > 0;
+      const hasTasks = Array.isArray(log.tasks) && log.tasks.length > 0;
+
+      // If it was the only thing in the log, delete the entire record
+      if (!hasHolds && !hasComments && !hasReminders && !hasTasks && updatedResolutions.length === 0) {
+        await supabase.from('document_workflow_logs').delete().eq('id', logId);
+      } else {
+        // Fallback to a logical previous state action type
+        let nextActionType = log.action_type;
+        if (log.action_type === 'resolution' && updatedResolutions.length === 0) {
+          if (hasTasks) nextActionType = 'task_created';
+          else if (hasHolds) nextActionType = 'hold';
+          else if (hasReminders) nextActionType = 'reminder_sent';
+          else nextActionType = 'comment';
+        }
+
+        await supabase.from('document_workflow_logs').update({
+          resolutions: updatedResolutions,
+          action_type: nextActionType,
+          updated_at: new Date().toISOString()
+        }).eq('id', logId);
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Resolution reverted. Document is now available to be linked to workflows.'
+      });
+
+      // Trigger a re-fetch
+      setRefreshTrigger(prev => prev + 1);
+    } catch (err: any) {
+      console.error('Revert error:', err);
+      toast({
+        title: 'Error',
+        description: err.message || 'Failed to revert resolution.',
+        variant: 'destructive'
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const saveAllDocuments = useCallback(async () => {
     if (!stage?.id || !task?.id) {
       toast({ title: 'Error', description: 'Missing stage or task information', variant: 'destructive' });
@@ -752,7 +864,6 @@ export function StageUploadDialog({
       for (const [docId, docData] of Object.entries(pendingDocuments)) {
         if (!docData) continue;
 
-        // Extract base ID to retrieve configurations
         const baseDocId = docId.split('_')[0];
         const docConfig = applicableDocuments.find(doc => doc.id === baseDocId);
         if (!docConfig) continue;
@@ -965,17 +1076,13 @@ export function StageUploadDialog({
         source: 'stage-upload'
       });
 
-      // NEW: Update document workflow if this stage should trigger it
       if (shouldTriggerWorkflowUpdate(stage.id)) {
         try {
-          // Get the final uploaded document for this stage
           const finalDocId = uploadedDocIds.size > 0 ?
             Object.values(updatedLinkedDocs).find(doc => doc)?.id : null;
 
-          // Check if there's already a completed workflow for this document type
           const existingWorkflowDoc = Object.values(workflowDocuments).find(
             (doc: any) => {
-              // Check for completed workflows by looking at resolutions
               return doc.document_type_id === task.linked_document_type_id &&
                 doc.isCompleted === true &&
                 ['renewed_by_client', 'task_completed', 'task_endorsed'].includes(doc.workflowOutcome)
@@ -984,7 +1091,6 @@ export function StageUploadDialog({
 
           let workflowOutcome = WORKFLOW_OUTCOME_LABELS[TASK_STAGE_WORKFLOW_MAPPING[stage.id]];
 
-          // If there's already a completed workflow, use a more specific outcome
           if (existingWorkflowDoc && stage.id === 'writeup_completed') {
             workflowOutcome = 'Document Write-up Updated';
           }
@@ -1002,21 +1108,9 @@ export function StageUploadDialog({
               description: `Document workflow updated: ${workflowResult.data.outcome}`,
               variant: 'default'
             });
-          } else {
-            console.error('Workflow update failed:', workflowResult.error);
-            toast({
-              title: 'Workflow Update Failed',
-              description: 'Task was saved but workflow update failed',
-              variant: 'destructive'
-            });
           }
         } catch (workflowError) {
           console.error('Error updating workflow:', workflowError);
-          toast({
-            title: 'Workflow Update Error',
-            description: 'Task was saved but workflow update encountered an error',
-            variant: 'destructive'
-          });
         }
       }
 
@@ -1039,20 +1133,16 @@ export function StageUploadDialog({
     setPendingDocuments(prev => {
       const updated = { ...prev };
 
-      // Remove any existing files for THIS specific tab so we don't accumulate stale documents 
-      // if the user drops a new file or deletes one.
       Object.keys(updated).forEach(key => {
         if (key === originatingDoc.id || key.startsWith(`${originatingDoc.id}_`)) {
           delete updated[key];
         }
       });
 
-      // If document payload is cleared entirely
       if (!newDocument || Object.keys(newDocument).length === 0 || (newDocument.files && newDocument.files.length === 0)) {
         return updated;
       }
 
-      // Add fresh documents sent from UploadModal back in
       if (newDocument.files && Array.isArray(newDocument.files)) {
         newDocument.files.forEach((fileData: any, index: number) => {
           if (fileData.file && fileData.extractedData) {
@@ -1219,6 +1309,7 @@ export function StageUploadDialog({
                         messageState={tabMessageStates[doc.id]}
                         onMessageStateChange={(docId, message) => setTabMessageStates(prev => ({ ...prev, [docId]: message }))}
                         workflowDocuments={workflowDocuments}
+                        onRevertResolution={handleRevertResolution}
                       />
                     </div>
                   ))
