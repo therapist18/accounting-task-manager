@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState, useMemo, useCallback, useEffect } from "react"
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { unstable_batchedUpdates } from 'react-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -342,54 +342,47 @@ export default function DepartmentTasksManager({
   }, [])
 
   // Cache for tasks data to avoid re-fetching
-  const [tasksCache, setTasksCache] = useState<Map<string, { tasks: UtilTask[], stages: any[], timestamp: number }>>(new Map())
-  const [tableRowsCache, setTableRowsCache] = useState<Map<string, { rows: any[], timestamp: number }>>(new Map())
+  const tasksCacheRef = useRef<Map<string, { tasks: UtilTask[], stages: any[], timestamp: number }>>(new Map())
+  const tableRowsCacheRef = useRef<Map<string, { rows: any[], timestamp: number }>>(new Map())
   const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
 
   // Function to clear cache for specific department/subdepartment
   const clearTasksCache = useCallback((departmentId?: string, subdepartmentId?: string) => {
     const cacheKey = `${departmentId || 'all'}-${subdepartmentId || 'all'}`;
-    setTasksCache(prev => {
-      const newCache = new Map(prev);
-      newCache.delete(cacheKey);
-      return newCache;
-    });
-    setTableRowsCache(prev => {
-      const newCache = new Map(prev);
-      newCache.delete(cacheKey);
-      return newCache;
-    });
+    tasksCacheRef.current.delete(cacheKey);
+    tableRowsCacheRef.current.clear();
   }, []);
 
   const loadTasksData = useCallback(async (departmentId?: string, subdepartmentId?: string) => {
-    if (!departmentId) return;
+    if (!departmentId) return null;
 
     const cacheKey = `${departmentId}-${subdepartmentId || 'all'}`;
-    const cached = tasksCache.get(cacheKey);
+    const cached = tasksCacheRef.current.get(cacheKey);
     const now = Date.now();
 
-    // Return cached data if still valid
     if (cached && (now - cached.timestamp) < CACHE_DURATION) {
       setTasks(cached.tasks);
       setStages(cached.stages);
-      return;
+      return cached;
     }
 
     try {
       const [tasksData, stagesData] = await Promise.all([
         fetchTasks(departmentId, subdepartmentId),
-        departmentId ? fetchStages(departmentId, departments) : Promise.resolve([])
+        fetchStages(departmentId, departments)
       ])
 
       setTasks(tasksData)
       setStages(stagesData)
 
-      // Cache the results
-      setTasksCache(prev => new Map(prev).set(cacheKey, {
+      const nextValue = {
         tasks: tasksData,
         stages: stagesData,
         timestamp: now
-      }));
+      }
+
+      tasksCacheRef.current.set(cacheKey, nextValue)
+      return nextValue
 
     } catch (error) {
       console.error('Error loading tasks data:', error)
@@ -398,8 +391,9 @@ export default function DepartmentTasksManager({
         description: "Failed to load tasks data.",
         variant: "destructive"
       })
+      return null
     }
-  }, [departments, tasksCache])
+  }, [departments])
 
   const refreshAllData = useCallback(async () => {
     try {
@@ -787,7 +781,25 @@ export default function DepartmentTasksManager({
   const enquiryTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('enquiry')), [getFilteredTasks, filterTasksBySearchWrapper])
   const wipTasks = useMemo(() => filterTasksBySearchWrapper(getWIPTasksByFollowUp(activeFollowUpFilter)), [getWIPTasksByFollowUp, activeFollowUpFilter, filterTasksBySearchWrapper])
   const completedTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('write_up_completed')), [getFilteredTasks, filterTasksBySearchWrapper])
+  const endorsedTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('endorsed')), [getFilteredTasks, filterTasksBySearchWrapper])
   const cancelledTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('cancelled')), [getFilteredTasks, filterTasksBySearchWrapper])
+  const activeTabConfig = useMemo(() => {
+    switch (activeSubTab) {
+      case 'enquiries':
+        return { tasks: enquiryTasks, title: 'Enquiries' }
+      case 'endorsed':
+        return { tasks: endorsedTasks, title: 'Endorsement Completed' }
+      case 'cancelled':
+        return { tasks: cancelledTasks, title: 'Cancelled' }
+      case 'write_up_completed':
+        return { tasks: completedTasks, title: 'Write Up Completed' }
+      case 'wip-stages':
+      default:
+        return { tasks: wipTasks, title: 'WIP Stages' }
+    }
+  }, [activeSubTab, enquiryTasks, wipTasks, completedTasks, endorsedTasks, cancelledTasks])
+  const displayedTasks = activeTabConfig.tasks
+  const activeTabTitle = activeTabConfig.title
 
   const handleExport = useCallback(async (tasks: any[], tableType: string) => {
     if (!tasks.length) {
@@ -1454,7 +1466,7 @@ export default function DepartmentTasksManager({
       visibleStats: Array.from(visibleStats).sort()
     });
 
-    const cached = tableRowsCache.get(cacheKey);
+    const cached = tableRowsCacheRef.current.get(cacheKey);
     const now = Date.now();
 
     // Return cached rows if still valid
@@ -1649,13 +1661,13 @@ export default function DepartmentTasksManager({
     }
 
     // Cache the generated rows
-    setTableRowsCache(prev => new Map(prev).set(cacheKey, {
+    tableRowsCacheRef.current.set(cacheKey, {
       rows,
       timestamp: now
-    }));
+    });
 
     return rows
-  }, [stages, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleStats, kycDocuments, allDocuments, visibleStageIds, getDocumentForTaskStage, departments, tableRowsCache])
+  }, [stages, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleStats, kycDocuments, allDocuments, visibleStageIds, getDocumentForTaskStage, departments])
 
   const handleStageDocumentUpload = useCallback((task: any, stage: any) => {
     const enrichedTask = {
@@ -1719,8 +1731,8 @@ export default function DepartmentTasksManager({
 
   // Clear cache when manually refreshing
   const clearCacheAndRefresh = useCallback(() => {
-    setTasksCache(new Map());
-    setTableRowsCache(new Map());
+    tasksCacheRef.current.clear();
+    tableRowsCacheRef.current.clear();
     refreshAllData();
   }, [refreshAllData]);
 
@@ -2452,10 +2464,15 @@ export default function DepartmentTasksManager({
   const defaultSubdepartments = getDefaultSubdepartments()
 
   useEffect(() => {
-    if (isTransposedView && tasks && tasks.length > 0) {
-      loadRows(tasks);
+    if (!isTransposedView) return;
+
+    if (displayedTasks.length > 0) {
+      loadRows(displayedTasks);
+      return;
     }
-  }, [tasks, isTransposedView, loadRows]);
+
+    setTableRows(prevRows => (prevRows.length === 0 ? prevRows : []));
+  }, [displayedTasks, isTransposedView, loadRows]);
 
   useEffect(() => {
     if (stages && stages.length > 0) {
@@ -2538,20 +2555,11 @@ export default function DepartmentTasksManager({
     performInitialLoad();
   }, []);
 
-  // Debounced tab change handler to prevent excessive API calls
-  const [pendingTabChange, setPendingTabChange] = useState<{ dept: string, sub: string } | null>(null);
-
   useEffect(() => {
     if (activeDepartmentTab && departments.length > 0) {
-      // Clear any pending timeout
-      if (pendingTabChange) {
-        setPendingTabChange(null);
-      }
-
-      // Only load data if not already loading the same tab
       loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
     }
-  }, [activeDepartmentTab, activeSubdepartmentTab, loadTasksData])
+  }, [activeDepartmentTab, activeSubdepartmentTab, departments.length, loadTasksData])
 
   // Realtime subscription for tm_tasks_duplicate table
   useEffect(() => {
@@ -2889,8 +2897,8 @@ export default function DepartmentTasksManager({
           </TabsList>
         )}
 
-        {departments.map(dept => (
-          <TabsContent key={dept.id} value={dept.id.toString()} className="space-y-4">
+        {activeDept && (
+          <TabsContent value={activeDepartmentTab} className="space-y-4">
             {/* Subdepartment Tabs */}
             {areTabsVisible && defaultSubdepartments.length > 0 && (
               <Tabs value={activeSubdepartmentTab} onValueChange={setActiveSubdepartmentTab}>
@@ -2920,42 +2928,31 @@ export default function DepartmentTasksManager({
                     Write Up Completed <Badge variant="secondary" className="bg-green-100 text-green-800">{completedTasks.length}</Badge>
                   </TabsTrigger>
                   <TabsTrigger value="endorsed" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                    Endorsement Completed <Badge variant="secondary" className="bg-purple-100 text-purple-800">{getFilteredTasks('endorsed').length}</Badge>
+                    Endorsement Completed <Badge variant="secondary" className="bg-purple-100 text-purple-800">{endorsedTasks.length}</Badge>
                   </TabsTrigger>
                   <TabsTrigger value="cancelled" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-red-600 data-[state=active]:to-red-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                    Cancelled <Badge variant="secondary" className="bg-red-100 text-red-800">{getFilteredTasks('cancelled').length}</Badge>
+                    Cancelled <Badge variant="secondary" className="bg-red-100 text-red-800">{cancelledTasks.length}</Badge>
                   </TabsTrigger>
                 </TabsList>
               )}
 
-              {/* All Tabs Content */}
-              {['enquiries', 'wip-stages', 'write_up_completed', 'endorsed', 'cancelled'].map(tabValue => {
-                const isWipTab = tabValue === 'wip-stages';
-                let tasksToRender, title;
-                if (tabValue === 'enquiries') { tasksToRender = enquiryTasks; title = 'Enquiries'; }
-                else if (tabValue === 'wip-stages') { tasksToRender = wipTasks; title = 'WIP Stages'; }
-                else if (tabValue === 'endorsed') { tasksToRender = getFilteredTasks('endorsed'); title = 'Endorsement Completed'; }
-                else if (tabValue === 'cancelled') { tasksToRender = getFilteredTasks('cancelled'); title = 'Cancelled'; }
-                else { tasksToRender = completedTasks; title = 'Write Up Completed'; }
-
-                return (
-                  <TabsContent key={tabValue} value={tabValue} className="mt-4">
+              <TabsContent value={activeSubTab} className="mt-4">
                     <Card className="bg-white/80 backdrop-blur-sm shadow-lg border-slate-100">
                       <CardHeader className="border-b border-slate-100 bg-white">
                         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
                           <div>
                             <CardTitle className="text-lg text-slate-800">
-                              {title} - {dept.name}
+                              {activeTabTitle} - {activeDept.name}
                               {activeSubdepartmentTab && defaultSubdepartments.find(s => s.id.toString() === activeSubdepartmentTab) &&
                                 ` - ${defaultSubdepartments.find(s => s.id.toString() === activeSubdepartmentTab)?.name}`
                               }
                             </CardTitle>
                             <CardDescription className="text-slate-600">
-                              Showing {tasksToRender.length} {globalSearchTerm ? 'filtered ' : ''}tasks {isTransposedView ? '(Transposed View)' : '(Standard View)'}
+                              Showing {displayedTasks.length} {globalSearchTerm ? 'filtered ' : ''}tasks {isTransposedView ? '(Transposed View)' : '(Standard View)'}
                             </CardDescription>
                           </div>
                           <div className="flex items-center gap-2 flex-wrap justify-end">
-                            {tabValue === 'enquiries' && (
+                            {activeSubTab === 'enquiries' && (
                               <Button
                                 className="flex items-center gap-2"
                                 onClick={handleNewEnquiryClick}
@@ -3063,7 +3060,7 @@ export default function DepartmentTasksManager({
                                   <div className="space-y-2 border-t pt-2">
                                     <h5 className="text-sm font-medium text-slate-700">Visible Stages ({visibleStageIds.size})</h5>
                                     <div className="max-h-60 overflow-y-auto space-y-2 pr-2">
-                                      {stages.sort((a, b) => (a.order_num || 0) - (b.order_num || 0)).map((stage) => (
+                                      {[...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0)).map((stage) => (
                                         <div key={`vis-${stage.id}`} className="flex items-center space-x-2">
                                           <Checkbox
                                             id={`stage-vis-${stage.id}`}
@@ -3127,7 +3124,7 @@ export default function DepartmentTasksManager({
                               )}
                             </Button>
 
-                            <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport(tasksToRender, title)}>
+                            <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport(displayedTasks, activeTabTitle)}>
                               <Download className="h-4 w-4" />Export to Excel
                             </Button>
 
@@ -3160,8 +3157,8 @@ export default function DepartmentTasksManager({
                         {isTransposedView ? (
                           <EnhancedTable
                             departments={departments}
-                            tasks={tasksToRender}
-                            tableType={title}
+                            tasks={displayedTasks}
+                            tableType={activeTabTitle}
                             ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}
                             visibleHeaders={visibleHeaders}
                             taskDependants={taskDependants}
@@ -3244,8 +3241,8 @@ export default function DepartmentTasksManager({
 
                           <StandardTable
                             departments={departments}
-                            tasks={tasksToRender}
-                            tableType={title}
+                            tasks={displayedTasks}
+                            tableType={activeTabTitle}
                             ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}
                             stages={stages}
                             companies={companies}
@@ -3282,12 +3279,10 @@ export default function DepartmentTasksManager({
                         )}
                       </CardContent>
                     </Card>
-                  </TabsContent>
-                );
-              })}
+              </TabsContent>
             </Tabs>
           </TabsContent>
-        ))}
+        )}
       </Tabs>
       {activeDepartmentTab === '1' ? (
         <EnquiryDialog
@@ -3383,3 +3378,4 @@ export default function DepartmentTasksManager({
     </div>
   )
 }
+

@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Eye, Loader2, FileText } from "lucide-react";
+import { Eye, Loader2, FileText, Trash2, RotateCcw } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { format, parseISO } from "date-fns";
 import { supabase } from "@/lib/supabase/client";
@@ -187,7 +187,7 @@ const getDocumentsLinkedToOtherTasks = async (
 ): Promise<Set<string>> => {
   try {
     const { data: tasks, error } = await supabase
-      .from("tm_tasks")
+      .from("tm_tasks_duplicate")
       .select("id, source_document_id")
       .eq("individual_id", individualId)
       .neq("id", currentTaskId)
@@ -237,6 +237,203 @@ export function LinkSourceDocumentDialog({
   const [documentsLinkedToOtherTasks, setDocumentsLinkedToOtherTasks] = useState<Set<string>>(new Set());
   const [isLoadingLinkedDocs, setIsLoadingLinkedDocs] = useState(false);
   const [workflowDocuments, setWorkflowDocuments] = useState<Record<string, any>>({});
+
+  // NEW: Handle workflow resolution for original documents in write_up stage
+  const resolveOriginalDocumentWorkflow = async (newDocumentId: string, documentTypeId: string) => {
+    try {
+      console.log('[LinkSourceDocumentDialog] resolveOriginalDocumentWorkflow called:', {
+        newDocumentId,
+        documentTypeId,
+        individualId: task.individual_id
+      });
+
+      // Find existing workflow logs for this document type that have not_applicable status
+      const { data: existingLogs, error: logsError } = await supabase
+        .from('document_workflow_logs')
+        .select('*')
+        .eq('individual_id', task.individual_id)
+        .eq('document_type_id', documentTypeId)
+        .order('created_at', { ascending: false });
+
+      if (logsError) {
+        console.error('[LinkSourceDocumentDialog] Error fetching existing logs:', logsError);
+        throw logsError;
+      }
+
+      console.log('[LinkSourceDocumentDialog] Found existing logs:', {
+        count: existingLogs?.length || 0,
+        logs: existingLogs
+      });
+
+      if (!existingLogs || existingLogs.length === 0) {
+        console.log('[LinkSourceDocumentDialog] No existing workflow logs found for document type:', documentTypeId);
+        return;
+      }
+
+      // Find the most recent log with not_applicable tasks
+      const logToResolve = existingLogs.find(log => {
+        const tasks = Array.isArray(log.tasks) ? log.tasks : [];
+        const hasNotApplicable = tasks.some((task: any) => task.status === 'not_applicable');
+        console.log('[LinkSourceDocumentDialog] Checking log:', {
+          logId: log.id,
+          tasks: log.tasks,
+          hasNotApplicable
+        });
+        return hasNotApplicable;
+      });
+
+      if (!logToResolve) {
+        console.log('[LinkSourceDocumentDialog] No logs with not_applicable status found');
+        return;
+      }
+
+      console.log('[LinkSourceDocumentDialog] Found log to resolve:', logToResolve.id);
+
+      // Create a new resolution that marks the document as renewed
+      const newResolution = {
+        outcome: 'renewed_by_client',
+        document_id: newDocumentId, // Link to the new document
+        effectiveDate: new Date().toISOString().split('T')[0],
+        note: 'Document renewed through task completion',
+        createdAt: new Date().toISOString()
+      };
+
+      // Update the workflow log with the new resolution
+      const updatedResolutions = Array.isArray(logToResolve.resolutions)
+        ? [...logToResolve.resolutions, newResolution]
+        : [newResolution];
+
+      // Update tasks array to remove not_applicable status
+      const updatedTasks = Array.isArray(logToResolve.tasks)
+        ? logToResolve.tasks.map((task: any) =>
+          task.status === 'not_applicable'
+            ? { ...task, status: 'completed', note: 'Document renewed - task completed' }
+            : task
+        )
+        : [];
+
+      console.log('[LinkSourceDocumentDialog] Updating workflow log:', {
+        logId: logToResolve.id,
+        newResolution,
+        updatedResolutionsCount: updatedResolutions.length,
+        updatedTasksCount: updatedTasks.length
+      });
+
+      const { error: updateError } = await supabase
+        .from('document_workflow_logs')
+        .update({
+          resolutions: updatedResolutions,
+          tasks: updatedTasks,
+          action_type: 'resolution',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', logToResolve.id);
+
+      if (updateError) {
+        console.error('[LinkSourceDocumentDialog] Error updating workflow log:', updateError);
+        throw updateError;
+      }
+
+      console.log('[LinkSourceDocumentDialog] Successfully resolved original document workflow:', {
+        logId: logToResolve.id,
+        newResolution,
+        updatedTasksCount: updatedTasks.length
+      });
+
+      toast({
+        title: 'Document Renewed',
+        description: 'Original document workflow has been updated to reflect renewal',
+        variant: 'default'
+      });
+
+    } catch (error) {
+      console.error('[LinkSourceDocumentDialog] Error resolving original document workflow:', error);
+      toast({
+        title: 'Workflow Resolution Error',
+        description: 'Failed to update original document workflow',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  // NEW: Handle unlinking of documents
+  const handleUnlinkDocument = useCallback(async (stageId: string, docId: string) => {
+    try {
+      setIsLoading(true);
+
+      console.log('[LinkSourceDocumentDialog] Unlinking document:', { stageId, docId });
+
+      // Remove the document from the selected docs in local state
+      setSelectedDocs(prev => {
+        const currentSelections = prev[stageId] ? [...prev[stageId]] : [];
+        const filteredSelections = currentSelections.filter(d => d.id !== docId);
+        return { ...prev, [stageId]: filteredSelections };
+      });
+
+      // Update the database to remove the document from source_document_id
+      const { data: currentTask } = await supabase
+        .from('tm_tasks_duplicate')
+        .select('source_document_id, stages')
+        .eq('id', task.id)
+        .single();
+
+      if (currentTask?.source_document_id) {
+        // Remove the document from the stage in source_document_id
+        const updatedSourceDocs = { ...currentTask.source_document_id };
+        if (updatedSourceDocs[stageId]) {
+          updatedSourceDocs[stageId] = Array.isArray(updatedSourceDocs[stageId])
+            ? updatedSourceDocs[stageId].filter((doc: any) => doc.id !== docId)
+            : updatedSourceDocs[stageId].id !== docId ? updatedSourceDocs[stageId] : [];
+        }
+
+        // Also update the stages JSON to remove the document
+        const updatedStages = { ...currentTask.stages };
+        if (updatedStages?.[stageId]?.documents) {
+          const stageDocs = updatedStages[stageId].documents;
+          Object.keys(stageDocs).forEach(docKey => {
+            if (stageDocs[docKey]?.id === docId) {
+              delete stageDocs[docKey];
+            }
+          });
+        }
+
+        // Update both source_document_id and stages in the database
+        const { error: updateError } = await supabase
+          .from('tm_tasks_duplicate')
+          .update({
+            source_document_id: updatedSourceDocs,
+            stages: updatedStages,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', task.id);
+
+        if (updateError) {
+          console.error('[LinkSourceDocumentDialog] Error updating task:', updateError);
+          throw updateError;
+        }
+
+        console.log('[LinkSourceDocumentDialog] Successfully unlinked document and updated stages');
+      }
+
+      toast({
+        title: 'Document Unlinked',
+        description: 'Document has been removed from the task and stages updated',
+        variant: 'default'
+      });
+
+      // Refresh the data
+      onLinkSuccess();
+    } catch (error) {
+      console.error('Error unlinking document:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to unlink document',
+        variant: 'destructive'
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [task.id, onLinkSuccess]);
 
   const initialSelectedDocs = useMemo(() => {
     const normalized: Record<string, SelectedDoc[]> = {};
@@ -335,8 +532,9 @@ export function LinkSourceDocumentDialog({
   const handleSave = useCallback(async () => {
     setIsLoading(true);
     try {
+      // Update the task with selected documents
       const { error } = await supabase
-        .from("tm_tasks")
+        .from("tm_tasks_duplicate")
         .update({
           source_document_id: selectedDocs,
           updated_at: new Date().toISOString(),
@@ -344,6 +542,28 @@ export function LinkSourceDocumentDialog({
         .eq("id", task.id);
 
       if (error) throw error;
+
+      // NEW: Handle workflow resolution for write_up stage
+      const writeUpStageId = '072b9710-45df-4a05-ba65-01b4ef29d61d';
+      const writeUpDocs = selectedDocs[writeUpStageId] || [];
+
+      if (writeUpDocs.length > 0) {
+        console.log('[LinkSourceDocumentDialog] Write-up stage detected, attempting workflow resolution:', {
+          stageId: writeUpStageId,
+          docsCount: writeUpDocs.length
+        });
+
+        // Process each document in write_up stage
+        for (const doc of writeUpDocs) {
+          const uploadedDocInfo = doc; // Already has id and document_id
+          console.log('[LinkSourceDocumentDialog] Calling resolveOriginalDocumentWorkflow with:', {
+            newDocumentId: uploadedDocInfo.id,
+            documentTypeId: uploadedDocInfo.document_id
+          });
+          await resolveOriginalDocumentWorkflow(uploadedDocInfo.id, uploadedDocInfo.document_id);
+        }
+      }
+
       toast({ title: "Success", description: "Source documents linked successfully." });
       onLinkSuccess();
     } catch (error: any) {

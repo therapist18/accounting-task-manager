@@ -171,6 +171,34 @@ const isDocumentApplicableToTask = (doc: any, task: any, childContext: any = nul
   return false;
 };
 
+const collectTaskTriggerDocumentIds = (sourceDocumentMap: any) => {
+  const triggerIds = new Set<string>();
+
+  if (!sourceDocumentMap || typeof sourceDocumentMap !== 'object') {
+    return triggerIds;
+  }
+
+  Object.values(sourceDocumentMap).forEach((stageEntries: any) => {
+    if (!Array.isArray(stageEntries)) return;
+
+    stageEntries.forEach((entry: any) => {
+      const candidates = [
+        entry?.id,
+        entry?.linked_document_id,
+        entry?.uploaded_doc_id
+      ];
+
+      candidates.forEach((candidate) => {
+        if (candidate !== undefined && candidate !== null && String(candidate).trim()) {
+          triggerIds.add(String(candidate));
+        }
+      });
+    });
+  });
+
+  return triggerIds;
+};
+
 // --- Sub-Component: Document Tab Panel ---
 const DocumentTabPanel = ({
   doc,
@@ -524,6 +552,11 @@ export function StageUploadDialog({
     return `${task.job_description}`;
   }, [task]);
 
+  const currentTaskTriggerDocumentIds = useMemo(
+    () => collectTaskTriggerDocumentIds(task?.source_document_id),
+    [task?.source_document_id]
+  );
+
   useEffect(() => {
     if (open && task?.source_document_id) {
       setSelectedSourceDocs(prev => ({
@@ -616,6 +649,8 @@ export function StageUploadDialog({
         const newDocFieldsMap: Record<string, any[]> = {};
         const workflowDocMap: Record<string, any> = {};
 
+        const triggerDocIdsFromWorkflow = new Set<string>();
+
         if (kycRes.data) {
           kycRes.data.forEach((kycData: any) => {
             const transformed = { ...kycData, fields: transformKycFields(kycData.fields || []) };
@@ -654,6 +689,16 @@ export function StageUploadDialog({
         if (workflowRes.data) {
           workflowRes.data.forEach((log: any) => {
             const isCompleted = log.resolutions && log.resolutions.length > 0;
+            const tasksArray = Array.isArray(log.tasks) ? log.tasks : [];
+
+            // Collect all documents that triggered this specific task to hide them from selection UI
+            const isTriggerForCurrentTask = tasksArray.some((t: any) =>
+              Array.isArray(t.taskIds) && t.taskIds.map(String).includes(String(task.id))
+            );
+
+            if (isTriggerForCurrentTask && log.uploaded_doc_id) {
+              triggerDocIdsFromWorkflow.add(String(log.uploaded_doc_id));
+            }
 
             if (isCompleted && log.resolutions[0]) {
               workflowDocMap[log.uploaded_doc_id] = {
@@ -703,16 +748,23 @@ export function StageUploadDialog({
                 const workflowDoc = workflowDocMap[doc.id];
                 const hasNotApplicableTaskStatus = workflowDoc && hasNotApplicableTask(workflowDoc);
 
+                // Identify if this is the document that triggered the workflow task creation
+                const isCurrentTaskTriggerDocument = currentTaskTriggerDocumentIds.has(String(doc.id)) || triggerDocIdsFromWorkflow.has(String(doc.id));
+
                 return {
                   ...doc,
                   hasNoTaskOutcome: hasNotApplicableTaskStatus, // Use tasks array status instead of outcome
+                  isCurrentTaskTriggerDocument,
                   workflowLogId: workflowDoc?.id,
                   workflowOutcome: workflowDoc?.workflowOutcome
                 };
               });
 
-              if (processedMatching.length > 0) {
-                groupedDocs[stageDoc.id] = processedMatching;
+              // Filter out the documents that triggered the task creation so they are not selectable in UI
+              const selectableMatching = processedMatching.filter((doc: any) => !doc.isCurrentTaskTriggerDocument);
+
+              if (selectableMatching.length > 0) {
+                groupedDocs[stageDoc.id] = selectableMatching;
               }
             }
           });
@@ -732,7 +784,7 @@ export function StageUploadDialog({
     };
 
     fetchData();
-  }, [open, stage?.documents, task?.individual_id, applicableDocuments, refreshTrigger]);
+  }, [open, stage?.documents, task?.individual_id, applicableDocuments, refreshTrigger, currentTaskTriggerDocumentIds, task?.id]);
 
   useEffect(() => {
     if (!stage?.id || !applicableDocuments.length || !task?.id) return;
@@ -786,64 +838,116 @@ export function StageUploadDialog({
     }));
   }, [stage?.id, task?.id]);
 
-  // Handle reverting a resolution that hides it from standard task flow
-  const handleRevertResolution = async (logId: number) => {
-    setIsLoading(true);
+  // Handle workflow resolution for original documents in write_up stage
+  const resolveOriginalDocumentWorkflow = async (newDocumentId: string, documentTypeId: string) => {
     try {
-      const { data: log, error } = await supabase
+      console.log('[StageUploadDialog] resolveOriginalDocumentWorkflow called:', {
+        newDocumentId,
+        documentTypeId,
+        individualId: task.individual_id,
+        taskId: task.id,
+        currentStageId: stage?.id,
+      });
+
+      // Find existing workflow logs for this individual
+      const { data: existingLogs, error: logsError } = await supabase
         .from('document_workflow_logs')
         .select('*')
-        .eq('id', logId)
-        .single();
+        .eq('individual_id', task.individual_id)
+        .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      if (!log) return;
-
-      const resolutions = Array.isArray(log.resolutions) ? log.resolutions : [];
-      // Remove the last resolution
-      const updatedResolutions = resolutions.slice(0, -1);
-
-      const hasHolds = Array.isArray(log.holds) && log.holds.length > 0;
-      const hasComments = Array.isArray(log.comments) && log.comments.length > 0;
-      const hasReminders = Array.isArray(log.reminders) && log.reminders.length > 0;
-      const hasTasks = Array.isArray(log.tasks) && log.tasks.length > 0;
-
-      // If it was the only thing in the log, delete the entire record
-      if (!hasHolds && !hasComments && !hasReminders && !hasTasks && updatedResolutions.length === 0) {
-        await supabase.from('document_workflow_logs').delete().eq('id', logId);
-      } else {
-        // Fallback to a logical previous state action type
-        let nextActionType = log.action_type;
-        if (log.action_type === 'resolution' && updatedResolutions.length === 0) {
-          if (hasTasks) nextActionType = 'task_created';
-          else if (hasHolds) nextActionType = 'hold';
-          else if (hasReminders) nextActionType = 'reminder_sent';
-          else nextActionType = 'comment';
-        }
-
-        await supabase.from('document_workflow_logs').update({
-          resolutions: updatedResolutions,
-          action_type: nextActionType,
-          updated_at: new Date().toISOString()
-        }).eq('id', logId);
+      if (logsError) {
+        console.error('[StageUploadDialog] Error fetching existing logs:', logsError);
+        throw logsError;
       }
 
-      toast({
-        title: 'Success',
-        description: 'Resolution reverted. Document is now available to be linked to workflows.'
+      if (!existingLogs || existingLogs.length === 0) {
+        console.log('[StageUploadDialog] No existing workflow logs found for individual.');
+        return;
+      }
+
+      // Filter to find ALL workflow logs that actually triggered this current task
+      // E.g., multiple dependants may have triggered the task bundle, resolving all is necessary.
+      const logsToResolve = existingLogs.filter(log => {
+        const tasks = Array.isArray(log.tasks) ? log.tasks : [];
+        return tasks.some((t: any) =>
+          Array.isArray(t.taskIds) && t.taskIds.map(String).includes(String(task.id))
+        );
       });
 
-      // Trigger a re-fetch
-      setRefreshTrigger(prev => prev + 1);
-    } catch (err: any) {
-      console.error('Revert error:', err);
+      if (logsToResolve.length === 0) {
+        console.log('[StageUploadDialog] No workflow logs match the trigger for this task ID:', task.id);
+        return;
+      }
+
+      console.log(`[StageUploadDialog] Found ${logsToResolve.length} log(s) to resolve for renewal.`);
+
+      // Update each found triggering log
+      const updatePromises = logsToResolve.map(async (logToResolve) => {
+        const newResolution = {
+          outcome: 'renewed',
+          document_id: newDocumentId,
+          renewed_by_document_type_id: documentTypeId,
+          effectiveDate: new Date().toISOString().split('T')[0],
+          note: `Document renewed through task completion (Task ID: ${task.id})`,
+          createdAt: new Date().toISOString()
+        };
+
+        const updatedResolutions = Array.isArray(logToResolve.resolutions)
+          ? [...logToResolve.resolutions, newResolution]
+          : [newResolution];
+
+        const updatedTasks = Array.isArray(logToResolve.tasks)
+          ? logToResolve.tasks.map((t: any) => {
+            const isMatchingTask = Array.isArray(t.taskIds) && t.taskIds.map(String).includes(String(task.id));
+            if (isMatchingTask || t.status === 'not_applicable' || ['pending_task_creation', 'task_created', 'task_initiated'].includes(String(t.status || ''))) {
+              return { ...t, status: 'completed', note: 'Trigger document renewed by completed write-up task' };
+            }
+            return t;
+          })
+          : [];
+
+        const updatedPayload = {
+          ...(logToResolve.payload || {}),
+          activeWorkflow: {
+            ...(logToResolve.payload?.activeWorkflow || {}),
+            canProceed: false,
+            isCompleted: true,
+            currentAction: 'resolution',
+            currentStatus: 'renewed',
+            nextAction: null,
+            lastUpdated: new Date().toISOString()
+          }
+        };
+
+        return supabase
+          .from('document_workflow_logs')
+          .update({
+            resolutions: updatedResolutions,
+            tasks: updatedTasks,
+            payload: updatedPayload,
+            action_type: 'resolution',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', logToResolve.id);
+      });
+
+      await Promise.all(updatePromises);
+
+      console.log('[StageUploadDialog] Successfully resolved original document workflow for renewal.');
       toast({
-        title: 'Error',
-        description: err.message || 'Failed to revert resolution.',
+        title: 'Documents Renewed',
+        description: 'Original document workflows have been updated to reflect renewal',
+        variant: 'default'
+      });
+
+    } catch (error) {
+      console.error('[StageUploadDialog] Error resolving original document workflow:', error);
+      toast({
+        title: 'Workflow Resolution Error',
+        description: 'Failed to update original document workflow',
         variant: 'destructive'
       });
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -855,11 +959,21 @@ export function StageUploadDialog({
     setIsSaving(true);
 
     try {
+      console.log('[StageUploadDialog] saveAllDocuments start:', {
+        taskId: task.id,
+        individualId: task.individual_id,
+        stageId: stage.id,
+        stageName: stage.name,
+        linkedDocumentTypeId: task.linked_document_type_id,
+        pendingDocumentKeys: Object.keys(pendingDocuments)
+      });
+
       const currentDate = new Date().toISOString();
       const updatedLinkedDocs = { ...linkedDocuments };
       const updatedLockedDocs = { ...lockedDocuments };
       const updatedSourceDocs = { ...selectedSourceDocs };
       const uploadedDocIds = new Set<string>();
+      const uploadedDocumentsForWorkflow: Array<{ id: string; document_id: string; stage_doc_id: string }> = [];
 
       for (const [docId, docData] of Object.entries(pendingDocuments)) {
         if (!docData) continue;
@@ -951,6 +1065,24 @@ export function StageUploadDialog({
             linked_at: docData.linked_at || currentDate,
             updated_at: currentDate
           };
+
+          if (documentId && docConfig.kycId) {
+            uploadedDocumentsForWorkflow.push({
+              id: documentId,
+              document_id: docConfig.kycId,
+              stage_doc_id: baseDocId
+            });
+          }
+
+          console.log('[StageUploadDialog] Processed pending document:', {
+            docId,
+            baseDocId,
+            stageDocumentName: docConfig.name,
+            kycId: docConfig.kycId,
+            insertedDocumentId: documentId,
+            fromExistingDocument: !file
+          });
+
           updatedLockedDocs[baseDocId] = true;
           uploadedDocIds.add(docId);
 
@@ -1050,6 +1182,14 @@ export function StageUploadDialog({
 
       if (updateError) throw updateError;
 
+      console.log('[StageUploadDialog] tm_tasks_duplicate updated:', {
+        taskId: task.id,
+        updateData,
+        uploadedDocumentsForWorkflow,
+        updatedLinkedDocs,
+        updatedSourceDocs
+      });
+
       const successMsg = ('status' in taskStatusUpdate)
         ? `Documents saved & Status updated to ${taskStatusUpdate.status}`
         : `Successfully uploaded ${uploadedDocIds.size} document(s)`;
@@ -1076,38 +1216,70 @@ export function StageUploadDialog({
         source: 'stage-upload'
       });
 
-      if (shouldTriggerWorkflowUpdate(stage.id)) {
+      const isWriteUpStage = stage.id === '072b9710-45df-4a05-ba65-01b4ef29d61d';
+
+      // Always execute if it's WriteUp stage, otherwise rely on the workflow trigger map check.
+      if (isWriteUpStage || shouldTriggerWorkflowUpdate(stage.id)) {
         try {
-          const finalDocId = uploadedDocIds.size > 0 ?
-            Object.values(updatedLinkedDocs).find(doc => doc)?.id : null;
+          const workflowTargetDocument =
+            uploadedDocumentsForWorkflow.find(doc => doc.document_id === task.linked_document_type_id) ||
+            uploadedDocumentsForWorkflow[0] ||
+            null;
+          const finalDocId = workflowTargetDocument?.id || null;
 
-          const existingWorkflowDoc = Object.values(workflowDocuments).find(
-            (doc: any) => {
-              return doc.document_type_id === task.linked_document_type_id &&
-                doc.isCompleted === true &&
-                ['renewed_by_client', 'task_completed', 'task_endorsed'].includes(doc.workflowOutcome)
+          console.log('[StageUploadDialog] Workflow update execution starting:', {
+            stageId: stage.id,
+            isWriteUpStage,
+            finalDocId,
+            workflowTargetDocument,
+            stageName: stage.name
+          });
+
+          // Resolve triggering documents logic (Specifically for renewals in Write up stage)
+          if (isWriteUpStage && finalDocId) {
+            const resolvedDocumentTypeId =
+              workflowTargetDocument?.document_id ||
+              task.linked_document_type_id;
+
+            if (resolvedDocumentTypeId) {
+              console.log('[StageUploadDialog] Calling resolveOriginalDocumentWorkflow with:', {
+                finalDocId,
+                documentTypeId: resolvedDocumentTypeId
+              });
+              await resolveOriginalDocumentWorkflow(finalDocId, resolvedDocumentTypeId);
             }
-          );
-
-          let workflowOutcome = WORKFLOW_OUTCOME_LABELS[TASK_STAGE_WORKFLOW_MAPPING[stage.id]];
-
-          if (existingWorkflowDoc && stage.id === 'writeup_completed') {
-            workflowOutcome = 'Document Write-up Updated';
           }
 
-          const workflowResult = await updateDocumentWorkflow(
-            task.id,
-            stage.id,
-            finalDocId,
-            workflowOutcome
-          );
+          // Also execute the standard Document Workflow action mapped to this stage
+          if (shouldTriggerWorkflowUpdate(stage.id)) {
+            const existingWorkflowDoc = Object.values(workflowDocuments).find(
+              (doc: any) => {
+                return doc.document_type_id === task.linked_document_type_id &&
+                  doc.isCompleted === true &&
+                  ['renewed_by_client', 'renewed', 'task_completed', 'task_endorsed'].includes(doc.workflowOutcome)
+              }
+            );
 
-          if (workflowResult.success) {
-            toast({
-              title: 'Workflow Updated',
-              description: `Document workflow updated: ${workflowResult.data.outcome}`,
-              variant: 'default'
-            });
+            let workflowOutcome = WORKFLOW_OUTCOME_LABELS[TASK_STAGE_WORKFLOW_MAPPING[stage.id]];
+
+            if (existingWorkflowDoc && isWriteUpStage) {
+              workflowOutcome = 'Document Write-up Updated';
+            }
+
+            const workflowResult = await updateDocumentWorkflow(
+              task.id,
+              stage.id,
+              finalDocId,
+              workflowOutcome
+            );
+
+            if (workflowResult.success) {
+              toast({
+                title: 'Workflow Updated',
+                description: `Document workflow updated: ${workflowResult.data.outcome}`,
+                variant: 'default'
+              });
+            }
           }
         } catch (workflowError) {
           console.error('Error updating workflow:', workflowError);
@@ -1309,7 +1481,6 @@ export function StageUploadDialog({
                         messageState={tabMessageStates[doc.id]}
                         onMessageStateChange={(docId, message) => setTabMessageStates(prev => ({ ...prev, [docId]: message }))}
                         workflowDocuments={workflowDocuments}
-                        onRevertResolution={handleRevertResolution}
                       />
                     </div>
                   ))
