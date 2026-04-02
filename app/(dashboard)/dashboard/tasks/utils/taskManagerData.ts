@@ -393,6 +393,50 @@ export const formatDateValue = (dateString: string | Date | null | undefined): s
 }
 
 /**
+ * Fetch all tasks duplicate data
+ */
+export const fetchTasksDuplicate = async (): Promise<any[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('tm_tasks_duplicate')
+      .select('*')
+      .order('id', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching tasks duplicate:', error);
+      throw error;
+    }
+
+    return data || [];
+  } catch (error) {
+    console.error('Error fetching tasks duplicate:', error);
+    throw error;
+  }
+};
+
+/**
+ * Fetch all document workflow logs
+ */
+export const fetchDocumentWorkflowLogs = async (): Promise<any[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('document_workflow_logs')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching document workflow logs:', error);
+      throw error;
+    }
+
+    return data || [];
+  } catch (error) {
+    console.error('Error fetching document workflow logs:', error);
+    throw error;
+  }
+};
+
+/**
  * Get document for task and stage
  */
 export const getDocumentForTaskStage = (

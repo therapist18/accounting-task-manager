@@ -25,7 +25,7 @@ import { Label } from "@/components/ui/label"
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import * as XLSX from 'xlsx'
-import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields, fetchKycDocument, formatDateValue, type Task as UtilTask, type Department, type KycDocument, type Document } from "./utils/taskManagerData"
+import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields, fetchKycDocument, formatDateValue, type Task as UtilTask, type Department, type KycDocument, type Document, fetchTasksDuplicate, fetchDocumentWorkflowLogs } from "./utils/taskManagerData"
 import { LinkSourceDocumentDialog } from './components/LinkSourceDocumentDialog';
 import { StandardTable } from './overall-view/StandardTable';
 import { EnhancedTable } from './overall-view/EnhancedTable';
@@ -401,12 +401,16 @@ export default function DepartmentTasksManager({
         documentsData,
         { fieldsMap, kycDocsMap },
         usersData,
-        tasksData = null
+        tasksData = null,
+        tasksDuplicateData,
+        documentWorkflowLogsData
       ] = await Promise.all([
         fetchAllDocuments(),
         fetchAllKycFields(),
         fetchTmUsers(),
-        activeDepartmentTab ? loadTasksData(activeDepartmentTab, activeSubdepartmentTab) : Promise.resolve(null)
+        activeDepartmentTab ? loadTasksData(activeDepartmentTab, activeSubdepartmentTab) : Promise.resolve(null),
+        fetchTasksDuplicate(),
+        fetchDocumentWorkflowLogs()
       ]);
 
       // Batch state updates
@@ -415,6 +419,9 @@ export default function DepartmentTasksManager({
         setAllKycFields(fieldsMap);
         setKycDocuments(kycDocsMap);
         setTmUsers(usersData);
+        // You can add state setters for the new data if needed
+        // setTasksDuplicate(tasksDuplicateData);
+        // setDocumentWorkflowLogs(documentWorkflowLogsData);
       });
 
       if (tasksData === null && activeDepartmentTab) {
@@ -1827,7 +1834,7 @@ export default function DepartmentTasksManager({
           type: fileName.split('.').pop()?.toLowerCase() || 'pdf',
           url: fileUrl
         },
-        onDelete: () => handleDeleteDocument(document.id)
+        onDelete: () => handleDeleteDocument(document)
       };
 
       setPreviewDocument(previewData);
@@ -2937,204 +2944,204 @@ export default function DepartmentTasksManager({
               )}
 
               <TabsContent value={activeSubTab} className="mt-4">
-                    <Card className="bg-white/80 backdrop-blur-sm shadow-lg border-slate-100">
-                      <CardHeader className="border-b border-slate-100 bg-white">
-                        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
-                          <div>
-                            <CardTitle className="text-lg text-slate-800">
-                              {activeTabTitle} - {activeDept.name}
-                              {activeSubdepartmentTab && defaultSubdepartments.find(s => s.id.toString() === activeSubdepartmentTab) &&
-                                ` - ${defaultSubdepartments.find(s => s.id.toString() === activeSubdepartmentTab)?.name}`
-                              }
-                            </CardTitle>
-                            <CardDescription className="text-slate-600">
-                              Showing {displayedTasks.length} {globalSearchTerm ? 'filtered ' : ''}tasks {isTransposedView ? '(Transposed View)' : '(Standard View)'}
-                            </CardDescription>
-                          </div>
-                          <div className="flex items-center gap-2 flex-wrap justify-end">
-                            {activeSubTab === 'enquiries' && (
-                              <Button
-                                className="flex items-center gap-2"
-                                onClick={handleNewEnquiryClick}
-                              >
-                                <Plus className="h-4 w-4" />
-                                New Enquiry
-                              </Button>
-                            )}
-                            <div className="relative">
-                              <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
-                              <Input
-                                placeholder="Search tasks, applicants, companies..."
-                                value={globalSearchTerm}
-                                onChange={(e) => setGlobalSearchTerm(e.target.value)}
-                                className="pl-8 w-64"
-                              />
-                              {globalSearchTerm && (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="absolute right-1 top-1 h-6 w-6"
-                                  onClick={() => setGlobalSearchTerm('')}
-                                >
-                                  <X className="h-4 w-4" />
-                                </Button>
-                              )}
-                            </div>
-
-                            {isTransposedView && !activeReport && (
-                              <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => isAllExpanded ? collapseAll() : expandAll()}>
-                                {isAllExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                                {isAllExpanded ? 'Collapse All' : 'Expand All'}
-                              </Button>
-                            )}
+                <Card className="bg-white/80 backdrop-blur-sm shadow-lg border-slate-100">
+                  <CardHeader className="border-b border-slate-100 bg-white">
+                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
+                      <div>
+                        <CardTitle className="text-lg text-slate-800">
+                          {activeTabTitle} - {activeDept.name}
+                          {activeSubdepartmentTab && defaultSubdepartments.find(s => s.id.toString() === activeSubdepartmentTab) &&
+                            ` - ${defaultSubdepartments.find(s => s.id.toString() === activeSubdepartmentTab)?.name}`
+                          }
+                        </CardTitle>
+                        <CardDescription className="text-slate-600">
+                          Showing {displayedTasks.length} {globalSearchTerm ? 'filtered ' : ''}tasks {isTransposedView ? '(Transposed View)' : '(Standard View)'}
+                        </CardDescription>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap justify-end">
+                        {activeSubTab === 'enquiries' && (
+                          <Button
+                            className="flex items-center gap-2"
+                            onClick={handleNewEnquiryClick}
+                          >
+                            <Plus className="h-4 w-4" />
+                            New Enquiry
+                          </Button>
+                        )}
+                        <div className="relative">
+                          <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
+                          <Input
+                            placeholder="Search tasks, applicants, companies..."
+                            value={globalSearchTerm}
+                            onChange={(e) => setGlobalSearchTerm(e.target.value)}
+                            className="pl-8 w-64"
+                          />
+                          {globalSearchTerm && (
                             <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex items-center gap-2"
-                              onClick={() => setIsTransposedView(!isTransposedView)}
+                              variant="ghost"
+                              size="icon"
+                              className="absolute right-1 top-1 h-6 w-6"
+                              onClick={() => setGlobalSearchTerm('')}
                             >
-                              {isTransposedView ? <TableProperties className="h-4 w-4" /> : <RotateCcw className="h-4 w-4" />}
-                              {isTransposedView ? 'Standard View' : 'Transposed View'}
+                              <X className="h-4 w-4" />
                             </Button>
-
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <Button variant="outline" size="sm" className="flex items-center gap-2">
-                                  <Settings className="h-4 w-4" />
-                                  {isTransposedView ? `Fields (${visibleHeaders.size + visibleStats.size + visibleStageIds.size})` : `Columns (${visibleHeaders.size + visibleStageIds.size})`}
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-80 h-[65vh] overflow-y-auto">
-                                <div className="space-y-4">
-                                  <div className="space-y-2">
-                                    <h4 className="font-medium">
-                                      {isTransposedView ? 'Visible Fields & Rows' : 'Visible Columns'}
-                                    </h4>
-                                    <p className="text-sm text-muted-foreground">
-                                      {isTransposedView ? 'Select which fields and stages to display' : 'Select which columns to display'}
-                                    </p>
-                                  </div>
-                                  {/* Stats Fields (only in transposed view) */}
-                                  {isTransposedView && (
-                                    <div className="space-y-2 border-t pt-2">
-                                      <h5 className="text-sm font-medium text-slate-700">Statistics ({visibleStats.size})</h5>
-                                      {STATS_HEADERS.map((stat) => (
-                                        <div key={stat.id} className="flex items-center space-x-2">
-                                          <Checkbox
-                                            id={stat.id}
-                                            checked={visibleStats.has(stat.id)}
-                                            onCheckedChange={() => toggleStatsVisibility(stat.id)}
-                                          />
-                                          <Label
-                                            htmlFor={stat.id}
-                                            className="text-sm font-normal cursor-pointer"
-                                          >
-                                            {stat.label}
-                                          </Label>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                  {/* Case Details Fields */}
-                                  <div className="space-y-2 border-t pt-2">
-                                    <h5 className="text-sm font-medium text-slate-700">Case Details ({visibleHeaders.size})</h5>
-                                    {currentTableHeaders.map((header) => (
-                                      <div key={header.id} className="flex items-center space-x-2">
-                                        <Checkbox
-                                          id={header.id}
-                                          checked={visibleHeaders.has(header.id)}
-                                          onCheckedChange={() => toggleHeaderVisibility(header.id)}
-                                        />
-                                        <Label
-                                          htmlFor={header.id}
-                                          className="text-sm font-normal cursor-pointer"
-                                        >
-                                          {header.label}
-                                        </Label>
-                                      </div>
-                                    ))}
-
-                                  </div>
-
-                                  {/* Visible Stages Section */}
-                                  <div className="space-y-2 border-t pt-2">
-                                    <h5 className="text-sm font-medium text-slate-700">Visible Stages ({visibleStageIds.size})</h5>
-                                    <div className="max-h-60 overflow-y-auto space-y-2 pr-2">
-                                      {[...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0)).map((stage) => (
-                                        <div key={`vis-${stage.id}`} className="flex items-center space-x-2">
-                                          <Checkbox
-                                            id={`stage-vis-${stage.id}`}
-                                            checked={visibleStageIds.has(stage.id.toString())}
-                                            onCheckedChange={() => toggleStageVisibility(stage.id.toString())}
-                                          />
-                                          <Label
-                                            htmlFor={`stage-vis-${stage.id}`}
-                                            className="text-sm font-normal cursor-pointer"
-                                          >
-                                            {stage.name}
-                                          </Label>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-
-                                  <div className="flex gap-2 pt-2 border-t">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => {
-                                        const defaultHeaders = currentTableHeaders.filter(h => h.default && (activeSubTab === 'cancelled' || h.id !== 'cancellation_reason'));
-                                        setVisibleHeaders(new Set(defaultHeaders.map(h => h.id)))
-                                        if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.filter(s => s.default).map(s => s.id)))
-                                        setVisibleStageIds(new Set(stages.map(s => s.id.toString())))
-                                      }}
-                                    >
-                                      Show Default Columns
-                                    </Button>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => {
-                                        setVisibleHeaders(new Set(currentTableHeaders.map(h => h.id)))
-                                        if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.map(s => s.id)))
-                                        setVisibleStageIds(new Set(stages.map(s => s.id.toString())))
-                                      }}
-                                    >
-                                      Reset
-                                    </Button>
-                                  </div>
-                                </div>
-                              </PopoverContent>
-                            </Popover>
-
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex items-center gap-2"
-                              onClick={() => setShowNAStages(!showNAStages)}
-                            >
-                              {showNAStages ? (
-                                <>
-                                  <EyeOff className="h-4 w-4" /> Hide N/A Stages
-                                </>
-                              ) : (
-                                <>
-                                  <Eye className="h-4 w-4" /> Show N/A Stages
-                                </>
-                              )}
-                            </Button>
-
-                            <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport(displayedTasks, activeTabTitle)}>
-                              <Download className="h-4 w-4" />Export to Excel
-                            </Button>
-
-                            <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={refreshAllData}>
-                              <RotateCcw className="h-4 w-4" />Refresh
-                            </Button>
-                          </div>
+                          )}
                         </div>
 
-                        {/* {isWipTab && areTabsVisible && (
+                        {isTransposedView && !activeReport && (
+                          <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => isAllExpanded ? collapseAll() : expandAll()}>
+                            {isAllExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                            {isAllExpanded ? 'Collapse All' : 'Expand All'}
+                          </Button>
+                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex items-center gap-2"
+                          onClick={() => setIsTransposedView(!isTransposedView)}
+                        >
+                          {isTransposedView ? <TableProperties className="h-4 w-4" /> : <RotateCcw className="h-4 w-4" />}
+                          {isTransposedView ? 'Standard View' : 'Transposed View'}
+                        </Button>
+
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button variant="outline" size="sm" className="flex items-center gap-2">
+                              <Settings className="h-4 w-4" />
+                              {isTransposedView ? `Fields (${visibleHeaders.size + visibleStats.size + visibleStageIds.size})` : `Columns (${visibleHeaders.size + visibleStageIds.size})`}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-80 h-[65vh] overflow-y-auto">
+                            <div className="space-y-4">
+                              <div className="space-y-2">
+                                <h4 className="font-medium">
+                                  {isTransposedView ? 'Visible Fields & Rows' : 'Visible Columns'}
+                                </h4>
+                                <p className="text-sm text-muted-foreground">
+                                  {isTransposedView ? 'Select which fields and stages to display' : 'Select which columns to display'}
+                                </p>
+                              </div>
+                              {/* Stats Fields (only in transposed view) */}
+                              {isTransposedView && (
+                                <div className="space-y-2 border-t pt-2">
+                                  <h5 className="text-sm font-medium text-slate-700">Statistics ({visibleStats.size})</h5>
+                                  {STATS_HEADERS.map((stat) => (
+                                    <div key={stat.id} className="flex items-center space-x-2">
+                                      <Checkbox
+                                        id={stat.id}
+                                        checked={visibleStats.has(stat.id)}
+                                        onCheckedChange={() => toggleStatsVisibility(stat.id)}
+                                      />
+                                      <Label
+                                        htmlFor={stat.id}
+                                        className="text-sm font-normal cursor-pointer"
+                                      >
+                                        {stat.label}
+                                      </Label>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {/* Case Details Fields */}
+                              <div className="space-y-2 border-t pt-2">
+                                <h5 className="text-sm font-medium text-slate-700">Case Details ({visibleHeaders.size})</h5>
+                                {currentTableHeaders.map((header) => (
+                                  <div key={header.id} className="flex items-center space-x-2">
+                                    <Checkbox
+                                      id={header.id}
+                                      checked={visibleHeaders.has(header.id)}
+                                      onCheckedChange={() => toggleHeaderVisibility(header.id)}
+                                    />
+                                    <Label
+                                      htmlFor={header.id}
+                                      className="text-sm font-normal cursor-pointer"
+                                    >
+                                      {header.label}
+                                    </Label>
+                                  </div>
+                                ))}
+
+                              </div>
+
+                              {/* Visible Stages Section */}
+                              <div className="space-y-2 border-t pt-2">
+                                <h5 className="text-sm font-medium text-slate-700">Visible Stages ({visibleStageIds.size})</h5>
+                                <div className="max-h-60 overflow-y-auto space-y-2 pr-2">
+                                  {[...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0)).map((stage) => (
+                                    <div key={`vis-${stage.id}`} className="flex items-center space-x-2">
+                                      <Checkbox
+                                        id={`stage-vis-${stage.id}`}
+                                        checked={visibleStageIds.has(stage.id.toString())}
+                                        onCheckedChange={() => toggleStageVisibility(stage.id.toString())}
+                                      />
+                                      <Label
+                                        htmlFor={`stage-vis-${stage.id}`}
+                                        className="text-sm font-normal cursor-pointer"
+                                      >
+                                        {stage.name}
+                                      </Label>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div className="flex gap-2 pt-2 border-t">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    const defaultHeaders = currentTableHeaders.filter(h => h.default && (activeSubTab === 'cancelled' || h.id !== 'cancellation_reason'));
+                                    setVisibleHeaders(new Set(defaultHeaders.map(h => h.id)))
+                                    if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.filter(s => s.default).map(s => s.id)))
+                                    setVisibleStageIds(new Set(stages.map(s => s.id.toString())))
+                                  }}
+                                >
+                                  Show Default Columns
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setVisibleHeaders(new Set(currentTableHeaders.map(h => h.id)))
+                                    if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.map(s => s.id)))
+                                    setVisibleStageIds(new Set(stages.map(s => s.id.toString())))
+                                  }}
+                                >
+                                  Reset
+                                </Button>
+                              </div>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex items-center gap-2"
+                          onClick={() => setShowNAStages(!showNAStages)}
+                        >
+                          {showNAStages ? (
+                            <>
+                              <EyeOff className="h-4 w-4" /> Hide N/A Stages
+                            </>
+                          ) : (
+                            <>
+                              <Eye className="h-4 w-4" /> Show N/A Stages
+                            </>
+                          )}
+                        </Button>
+
+                        <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport(displayedTasks, activeTabTitle)}>
+                          <Download className="h-4 w-4" />Export to Excel
+                        </Button>
+
+                        <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={refreshAllData}>
+                          <RotateCcw className="h-4 w-4" />Refresh
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* {isWipTab && areTabsVisible && (
                             <div className="space-y-4 pt-4">
                               <Tabs value={activeFollowUpFilter} onValueChange={setActiveFollowUpFilter}>
                                 <TabsList className="rounded-lg p-1 shadow-sm bg-slate-100">
@@ -3152,133 +3159,133 @@ export default function DepartmentTasksManager({
                               )}
                             </div>
                           )} */}
-                      </CardHeader>
-                      <CardContent className="p-2 sm:p-4">
-                        {isTransposedView ? (
-                          <EnhancedTable
-                            departments={departments}
-                            tasks={displayedTasks}
-                            tableType={activeTabTitle}
-                            ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}
-                            visibleHeaders={visibleHeaders}
-                            taskDependants={taskDependants}
-                            expandedDependants={expandedDependants}
-                            expandedSections={expandedSections}
-                            companies={companies}
-                            tableRows={tableRows}
-                            loading={false}
-                            error={error}
-                            kycDocuments={kycDocuments}
-                            enhancedTasksData={enhancedTasksData}
-                            getCellContent={getCellContentWrapper}
-                            renderCellContent={renderCellContent}
-                            toggleSectionExpansion={toggleSectionExpansion}
-                            toggleStageExpansion={toggleStageExpansion}
-                            toggleDocumentExpansion={toggleDocumentExpansion}
-                            getTaskHierarchy={getTaskHierarchy}
-                            getStaffName={getStaffName}
-                            onDocumentPreview={async (doc) => {
-                              console.log('Document preview clicked:', doc);
-                              setPreviewDocument(doc);
+                  </CardHeader>
+                  <CardContent className="p-2 sm:p-4">
+                    {isTransposedView ? (
+                      <EnhancedTable
+                        departments={departments}
+                        tasks={displayedTasks}
+                        tableType={activeTabTitle}
+                        ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}
+                        visibleHeaders={visibleHeaders}
+                        taskDependants={taskDependants}
+                        expandedDependants={expandedDependants}
+                        expandedSections={expandedSections}
+                        companies={companies}
+                        tableRows={tableRows}
+                        loading={false}
+                        error={error}
+                        kycDocuments={kycDocuments}
+                        enhancedTasksData={enhancedTasksData}
+                        getCellContent={getCellContentWrapper}
+                        renderCellContent={renderCellContent}
+                        toggleSectionExpansion={toggleSectionExpansion}
+                        toggleStageExpansion={toggleStageExpansion}
+                        toggleDocumentExpansion={toggleDocumentExpansion}
+                        getTaskHierarchy={getTaskHierarchy}
+                        getStaffName={getStaffName}
+                        onDocumentPreview={async (doc) => {
+                          console.log('Document preview clicked:', doc);
+                          setPreviewDocument(doc);
 
-                              // If there's a document ID, try to fetch the extracted data
-                              if (doc.document_id) {
-                                try {
-                                  const { data: extractionData, error } = await supabase
-                                    .from('document_extractions')
-                                    .select('extracted_data')
-                                    .eq('document_id', doc.document_id)
-                                    .single();
+                          // If there's a document ID, try to fetch the extracted data
+                          if (doc.document_id) {
+                            try {
+                              const { data: extractionData, error } = await supabase
+                                .from('document_extractions')
+                                .select('extracted_data')
+                                .eq('document_id', doc.document_id)
+                                .single();
 
-                                  if (extractionData?.extracted_data) {
-                                    setExtractedData(extractionData.extracted_data);
-                                  } else {
-                                    setExtractedData({});
-                                  }
-                                } catch (error) {
-                                  console.error('Error fetching extraction data:', error);
-                                  setExtractedData({});
-                                }
+                              if (extractionData?.extracted_data) {
+                                setExtractedData(extractionData.extracted_data);
                               } else {
                                 setExtractedData({});
                               }
+                            } catch (error) {
+                              console.error('Error fetching extraction data:', error);
+                              setExtractedData({});
+                            }
+                          } else {
+                            setExtractedData({});
+                          }
 
-                              setIsDocumentPreviewOpen(true);
-                            }}
-                            onDeleteTask={async (task) => {
-                              try {
-                                setIsDeleting(true);
+                          setIsDocumentPreviewOpen(true);
+                        }}
+                        onDeleteTask={async (task) => {
+                          try {
+                            setIsDeleting(true);
 
-                                const { error } = await supabase
-                                  .from('tm_tasks')
-                                  .delete()
-                                  .eq('id', task.id);
+                            const { error } = await supabase
+                              .from('tm_tasks')
+                              .delete()
+                              .eq('id', task.id);
 
-                                if (error) throw error;
+                            if (error) throw error;
 
-                                // Update tasks list by removing the deleted task
-                                setTasks(prevTasks => prevTasks.filter(t => t.id !== task.id));
+                            // Update tasks list by removing the deleted task
+                            setTasks(prevTasks => prevTasks.filter(t => t.id !== task.id));
 
-                                toast({
-                                  title: 'Success',
-                                  description: 'Task deleted successfully',
-                                  variant: 'default'
-                                });
+                            toast({
+                              title: 'Success',
+                              description: 'Task deleted successfully',
+                              variant: 'default'
+                            });
 
-                              } catch (error) {
-                                console.error('Error deleting task:', error);
-                                toast({
-                                  title: 'Error',
-                                  description: 'Failed to delete task. Please try again.',
-                                  variant: 'destructive'
-                                });
-                              } finally {
-                                setIsDeleting(false);
-                              }
-                            }}
-                          />
-                        ) : (
+                          } catch (error) {
+                            console.error('Error deleting task:', error);
+                            toast({
+                              title: 'Error',
+                              description: 'Failed to delete task. Please try again.',
+                              variant: 'destructive'
+                            });
+                          } finally {
+                            setIsDeleting(false);
+                          }
+                        }}
+                      />
+                    ) : (
 
-                          <StandardTable
-                            departments={departments}
-                            tasks={displayedTasks}
-                            tableType={activeTabTitle}
-                            ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}
-                            stages={stages}
-                            companies={companies}
-                            visibleHeaders={visibleHeaders}
-                            visibleStageIds={visibleStageIds}
-                            expandedStages={expandedStages}
-                            expandedDocuments={expandedDocuments}
-                            expandedDependants={expandedDependants}
-                            taskDependants={taskDependants}
-                            kycDocuments={kycDocuments}
-                            allDocuments={allDocuments}
-                            sortConfig={sortConfig}
-                            error={error}
-                            isPushingCase={isPushingCase}
-                            isDownloading={isDownloading}
-                            enhancedTasksData={enhancedTasksData}
-                            getCellContent={getCellContentWrapper}
-                            getSortedTasks={getSortedTasks}
-                            getDocumentForTaskStage={getDocumentForTaskStage}
-                            getTaskHierarchy={getTaskHierarchy}
-                            getStaffName={getStaffName}
-                            requestSort={requestSort}
-                            handleTaskEdit={handleTaskEdit}
-                            handleStageDocumentUpload={handleStageDocumentUpload}
-                            handleViewDocument={handleViewDocument}
-                            handlePushCase={handlePushCase}
-                            handleDownloadZip={handleDownloadZip}
-                            onTaskAction={onTaskAction}
-                            enhancedHandleStageStatusSave={enhancedHandleStageStatusSave}
-                            getKycFields={getKycFields}
-                            toggleStageExpansion={toggleStageExpansion}
-                            toggleDocumentExpansion={toggleDocumentExpansion}
-                          />
-                        )}
-                      </CardContent>
-                    </Card>
+                      <StandardTable
+                        departments={departments}
+                        tasks={displayedTasks}
+                        tableType={activeTabTitle}
+                        ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}
+                        stages={stages}
+                        companies={companies}
+                        visibleHeaders={visibleHeaders}
+                        visibleStageIds={visibleStageIds}
+                        expandedStages={expandedStages}
+                        expandedDocuments={expandedDocuments}
+                        expandedDependants={expandedDependants}
+                        taskDependants={taskDependants}
+                        kycDocuments={kycDocuments}
+                        allDocuments={allDocuments}
+                        sortConfig={sortConfig}
+                        error={error}
+                        isPushingCase={isPushingCase}
+                        isDownloading={isDownloading}
+                        enhancedTasksData={enhancedTasksData}
+                        getCellContent={getCellContentWrapper}
+                        getSortedTasks={getSortedTasks}
+                        getDocumentForTaskStage={getDocumentForTaskStage}
+                        getTaskHierarchy={getTaskHierarchy}
+                        getStaffName={getStaffName}
+                        requestSort={requestSort}
+                        handleTaskEdit={handleTaskEdit}
+                        handleStageDocumentUpload={handleStageDocumentUpload}
+                        handleViewDocument={handleViewDocument}
+                        handlePushCase={handlePushCase}
+                        handleDownloadZip={handleDownloadZip}
+                        onTaskAction={onTaskAction}
+                        enhancedHandleStageStatusSave={enhancedHandleStageStatusSave}
+                        getKycFields={getKycFields}
+                        toggleStageExpansion={toggleStageExpansion}
+                        toggleDocumentExpansion={toggleDocumentExpansion}
+                      />
+                    )}
+                  </CardContent>
+                </Card>
               </TabsContent>
             </Tabs>
           </TabsContent>

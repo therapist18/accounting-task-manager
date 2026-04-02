@@ -7,10 +7,10 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { 
-  Download, Save, Trash2, RefreshCw, Eye, FileText, 
-  AlertTriangle, ZoomIn, ZoomOut, RotateCcw, RotateCw, 
-  Undo2, X, ChevronDown 
+import {
+  Download, Save, Trash2, RefreshCw, Eye, FileText,
+  AlertTriangle, ZoomIn, ZoomOut, RotateCcw, RotateCw,
+  Undo2, X, ChevronDown
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
@@ -61,6 +61,7 @@ interface ExtractionPreviewProps {
   showSaveButton?: boolean;
   type?: string;
   file?: any;
+  documentId?: string;
   extractionStatus?: 'pending' | 'success' | 'failed' | 'success';
   getStylesByType?: (type: string) => {
     getBgColor: () => string;
@@ -83,9 +84,9 @@ const RowWrapper = ({ children, className = "", isEven = false }) => (
 
 const LabelCell = ({ children }) => (
   <div className="w-full sm:w-[160px] flex-shrink-0 p-3 sm:border-r border-gray-100 flex items-center bg-gray-50/50 sm:bg-transparent">
-     <span className="text-xs font-semibold text-gray-500 uppercase tracking-tight break-words">
-        {children}
-     </span>
+    <span className="text-xs font-semibold text-gray-500 uppercase tracking-tight break-words">
+      {children}
+    </span>
   </div>
 );
 
@@ -159,16 +160,16 @@ const DocumentPreview = ({ fileUrl, fileName, documentName }) => {
 
               {/* Image Container with Scrolling/Centering */}
               <div className="w-full h-full flex items-center justify-center overflow-auto bg-gray-900/5">
-                 <div style={{
-                    transform: `scale(${zoom}) rotate(${rotation}deg)`,
-                    transition: 'transform 0.2s ease-out',
-                    width: '100%',
-                    height: '100%',
-                    position: 'relative',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                 }}>
+                <div style={{
+                  transform: `scale(${zoom}) rotate(${rotation}deg)`,
+                  transition: 'transform 0.2s ease-out',
+                  width: '100%',
+                  height: '100%',
+                  position: 'relative',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
                   <Image
                     src={displayUrl}
                     alt={documentName || 'Document preview'}
@@ -176,7 +177,7 @@ const DocumentPreview = ({ fileUrl, fileName, documentName }) => {
                     className="object-contain"
                     priority
                   />
-                 </div>
+                </div>
               </div>
             </>
           )
@@ -205,6 +206,7 @@ export const ExtractionPreview = ({
   showSaveButton = true,
   type,
   file,
+  documentId,
   extractionStatus,
   getStylesByType = (type) => ({
     getBgColor: () => 'bg-white',
@@ -225,14 +227,14 @@ export const ExtractionPreview = ({
   const [isRetrying, setIsRetrying] = useState(false)
   const [isSaving, setIsSaving] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
-  
+
   // Update the localData state initialization to handle null/undefined field names
   const [localData, setLocalData] = useState<Record<string, any>>(() => {
     const initialData: Record<string, any> = {};
     fields.forEach(field => {
       // Add null check for field and field.name
       if (!field || !field.name) return;
-      
+
       const snakeCase = String(field.name || '')
         .toLowerCase()
         .replace(/[^a-z0-9]+(.)/g, (_, chr) => '_' + (chr || '').toLowerCase())
@@ -242,7 +244,7 @@ export const ExtractionPreview = ({
         extractedData[field.id] ||
         extractedData[field.name] ||
         '';
-        
+
       initialData[field.name] = value;
     });
     return initialData;
@@ -298,7 +300,7 @@ export const ExtractionPreview = ({
         const newData = { ...prevData };
         fields.forEach(field => {
           if (!field || !field.name) return;
-          
+
           const snakeCase = String(field.name || '')
             .toLowerCase()
             .replace(/[^a-z0-9]+(.)/g, (_, chr) => '_' + (chr || '').toLowerCase())
@@ -308,7 +310,7 @@ export const ExtractionPreview = ({
             extractedData[field.id] ||
             extractedData[field.name] ||
             '';
-            
+
           // Only update if the value is different to prevent unnecessary re-renders
           if (newData[field.name] !== value) {
             newData[field.name] = value;
@@ -329,10 +331,10 @@ export const ExtractionPreview = ({
 
   const handleDelete = async (docData?: any) => {
     if (!onDelete) return;
-    
+
     try {
       setIsDeleting(true);
-      
+
       // Prepare document data for deletion
       const documentData = docData || {
         file_path: fileUrl,
@@ -340,16 +342,22 @@ export const ExtractionPreview = ({
         document_name: documentName,
         extracted_details: extractedData,
         document_type: type,
-        id: file?.id,
         company_id: file?.company_id,
         kyc_document_id: file?.kyc_document_id,
         director_id: file?.director_id,
-        ...file
+        ...file,
+        id: documentId // Set id last to override any potential id from ...file
       };
-      
+
+      console.log(' [DEBUG] ExtractionPreview handleDelete documentData:', {
+        documentData,
+        documentId,
+        fileId: file?.id
+      });
+
       // Call parent delete function - this will handle toast, data refresh, etc.
       await onDelete(documentData);
-      
+
       // Close the dialog after successful deletion
       // Use parent callback if available, otherwise internal state
       if (onDialogClose) {
@@ -357,7 +365,7 @@ export const ExtractionPreview = ({
       } else {
         setIsOpen(false);
       }
-      
+
     } catch (error) {
       console.error('Error deleting document:', error);
       // Only show error toast if parent didn't handle it
@@ -476,7 +484,7 @@ export const ExtractionPreview = ({
                 onValueChange={(val) => handleFieldChange(field.name, val)}
                 disabled={!onDataChange}
               >
-                <SelectTrigger 
+                <SelectTrigger
                   className="w-full h-8 border-transparent focus:border-blue-500 hover:border-gray-200 focus:ring-1 focus:ring-blue-500 bg-transparent shadow-none text-sm transition-all px-2"
                 >
                   <SelectValue placeholder="Select..." />
@@ -495,12 +503,12 @@ export const ExtractionPreview = ({
                   )}
                 </SelectContent>
               </Select>
-              
+
               {/* Clear Button */}
               {value && onDataChange && (
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
+                <Button
+                  variant="ghost"
+                  size="icon"
                   className="h-6 w-6 text-gray-400 hover:text-red-500 hover:bg-red-50 flex-shrink-0"
                   onClick={() => handleFieldChange(field.name, '')}
                   title="Clear selection"
@@ -509,11 +517,11 @@ export const ExtractionPreview = ({
                 </Button>
               )}
             </div>
-            
+
             {/* Warning if extracted value isn't in list (Optional UX enhancement) */}
             {value && !field.options.includes(value) && (
               <div className="absolute top-0 right-8">
-                 <span className="flex h-2 w-2 rounded-full bg-amber-500" title="Extracted value not in list" />
+                <span className="flex h-2 w-2 rounded-full bg-amber-500" title="Extracted value not in list" />
               </div>
             )}
           </ValueCell>
@@ -552,7 +560,7 @@ export const ExtractionPreview = ({
       {/* Extracted Data - Fixed Height with Overflow */}
       <div className="lg:col-span-1 h-[75vh] shadow-sm rounded-lg flex flex-col">
         <div className={`h-full flex flex-col rounded-lg border ${getStylesByType?.(type || 'principal')?.getBgColor() || 'bg-white'} ${getStylesByType?.(type || 'principal')?.getBorderColor() || 'border-gray-200'} overflow-hidden`}>
-          
+
           {/* 1. Header Section (Fixed at top) */}
           <div className="p-4 border-b border-gray-200 bg-white flex-shrink-0">
             <div className="flex justify-between items-center">
@@ -602,13 +610,13 @@ export const ExtractionPreview = ({
           {/* 3. Scrollable List Area (Takes remaining height) */}
           <div className="flex-1 overflow-y-auto bg-white scrollbar-thin scrollbar-thumb-gray-200 scrollbar-track-transparent">
             <div className="flex flex-col">
-            {fields
+              {fields
                 .sort((a, b) => {
                   const order = ['name', 'company_name', 'date', 'reference_number', 'file_number'];
                   // Safe access with fallback to empty string
                   const aName = (a?.name || '').toLowerCase();
                   const bName = (b?.name || '').toLowerCase();
-                  
+
                   const aIndex = order.indexOf(aName);
                   const bIndex = order.indexOf(bName);
                   return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
@@ -618,18 +626,18 @@ export const ExtractionPreview = ({
 
             {/* Comment Section (Scrolls with content) */}
             {extractedData?.comment && (
-               <div className="p-4 border-t border-gray-200 bg-yellow-50/30">
+              <div className="p-4 border-t border-gray-200 bg-yellow-50/30">
                 <h4 className="text-xs font-bold text-gray-500 mb-2 uppercase">Upload Comment</h4>
                 <div className="p-3 bg-white border border-gray-200 rounded-md text-sm text-gray-700 italic">
                   "{extractedData.comment}"
                 </div>
               </div>
             )}
-            
+
             {/* Bottom Padding */}
             <div className="h-4"></div>
           </div>
-          
+
         </div>
       </div>
     </div>

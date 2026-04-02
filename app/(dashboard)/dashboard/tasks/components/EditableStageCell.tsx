@@ -175,6 +175,15 @@ export default function EditableStageCell({
       return null;
     }
     const firstDoc = linkedDocuments[0];
+
+    console.log('🔗 [DEBUG] linkedDocument memo:', {
+      requiresUpload,
+      linkedDocumentsCount: linkedDocuments.length,
+      firstDoc,
+      firstDocKeys: firstDoc ? Object.keys(firstDoc) : 'null',
+      firstDocId: firstDoc?.id
+    });
+
     return firstDoc;
   }, [linkedDocuments, requiresUpload, stage.id, stage.name]);
 
@@ -499,6 +508,16 @@ export default function EditableStageCell({
   };
 
   const handleDeleteDocument = useCallback(async (documentToDelete: any) => {
+    console.log(' [DEBUG] handleDeleteDocument called with:', {
+      documentToDelete,
+      documentKeys: documentToDelete ? Object.keys(documentToDelete) : 'null',
+      id: documentToDelete?.id,
+      fileId: documentToDelete?.file?.id,
+      documentId: documentToDelete?.documentId,
+      linkedDocument,
+      previewDocuments
+    });
+
     if (!documentToDelete) {
       toast({ title: 'Error', description: 'No document to delete', variant: 'destructive' });
       return;
@@ -511,12 +530,29 @@ export default function EditableStageCell({
           ? documentToDelete.file_path.substring('kyc-documents/'.length)
           : documentToDelete.file_path;
 
+        console.log(' [DEBUG] Deleting file from storage:', filePath);
         await supabase.storage.from('kyc-documents').remove([filePath]);
       }
 
+      // Try multiple possible ID fields with detailed logging
+      const possibleIds = [
+        documentToDelete.id,
+        documentToDelete.file?.id,
+        documentToDelete.documentId,
+        documentToDelete.kyc_document_id,
+        documentToDelete.director_id
+      ];
+
+      console.log(' [DEBUG] Possible document IDs:', possibleIds);
+
       const documentId = documentToDelete.id || documentToDelete.file?.id || documentToDelete.documentId;
 
-      if (!documentId) throw new Error('Cannot delete document: Missing document ID');
+      console.log(' [DEBUG] Selected documentId:', documentId);
+
+      if (!documentId) {
+        console.error(' [ERROR] Cannot delete document: Missing document ID. Document object:', documentToDelete);
+        throw new Error('Cannot delete document: Missing document ID');
+      }
 
       const { error: dbError } = await supabase.from('acc_portal_directors_documents').delete().eq('id', documentId);
       if (dbError) throw dbError;
@@ -696,6 +732,13 @@ export default function EditableStageCell({
           },
           created_at: doc.created_at || new Date().toISOString()
         };
+
+        console.log('📄 [DEBUG] Created preview data:', {
+          originalDoc: doc,
+          previewData,
+          docId: doc.id,
+          previewDocumentId: previewData.documentId
+        });
 
         previewDocuments.push(previewData);
       } catch (error) {
