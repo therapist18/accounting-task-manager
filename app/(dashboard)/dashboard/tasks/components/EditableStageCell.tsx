@@ -544,14 +544,20 @@ export default function EditableStageCell({
         documentToDelete.director_id
       ];
 
-      const documentId = documentToDelete.id || documentToDelete.file?.id || documentToDelete.documentId;
+      const documentId = documentToDelete.id || documentToDelete.file?.id || documentToDelete.documentId || documentToDelete.document_id;
       if (!documentId) {
         console.error(' [ERROR] Cannot delete document: Missing document ID. Document object:', documentToDelete);
         throw new Error('Cannot delete document: Missing document ID');
       }
 
-      const { error: dbError } = await supabase.from('acc_portal_directors_documents').delete().eq('id', documentId);
-      if (dbError) throw dbError;
+      // Handle one-off documents differently - they can't be deleted from acc_portal_directors_documents
+      if (documentId === 'one_off' || documentToDelete.type === 'one_off') {
+        console.log('Skipping database deletion for one-off document:', documentToDelete);
+        // One-off documents are typically temporary/external documents that don't need DB deletion
+      } else {
+        const { error: dbError } = await supabase.from('acc_portal_directors_documents').delete().eq('id', documentId);
+        if (dbError) throw dbError;
+      }
 
       const currentTask = await supabase.from('tm_tasks').select('stages, source_document_id').eq('id', task.id).single();
       if (currentTask.error) throw currentTask.error;

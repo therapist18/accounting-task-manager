@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { SearchableSelect } from "@/components/ui/searchable-select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Check, ChevronsUpDown, Loader2, User, Users, Building2, FileText, UserPlus, UserCheck, Shield, HelpCircle, Calendar, MessageSquare, ListTodo, Phone, Database, Folder, Search, HeartHandshake, Split, X, AlertCircle, Link2 } from "lucide-react"
+import { Check, ChevronsUpDown, Loader2, User, Users, Building2, FileText, UserPlus, UserCheck, Shield, HelpCircle, Calendar, MessageSquare, ListTodo, Phone, Database, Folder, Search, HeartHandshake, Split, X, AlertCircle, Link2, PlusCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Textarea } from "@/components/ui/textarea"
@@ -25,6 +25,7 @@ import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, ev
 
 const CLASS_D_ID = '1750687058159';
 const SPONSOR_SUBDEPT_ID = '26';
+const CLIENT_CATEGORIES = ['ACC', 'IMM', 'Sheria', 'Audit'];
 
 // Photo document IDs
 const PASSPORT_PHOTO_ID = '48f48255-e5db-4944-8864-6f35b3af4696';
@@ -58,6 +59,48 @@ interface Individual {
     relationships?: any[]
     employment_data?: any
 }
+
+const createInitialCompanyCategories = () =>
+    CLIENT_CATEGORIES.reduce((acc, category) => {
+        acc[category] = {
+            isActive: category === 'IMM',
+            wef: '2000-01-01',
+            to: category === 'IMM' ? '2050-12-31' : '2000-01-01'
+        };
+        return acc;
+    }, {} as Record<string, { isActive: boolean; wef: string; to: string }>);
+
+const normalizeEnquiryDateForStorage = (dateValue?: string) => {
+    if (!dateValue) {
+        const today = new Date();
+        return {
+            isoDateTime: `${today.toISOString().split('T')[0]}T00:00:00.000Z`,
+            displayDate: format(today, 'dd/MM/yyyy')
+        };
+    }
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+        const [year, month, day] = dateValue.split('-');
+        return {
+            isoDateTime: `${year}-${month}-${day}T00:00:00.000Z`,
+            displayDate: `${day}/${month}/${year}`
+        };
+    }
+
+    const parsedDate = new Date(dateValue);
+    if (!isNaN(parsedDate.getTime())) {
+        return {
+            isoDateTime: `${parsedDate.toISOString().split('T')[0]}T00:00:00.000Z`,
+            displayDate: format(parsedDate, 'dd/MM/yyyy')
+        };
+    }
+
+    const today = new Date();
+    return {
+        isoDateTime: `${today.toISOString().split('T')[0]}T00:00:00.000Z`,
+        displayDate: format(today, 'dd/MM/yyyy')
+    };
+};
 
 // Moved TableRow outside to prevent re-rendering/focus loss
 const TableRow = ({ label, children, required = false }: { label: string; children: React.ReactNode; required?: boolean }) => (
@@ -109,6 +152,7 @@ export function EnquiryDialog({
     const [selectedSponsor, setSelectedSponsor] = useState<any | null>(null) // State for Sponsor
     const [principalForDependant, setPrincipalForDependant] = useState<Individual | null>(null)
     const [companies, setCompanies] = useState<any[]>([])
+    const [allCompanies, setAllCompanies] = useState<any[]>([])
     const [selectedCompany, setSelectedCompany] = useState<string>('')
     const [understudies, setUnderstudies] = useState<any[]>([])
     const [selectedUnderstudy, setSelectedUnderstudy] = useState<string>('')
@@ -146,6 +190,10 @@ export function EnquiryDialog({
     const [isSponsorPopoverOpen, setIsSponsorPopoverOpen] = useState(false);
     const [showCompanyAssociationDialog, setShowCompanyAssociationDialog] = useState(false);
     const [associationLoading, setAssociationLoading] = useState(false);
+    const [showCompanyCreateDialog, setShowCompanyCreateDialog] = useState(false);
+    const [companySearchTerm, setCompanySearchTerm] = useState('');
+    const [newCompanyName, setNewCompanyName] = useState('');
+    const [companyCategories, setCompanyCategories] = useState(createInitialCompanyCategories);
     const [newAssociationData, setNewAssociationData] = useState({
         individual_type: '',
         company_id: '',
@@ -167,6 +215,14 @@ export function EnquiryDialog({
     const companyOptions = useMemo(() => {
         return companies.map(c => ({ value: c.id.toString(), label: c.company_name }));
     }, [companies]);
+
+    const filteredAssociationCompanies = useMemo(() => {
+        const term = companySearchTerm.trim().toLowerCase();
+        if (!term) return allCompanies.slice(0, 6);
+        return allCompanies
+            .filter(company => company.company_name?.toLowerCase().includes(term))
+            .slice(0, 6);
+    }, [allCompanies, companySearchTerm]);
 
     const understudyOptions = useMemo(() => {
         return understudies.map(u => ({ value: u.id.toString(), label: u.full_name }));
@@ -208,6 +264,39 @@ export function EnquiryDialog({
         const fullPath = filePath.startsWith(bucketName) ? filePath : `${bucketName}/${filePath}`;
         return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${fullPath}`;
     }, []);
+
+    const fetchAllCompanies = useCallback(async () => {
+        const { data, error } = await supabase
+            .from('acc_portal_company_duplicate')
+            .select('id, company_name, understudy')
+            .order('company_name');
+
+        if (error) throw error;
+        setAllCompanies(data || []);
+        return data || [];
+    }, []);
+
+    const fetchIndividualsByType = useCallback(async (type: 'principal' | 'dependant') => {
+        const { data, error } = await supabase
+            .from('registry_individuals')
+            .select('id, full_name, contact_details, individual_type, relationships, employment_data')
+            .eq('individual_type', type)
+            .order('full_name');
+
+        if (error) throw error;
+        setIndividuals(data || []);
+        return data || [];
+    }, []);
+
+    const fetchUnderstudies = useCallback(async (companyId: string) => {
+        if (!companyId) { setUnderstudies([]); return }
+        const { data: companyData } = await supabase.from('acc_portal_company_duplicate').select('understudy').eq('id', companyId).single()
+        const understudyList = companyData?.understudy || []
+        if (understudyList.length) {
+            const { data: inds } = await supabase.from('registry_individuals').select('id, full_name').in('id', understudyList.map((u: any) => u.individual_id))
+            setUnderstudies(inds || [])
+        }
+    }, [])
 
     // Fetch applicant photo
     const fetchApplicantPhoto = useCallback(async (individualId: number) => {
@@ -517,16 +606,18 @@ export function EnquiryDialog({
     useEffect(() => {
         if (open) {
             setSearchLoading(true)
-            supabase.from('registry_individuals')
-                .select('id, full_name, contact_details, individual_type, relationships, employment_data')
-                .eq('individual_type', applicantType)
-                .order('full_name')
-                .then(({ data }) => {
-                    setIndividuals(data || [])
-                    setSearchLoading(false)
-                })
+            fetchIndividualsByType(applicantType)
+                .finally(() => setSearchLoading(false))
         }
-    }, [open, applicantType])
+    }, [open, applicantType, fetchIndividualsByType])
+
+    useEffect(() => {
+        if (!open) return;
+        fetchAllCompanies().catch((error) => {
+            console.error('Error fetching companies:', error);
+            toast({ title: "Load Failed", description: "Failed to load companies.", variant: "destructive" });
+        });
+    }, [open, fetchAllCompanies])
 
     // Reset primary applicant field when applicant type changes
     useEffect(() => {
@@ -547,16 +638,6 @@ export function EnquiryDialog({
             setSelectedSponsor(null)
         }
     }, [applicantType, open])
-
-    const fetchUnderstudies = useCallback(async (companyId: string) => {
-        if (!companyId) { setUnderstudies([]); return }
-        const { data: companyData } = await supabase.from('acc_portal_company_duplicate').select('understudy').eq('id', companyId).single()
-        const understudyList = companyData?.understudy || []
-        if (understudyList.length) {
-            const { data: inds } = await supabase.from('registry_individuals').select('id, full_name').in('id', understudyList.map((u: any) => u.individual_id))
-            setUnderstudies(inds || [])
-        }
-    }, [])
 
     const handleIndividualSelect = useCallback(async (ind: Individual) => {
         setLoadingRelations(true)
@@ -708,12 +789,163 @@ export function EnquiryDialog({
         };
     }, [open, selectedIndividual?.id, formData.department_id, formData.subdepartment_id, formData.class_id, taskToEdit?.id]);
 
+    useEffect(() => {
+        if (!open) return;
+
+        const reloadSelectedIndividual = async (individualId?: number | string | null) => {
+            if (!individualId) return;
+
+            const { data, error } = await supabase
+                .from('registry_individuals')
+                .select('id, full_name, contact_details, individual_type, relationships, employment_data')
+                .eq('id', individualId)
+                .single();
+
+            if (!error && data) {
+                await handleIndividualSelect(data);
+            }
+        };
+
+        const individualChannel = supabase
+            .channel(`enquiry-registry-individuals:${applicantType}`)
+            .on('postgres_changes', {
+                event: '*',
+                schema: 'public',
+                table: 'registry_individuals'
+            }, async (payload) => {
+                await fetchIndividualsByType(applicantType);
+
+                const changedId = payload.new?.id || payload.old?.id;
+                if (selectedIndividual?.id && String(changedId) === String(selectedIndividual.id)) {
+                    await reloadSelectedIndividual(selectedIndividual.id);
+                }
+            })
+            .subscribe();
+
+        const companyChannel = supabase
+            .channel('enquiry-company-duplicate')
+            .on('postgres_changes', {
+                event: '*',
+                schema: 'public',
+                table: 'acc_portal_company_duplicate'
+            }, async () => {
+                await fetchAllCompanies();
+
+                if (selectedIndividual) {
+                    await reloadSelectedIndividual(selectedIndividual.id);
+                }
+            })
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(individualChannel);
+            supabase.removeChannel(companyChannel);
+        };
+    }, [open, applicantType, selectedIndividual, fetchIndividualsByType, fetchAllCompanies, handleIndividualSelect]);
+
     // --- New Handler: Clear Company Selection ---
     const handleClearCompany = () => {
         setSelectedCompany('');
         setUnderstudies([]);
         setSelectedUnderstudy('');
     }
+
+    const resetCompanyCreationState = useCallback(() => {
+        setNewCompanyName('');
+        setCompanyCategories(createInitialCompanyCategories());
+    }, []);
+
+    const handleOpenCompanyCreateDialog = useCallback((companyName: string) => {
+        setNewCompanyName(companyName);
+        setShowCompanyCreateDialog(true);
+    }, []);
+
+    const handleCompanyCategoryChange = useCallback((category: string, field: 'isActive' | 'wef' | 'to', value: any) => {
+        setCompanyCategories(prev => ({
+            ...prev,
+            [category]: {
+                ...prev[category],
+                [field]: value
+            }
+        }));
+    }, []);
+
+    const handleCreateCompany = useCallback(async () => {
+        const trimmedName = newCompanyName.trim();
+        if (!trimmedName) {
+            toast({ title: "Missing Company Name", description: "Please provide a company name.", variant: "destructive" });
+            return;
+        }
+
+        setAssociationLoading(true);
+        try {
+            const payload = {
+                company_name: trimmedName,
+                ...Object.keys(companyCategories).reduce((acc, category) => {
+                    const categoryData = companyCategories[category];
+                    if (categoryData?.isActive) {
+                        acc[`${category.toLowerCase()}_client_effective_from`] = categoryData.wef || '01/01/2000';
+                        acc[`${category.toLowerCase()}_client_effective_to`] = categoryData.to || '01/01/2000';
+                    }
+                    return acc;
+                }, {} as Record<string, string>)
+            };
+
+            const { data, error } = await supabase
+                .from('acc_portal_company_duplicate')
+                .insert(payload)
+                .select('id, company_name, understudy')
+                .single();
+
+            if (error) throw error;
+
+            const nextCompanies = [...allCompanies, data].sort((a, b) =>
+                (a.company_name || '').localeCompare(b.company_name || '')
+            );
+            setAllCompanies(nextCompanies);
+            setNewAssociationData(prev => ({ ...prev, company_id: String(data.id) }));
+            setCompanySearchTerm(data.company_name || '');
+
+            toast({
+                title: "Company Created",
+                description: `Successfully created "${trimmedName}".`,
+                variant: "success"
+            });
+
+            setShowCompanyCreateDialog(false);
+            resetCompanyCreationState();
+        } catch (error) {
+            console.error('Error creating company:', error);
+            toast({
+                title: "Creation Failed",
+                description: error.message || "Failed to create company.",
+                variant: "destructive"
+            });
+        } finally {
+            setAssociationLoading(false);
+        }
+    }, [newCompanyName, companyCategories, allCompanies, resetCompanyCreationState]);
+
+    useEffect(() => {
+        if (!showCompanyAssociationDialog) {
+            setCompanySearchTerm('');
+            setNewAssociationData({
+                individual_type: '',
+                company_id: '',
+                effective_start_date: '',
+                effective_end_date: '',
+                shares_held: ''
+            });
+        }
+    }, [showCompanyAssociationDialog]);
+
+    useEffect(() => {
+        if (!newAssociationData.company_id || newAssociationData.company_id === 'unallocated') return;
+        const selected = allCompanies.find(company => String(company.id) === String(newAssociationData.company_id));
+        if (selected?.company_name) {
+            setCompanySearchTerm(selected.company_name);
+        }
+    }, [newAssociationData.company_id, allCompanies]);
 
     // --- New Handler: Create Company Association ---
     const handleCreateCompanyAssociation = async () => {
@@ -817,6 +1049,7 @@ export function EnquiryDialog({
 
         setLoading(true)
         try {
+            const normalizedEnquiryDate = normalizeEnquiryDateForStorage(formData.enquiry_date);
             const participants: any[] = []
 
             // Extract Participant Details
@@ -902,7 +1135,7 @@ export function EnquiryDialog({
                 const insertPayload = {
                     ...payload,
                     status: 'enquiry',
-                    date_initiated: new Date(formData.enquiry_date).toISOString(),
+                    date_initiated: normalizedEnquiryDate.isoDateTime,
                     applied_by: "11",
                     created_by: "enquiry_dialog",
                     job_level: {
@@ -918,7 +1151,7 @@ export function EnquiryDialog({
                         existing_workflow_detected: !!workflowRestrictionSummary?.matchedDocumentTypes?.length,
                         workflow_blocking_reasons: workflowRestrictionSummary?.blockingReasons || []
                     },
-                    stages: { '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa': { status: "completed", date: format(new Date(), 'dd/MM/yyyy') } }
+                    stages: { '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa': { status: "completed", date: normalizedEnquiryDate.displayDate } }
                 };
                 const { data, error } = await supabase.from('tm_tasks').insert([insertPayload]).select().single();
                 if (error) throw error;
@@ -1607,16 +1840,95 @@ export function EnquiryDialog({
                         <div className="grid grid-cols-4 items-center gap-4">
                             <Label htmlFor="company" className="">Company</Label>
                             <div className="col-span-3">
-                                <SearchableSelect
-                                    value={newAssociationData.company_id}
-                                    onValueChange={(value) => setNewAssociationData(prev => ({ ...prev, company_id: value }))}
-                                    options={[{ value: 'unallocated', label: 'Un-allocated Company' }, ...companyOptions]}
-                                    placeholder="Select company..."
-                                    emptyMessage="No companies found."
-                                    searchPlaceholder="Search company..."
-                                    buttonClassName="w-full"
-                                    popoverClassName="w-[--radix-popover-trigger-width]"
-                                />
+                                <div className="space-y-3">
+                                    <div className="relative">
+                                        <Input
+                                            placeholder="Search existing company or type new company name..."
+                                            value={companySearchTerm}
+                                            onChange={(e) => {
+                                                setCompanySearchTerm(e.target.value);
+                                                setNewAssociationData(prev => ({ ...prev, company_id: '' }));
+                                            }}
+                                        />
+
+                                        {companySearchTerm.trim() && (
+                                            <div className="absolute top-full left-0 right-0 z-50 mt-1 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg max-h-60">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setNewAssociationData(prev => ({ ...prev, company_id: 'unallocated' }));
+                                                        setCompanySearchTerm('Un-allocated Company');
+                                                    }}
+                                                    className="flex w-full items-center gap-2 border-b border-gray-100 px-3 py-2 text-left hover:bg-slate-50"
+                                                >
+                                                    <Building2 className="h-4 w-4 text-slate-500" />
+                                                    <span className="text-sm">Un-allocated Company</span>
+                                                    <Badge variant="secondary" className="ml-auto text-xs">Special</Badge>
+                                                </button>
+
+                                                {filteredAssociationCompanies.map(company => (
+                                                    <button
+                                                        key={company.id}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setNewAssociationData(prev => ({ ...prev, company_id: String(company.id) }));
+                                                            setCompanySearchTerm(company.company_name);
+                                                        }}
+                                                        className="flex w-full items-center gap-2 border-b border-gray-100 px-3 py-2 text-left hover:bg-gray-100 last:border-b-0"
+                                                    >
+                                                        <Building2 className="h-4 w-4 text-gray-500" />
+                                                        <span className="text-sm">{company.company_name}</span>
+                                                        <Badge variant="secondary" className="ml-auto text-xs">Existing</Badge>
+                                                    </button>
+                                                ))}
+
+                                                {!allCompanies.some(company =>
+                                                    company.company_name?.toLowerCase() === companySearchTerm.trim().toLowerCase()
+                                                ) && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleOpenCompanyCreateDialog(companySearchTerm.trim())}
+                                                        className="flex w-full items-center gap-2 bg-blue-50 px-3 py-2 text-left hover:bg-blue-100"
+                                                    >
+                                                        <PlusCircle className="h-4 w-4 text-blue-600" />
+                                                        <span className="text-sm font-medium text-blue-800">Create "{companySearchTerm.trim()}"</span>
+                                                        <Badge variant="default" className="ml-auto bg-blue-600 text-xs">New</Badge>
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {newAssociationData.company_id && (
+                                        <div className="rounded-lg border border-green-200 bg-green-50 p-3">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <Building2 className="h-4 w-4 text-green-600" />
+                                                    <span className="text-sm font-medium text-green-800">
+                                                        {newAssociationData.company_id === 'unallocated'
+                                                            ? 'Un-allocated Company'
+                                                            : (allCompanies.find(company => String(company.id) === String(newAssociationData.company_id))?.company_name || companySearchTerm)}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <Badge variant="default" className="bg-green-600 text-xs">Selected</Badge>
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => {
+                                                            setNewAssociationData(prev => ({ ...prev, company_id: '' }));
+                                                            setCompanySearchTerm('');
+                                                        }}
+                                                        className="h-6 w-6 p-0 text-gray-500 hover:text-red-600"
+                                                    >
+                                                        <X className="h-3 w-3" />
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
 
@@ -1689,6 +2001,101 @@ export function EnquiryDialog({
                                 <>
                                     <Link2 className="mr-2 h-4 w-4" />
                                     Create Association
+                                </>
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={showCompanyCreateDialog} onOpenChange={setShowCompanyCreateDialog}>
+                <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <PlusCircle className="h-5 w-5 text-blue-600" />
+                            Create Company
+                        </DialogTitle>
+                        <DialogDescription>
+                            Create a new company using the same client-category setup used in quick add.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-5 py-2">
+                        <div className="space-y-2">
+                            <Label htmlFor="new-company-name">Company Name</Label>
+                            <Input
+                                id="new-company-name"
+                                value={newCompanyName}
+                                onChange={(e) => setNewCompanyName(e.target.value)}
+                                placeholder="Enter company name..."
+                            />
+                        </div>
+
+                        <div className="space-y-4">
+                            <Label>Client Categories</Label>
+                            <div className="space-y-3">
+                                {CLIENT_CATEGORIES.map((category) => (
+                                    <div key={category} className="rounded-lg border p-4">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div className="flex items-center gap-3">
+                                                <Checkbox
+                                                    checked={companyCategories[category]?.isActive || false}
+                                                    onCheckedChange={(checked) => handleCompanyCategoryChange(category, 'isActive', Boolean(checked))}
+                                                />
+                                                <span className="font-medium text-slate-800">{category}</span>
+                                            </div>
+                                            <Badge variant={companyCategories[category]?.isActive ? "default" : "secondary"}>
+                                                {companyCategories[category]?.isActive ? "Active" : "Inactive"}
+                                            </Badge>
+                                        </div>
+
+                                        <div className="mt-3 grid grid-cols-2 gap-3">
+                                            <div className="space-y-1">
+                                                <Label className="text-xs text-slate-500">Effective From</Label>
+                                                <Input
+                                                    type="date"
+                                                    value={companyCategories[category]?.wef || ''}
+                                                    onChange={(e) => handleCompanyCategoryChange(category, 'wef', e.target.value)}
+                                                    disabled={!companyCategories[category]?.isActive}
+                                                />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <Label className="text-xs text-slate-500">Effective To</Label>
+                                                <Input
+                                                    type="date"
+                                                    value={companyCategories[category]?.to || ''}
+                                                    onChange={(e) => handleCompanyCategoryChange(category, 'to', e.target.value)}
+                                                    disabled={!companyCategories[category]?.isActive}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={() => {
+                                setShowCompanyCreateDialog(false);
+                                resetCompanyCreationState();
+                            }}
+                            disabled={associationLoading}
+                        >
+                            Cancel
+                        </Button>
+                        <Button onClick={handleCreateCompany} disabled={associationLoading || !newCompanyName.trim()}>
+                            {associationLoading ? (
+                                <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Creating Company...
+                                </>
+                            ) : (
+                                <>
+                                    <PlusCircle className="mr-2 h-4 w-4" />
+                                    Create Company
                                 </>
                             )}
                         </Button>
