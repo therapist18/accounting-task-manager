@@ -1229,7 +1229,7 @@ export default function DepartmentTasksManager({
       }
 
       const { data: newTasks, error } = await supabase
-        .from('tm_tasks_duplicate')
+        .from('tm_tasks')
         .insert(taskRows)
         .select();
 
@@ -1915,7 +1915,13 @@ export default function DepartmentTasksManager({
             )
           );
           clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
-          void loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
+
+          // If this is from a document upload, refresh documents to show newly uploaded ones
+          if (action.source === 'stage-upload') {
+            refreshAllData();
+          } else {
+            void loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
+          }
         }
         break
       case 'refresh':
@@ -2568,7 +2574,7 @@ export default function DepartmentTasksManager({
     }
   }, [activeDepartmentTab, activeSubdepartmentTab, departments.length, loadTasksData])
 
-  // Realtime subscription for tm_tasks_duplicate table
+  // Realtime subscription for tm_tasks table
   useEffect(() => {
     // Set up realtime subscription
     const subscription = supabase
@@ -2578,7 +2584,7 @@ export default function DepartmentTasksManager({
         {
           event: '*',
           schema: 'public',
-          table: 'tm_tasks_duplicate'
+          table: 'tm_tasks'
         },
         async (payload) => {
           console.log('Realtime update received:', payload);
@@ -2726,9 +2732,9 @@ export default function DepartmentTasksManager({
       )
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
-          console.log('Realtime subscription established for tm_tasks_duplicate');
+          console.log('Realtime subscription established for tm_tasks');
         } else if (status === 'CHANNEL_ERROR') {
-          console.error('Realtime subscription error for tm_tasks_duplicate');
+          console.error('Realtime subscription error for tm_tasks');
           toast({
             title: "Realtime Error",
             description: "Failed to establish realtime connection. Refreshing data manually.",

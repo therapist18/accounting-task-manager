@@ -175,15 +175,6 @@ export default function EditableStageCell({
       return null;
     }
     const firstDoc = linkedDocuments[0];
-
-    console.log('🔗 [DEBUG] linkedDocument memo:', {
-      requiresUpload,
-      linkedDocumentsCount: linkedDocuments.length,
-      firstDoc,
-      firstDocKeys: firstDoc ? Object.keys(firstDoc) : 'null',
-      firstDocId: firstDoc?.id
-    });
-
     return firstDoc;
   }, [linkedDocuments, requiresUpload, stage.id, stage.name]);
 
@@ -208,10 +199,8 @@ export default function EditableStageCell({
       }
 
       try {
-        console.log('[EditableStageCell] Fetching document fields for type:', linkedDocument.document_type_id);
         setIsLoadingFields(true);
         const fields = await getKycFields(linkedDocument.document_type_id);
-        console.log('[EditableStageCell] Fetched document fields:', fields);
 
         // Cache the results
         documentFieldsCache.set(cacheKey, {
@@ -417,6 +406,11 @@ export default function EditableStageCell({
         title: "Success",
         description: isSkipped ? "Stage marked as skipped" : "Stage updated successfully",
       });
+
+      // Fetch and update states after successful submission
+      if (onFetchData) {
+        await onFetchData();
+      }
     } catch (error) {
       console.error('Error saving stage:', error);
       toast({
@@ -480,6 +474,7 @@ export default function EditableStageCell({
         variant: "default"
       });
 
+      // Fetch and update states after successful submission
       if (onFetchData) {
         await onFetchData();
       }
@@ -508,16 +503,6 @@ export default function EditableStageCell({
   };
 
   const handleDeleteDocument = useCallback(async (documentToDelete: any) => {
-    console.log(' [DEBUG] handleDeleteDocument called with:', {
-      documentToDelete,
-      documentKeys: documentToDelete ? Object.keys(documentToDelete) : 'null',
-      id: documentToDelete?.id,
-      fileId: documentToDelete?.file?.id,
-      documentId: documentToDelete?.documentId,
-      linkedDocument,
-      previewDocuments
-    });
-
     if (!documentToDelete) {
       toast({ title: 'Error', description: 'No document to delete', variant: 'destructive' });
       return;
@@ -529,8 +514,6 @@ export default function EditableStageCell({
         const filePath = documentToDelete.file_path.startsWith('kyc-documents/')
           ? documentToDelete.file_path.substring('kyc-documents/'.length)
           : documentToDelete.file_path;
-
-        console.log(' [DEBUG] Deleting file from storage:', filePath);
         await supabase.storage.from('kyc-documents').remove([filePath]);
       }
 
@@ -543,12 +526,7 @@ export default function EditableStageCell({
         documentToDelete.director_id
       ];
 
-      console.log(' [DEBUG] Possible document IDs:', possibleIds);
-
       const documentId = documentToDelete.id || documentToDelete.file?.id || documentToDelete.documentId;
-
-      console.log(' [DEBUG] Selected documentId:', documentId);
-
       if (!documentId) {
         console.error(' [ERROR] Cannot delete document: Missing document ID. Document object:', documentToDelete);
         throw new Error('Cannot delete document: Missing document ID');
@@ -612,6 +590,11 @@ export default function EditableStageCell({
 
       if (onSave) {
         await onSave(stage.id, task.id, '', {});
+      }
+
+      // Fetch and update states after successful submission to tm_tasks
+      if (onFetchData) {
+        await onFetchData();
       }
 
     } catch (error) {
@@ -732,14 +715,6 @@ export default function EditableStageCell({
           },
           created_at: doc.created_at || new Date().toISOString()
         };
-
-        console.log('📄 [DEBUG] Created preview data:', {
-          originalDoc: doc,
-          previewData,
-          docId: doc.id,
-          previewDocumentId: previewData.documentId
-        });
-
         previewDocuments.push(previewData);
       } catch (error) {
         console.error(`Error building preview data for document ${doc.id}:`, error);
@@ -753,10 +728,7 @@ export default function EditableStageCell({
         description: 'Failed to prepare document previews.',
         variant: 'destructive'
       });
-    } else {
-      console.log(`Successfully created ${previewDocuments.length} preview documents`); // Debug log
     }
-
     return previewDocuments;
   }, [fetchKycDocumentData, transformKycFieldsToPreviewFormat]);
 
@@ -825,9 +797,12 @@ export default function EditableStageCell({
       };
       setPreviewDocuments(updatedDocs);
 
-      if (onFetchData) await onFetchData();
-
       toast({ title: 'Success', description: 'Document data saved and refreshed successfully.' });
+
+      // Fetch and update states after successful submission
+      if (onFetchData) {
+        await onFetchData();
+      }
 
       if (currentPreviewIndex >= previewDocuments.length - 1) {
         setIsPreviewOpen(false);
@@ -1294,7 +1269,6 @@ export default function EditableStageCell({
 
       {/* Test Dialog for debugging */}
       <Dialog open={automationDialogOpen} onOpenChange={(open) => {
-        console.log('🧪 [Test Dialog] onOpenChange:', open);
         if (!open) setAutomationDialogOpen(false);
       }}>
         <DialogContent className="max-w-md">

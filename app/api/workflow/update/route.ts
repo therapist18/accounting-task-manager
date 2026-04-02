@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
 
     // 1. Get the task details to find the original document
     const { data: task, error: taskError } = await supabase
-      .from('tm_tasks_duplicate')
+      .from('tm_tasks')
       .select(`
         id,
         individual_id,

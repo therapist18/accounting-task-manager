@@ -3,6 +3,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import dayjs from 'dayjs'; // Import dayjs library
 import { supabase } from "@/utils/supabase/client";
+import { toast } from "sonner";
 
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
 
@@ -65,7 +66,7 @@ async function fileToGenerativePart(fileInput: string | File, originalFileName?:
         .split('.')
         .pop()
         ?.toLowerCase();
-      
+
       if (extension) {
         switch (extension) {
           case 'jpg':
@@ -86,7 +87,7 @@ async function fileToGenerativePart(fileInput: string | File, originalFileName?:
 
     // Convert to base64
     const base64 = Buffer.from(data).toString('base64');
-    
+
     return {
       inlineData: {
         data: base64,
@@ -197,16 +198,16 @@ const formatExtractedValue = (value: any, fieldType: string): any => {
       } catch {
         return null;
       }
-    
+
     case 'number':
-      const num = typeof value === 'string' ? 
-        parseFloat(value.replace(/[^\d.-]/g, '')) : 
+      const num = typeof value === 'string' ?
+        parseFloat(value.replace(/[^\d.-]/g, '')) :
         parseFloat(String(value));
       return isNaN(num) ? null : num;
-    
+
     case 'array':
       return Array.isArray(value) ? value : [];
-    
+
     case 'boolean':
       if (typeof value === 'boolean') return value;
       if (typeof value === 'string') {
@@ -215,7 +216,7 @@ const formatExtractedValue = (value: any, fieldType: string): any => {
         if (['false', 'no', '0'].includes(lowered)) return false;
       }
       return null;
-    
+
     default:
       return String(value).trim();
   }
@@ -237,15 +238,15 @@ const parseExtractionResponse = (output: string): Record<string, any> => {
     // If not JSON, try to parse line by line
     const parsedData: Record<string, any> = {};
     const lines = output.split('\n');
-    
+
     lines.forEach(line => {
       const [key, ...valueParts] = line.split(':');
       if (key && valueParts.length > 0) {
         const value = valueParts.join(':').trim();
         if (value) {
           // Try to parse as JSON if it looks like an array or object
-          if ((value.startsWith('[') && value.endsWith(']')) || 
-              (value.startsWith('{') && value.endsWith('}'))) {
+          if ((value.startsWith('[') && value.endsWith(']')) ||
+            (value.startsWith('{') && value.endsWith('}'))) {
             try {
               parsedData[key.trim()] = JSON.parse(value);
             } catch {
@@ -267,7 +268,7 @@ const parseExtractionResponse = (output: string): Record<string, any> => {
         }
       }
     });
-    
+
     return parsedData;
   } catch (error) {
     console.error('Error parsing extraction response:', error);
@@ -348,12 +349,20 @@ export const performExtraction = async (
 
   while (attempts < MAX_ATTEMPTS) {
     try {
-      onProgress?.(`Attempt ${attempts + 1}/${MAX_ATTEMPTS}: Processing document...`);
-      
+      const progressMessage = `Attempt ${attempts + 1}/${MAX_ATTEMPTS}: Processing document...`;
+      onProgress?.(progressMessage);
+
+      // Also show direct toast for better visibility
+      if (attempts === 0) {
+        toast.loading(progressMessage, { id: 'extraction-progress' });
+      } else {
+        toast.loading(progressMessage, { id: 'extraction-progress' });
+      }
+
       const filePart = await fileToGenerativePart(fileUrl, originalFileName);
       const fieldPrompts = formatFieldPrompts(fields);
       const exampleOutput = createExampleOutput(fields);
-      
+
       console.log('Extraction configuration:', {
         documentType,
         fields,
@@ -380,41 +389,41 @@ export const performExtraction = async (
 
       // Generate content using the model
       const result = await model.generateContent([prompt, filePart]);
-      
+
       // Extract and parse the response
       const response = await result.response;
       const text = response.text();
       const extractedData = parseExtractionResponse(text);
       console.log('Parsed extraction data:', extractedData);
-      
+
       // Perform initial cleaning
       const cleanedData = cleanExtractedData(extractedData, fields);
-      
+
       let mappedData = extractedData.rawData || {};
-      
+
       if (!extractedData.rawData) {
         fields.forEach(field => {
           if (field.type === 'array' && field.isArray && field.arrayConfig?.fields) {
             // Generic array field handling (existing logic)
             const arrayFieldName = field.name;
             let arrayData = extractedData[arrayFieldName] || [];
-            
+
             if (!Array.isArray(arrayData)) {
-               // ... (existing array fallback logic) ...
-               // Preserving existing logic for brevity, logic handles nested structures
-               const constructedArray = [];
-               if(typeof extractedData[arrayFieldName] === 'object') {
-                   // ...
-                   constructedArray.push(extractedData[arrayFieldName]); // Simplified fallback
-               }
-               if(constructedArray.length > 0) arrayData = constructedArray;
+              // ... (existing array fallback logic) ...
+              // Preserving existing logic for brevity, logic handles nested structures
+              const constructedArray = [];
+              if (typeof extractedData[arrayFieldName] === 'object') {
+                // ...
+                constructedArray.push(extractedData[arrayFieldName]); // Simplified fallback
+              }
+              if (constructedArray.length > 0) arrayData = constructedArray;
             }
-            
+
             arrayData = arrayData.filter(item => {
               if (!item || typeof item !== 'object') return false;
               return Object.values(item).some(val => val !== undefined && val !== null && val !== '');
             });
-            
+
             if (arrayData.length > 0) {
               mappedData[arrayFieldName] = arrayData;
             }
@@ -426,11 +435,11 @@ export const performExtraction = async (
               field.name.replace(/[_\s]/g, ''),
               field.name.replace(/[_\s]/g, '.')
             ];
-            
+
             const value = fieldKeys.reduce((val, key) => {
               if (val !== undefined) return val;
               if (extractedData[key] !== undefined) return extractedData[key];
-              
+
               // Check nested objects
               const parts = key.split('.');
               let current = extractedData;
@@ -440,7 +449,7 @@ export const performExtraction = async (
               }
               return current;
             }, undefined);
-            
+
             if (value !== undefined) {
               mappedData[field.name] = value;
             }
@@ -460,12 +469,14 @@ export const performExtraction = async (
         }
       });
 
+      const resultMessage = validationErrors.length > 0
+        ? 'Data extracted with some validation issues. Please review and correct if needed.'
+        : 'Data extracted successfully';
+      toast.success(resultMessage, { id: 'extraction-progress' });
       return {
         extractedData: mappedData,
         success: true,
-        message: validationErrors.length > 0 
-          ? 'Data extracted with some validation issues. Please review and correct if needed.'
-          : 'Data extracted successfully',
+        message: resultMessage,
         validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
         failedImage: fileUrl,
         failedFields: fields
@@ -474,15 +485,19 @@ export const performExtraction = async (
     } catch (error) {
       attempts++;
       console.error(`Extraction attempt ${attempts} failed:`, error);
-      
+
       if (attempts < MAX_ATTEMPTS) {
-        onProgress?.(`Extraction failed. Retrying with same API key (Attempt ${attempts + 1}/${MAX_ATTEMPTS})...`);
+        const retryMessage = `Extraction failed. Retrying with same API key (Attempt ${attempts + 1}/${MAX_ATTEMPTS})...`;
+        onProgress?.(retryMessage);
+        toast.loading(retryMessage, { id: 'extraction-progress' });
         await delay(2000); // Wait 2 seconds before retrying
       } else {
+        const errorMessage = `Extraction failed after ${MAX_ATTEMPTS} attempts. Please enter the data manually.`;
+        toast.error(errorMessage, { id: 'extraction-progress' });
         return {
           extractedData: {},
           success: false,
-          message: `Extraction failed after ${MAX_ATTEMPTS} attempts. Please enter the data manually.`,
+          message: errorMessage,
           failedImage: fileUrl,
           failedFields: fields
         };
@@ -490,10 +505,12 @@ export const performExtraction = async (
     }
   }
 
+  const finalErrorMessage = 'Extraction failed after all attempts. Please enter the data manually.';
+  toast.error(finalErrorMessage, { id: 'extraction-progress' });
   return {
     extractedData: {},
     success: false,
-    message: 'Extraction failed after all attempts. Please enter the data manually.',
+    message: finalErrorMessage,
     failedImage: fileUrl,
     failedFields: fields
   };
@@ -508,7 +525,7 @@ export const saveExtractedData = async (
     const [uploadUpdate, documentUpdate] = await Promise.all([
       supabase
         .from('acc_portal_kyc_uploads')
-        .update({ 
+        .update({
           extracted_details: extractedData,
           extraction_date: new Date().toISOString(),
           extraction_status: 'success',
@@ -520,7 +537,7 @@ export const saveExtractedData = async (
 
       supabase
         .from('acc_portal_kyc')
-        .update({ 
+        .update({
           extracted_fields: extractedData,
           extraction_date: new Date().toISOString()
         })
@@ -565,7 +582,7 @@ export const retryExtraction = async (
       attempt++;
       if (attempt < maxRetries) {
         const backoffTime = Math.pow(2, attempt - 1) * 1000;
-        onProgress?.(`Retrying in ${backoffTime/1000} seconds...`);
+        onProgress?.(`Retrying in ${backoffTime / 1000} seconds...`);
         await delay(backoffTime);
       }
     }
@@ -671,7 +688,7 @@ export const validateField = (
       case 'dropdown':
         if (field.options && field.options.length > 0 && value) {
           if (!field.options.includes(value)) {
-             // We allow slight mismatch if AI cleaned it, but technically it should be valid
+            // We allow slight mismatch if AI cleaned it, but technically it should be valid
           }
         }
         break;
@@ -697,7 +714,7 @@ export const cleanExtractedData = (
   fields: Field[]
 ): ExtractionResult => {
   const cleanedData: ExtractionResult = {};
-  
+
   fields.forEach(field => {
     const value = data[field.name];
     if (value === undefined) {
@@ -741,7 +758,7 @@ export const formatFieldPrompts = (fields: Field[]): string => {
 
   return fields.map(field => {
     let prompt = `- ${field.name}`;
-    
+
     if (field.type === 'array' && field.arrayConfig?.fields) {
       prompt += ' (multiple entries possible) with fields:';
       field.arrayConfig.fields.forEach(subField => {
@@ -754,7 +771,7 @@ export const formatFieldPrompts = (fields: Field[]): string => {
       const optionsList = field.options.map(opt => `"${opt}"`).join(', ');
       prompt += ` (Strictly select one from: [${optionsList}])`;
     }
-    
+
     return prompt;
   }).join('\n');
 };

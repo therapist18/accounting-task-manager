@@ -187,7 +187,7 @@ const getDocumentsLinkedToOtherTasks = async (
 ): Promise<Set<string>> => {
   try {
     const { data: tasks, error } = await supabase
-      .from("tm_tasks_duplicate")
+      .from("tm_tasks")
       .select("id, source_document_id")
       .eq("individual_id", individualId)
       .neq("id", currentTaskId)
@@ -372,7 +372,7 @@ export function LinkSourceDocumentDialog({
 
       // Update the database to remove the document from source_document_id
       const { data: currentTask } = await supabase
-        .from('tm_tasks_duplicate')
+        .from('tm_tasks')
         .select('source_document_id, stages')
         .eq('id', task.id)
         .single();
@@ -399,7 +399,7 @@ export function LinkSourceDocumentDialog({
 
         // Update both source_document_id and stages in the database
         const { error: updateError } = await supabase
-          .from('tm_tasks_duplicate')
+          .from('tm_tasks')
           .update({
             source_document_id: updatedSourceDocs,
             stages: updatedStages,
@@ -534,7 +534,7 @@ export function LinkSourceDocumentDialog({
     try {
       // Update the task with selected documents
       const { error } = await supabase
-        .from("tm_tasks_duplicate")
+        .from("tm_tasks")
         .update({
           source_document_id: selectedDocs,
           updated_at: new Date().toISOString(),

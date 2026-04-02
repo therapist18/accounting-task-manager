@@ -121,9 +121,9 @@ export const fetchCompanies = async (): Promise<Map<number, string>> => {
 export const fetchTasks = async (departmentId?: string, subdepartmentId?: string): Promise<Task[]> => {
   try {
     let query = supabase
-      .from('tm_tasks_duplicate')
+      .from('tm_tasks')
       .select('*')
-      .order('id', { ascending: true });
+      .order('id', { ascending: false });
 
     if (departmentId) {
       // Convert to number and filter using job_level->>department_id
@@ -398,9 +398,9 @@ export const formatDateValue = (dateString: string | Date | null | undefined): s
 export const fetchTasksDuplicate = async (): Promise<any[]> => {
   try {
     const { data, error } = await supabase
-      .from('tm_tasks_duplicate')
+      .from('tm_tasks')
       .select('*')
-      .order('id', { ascending: true });
+      .order('id', { ascending: false });
 
     if (error) {
       console.error('Error fetching tasks duplicate:', error);

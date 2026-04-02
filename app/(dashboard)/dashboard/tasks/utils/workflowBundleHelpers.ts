@@ -294,7 +294,7 @@ export async function detectExistingWorkflowForIndividual(individualId: number) 
       .order("updated_at", { ascending: false })
       .limit(200),
     supabase
-      .from("tm_tasks_duplicate")
+      .from("tm_tasks")
       .select("id, status, job_description, individual_id, registry_metadata, created_at")
       .eq("individual_id", individualId)
       .order("created_at", { ascending: false })
@@ -330,7 +330,7 @@ export async function detectTaskConflictsForJobLevel(individualId: number, jobLe
   if (!normalized?.department_id) return [];
 
   const { data, error } = await supabase
-    .from("tm_tasks_duplicate")
+    .from("tm_tasks")
     .select("id, status, job_description, job_level, individual_id, created_at, registry_metadata")
     .eq("individual_id", individualId)
     .order("created_at", { ascending: false })

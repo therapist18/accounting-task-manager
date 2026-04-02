@@ -801,7 +801,7 @@ export function EnquiryDialog({
             let result;
             if (taskToEdit) {
                 // UPDATE
-                const { data, error } = await supabase.from('tm_tasks_duplicate')
+                const { data, error } = await supabase.from('tm_tasks')
                     .update(payload)
                     .eq('id', taskToEdit.id)
                     .select()
@@ -832,7 +832,7 @@ export function EnquiryDialog({
                     },
                     stages: { '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa': { status: "completed", date: format(new Date(), 'dd/MM/yyyy') } }
                 };
-                const { data, error } = await supabase.from('tm_tasks_duplicate').insert([insertPayload]).select().single();
+                const { data, error } = await supabase.from('tm_tasks').insert([insertPayload]).select().single();
                 if (error) throw error;
                 result = data;
                 toast({ title: "Success", description: "Enquiry created successfully." });

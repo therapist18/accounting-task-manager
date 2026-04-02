@@ -187,7 +187,7 @@ export const getWorkflowLogsForIndividual = async (individualId: number) => {
 export const getOriginalDocumentForTask = async (taskId: string) => {
   try {
     const { data: task } = await supabase
-      .from('tm_tasks_duplicate')
+      .from('tm_tasks')
       .select('linked_document_type_id, individual_id')
       .eq('id', taskId)
       .single();
@@ -248,7 +248,7 @@ export const setupTaskRealtimeSubscription = (
     const channel = supabase
       .channel('task_updates')
       .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'tm_tasks_duplicate' },
+        { event: 'UPDATE', schema: 'public', table: 'tm_tasks' },
         (payload) => {
           console.log('Realtime task update received:', payload);
           onTaskUpdate(payload);

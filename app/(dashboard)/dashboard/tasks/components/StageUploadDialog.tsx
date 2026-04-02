@@ -791,7 +791,7 @@ export function StageUploadDialog({
 
     const checkLockedDocuments = async () => {
       const { data: taskData } = await supabase
-        .from('tm_tasks_duplicate')
+        .from('tm_tasks')
         .select('source_document_id')
         .eq('id', task.id)
         .single();
@@ -1176,13 +1176,13 @@ export function StageUploadDialog({
       };
 
       const { error: updateError } = await supabase
-        .from('tm_tasks_duplicate')
+        .from('tm_tasks')
         .update(updateData)
         .eq('id', task.id);
 
       if (updateError) throw updateError;
 
-      console.log('[StageUploadDialog] tm_tasks_duplicate updated:', {
+      console.log('[StageUploadDialog] tm_tasks updated:', {
         taskId: task.id,
         updateData,
         uploadedDocumentsForWorkflow,
