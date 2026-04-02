@@ -23,13 +23,6 @@ import {
   getWorkflowLogsForIndividual
 } from "../utils/workflowSyncService";
 
-const sanitizeFilename = (filename: string): string => {
-  return filename
-    .replace(/[~`!@#$%^&*+=\[\]\\';,{}|":<>?]/g, '')
-    .replace(/\s+/g, '_')
-    .toLowerCase();
-};
-
 const transformKycFields = (fields: any[]): any[] => {
   if (!Array.isArray(fields)) return []
   return fields.map((field: any) => {
@@ -1068,8 +1061,7 @@ export function StageUploadDialog({
           let documentId = docData.id || '';
 
           if (file) {
-            const sanitizedFilename = sanitizeFilename(file.name);
-            filePath = `individual-documents/${task.individual_id}/${docConfig.kycId}/${sanitizedFilename}`;
+            filePath = `individual-documents/${task.individual_id}/${docConfig.kycId}/${file.name}`;
 
             const { error: uploadError } = await supabase.storage
               .from('kyc-documents')

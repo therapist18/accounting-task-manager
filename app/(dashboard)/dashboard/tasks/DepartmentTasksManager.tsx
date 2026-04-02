@@ -439,7 +439,7 @@ export default function DepartmentTasksManager({
       toast({
         title: "Success",
         description: "Data refreshed successfully.",
-        variant: "default"
+        variant: "success"
       });
     } catch (error) {
       console.error('Error refreshing data:', error);
@@ -1738,7 +1738,7 @@ export default function DepartmentTasksManager({
       toast({
         title: 'Success',
         description: 'Document deleted successfully',
-        variant: 'default',
+        variant: 'success',
       });
 
       // Close the preview
@@ -1771,7 +1771,7 @@ export default function DepartmentTasksManager({
         toast({
           title: 'No Linked Document',
           description: `No document has been linked for this stage yet. Please use the 'Link' button to link a document first.`,
-          variant: 'default',
+          variant: 'warning',
         });
         return;
       }
@@ -1783,7 +1783,7 @@ export default function DepartmentTasksManager({
         toast({
           title: 'Preview not available',
           description: 'Document preview is not available for this document.',
-          variant: 'default',
+          variant: 'warning',
         });
         return;
       }
@@ -1911,7 +1911,7 @@ export default function DepartmentTasksManager({
       toast({
         title: "Success",
         description: "New enquiry created successfully",
-        variant: "default"
+        variant: "success"
       })
     } catch (error) {
       console.error('Error creating enquiry:', error);
@@ -2638,7 +2638,7 @@ export default function DepartmentTasksManager({
               toast({
                 title: "New Task Added",
                 description: "A new task has been added to the current view.",
-                variant: "default"
+                variant: "success"
               });
             } else if (payload.eventType === 'UPDATE') {
               const hasSignificantChange = newTask?.status !== oldTask?.status ||
@@ -2648,7 +2648,7 @@ export default function DepartmentTasksManager({
                 toast({
                   title: "Task Updated",
                   description: "Task information has been updated.",
-                  variant: "default"
+                  variant: "success"
                 });
               }
             } else if (payload.eventType === 'DELETE') {

@@ -14,27 +14,27 @@ import {
 const TOAST_ICON_STYLES = {
   default: {
     icon: Info,
-    wrapperClassName: "bg-slate-100 text-slate-700",
+    wrapperClassName: "bg-white text-slate-700",
     label: "Notice",
   },
   destructive: {
     icon: XCircle,
-    wrapperClassName: "bg-red-100 text-red-700",
+    wrapperClassName: "bg-red-600 text-white",
     label: "Error",
   },
   success: {
     icon: CheckCircle2,
-    wrapperClassName: "bg-green-100 text-green-700",
+    wrapperClassName: "bg-green-600 text-white",
     label: "Success",
   },
   warning: {
     icon: AlertTriangle,
-    wrapperClassName: "bg-amber-100 text-amber-700",
+    wrapperClassName: "bg-amber-600 text-white",
     label: "Warning",
   },
   info: {
     icon: Info,
-    wrapperClassName: "bg-blue-100 text-blue-700",
+    wrapperClassName: "bg-blue-600 text-white",
     label: "Info",
   },
 } as const
@@ -72,9 +72,6 @@ export function Toaster() {
 
               <div className="grid gap-1.5">
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    {toastMeta.label}
-                  </span>
                   {variant === "default" && title === "Processing" && (
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />
                   )}
@@ -90,7 +87,7 @@ export function Toaster() {
           </Toast>
         )
       })}
-      <ToastViewport className="top-0" />
+      <ToastViewport className="top-4 right-4 sm:top-4 sm:bottom-auto" />
     </ToastProvider>
   )
 }

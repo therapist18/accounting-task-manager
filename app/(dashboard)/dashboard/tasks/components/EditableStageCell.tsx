@@ -407,6 +407,7 @@ export default function EditableStageCell({
       toast({
         title: "Success",
         description: isSkipped ? "Stage marked as skipped" : "Stage updated successfully",
+        variant: "success"
       });
 
       // Fetch and update states after successful submission
@@ -418,7 +419,7 @@ export default function EditableStageCell({
           toast({
             title: "Warning",
             description: "Stage saved but data refresh failed. Please refresh manually.",
-            variant: "default"
+            variant: "warning"
           });
         }
       }
@@ -488,7 +489,7 @@ export default function EditableStageCell({
       toast({
         title: "Success",
         description: "Stage reset.",
-        variant: "default"
+        variant: "success"
       });
 
       // Fetch and update states after successful submission
@@ -761,7 +762,7 @@ export default function EditableStageCell({
         toast({
           title: 'No documents',
           description: 'No documents available to preview',
-          variant: 'default'
+          variant: 'warning'
         });
         return;
       }
@@ -814,7 +815,7 @@ export default function EditableStageCell({
       };
       setPreviewDocuments(updatedDocs);
 
-      toast({ title: 'Success', description: 'Document data saved and refreshed successfully.' });
+      toast({ title: "Success", description: "Document data saved and refreshed successfully.", variant: "success" });
 
       // Fetch and update states after successful submission
       if (onFetchData) {

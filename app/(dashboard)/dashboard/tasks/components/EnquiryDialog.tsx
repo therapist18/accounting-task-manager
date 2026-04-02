@@ -768,7 +768,8 @@ export function EnquiryDialog({
 
             toast({
                 title: "Association Created",
-                description: `Successfully linked ${selectedIndividual.full_name} to the company.`
+                description: `Successfully linked ${selectedIndividual.full_name} to the company.`,
+                variant: "success"
             });
 
             // Close dialog and reset form
@@ -895,7 +896,7 @@ export function EnquiryDialog({
                     .single();
                 if (error) throw error;
                 result = data;
-                toast({ title: "Success", description: "Enquiry updated successfully." });
+                toast({ title: "Success", description: "Enquiry updated successfully.", variant: "success" });
             } else {
                 // INSERT
                 const insertPayload = {
@@ -922,7 +923,7 @@ export function EnquiryDialog({
                 const { data, error } = await supabase.from('tm_tasks').insert([insertPayload]).select().single();
                 if (error) throw error;
                 result = data;
-                toast({ title: "Success", description: "Enquiry created successfully." });
+                toast({ title: "Success", description: "Enquiry created successfully.", variant: "success" });
             }
 
             // Call the callback with the updated/created task to refresh parent state

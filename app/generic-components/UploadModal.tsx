@@ -20,11 +20,11 @@ const showLoadingToast = (message: string, id?: string) => {
   const description = message;
 
   if (id && toastControllers.has(id)) {
-    toastControllers.get(id)?.update({ id, title, description, open: true });
+    toastControllers.get(id)?.update({ id, title, description, variant: 'default', open: true });
     return id;
   }
 
-  const controller = toast({ title, description });
+  const controller = toast({ title, description, variant: 'default' });
   toastControllers.set(controller.id, controller);
   return controller.id;
 };
@@ -35,11 +35,11 @@ const showSuccessToast = (message: string, id?: string) => {
 
   if (id && toastControllers.has(id)) {
     const controller = toastControllers.get(id)!;
-    controller.update({ id, title, description, open: true });
+    controller.update({ id, title, description, variant: 'success', open: true });
     return id;
   }
 
-  const controller = toast({ title, description });
+  const controller = toast({ title, description, variant: 'success' });
   toastControllers.set(controller.id, controller);
   return controller.id;
 };
