@@ -19,7 +19,7 @@ import { Separator } from "@/components/ui/separator"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Checkbox } from "@/components/ui/checkbox"
 import supabase from "@/lib/supabase/client"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import { DepartmentSidebar } from "../main-shared-components/department-sidebar"
 import type { Department } from "./database"
 

@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Loader2, Upload } from "lucide-react"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import { performExtraction } from "@/lib/extractionUtils"
 import { supabase } from "@/lib/supabase/client"
 import dynamic from 'next/dynamic'

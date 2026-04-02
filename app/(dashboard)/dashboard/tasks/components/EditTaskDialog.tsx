@@ -10,12 +10,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { 
-  Loader2, Save, X, Building, Workflow, Layers, BoxSelect, 
-  Shield, User, UserCheck, Calendar, FileText, Users, Hash, 
+import {
+  Loader2, Save, X, Building, Workflow, Layers, BoxSelect,
+  Shield, User, UserCheck, Calendar, FileText, Users, Hash,
   Check, UserCog, Briefcase, Clock, Building2, AlertCircle
 } from "lucide-react"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 
 interface EditTaskDialogProps {
@@ -46,18 +46,18 @@ export function EditTaskDialog({
     job_description: '',
     status: '',
     renewal_status: '',
-    
+
     // Department Hierarchy
     department_id: '',
     subdepartment_id: '',
     class_id: '',
     subclass_id: '',
-    
+
     // Staff Assignment
     task_manager_id: '',
     officer_id: '',
     task_assistant_id: '',
-    
+
     // Case Details
     r_number: '',
     principal_member_name: '',
@@ -68,17 +68,17 @@ export function EditTaskDialog({
     applied_by: '',
     understudy: '',
     company_id: '',
-    
+
     // Dates
     date_initiated: '',
     created_at: '',
     updated_at: ''
   })
-  
+
   const [loading, setLoading] = useState(false)
   const [companies, setCompanies] = useState([])
   const isInitialLoad = useRef(true);
-  
+
   // State for dropdown options
   const [availableSubdepartments, setAvailableSubdepartments] = useState([])
   const [availableClasses, setAvailableClasses] = useState([])
@@ -86,7 +86,7 @@ export function EditTaskDialog({
   const [availableOfficers, setAvailableOfficers] = useState([])
   const [availableManagers, setAvailableManagers] = useState([])
   const [availableAssistants, setAvailableAssistants] = useState([])
-  
+
   // Stage management state
   const [taskStages, setTaskStages] = useState<Record<string, any>>({});
   const [availableStages, setAvailableStages] = useState<any[]>([]);
@@ -99,7 +99,7 @@ export function EditTaskDialog({
           .from('acc_portal_company_duplicate')
           .select('id, company_name')
           .order('company_name');
-        
+
         if (error) throw error;
         setCompanies(data || []);
       } catch (error) {
@@ -200,7 +200,7 @@ export function EditTaskDialog({
     const activeOfficerIds = getActiveUserIds(subdept.officer_history);
     const activeManagerIds = getActiveUserIds(subdept.manager_history);
     const activeAssistantIds = getActiveUserIds(subdept.assistant_history);
-    
+
     const hasSpecificAssignments = activeOfficerIds.length > 0 || activeManagerIds.length > 0 || activeAssistantIds.length > 0;
 
     if (!hasSpecificAssignments) {
@@ -253,7 +253,7 @@ export function EditTaskDialog({
         created_at: formatDateForInput(task.created_at),
         updated_at: formatDateForInput(task.updated_at)
       };
-      
+
       setFormData(initialFormData);
       setTaskStages(task.stages || {});
       setAvailableStages(getAvailableStagesForTask(initialFormData.department_id, initialFormData.subdepartment_id));
@@ -323,8 +323,8 @@ export function EditTaskDialog({
   // --- Handlers ---
   const handleInputChange = (field, value) => {
     if (field === 'task_manager_id') {
-      setFormData(prev => ({ 
-        ...prev, 
+      setFormData(prev => ({
+        ...prev,
         [field]: value,
         ...(value && prev.task_assistant_id && { task_assistant_id: '' })
       }));
@@ -428,18 +428,18 @@ export function EditTaskDialog({
       <DialogContent className="max-w-7xl max-h-[90vh] overflow-y-auto border border-gray-200/50 shadow-lg">
         <DialogHeader className="border-b border-gray-200/50 pb-4 bg-white/50">
           <DialogTitle className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-             Edit Task <span className="text-sm font-normal text-gray-500">#{task.id}</span>
+            Edit Task <span className="text-sm font-normal text-gray-500">#{task.id}</span>
           </DialogTitle>
           <DialogDescription className="text-gray-600">
-             Modify details, hierarchy, staff assignments and stage progress.
+            Modify details, hierarchy, staff assignments and stage progress.
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-4">
-          
+
           {/* LEFT COLUMN: IDENTIFICATION & CONTEXT */}
           <div className="lg:col-span-1 space-y-6">
-            
+
             {/* Applicant Details */}
             <Card>
               <CardHeader className="pb-3 bg-blue-50/50">
@@ -448,26 +448,26 @@ export function EditTaskDialog({
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-4 space-y-4">
-                 <div className="space-y-2">
-                    <Label htmlFor="applicant_name">Full Name *</Label>
-                    <Input id="applicant_name" value={formData.applicant_name} onChange={(e) => handleInputChange('applicant_name', e.target.value)} />
-                 </div>
-                 <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                       <Label>Type</Label>
-                       <Select value={formData.applicant_type} onValueChange={(v) => handleInputChange('applicant_type', v)}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                             <SelectItem value="principal">Principal</SelectItem>
-                             <SelectItem value="dependant">Dependant</SelectItem>
-                          </SelectContent>
-                       </Select>
-                    </div>
-                 </div>
-                 <div className="flex items-center space-x-2 pt-2">
-                    <input type="checkbox" id="principal_member" checked={formData.principal_member} onChange={(e) => handleInputChange('principal_member', e.target.checked)} className="rounded border-gray-300 text-blue-600" />
-                    <Label htmlFor="principal_member" className="font-normal">Is Principal Member?</Label>
-                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="applicant_name">Full Name *</Label>
+                  <Input id="applicant_name" value={formData.applicant_name} onChange={(e) => handleInputChange('applicant_name', e.target.value)} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Type</Label>
+                    <Select value={formData.applicant_type} onValueChange={(v) => handleInputChange('applicant_type', v)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="principal">Principal</SelectItem>
+                        <SelectItem value="dependant">Dependant</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2 pt-2">
+                  <input type="checkbox" id="principal_member" checked={formData.principal_member} onChange={(e) => handleInputChange('principal_member', e.target.checked)} className="rounded border-gray-300 text-blue-600" />
+                  <Label htmlFor="principal_member" className="font-normal">Is Principal Member?</Label>
+                </div>
               </CardContent>
             </Card>
 
@@ -479,250 +479,250 @@ export function EditTaskDialog({
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-4 space-y-4">
-                 <div className="space-y-2">
-                    <Label>Company</Label>
-                    <Select value={formData.company_id} onValueChange={(v) => handleInputChange('company_id', v)}>
-                       <SelectTrigger><SelectValue placeholder="Select company" /></SelectTrigger>
-                       <SelectContent>
-                          <SelectItem value="none">No Company</SelectItem>
-                          {companies.map((c: any) => <SelectItem key={c.id} value={c.id.toString()}>{c.company_name}</SelectItem>)}
-                       </SelectContent>
-                    </Select>
-                 </div>
-                 <div className="space-y-2">
-                    <Label>Understudy</Label>
-                    <Input value={formData.understudy} onChange={(e) => handleInputChange('understudy', e.target.value)} />
-                 </div>
-                 <div className="space-y-2">
-                    <Label>Principal Member Name</Label>
-                    <Input value={formData.principal_member_name} onChange={(e) => handleInputChange('principal_member_name', e.target.value)} />
-                 </div>
-                 <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                       <Label>Account Used</Label>
-                       <Input value={formData.account_used} onChange={(e) => handleInputChange('account_used', e.target.value)} />
-                    </div>
-                    <div className="space-y-2">
-                       <Label>Applied By</Label>
-                       <Input value={formData.applied_by} onChange={(e) => handleInputChange('applied_by', e.target.value)} />
-                    </div>
-                 </div>
+                <div className="space-y-2">
+                  <Label>Company</Label>
+                  <Select value={formData.company_id} onValueChange={(v) => handleInputChange('company_id', v)}>
+                    <SelectTrigger><SelectValue placeholder="Select company" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No Company</SelectItem>
+                      {companies.map((c: any) => <SelectItem key={c.id} value={c.id.toString()}>{c.company_name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Understudy</Label>
+                  <Input value={formData.understudy} onChange={(e) => handleInputChange('understudy', e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Principal Member Name</Label>
+                  <Input value={formData.principal_member_name} onChange={(e) => handleInputChange('principal_member_name', e.target.value)} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Account Used</Label>
+                    <Input value={formData.account_used} onChange={(e) => handleInputChange('account_used', e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Applied By</Label>
+                    <Input value={formData.applied_by} onChange={(e) => handleInputChange('applied_by', e.target.value)} />
+                  </div>
+                </div>
               </CardContent>
             </Card>
 
             {/* Timeline */}
             <Card>
-               <CardHeader className="pb-3 bg-blue-50/50">
-                  <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
-                     <Clock className="h-4 w-4" /> Timeline
-                  </CardTitle>
-               </CardHeader>
-               <CardContent className="pt-4 space-y-4">
+              <CardHeader className="pb-3 bg-blue-50/50">
+                <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
+                  <Clock className="h-4 w-4" /> Timeline
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-4 space-y-4">
+                <div className="space-y-2">
+                  <Label>Date Initiated</Label>
+                  <Input type="date" value={formData.date_initiated} onChange={(e) => handleInputChange('date_initiated', e.target.value)} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
-                     <Label>Date Initiated</Label>
-                     <Input type="date" value={formData.date_initiated} onChange={(e) => handleInputChange('date_initiated', e.target.value)} />
+                    <Label className="text-xs text-gray-500">Created At</Label>
+                    <Input type="date" value={formData.created_at} disabled className="bg-gray-50 text-xs" />
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                     <div className="space-y-2">
-                        <Label className="text-xs text-gray-500">Created At</Label>
-                        <Input type="date" value={formData.created_at} disabled className="bg-gray-50 text-xs" />
-                     </div>
-                     <div className="space-y-2">
-                        <Label className="text-xs text-gray-500">Last Updated</Label>
-                        <Input type="date" value={formData.updated_at} disabled className="bg-gray-50 text-xs" />
-                     </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-gray-500">Last Updated</Label>
+                    <Input type="date" value={formData.updated_at} disabled className="bg-gray-50 text-xs" />
                   </div>
-               </CardContent>
+                </div>
+              </CardContent>
             </Card>
           </div>
 
           {/* RIGHT COLUMN: TASK & EXECUTION */}
           <div className="lg:col-span-2 space-y-6">
-            
+
             {/* Task Overview */}
             <Card>
               <CardHeader className="pb-3 bg-blue-50/50">
-                 <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
-                    <FileText className="h-4 w-4" /> Task Overview
-                 </CardTitle>
+                <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
+                  <FileText className="h-4 w-4" /> Task Overview
+                </CardTitle>
               </CardHeader>
               <CardContent className="pt-4 space-y-4">
-                 <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                       <Label>Status</Label>
-                       <Select value={formData.status} onValueChange={(v) => handleInputChange('status', v)}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                             <SelectItem value="enquiry">Enquiry</SelectItem>
-                             <SelectItem value="in_progress">In Progress</SelectItem>
-                             <SelectItem value="completed">Completed</SelectItem>
-                             <SelectItem value="cancelled">Cancelled</SelectItem>
-                             <SelectItem value="on_hold">On Hold</SelectItem>
-                          </SelectContent>
-                       </Select>
-                    </div>
-                    <div className="space-y-2">
-                       <Label>Renewal Type</Label>
-                       <Select value={formData.renewal_status} onValueChange={(v) => handleInputChange('renewal_status', v)}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                             <SelectItem value="new">New</SelectItem>
-                             <SelectItem value="renewal">Renewal</SelectItem>
-                          </SelectContent>
-                       </Select>
-                    </div>
-                 </div>
-                 <div className="space-y-2">
-                    <Label>Job Description *</Label>
-                    <Textarea value={formData.job_description} onChange={(e) => handleInputChange('job_description', e.target.value)} className="min-h-[80px]" />
-                 </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Status</Label>
+                    <Select value={formData.status} onValueChange={(v) => handleInputChange('status', v)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="enquiry">Enquiry</SelectItem>
+                        <SelectItem value="in_progress">In Progress</SelectItem>
+                        <SelectItem value="completed">Completed</SelectItem>
+                        <SelectItem value="cancelled">Cancelled</SelectItem>
+                        <SelectItem value="on_hold">On Hold</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Renewal Type</Label>
+                    <Select value={formData.renewal_status} onValueChange={(v) => handleInputChange('renewal_status', v)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="new">New</SelectItem>
+                        <SelectItem value="renewal">Renewal</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Job Description *</Label>
+                  <Textarea value={formData.job_description} onChange={(e) => handleInputChange('job_description', e.target.value)} className="min-h-[80px]" />
+                </div>
               </CardContent>
             </Card>
 
             {/* Department Hierarchy */}
             <Card>
-                <CardHeader className="pb-3 bg-blue-50/50">
-                    <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
-                        <Shield className="h-4 w-4" /> Department & Classification
-                    </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-4 space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                            <Label>Department</Label>
-                            <Select value={formData.department_id} onValueChange={(v) => handleInputChange('department_id', v)}>
-                                <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
-                                <SelectContent>{departments.map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>)}</SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-2">
-                            <Label>Subdepartment</Label>
-                            <Select value={formData.subdepartment_id} onValueChange={(v) => handleInputChange('subdepartment_id', v)} disabled={!formData.department_id}>
-                                <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
-                                <SelectContent>{availableSubdepartments.map((s: any) => <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>)}</SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-2">
-                            <Label>Class</Label>
-                            <Select value={formData.class_id} onValueChange={(v) => handleInputChange('class_id', v)} disabled={!availableClasses.length}>
-                                <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
-                                <SelectContent>{availableClasses.map((c: any) => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>)}</SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-2">
-                            <Label>Subclass</Label>
-                            <Select value={formData.subclass_id} onValueChange={(v) => handleInputChange('subclass_id', v)} disabled={!availableSubclasses.length}>
-                                <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
-                                <SelectContent>{availableSubclasses.map((s: any) => <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>)}</SelectContent>
-                            </Select>
-                        </div>
-                    </div>
-                </CardContent>
+              <CardHeader className="pb-3 bg-blue-50/50">
+                <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
+                  <Shield className="h-4 w-4" /> Department & Classification
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-4 space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Department</Label>
+                    <Select value={formData.department_id} onValueChange={(v) => handleInputChange('department_id', v)}>
+                      <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
+                      <SelectContent>{departments.map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Subdepartment</Label>
+                    <Select value={formData.subdepartment_id} onValueChange={(v) => handleInputChange('subdepartment_id', v)} disabled={!formData.department_id}>
+                      <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
+                      <SelectContent>{availableSubdepartments.map((s: any) => <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Class</Label>
+                    <Select value={formData.class_id} onValueChange={(v) => handleInputChange('class_id', v)} disabled={!availableClasses.length}>
+                      <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
+                      <SelectContent>{availableClasses.map((c: any) => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Subclass</Label>
+                    <Select value={formData.subclass_id} onValueChange={(v) => handleInputChange('subclass_id', v)} disabled={!availableSubclasses.length}>
+                      <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
+                      <SelectContent>{availableSubclasses.map((s: any) => <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </CardContent>
             </Card>
 
             {/* Staff Assignment */}
             <Card>
-                <CardHeader className="pb-3 bg-blue-50/50">
-                    <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
-                        <UserCheck className="h-4 w-4" /> Staff Assignment
-                    </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-4 space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="space-y-2">
-                            <Label className="text-xs">Officer ({availableOfficers.length})</Label>
-                            <Select value={formData.officer_id} onValueChange={v => handleInputChange('officer_id', v)} disabled={!formData.subdepartment_id}>
-                                <SelectTrigger className="h-8"><SelectValue placeholder="Select Officer" /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="none">No Officer</SelectItem>
-                                    {availableOfficers.map((o: any) => <SelectItem key={o.id} value={o.id.toString()}>{o.name || o.email}</SelectItem>)}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-2">
-                            <Label className="text-xs">Manager ({availableManagers.length})</Label>
-                            <Select value={formData.task_manager_id} onValueChange={v => handleInputChange('task_manager_id', v)} disabled={!formData.subdepartment_id}>
-                                <SelectTrigger className="h-8"><SelectValue placeholder="Select Manager" /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="none">No Manager</SelectItem>
-                                    {availableManagers.map((m: any) => <SelectItem key={m.id} value={m.id.toString()}>{m.name || m.email}</SelectItem>)}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-2">
-                            <Label className="text-xs">Assistant ({availableAssistants.length})</Label>
-                            <Select value={formData.task_assistant_id} onValueChange={v => handleInputChange('task_assistant_id', v)} disabled={!formData.task_manager_id}>
-                                <SelectTrigger className="h-8"><SelectValue placeholder="Select Assistant" /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="none">No Assistant</SelectItem>
-                                    {availableAssistants.map((a: any) => <SelectItem key={a.id} value={a.id.toString()}>{a.name || a.email}</SelectItem>)}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
-                </CardContent>
+              <CardHeader className="pb-3 bg-blue-50/50">
+                <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
+                  <UserCheck className="h-4 w-4" /> Staff Assignment
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-4 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs">Officer ({availableOfficers.length})</Label>
+                    <Select value={formData.officer_id} onValueChange={v => handleInputChange('officer_id', v)} disabled={!formData.subdepartment_id}>
+                      <SelectTrigger className="h-8"><SelectValue placeholder="Select Officer" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No Officer</SelectItem>
+                        {availableOfficers.map((o: any) => <SelectItem key={o.id} value={o.id.toString()}>{o.name || o.email}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Manager ({availableManagers.length})</Label>
+                    <Select value={formData.task_manager_id} onValueChange={v => handleInputChange('task_manager_id', v)} disabled={!formData.subdepartment_id}>
+                      <SelectTrigger className="h-8"><SelectValue placeholder="Select Manager" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No Manager</SelectItem>
+                        {availableManagers.map((m: any) => <SelectItem key={m.id} value={m.id.toString()}>{m.name || m.email}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Assistant ({availableAssistants.length})</Label>
+                    <Select value={formData.task_assistant_id} onValueChange={v => handleInputChange('task_assistant_id', v)} disabled={!formData.task_manager_id}>
+                      <SelectTrigger className="h-8"><SelectValue placeholder="Select Assistant" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No Assistant</SelectItem>
+                        {availableAssistants.map((a: any) => <SelectItem key={a.id} value={a.id.toString()}>{a.name || a.email}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </CardContent>
             </Card>
 
             {/* Stage Management */}
             <Card>
-               <CardHeader className="pb-3 bg-blue-50/50">
-                  <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
-                     <Workflow className="h-4 w-4" /> Stage Progress
-                  </CardTitle>
-               </CardHeader>
-               <CardContent className="pt-4">
-                  {availableStages.length === 0 ? (
-                     <div className="text-center text-gray-500 py-4">
-                        <Calendar className="h-8 w-8 mx-auto mb-2 text-gray-300" />
-                        <p className="text-sm">Select a department to view stages.</p>
-                     </div>
-                  ) : (
-                     <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
-                        {availableStages.map((stage) => {
-                           const stageData = taskStages[stage.id] || {};
-                           const isCompleted = stageData.status === 'completed' || stageData.date;
-                           const inputDateValue = stageData.date ? formatDateForInput(stageData.date) : '';
-                           
-                           return (
-                              <div key={stage.id} className="flex items-center justify-between p-3 border rounded-md bg-white text-sm">
-                                 <div className="flex items-center gap-2 flex-1 min-w-0">
-                                    <div className={`w-3 h-3 rounded-full flex-shrink-0 ${isCompleted ? 'bg-green-500' : 'bg-gray-200'}`} />
-                                    <div className="truncate">
-                                       <span className="font-medium text-gray-700">{stage.name}</span>
-                                       {stageData.date && <span className="ml-2 text-xs text-green-600">({stageData.date})</span>}
-                                    </div>
-                                 </div>
-                                 <div className="flex items-center gap-2">
-                                    {stage.requires_upload === false ? (
-                                       <>
-                                          <Input 
-                                             type="date" 
-                                             value={inputDateValue} 
-                                             onChange={(e) => handleStageDateChange(stage.id, e.target.value)} 
-                                             className="h-7 w-32 text-xs p-1" 
-                                          />
-                                          {inputDateValue && (
-                                             <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleStageDateChange(stage.id, '')}>
-                                                <X className="h-3 w-3" />
-                                             </Button>
-                                          )}
-                                       </>
-                                    ) : (
-                                       <Badge variant="outline" className="text-[10px] text-gray-500 font-normal">Docs Required</Badge>
-                                    )}
-                                 </div>
-                              </div>
-                           )
-                        })}
-                     </div>
-                  )}
-                  {availableStages.length > 0 && (
-                     <div className="mt-3 text-xs text-gray-500 flex gap-4 border-t pt-2">
-                        <span>Total: <b>{availableStages.length}</b></span>
-                        <span className="text-green-600">Completed: <b>{Object.keys(taskStages).length}</b></span>
-                     </div>
-                  )}
-               </CardContent>
+              <CardHeader className="pb-3 bg-blue-50/50">
+                <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
+                  <Workflow className="h-4 w-4" /> Stage Progress
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-4">
+                {availableStages.length === 0 ? (
+                  <div className="text-center text-gray-500 py-4">
+                    <Calendar className="h-8 w-8 mx-auto mb-2 text-gray-300" />
+                    <p className="text-sm">Select a department to view stages.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
+                    {availableStages.map((stage) => {
+                      const stageData = taskStages[stage.id] || {};
+                      const isCompleted = stageData.status === 'completed' || stageData.date;
+                      const inputDateValue = stageData.date ? formatDateForInput(stageData.date) : '';
+
+                      return (
+                        <div key={stage.id} className="flex items-center justify-between p-3 border rounded-md bg-white text-sm">
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <div className={`w-3 h-3 rounded-full flex-shrink-0 ${isCompleted ? 'bg-green-500' : 'bg-gray-200'}`} />
+                            <div className="truncate">
+                              <span className="font-medium text-gray-700">{stage.name}</span>
+                              {stageData.date && <span className="ml-2 text-xs text-green-600">({stageData.date})</span>}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {stage.requires_upload === false ? (
+                              <>
+                                <Input
+                                  type="date"
+                                  value={inputDateValue}
+                                  onChange={(e) => handleStageDateChange(stage.id, e.target.value)}
+                                  className="h-7 w-32 text-xs p-1"
+                                />
+                                {inputDateValue && (
+                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleStageDateChange(stage.id, '')}>
+                                    <X className="h-3 w-3" />
+                                  </Button>
+                                )}
+                              </>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] text-gray-500 font-normal">Docs Required</Badge>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+                {availableStages.length > 0 && (
+                  <div className="mt-3 text-xs text-gray-500 flex gap-4 border-t pt-2">
+                    <span>Total: <b>{availableStages.length}</b></span>
+                    <span className="text-green-600">Completed: <b>{Object.keys(taskStages).length}</b></span>
+                  </div>
+                )}
+              </CardContent>
             </Card>
 
           </div>
@@ -733,8 +733,8 @@ export function EditTaskDialog({
             Cancel
           </Button>
           <Button onClick={handleSave} disabled={loading} className="bg-blue-600 hover:bg-blue-700">
-             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-             Save Changes
+            {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Save Changes
           </Button>
         </DialogFooter>
 

@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useCallback, useRef, useReducer } from "react"
 import { supabase } from "@/lib/supabase/client"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 
 export interface TableColumn {
   column_name: string
@@ -31,20 +31,20 @@ export interface TableOption {
 }
 
 // Reducer for table fields
-type FieldAction = 
-  | { type: 'SET_LOADING'; index: number; tableName: string } 
-  | { type: 'SET_FIELDS'; index: number; tableName: string; fields: TableColumn[] } 
+type FieldAction =
+  | { type: 'SET_LOADING'; index: number; tableName: string }
+  | { type: 'SET_FIELDS'; index: number; tableName: string; fields: TableColumn[] }
   | { type: 'CLEAR_LOADING'; index: number; tableName: string }
 
 function fieldsReducer(state: Record<string, { fields: TableColumn[]; loading: boolean }>, action: FieldAction) {
   switch (action.type) {
-    case 'SET_LOADING': 
+    case 'SET_LOADING':
       return { ...state, [`${action.index}-${action.tableName}`]: { fields: state[`${action.index}-${action.tableName}`]?.fields || [], loading: true } }
-    case 'SET_FIELDS': 
+    case 'SET_FIELDS':
       return { ...state, [`${action.index}-${action.tableName}`]: { fields: action.fields, loading: false } }
-    case 'CLEAR_LOADING': 
+    case 'CLEAR_LOADING':
       return { ...state, [`${action.index}-${action.tableName}`]: { ...state[`${action.index}-${action.tableName}`], loading: false } }
-    default: 
+    default:
       return state
   }
 }
@@ -87,7 +87,7 @@ export function useTableFields() {
 
   const fetchFieldsForTable = useCallback(async (tableName: string, index: number = 0) => {
     if (!tableName) return
-    
+
     const cacheKey = tableName
     if (fieldCacheRef.current[cacheKey]) {
       dispatchField({ type: 'SET_FIELDS', index, tableName, fields: fieldCacheRef.current[cacheKey] })
@@ -97,7 +97,7 @@ export function useTableFields() {
     const fetchKey = `${tableName}-${index}`
     if (fetchInProgressRef.current[fetchKey]) return
     fetchInProgressRef.current[fetchKey] = true
-    
+
     dispatchField({ type: 'SET_LOADING', index, tableName })
 
     try {

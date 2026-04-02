@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import supabase from "@/lib/supabase/client"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 
 type ClassRequirement = {
   name: string
@@ -66,17 +66,17 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
   const [newWebdata, setNewWebdata] = useState<Array<{ name: string; description: string }>>([{ name: '', description: '' }])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState<{name: string; description: string}>({ name: '', description: '' });
+  const [editForm, setEditForm] = useState<{ name: string; description: string }>({ name: '', description: '' });
   const [selectedDept, setSelectedDept] = useState<string>('');
   const [selectedSubdept, setSelectedSubdept] = useState<string>('');
   const [selectedClass, setSelectedClass] = useState<string>('');
-  
+
   // Initialize selected department when departments change
   useEffect(() => {
     if (departments.length > 0 && !selectedDept) {
       const deptId = departments[0].id;
       setSelectedDept(deptId);
-      
+
       // Also set the first subdepartment if available
       const firstSubdept = departments[0].tm_subdepartments?.[0];
       if (firstSubdept) {
@@ -84,17 +84,17 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
       }
     }
   }, [departments]);
-  
+
   // Initialize active subdepartment and editing context
   useEffect(() => {
     const currentDept = departments.find(d => d.id === activeDept) || departments[0];
     if (!currentDept) {
       return;
     }
-    
+
     let subdeptId = activeSubdept[currentDept.id];
     let classId = '';
-    
+
     // Set active subdepartment if not set
     if (currentDept.tm_subdepartments?.length) {
       if (!subdeptId) {
@@ -104,7 +104,7 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
           [currentDept.id]: subdeptId
         }));
       }
-      
+
       // Set active class if not set
       const currentSubdept = currentDept.tm_subdepartments.find(sd => sd.id.toString() === subdeptId);
       if (currentSubdept?.classes?.length) {
@@ -119,7 +119,7 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
           classId = activeClass[subdeptKey];
         }
       }
-      
+
       // Set editing context
       setEditingContext({
         type: currentSubdept?.classes?.length ? 'class' : 'subdepartment',
@@ -139,18 +139,18 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
       subdepartmentId: activeSubdept[activeDept],
       classId: activeClass[activeSubdept[activeDept] || ''] || ''
     })
-    
+
     // Initialize with one empty requirement
     setNewWebdata([{ name: '', description: '' }])
     setIsDialogOpen(true)
   }
 
   const updateSubdepartmentWebdata = (subdepartmentId: string, updatedWebdata: ClassRequirement[]) => {
-    setDepartments(prevDepartments => 
+    setDepartments(prevDepartments =>
       prevDepartments.map(dept => ({
         ...dept,
-        tm_subdepartments: dept.tm_subdepartments?.map(subdept => 
-          subdept.id.toString() === subdepartmentId 
+        tm_subdepartments: dept.tm_subdepartments?.map(subdept =>
+          subdept.id.toString() === subdepartmentId
             ? { ...subdept, upload_webdata: updatedWebdata }
             : subdept
         ) || []
@@ -159,13 +159,13 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
   }
 
   const updateClassWebdata = (subdepartmentId: string, className: string, updatedWebdata: ClassRequirement[]) => {
-    setDepartments(prevDepartments => 
+    setDepartments(prevDepartments =>
       prevDepartments.map(dept => ({
         ...dept,
         tm_subdepartments: dept.tm_subdepartments?.map(subdept => ({
           ...subdept,
-          classes: subdept.classes?.map(cls => 
-            cls.name === className 
+          classes: subdept.classes?.map(cls =>
+            cls.name === className
               ? { ...cls, webdata: updatedWebdata }
               : cls
           ) || []
@@ -175,43 +175,43 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
   }
 
   const saveSubdepartmentRequirement = async (
-    requirement: { name: string; description: string | null }, 
-    subdepartmentId?: string, 
+    requirement: { name: string; description: string | null },
+    subdepartmentId?: string,
     index?: number
   ) => {
     if (!subdepartmentId) return;
-    
+
     try {
       const subdept = departments
         .flatMap(dept => dept.tm_subdepartments || [])
         .find(sd => sd.id.toString() === subdepartmentId);
-      
+
       if (!subdept) return;
-      
+
       const currentWebdata = subdept.upload_webdata || [];
-      const updatedWebdata = 
+      const updatedWebdata =
         index !== undefined && index >= 0
           ? currentWebdata.map((r, i) => (i === index ? requirement : r))
           : [...currentWebdata, requirement];
-      
+
       // Update local state immediately for better UX
       updateSubdepartmentWebdata(subdepartmentId, updatedWebdata);
-      
+
       // Update database
       const { error } = await supabase
         .from('tm_subdepartments')
         .update({ upload_webdata: updatedWebdata })
         .eq('id', subdepartmentId);
-      
+
       if (error) throw error;
-      
+
       // Show success message
       toast({
         title: "Success",
         description: "Webdata updated successfully",
         variant: "default"
       });
-      
+
     } catch (error) {
       console.error('Error saving subdepartment requirement:', error);
       // Revert local state on error
@@ -229,72 +229,72 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
       });
     }
   }
-  
+
   const saveClassRequirement = async (
-    requirement: { name: string; description: string | null }, 
-    subdepartmentId?: string, 
-    className?: string, 
+    requirement: { name: string; description: string | null },
+    subdepartmentId?: string,
+    className?: string,
     index?: number
   ) => {
     if (!subdepartmentId || !className) return;
-    
+
     try {
       const subdept = departments
         .flatMap(dept => dept.tm_subdepartments || [])
         .find(sd => sd.id.toString() === subdepartmentId);
-      
+
       if (!subdept) return;
-      
+
       const targetClass = subdept.classes?.find(cls => cls.name === className);
       if (!targetClass) return;
-      
+
       const currentWebdata = targetClass.webdata || [];
-      const updatedWebdata = 
+      const updatedWebdata =
         index !== undefined && index >= 0
           ? currentWebdata.map((r, i) => (i === index ? requirement : r))
           : [...currentWebdata, requirement];
-      
+
       // Update local state immediately for better UX
       updateClassWebdata(subdepartmentId, className, updatedWebdata);
-      
+
       // Get current subdepartment data
       const { data: subdeptData, error: fetchError } = await supabase
         .from('tm_subdepartments')
         .select('classes')
         .eq('id', subdepartmentId)
         .single();
-      
+
       if (fetchError) throw fetchError;
-      
+
       // Update the class webdata in the classes array
-      const updatedClasses = subdeptData.classes.map((cls: any) => 
-        cls.name === className 
+      const updatedClasses = subdeptData.classes.map((cls: any) =>
+        cls.name === className
           ? { ...cls, webdata: updatedWebdata }
           : cls
       );
-      
+
       // Save back to database
       const { error: updateError } = await supabase
         .from('tm_subdepartments')
         .update({ classes: updatedClasses })
         .eq('id', subdepartmentId);
-      
+
       if (updateError) throw updateError;
-      
+
       // Show success message
       toast({
         title: "Success",
         description: "Class webdata updated successfully",
         variant: "default"
       });
-      
+
     } catch (error) {
       console.error('Error saving class requirement:', error);
       // Revert local state on error
       const subdept = departments
         .flatMap(dept => dept.tm_subdepartments || [])
         .find(sd => sd.id.toString() === subdepartmentId);
-      
+
       if (subdept) {
         const targetClass = subdept.classes?.find(cls => cls.name === className);
         if (targetClass) {
@@ -309,7 +309,7 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
       });
     }
   }
-  
+
   const handleCloseDialog = () => {
     setIsDialogOpen(false)
     setEditingContext(null)
@@ -328,67 +328,67 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
 
   const handleDeleteConfirm = async () => {
     if (!deleteContext) return
-    
+
     const { type, index } = deleteContext
-    
+
     try {
       if (!editingContext) return
-      
+
       if (type === 'subdepartment' && editingContext.subdepartmentId) {
         const subdept = departments
           .flatMap(dept => dept.tm_subdepartments || [])
           .find(sd => sd.id.toString() === editingContext.subdepartmentId)
-        
+
         if (!subdept?.upload_webdata) return
-        
+
         const updatedWebdata = subdept.upload_webdata.filter((_, i) => i !== index)
         updateSubdepartmentWebdata(editingContext.subdepartmentId, updatedWebdata)
-        
+
         const { error } = await supabase
           .from('tm_subdepartments')
           .update({ upload_webdata: updatedWebdata })
           .eq('id', editingContext.subdepartmentId)
-        
+
         if (error) throw error
-        
+
       } else if (type === 'class' && editingContext.subdepartmentId && editingContext.classId) {
         const subdept = departments
           .flatMap(dept => dept.tm_subdepartments || [])
           .find(sd => sd.id.toString() === editingContext.subdepartmentId)
-        
+
         if (!subdept) return
-        
+
         const targetClass = subdept.classes?.find(cls => cls.name === editingContext.classId)
         if (!targetClass?.webdata) return
-        
+
         // Update local state first for better UX
         const updatedWebdata = targetClass.webdata.filter((_, i) => i !== index)
         updateClassWebdata(editingContext.subdepartmentId, editingContext.classId, updatedWebdata)
-        
+
         // Get current classes from the subdepartment
         const { data: currentData, error: fetchError } = await supabase
           .from('tm_subdepartments')
           .select('classes')
           .eq('id', editingContext.subdepartmentId)
           .single()
-        
+
         if (fetchError) throw fetchError
-        
+
         // Update only the webdata for the target class
-        const updatedClasses = currentData.classes.map((cls: any) => 
+        const updatedClasses = currentData.classes.map((cls: any) =>
           cls.name === editingContext.classId
             ? { ...cls, webdata: updatedWebdata }
             : cls
         )
-        
+
         // Update the database with the modified classes array
         const { error } = await supabase
           .from('tm_subdepartments')
           .update({ classes: updatedClasses })
           .eq('id', editingContext.subdepartmentId)
-        
+
         if (error) throw error
-        
+
         // Show success message
         toast({
           title: "Success",
@@ -396,10 +396,10 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
           variant: "default"
         })
       }
-      
+
       setIsDeleteDialogOpen(false)
       setDeleteContext(null)
-      
+
     } catch (error) {
       console.error('Error deleting requirement:', error)
       toast({
@@ -440,7 +440,7 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
 
     // Filter out empty webdata
     const validWebdata = newWebdata.filter(req => req.name.trim() !== '');
-    
+
     if (validWebdata.length === 0) {
       handleCloseDialog();
       return;
@@ -467,10 +467,10 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
         updateSubdepartmentWebdata(editingContext.subdepartmentId, updatedWebdata);
       } else if (editingContext.type === 'class') {
         // If classId is empty, use the first class
-        const targetClass = selectedClass 
+        const targetClass = selectedClass
           ? subdept.classes?.find(cls => cls.name === selectedClass)
           : subdept.classes?.[0];
-        
+
         if (!targetClass) {
           throw new Error('No valid class found');
         }
@@ -480,7 +480,7 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
           name: req.name.trim(),
           description: req.description?.trim() || null
         }))];
-        
+
         updateClassWebdata(editingContext.subdepartmentId, targetClass.name, updatedWebdata);
       }
 
@@ -497,7 +497,7 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
 
       // Prepare the update data
       let updateData: any = {};
-      
+
       if (editingContext.type === 'subdepartment' || !subdept.classes?.length) {
         // Handle subdepartment webdata
         const currentWebdata = subdeptData.upload_webdata || [];
@@ -512,16 +512,16 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
         if (!targetClassName) {
           throw new Error('No valid class found');
         }
-        
+
         // Get current classes or initialize if not exists
         const currentClasses = Array.isArray(subdeptData.classes) ? [...subdeptData.classes] : [];
         const classIndex = currentClasses.findIndex(cls => cls.name === targetClassName);
-        
+
         const newWebdata = validWebdata.map(req => ({
           name: req.name.trim(),
           description: req.description?.trim() || null
         }));
-        
+
         if (classIndex >= 0) {
           // Update existing class
           const existingClass = currentClasses[classIndex];
@@ -537,7 +537,7 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
             webdata: newWebdata
           });
         }
-        
+
         updateData.classes = currentClasses;
       }
 
@@ -547,7 +547,7 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
         .update(updateData)
         .eq('id', editingContext.subdepartmentId)
         .select('*');
-        
+
       // Refresh the data after successful update
       if (!updateError) {
         const { data: updatedData, error: refreshError } = await supabase
@@ -555,12 +555,12 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
           .select('*')
           .eq('id', editingContext.subdepartmentId)
           .single();
-          
+
         if (!refreshError && updatedData) {
           // Update local state with fresh data from database
           const updatedDepartments = departments.map(dept => ({
             ...dept,
-            tm_subdepartments: dept.tm_subdepartments?.map(sd => 
+            tm_subdepartments: dept.tm_subdepartments?.map(sd =>
               sd.id.toString() === editingContext.subdepartmentId ? updatedData : sd
             ) || []
           }));
@@ -608,7 +608,7 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
     }
     const hasWebdata = webdata && webdata.length > 0;
     const webdataList = [...(webdata || [])];
-    
+
     const handleMove = (index: number, direction: 'up' | 'down') => {
       if (!webdata || !context) return;
       handleMoveRequirement(index, direction, type, webdata);
@@ -624,7 +624,7 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
 
     const handleSaveEdit = async () => {
       if (editingIndex === null || !context) return;
-      
+
       const updatedRequirement = {
         name: editForm.name.trim(),
         description: editForm.description.trim() || null
@@ -635,10 +635,10 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
       } else if (type === 'class' && context.subdepartmentId && context.classId) {
         await saveClassRequirement(updatedRequirement, context.subdepartmentId, context.classId, editingIndex);
       }
-      
+
       setEditingIndex(null);
     };
-    
+
     return (
       <div className="space-y-4">
         <div className="border rounded-md overflow-hidden">
@@ -659,7 +659,7 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
                     {editingIndex === idx ? (
                       <Input
                         value={editForm.name}
-                        onChange={(e) => setEditForm({...editForm, name: e.target.value})}
+                        onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
                         className="h-8"
                         autoFocus
                       />
@@ -671,7 +671,7 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
                     {editingIndex === idx ? (
                       <Input
                         value={editForm.description}
-                        onChange={(e) => setEditForm({...editForm, description: e.target.value})}
+                        onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
                         className="h-8"
                         placeholder="No description"
                         onKeyDown={(e) => e.key === 'Enter' && handleSaveEdit()}
@@ -684,18 +684,18 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
                     <div className="flex justify-end gap-1">
                       {editingIndex === idx ? (
                         <>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             className="h-8 w-8 hover:bg-green-50"
                             onClick={handleSaveEdit}
                             title="Save"
                           >
                             <Check className="h-4 w-4 text-green-600" />
                           </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             className="h-8 w-8"
                             onClick={() => setEditingIndex(null)}
                             title="Cancel"
@@ -705,18 +705,18 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
                         </>
                       ) : (
                         <>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             className="h-8 w-8 hover:bg-blue-50"
                             onClick={() => handleEdit(idx)}
                             title="Edit"
                           >
                             <Pencil className="h-3.5 w-3.5 text-blue-600" />
                           </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             className="h-8 w-8"
                             onClick={(e) => {
                               e.stopPropagation();
@@ -727,9 +727,9 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
                           >
                             <ArrowUp className="h-3.5 w-3.5" />
                           </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             className="h-8 w-8"
                             onClick={(e) => {
                               e.stopPropagation();
@@ -740,9 +740,9 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
                           >
                             <ArrowDown className="h-3.5 w-3.5" />
                           </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             className="h-8 w-8 text-destructive hover:bg-red-50"
                             onClick={(e) => handleDeleteClickWrapper(e, idx)}
                             title="Delete"
@@ -772,7 +772,7 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
     const hasClasses = subdept.classes && subdept.classes.length > 0;
     const subdeptKey = `${deptId}-${subdept.id}`;
     const currentClass = activeClass[subdeptKey];
-    
+
     // Update editing context when subdepartment or class changes
     useEffect(() => {
       setEditingContext({
@@ -782,7 +782,7 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
         classId: hasClasses ? currentClass : undefined
       });
     }, [deptId, subdept.id, hasClasses, currentClass]);
-    
+
     // Create context for webdata rendering
     const context = {
       type: hasClasses ? 'class' as const : 'subdepartment' as const,
@@ -795,8 +795,8 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
       <div className="space-y-6">
         {hasClasses ? (
           <div className="space-y-4">
-            <Tabs 
-              value={activeClass[subdeptKey] || ''} 
+            <Tabs
+              value={activeClass[subdeptKey] || ''}
               onValueChange={(value) => setActiveClass(prev => ({
                 ...prev,
                 [subdeptKey]: value
@@ -816,8 +816,8 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
                     </TabsTrigger>
                   ))}
                 </TabsList>
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   size="sm"
                   onClick={() => openMultipleWebdataDialog('class')}
                 >
@@ -840,8 +840,8 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
           <div className="space-y-4">
             <div className="flex justify-between items-center">
               <h3 className="text-lg font-medium">Subdepartment Webdata</h3>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 size="sm"
                 onClick={() => openMultipleWebdataDialog('subdepartment')}
               >
@@ -867,64 +867,64 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
 
   const moveRequirement = (webdata: ClassRequirement[], currentIndex: number, direction: 'up' | 'down'): ClassRequirement[] => {
     const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
-    
+
     // Check if the move is valid
     if (newIndex < 0 || newIndex >= webdata.length) {
       return webdata;
     }
-    
+
     // Create a new array with the items swapped
     const newWebdata = [...webdata];
-    [newWebdata[currentIndex], newWebdata[newIndex]] = 
+    [newWebdata[currentIndex], newWebdata[newIndex]] =
       [newWebdata[newIndex], newWebdata[currentIndex]];
-    
+
     return newWebdata;
   };
 
   const handleMoveRequirement = async (index: number, direction: 'up' | 'down', type: 'subdepartment' | 'class', webdata: ClassRequirement[] = []) => {
     if (!editingContext) return;
-    
+
     const updatedWebdata = moveRequirement(webdata, index, direction);
-    
+
     try {
       if (type === 'subdepartment' && editingContext.subdepartmentId) {
         // Update local state immediately for better UX
         updateSubdepartmentWebdata(editingContext.subdepartmentId, updatedWebdata);
-        
+
         // Update database
         const { error } = await supabase
           .from('tm_subdepartments')
           .update({ upload_webdata: updatedWebdata })
           .eq('id', editingContext.subdepartmentId);
-          
+
         if (error) throw error;
-        
+
       } else if (type === 'class' && editingContext.subdepartmentId && editingContext.classId) {
         // Update local state immediately for better UX
         updateClassWebdata(editingContext.subdepartmentId, editingContext.classId, updatedWebdata);
-        
+
         // Get current subdepartment data
         const { data: subdeptData, error: fetchError } = await supabase
           .from('tm_subdepartments')
           .select('classes')
           .eq('id', editingContext.subdepartmentId)
           .single();
-          
+
         if (fetchError) throw fetchError;
-        
+
         // Update the class webdata in the classes array
-        const updatedClasses = subdeptData.classes.map((cls: any) => 
-          cls.name === editingContext.classId 
+        const updatedClasses = subdeptData.classes.map((cls: any) =>
+          cls.name === editingContext.classId
             ? { ...cls, webdata: updatedWebdata }
             : cls
         );
-        
+
         // Save back to database
         const { error: updateError } = await supabase
           .from('tm_subdepartments')
           .update({ classes: updatedClasses })
           .eq('id', editingContext.subdepartmentId);
-          
+
         if (updateError) throw updateError;
       }
     } catch (error) {
@@ -947,8 +947,8 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
   return (
     <div className="space-y-6">
       {/* Department Tabs */}
-      <Tabs 
-        value={activeDept} 
+      <Tabs
+        value={activeDept}
         onValueChange={setActiveDept}
         className="space-y-4"
       >
@@ -970,8 +970,8 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
             {dept.tm_subdepartments && dept.tm_subdepartments.length > 0 ? (
               <div className="space-y-6">
                 {/* Subdepartment Tabs */}
-                <Tabs 
-                  value={activeSubdept[dept.id] || ''} 
+                <Tabs
+                  value={activeSubdept[dept.id] || ''}
                   onValueChange={(value) => setActiveSubdept(prev => ({
                     ...prev,
                     [dept.id]: value
@@ -979,8 +979,8 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
                 >
                   <TabsList className="mb-4">
                     {dept.tm_subdepartments.map((subdept) => (
-                      <TabsTrigger 
-                        key={subdept.id} 
+                      <TabsTrigger
+                        key={subdept.id}
                         value={subdept.id.toString()}
                         className="flex items-center gap-2"
                       >
@@ -995,8 +995,8 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
                   </TabsList>
 
                   {dept.tm_subdepartments.map((subdept) => (
-                    <TabsContent 
-                      key={subdept.id} 
+                    <TabsContent
+                      key={subdept.id}
                       value={subdept.id.toString()}
                       className="mt-0"
                     >
@@ -1027,14 +1027,14 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={handleCloseDeleteDialog}
             >
               Cancel
             </Button>
-            <Button 
-              variant="destructive" 
+            <Button
+              variant="destructive"
               onClick={handleDeleteConfirm}
               disabled={isSubmitting}
             >
@@ -1051,7 +1051,7 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
             <DialogTitle>Add Multiple Webdata</DialogTitle>
             <DialogDescription>Add multiple webdata at once.</DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-4">
             {/* Department Selection */}
             <div>
@@ -1110,13 +1110,13 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
               // Find the selected subdepartment
               const dept = departments.find(d => d.id === selectedDept);
               if (!dept?.tm_subdepartments) return null;
-              
+
               const subdept = dept.tm_subdepartments.find(sd => sd.id.toString() === selectedSubdept);
               if (!subdept) return null;
-              
+
               // Only show class selection if the subdepartment has classes
               if (!subdept.classes?.length) return null;
-              
+
               return (
                 <div>
                   <Label htmlFor="class">Class</Label>
@@ -1190,12 +1190,12 @@ export default function Webdata({ departments: initialDepartments }: WebdataProp
               </Button>
             </div>
           </div>
-          
+
           <DialogFooter>
             <Button variant="outline" onClick={handleCloseDialog}>
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={handleAddMultipleWebdata}
               disabled={!selectedDept || !selectedSubdept || (!selectedClass && departments.find(d => d.id === selectedDept)?.tm_subdepartments?.find(sd => sd.id.toString() === selectedSubdept)?.classes?.length > 0) || !newWebdata.some(req => req.name.trim() !== '') || isSubmitting}
             >

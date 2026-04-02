@@ -5,7 +5,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Download, FileText, Image as ImageIcon } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
+import { useToast } from '@/lib/hooks/use-toast';
 
 interface LetterEditorWithPreviewProps {
   companyId?: string;

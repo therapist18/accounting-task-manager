@@ -16,7 +16,7 @@ import { EditFieldDialog } from "./components/dialogs/field-dialog"
 import { DeleteFieldDialog } from "./components/dialogs/delete-field-dialog"
 import { LinkSourcesDialog } from "./components/dialogs/link-sources-dialog"
 import { Checkbox } from "@/components/ui/checkbox"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import { exportToExcel } from "./components/lib/excel-export"
 
 export default function JobFieldsPage() {

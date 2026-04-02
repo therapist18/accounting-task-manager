@@ -17,7 +17,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
 import { CalendarIcon, Calculator, Minus, Plus, Save, DollarSign, Clock, ChevronDown, History, Copy, Eye, ChevronRight, Info, Download, FileSpreadsheet, DownloadCloud, EyeOff, ChevronUp, Settings, CreditCard, Smartphone, Trash2 } from "lucide-react"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import ColumnVisibilityControl, { ColumnVisibilityOption } from "../main-shared-components/column-visibility"
 import ChargeCalculatorDialog from "./components/ChargeCalculatorDialog"
@@ -186,12 +186,12 @@ const getCategoryInfo = (category: string) => {
 };
 
 // Historical Periods Dialog Component
-const HistoricalPeriodsDialog = ({ 
-  isOpen, 
-  onOpenChange, 
-  historicalPeriods, 
-  loadingHistory, 
-  onViewHistoricalPeriod 
+const HistoricalPeriodsDialog = ({
+  isOpen,
+  onOpenChange,
+  historicalPeriods,
+  loadingHistory,
+  onViewHistoricalPeriod
 }: {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
@@ -210,7 +210,7 @@ const HistoricalPeriodsDialog = ({
       <DialogHeader>
         <DialogTitle>M-Pesa Rates History</DialogTitle>
       </DialogHeader>
-      
+
       {loadingHistory ? (
         <div className="flex items-center justify-center py-8">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
@@ -244,7 +244,7 @@ const HistoricalPeriodsDialog = ({
                           <p className="text-sm text-muted-foreground">{period.description}</p>
                         )}
                         <div className="text-xs text-muted-foreground">
-                          Created: {period.createdAt ? format(period.createdAt, "PPp") : 'Unknown'} 
+                          Created: {period.createdAt ? format(period.createdAt, "PPp") : 'Unknown'}
                           {period.createdBy && ` by ${period.createdBy}`}
                         </div>
                       </div>
@@ -274,12 +274,12 @@ const HistoricalPeriodsDialog = ({
 )
 
 // New Period Dialog Component
-const NewPeriodDialog = ({ 
-  isOpen, 
-  onOpenChange, 
-  historicalPeriods, 
-  onCreatePeriod, 
-  saving 
+const NewPeriodDialog = ({
+  isOpen,
+  onOpenChange,
+  historicalPeriods,
+  onCreatePeriod,
+  saving
 }: {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
@@ -306,7 +306,7 @@ const NewPeriodDialog = ({
         <DialogHeader>
           <DialogTitle>Create New Rate Period</DialogTitle>
         </DialogHeader>
-        
+
         <div className="space-y-4">
           <div className="space-y-2">
             <Label>Effective From</Label>
@@ -359,11 +359,11 @@ const NewPeriodDialog = ({
 
           <div className="space-y-2">
             <Label>Copy From Period (Optional)</Label>
-            <Select 
-              value={formData.copyFromPeriod?.toString() || ""} 
-              onValueChange={(value) => setFormData(prev => ({ 
-                ...prev, 
-                copyFromPeriod: value ? parseInt(value) : null 
+            <Select
+              value={formData.copyFromPeriod?.toString() || ""}
+              onValueChange={(value) => setFormData(prev => ({
+                ...prev,
+                copyFromPeriod: value ? parseInt(value) : null
               }))}
             >
               <SelectTrigger>
@@ -1292,7 +1292,7 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
                                 <Plus className="h-3 w-3 text-blue-500" />
                               </TableCell>
                             )}
-                            <TableCell 
+                            <TableCell
                               className={cn(
                                 "sticky bg-blue-50 border-r z-30 px-3 pl-12 p-2",
                                 columnVisibility.index ? "left-16" : "left-0"

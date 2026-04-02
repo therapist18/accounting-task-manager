@@ -13,20 +13,20 @@ import { supabase } from "@/lib/supabase/client"
 import type { JobField } from "../types/database"
 import { FieldDialog } from "./components/dialogs/field-dialog"
 import { DeleteFieldDialog } from "./components/dialogs/delete-field-dialog"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import { exportToExcel } from "./components/lib/excel-export"
 
 export default function JobFieldsPage() {
   const [fields, setFields] = useState<JobField[]>([])
   const [filteredFields, setFilteredFields] = useState<JobField[]>([])
   const [loading, setLoading] = useState(true)
-  
+
   // Filter States
   const [searchTerm, setSearchTerm] = useState("")
   const [typeFilter, setTypeFilter] = useState<string>("all")
   const [requiredFilter, setRequiredFilter] = useState<string>("all")
-  const [categoryFilter, setCategoryFilter] = useState<string>("all") 
-  const [categories, setCategories] = useState<string[]>([]) 
+  const [categoryFilter, setCategoryFilter] = useState<string>("all")
+  const [categories, setCategories] = useState<string[]>([])
 
   const [selectedField, setSelectedField] = useState<JobField | null>(null)
   const [dialogStates, setDialogStates] = useState({
@@ -68,7 +68,7 @@ export default function JobFieldsPage() {
           .map((f: any) => f.category)
           .filter((c) => c && typeof c === 'string' && c.trim().length > 0)
       )) as string[]
-      
+
       setCategories(uniqueCats.sort())
     } catch (error) {
       toast({
@@ -153,8 +153,8 @@ export default function JobFieldsPage() {
 
         // Handle category specific sorting (treat null as "")
         if (sortConfig.key === 'category') {
-             aValue = aValue || ""
-             bValue = bValue || ""
+          aValue = aValue || ""
+          bValue = bValue || ""
         }
 
         // Handle undefined or null values
@@ -235,7 +235,7 @@ export default function JobFieldsPage() {
                     className="pl-10 w-full sm:w-64 bg-slate-50 dark:bg-slate-800 border-slate-300 dark:border-slate-700 focus-visible:ring-blue-500"
                   />
                 </div>
-                
+
                 {/* CATEGORY FILTER */}
                 <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                   <SelectTrigger className="w-full sm:w-[180px] bg-slate-50 border-slate-300">
@@ -262,7 +262,7 @@ export default function JobFieldsPage() {
                     <SelectItem value="select">Select</SelectItem>
                   </SelectContent>
                 </Select>
-                
+
                 <Select value={requiredFilter} onValueChange={setRequiredFilter}>
                   <SelectTrigger className="w-full sm:w-[160px] bg-slate-50 dark:bg-slate-800 border-slate-300 dark:border-slate-700 focus:ring-blue-500">
                     <SelectValue placeholder="Filter by required" />
@@ -410,7 +410,7 @@ export default function JobFieldsPage() {
                       </TableRow>
                     ))
                   ) : (
-                    <TableRow>  
+                    <TableRow>
                       <TableCell colSpan={9} className="h-24 text-center text-slate-500 dark:text-slate-400">
                         No fields found. Try adjusting your search or filters.
                       </TableCell>
@@ -424,9 +424,9 @@ export default function JobFieldsPage() {
         </Card>
 
         {/* Dialogs - Using unified FieldDialog for both add and edit */}
-        <FieldDialog 
-          open={dialogStates.add} 
-          onOpenChange={() => closeDialog("add")} 
+        <FieldDialog
+          open={dialogStates.add}
+          onOpenChange={() => closeDialog("add")}
           onSuccess={fetchFields}
           availableFields={allFields}
           mode="add"

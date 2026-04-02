@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { FileText, Edit, Trash2, Download, Building, Upload, Briefcase } from "lucide-react"
 import { EnquiryDialog } from "./components/EnquiryDialog"
 import { format, parseISO, isAfter, isEqual, isValid, parse, startOfToday } from 'date-fns';
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { EditTaskDialog } from "./components/EditTaskDialog"
 import { fetchDepartments } from "../departments/departments/database"

@@ -10,7 +10,7 @@ import { Calendar as CalendarIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { supabase } from "@/lib/supabase/client"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 
 interface UpdateStageDateDialogProps {
   open: boolean
@@ -21,13 +21,13 @@ interface UpdateStageDateDialogProps {
   onSuccess?: () => void
 }
 
-export function UpdateStageDateDialog({ 
-  open, 
-  onOpenChange, 
-  task, 
-  stageId, 
+export function UpdateStageDateDialog({
+  open,
+  onOpenChange,
+  task,
+  stageId,
   stageName,
-  onSuccess 
+  onSuccess
 }: UpdateStageDateDialogProps) {
   const [date, setDate] = useState<Date | undefined>(new Date())
   const [isLoading, setIsLoading] = useState(false)
@@ -45,7 +45,7 @@ export function UpdateStageDateDialog({
     try {
       // Get current stages data
       const currentStages = Array.isArray(task.stages) ? [...task.stages] : [];
-      
+
       // Update or add the stage date
       const stageIndex = currentStages.findIndex((s: any) => s.id === stageId);
       const stageData = {
@@ -64,7 +64,7 @@ export function UpdateStageDateDialog({
       // Update the task with the new stages data
       const { error: updateError } = await supabase
         .from('tm_tasks')
-        .update({ 
+        .update({
           stages: currentStages,
           updated_at: new Date().toISOString()
         })
@@ -131,14 +131,14 @@ export function UpdateStageDateDialog({
           )}
         </div>
         <DialogFooter>
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             onClick={() => onOpenChange(false)}
             disabled={isLoading}
           >
             Cancel
           </Button>
-          <Button 
+          <Button
             onClick={handleSubmit}
             disabled={isLoading}
           >

@@ -11,7 +11,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import type { JobField } from "../types/database"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 
 interface DeleteFieldDialogProps {
   open: boolean

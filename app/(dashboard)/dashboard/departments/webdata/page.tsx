@@ -18,7 +18,7 @@ import { Separator } from "@/components/ui/separator"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Checkbox } from "@/components/ui/checkbox"
 import supabase from "@/lib/supabase/client"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import { saveClassWebData, saveSubWebData } from "./database"
 import type { Department, WebData, WebDataForm } from "./database"
 import { DepartmentSidebar } from "@/app/(dashboard)/dashboard/departments/main-shared-components/department-sidebar"
@@ -243,26 +243,26 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
     setAddContext(enhancedContext)
     setIsAddDialogOpen(true)
   }
-// Inside WebData.tsx (around line 145)
+  // Inside WebData.tsx (around line 145)
 
-const handleAddWebData = async (webDataArray: WebDataEntry[]) => {
-  // We no longer need to calculate merges or call replaceWebDataForContext here
-  // because the AddWebDataDialog now handles the atomic DB write.
-  try {
-    setIsSubmitting(true);
-    
-    // Simply refresh the departments to get the new data from Supabase
-    await refreshDepartments();
-    
-    setIsAddDialogOpen(false);
-  } catch (error) {
-    console.error('Error refreshing after add:', error);
-  } finally {
-    setIsSubmitting(false);
-  }
-};
+  const handleAddWebData = async (webDataArray: WebDataEntry[]) => {
+    // We no longer need to calculate merges or call replaceWebDataForContext here
+    // because the AddWebDataDialog now handles the atomic DB write.
+    try {
+      setIsSubmitting(true);
 
-const refreshDepartments = async () => {
+      // Simply refresh the departments to get the new data from Supabase
+      await refreshDepartments();
+
+      setIsAddDialogOpen(false);
+    } catch (error) {
+      console.error('Error refreshing after add:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const refreshDepartments = async () => {
     try {
       const { data: departmentsData, error } = await supabase
         .from('tm_departments')
@@ -279,10 +279,10 @@ const refreshDepartments = async () => {
 
       const processedDepartments = departmentsData.map(dept => {
         const subdepartments = (dept.tm_subdepartments || []).map(subdept => {
-          
+
           // Helper to find requirement record by job_level matches
           const findRecord = (cId: string | null, scId: string | null) => {
-            return allReqRecords?.find(r => 
+            return allReqRecords?.find(r =>
               r.job_level?.department_id === dept.id &&
               r.job_level?.subdepartment_id === subdept.id &&
               String(r.job_level?.class_id || 'null') === String(cId || 'null') &&
@@ -495,7 +495,7 @@ const refreshDepartments = async () => {
     }
   }
 
-const replaceWebDataForContext = async (context: EditingContext, webDataArray: WebDataEntry[]) => {
+  const replaceWebDataForContext = async (context: EditingContext, webDataArray: WebDataEntry[]) => {
     try {
       // 1. Construct the job_level object based on context
       const jobLevel = {

@@ -17,7 +17,7 @@ import { format } from "date-fns"
 import { cn } from "@/lib/utils"
 import { CalendarIcon, Calculator, Minus, Plus, Save, DollarSign, Clock, ChevronDown, History, Copy, Eye, ChevronRight, Info, Download, FileSpreadsheet, DownloadCloud, EyeOff, ChevronUp, Settings } from "lucide-react"
 import { HistoricalRatesDialog, NewPeriodDialog, ExchangeRatesDialog } from "./components/dialogs"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import { fetchDepartments } from "../departments/database"
 import { supabase } from "@/lib/supabase/client"
 import ColumnVisibilityControl, { ColumnVisibilityOption } from "../main-shared-components/column-visibility"
@@ -1008,7 +1008,7 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
         // Add subdepartment row if it has direct entries or classes
         const hasDirectEntries = subdeptData.direct && subdeptData.direct.length > 0;
         const hasClasses = subdeptData.classes && Object.keys(subdeptData.classes).length > 0;
-        
+
         // Get subdepartment ID from either direct entries or classes
         let subdeptId = '';
         if (hasDirectEntries && subdeptData.direct[0]?.entityId) {
@@ -1023,7 +1023,7 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
             subdeptId = `subdept-${Object.values(firstClass.subclasses)[0][0].entityId.split('-')[0]}`;
           }
         }
-        
+
         // If we couldn't determine the ID, default to expanded
         const isSubdeptExpanded = subdeptId ? (entityVisibility[subdeptId] !== false) : true;
 
@@ -1032,9 +1032,9 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
           subdeptRow.getCell(1).value = subdeptPrefix;
           subdeptRow.getCell(2).value = subdeptName;
           subdeptRow.outlineLevel = 0; // Top level (0 for Excel)
-          subdeptRow.eachCell(c => styleCell(c, { 
-            font: { bold: true }, 
-            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } } 
+          subdeptRow.eachCell(c => styleCell(c, {
+            font: { bold: true },
+            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } }
           }));
 
           // Add direct entries for subdepartment if they exist and subdepartment is expanded
@@ -1154,7 +1154,8 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
               }
             });
           }
-        }});
+        }
+      });
 
       // --- ADD TOTALS ---
       const totals = calculateTotals();
@@ -2117,8 +2118,8 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
 
         {/* Enhanced Control Panel */}
         <div className="flex items-center gap-2">
-           {/* Save Changes Button */}
-           <Button
+          {/* Save Changes Button */}
+          <Button
             onClick={handleSaveChanges}
             disabled={!hasUnsavedChanges || isReadOnly || saving}
           >

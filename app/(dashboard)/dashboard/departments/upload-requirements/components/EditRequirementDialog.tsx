@@ -13,7 +13,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Badge } from "@/components/ui/badge"
 import { FileText, Zap, Users, Check, ChevronsUpDown, Search, Eraser, Trash2, Loader2, Database, X, Settings2, Calculator } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import supabase from "@/lib/supabase/client"
 import { Checkbox } from '@/components/ui/checkbox'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"

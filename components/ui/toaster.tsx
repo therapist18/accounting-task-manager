@@ -1,6 +1,7 @@
 "use client"
 
-import { useToast } from "@/hooks/use-toast"
+import { useToast } from "@/lib/hooks/use-toast"
+import { AlertTriangle, CheckCircle2, Info, Loader2, XCircle } from "lucide-react"
 import {
   Toast,
   ToastClose,
@@ -10,26 +11,86 @@ import {
   ToastViewport,
 } from "@/components/ui/toast"
 
+const TOAST_ICON_STYLES = {
+  default: {
+    icon: Info,
+    wrapperClassName: "bg-slate-100 text-slate-700",
+    label: "Notice",
+  },
+  destructive: {
+    icon: XCircle,
+    wrapperClassName: "bg-red-100 text-red-700",
+    label: "Error",
+  },
+  success: {
+    icon: CheckCircle2,
+    wrapperClassName: "bg-green-100 text-green-700",
+    label: "Success",
+  },
+  warning: {
+    icon: AlertTriangle,
+    wrapperClassName: "bg-amber-100 text-amber-700",
+    label: "Warning",
+  },
+  info: {
+    icon: Info,
+    wrapperClassName: "bg-blue-100 text-blue-700",
+    label: "Info",
+  },
+} as const
+
 export function Toaster() {
   const { toasts } = useToast()
 
   return (
     <ToastProvider>
-      {toasts.map(function ({ id, title, description, action, ...props }) {
+      {toasts.map(function ({ id, title, description, action, variant = "default", ...props }) {
+        const toastMeta = TOAST_ICON_STYLES[variant] || TOAST_ICON_STYLES.default
+        const Icon = toastMeta.icon
+
         return (
           <Toast key={id} {...props}>
-            <div className="grid gap-1.5">
-              {title && <ToastTitle>{title}</ToastTitle>}
-              {description && (
-                <ToastDescription>{description}</ToastDescription>
-              )}
+            <div className="absolute inset-x-0 top-0 h-1 bg-black/5">
+              <div
+                className={`h-full ${variant === "destructive"
+                  ? "bg-red-400"
+                  : variant === "success"
+                    ? "bg-green-400"
+                    : variant === "warning"
+                      ? "bg-amber-400"
+                      : variant === "info"
+                        ? "bg-blue-400"
+                        : "bg-slate-400"
+                  }`}
+              />
+            </div>
+
+            <div className="flex items-start gap-3 pr-4">
+              <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${toastMeta.wrapperClassName}`}>
+                <Icon className="h-4 w-4" />
+              </div>
+
+              <div className="grid gap-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    {toastMeta.label}
+                  </span>
+                  {variant === "default" && title === "Processing" && (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />
+                  )}
+                </div>
+                {title && <ToastTitle>{title}</ToastTitle>}
+                {description && (
+                  <ToastDescription>{description}</ToastDescription>
+                )}
+              </div>
             </div>
             {action}
             <ToastClose />
           </Toast>
         )
       })}
-      <ToastViewport />
+      <ToastViewport className="top-0" />
     </ToastProvider>
   )
 }

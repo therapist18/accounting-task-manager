@@ -1,31 +1,26 @@
 // @ts-nocheck
 "use client"
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Badge } from "@/components/ui/badge"
-import { Loader2, Send, FileText, MessageSquare, Star, Eye, Check, FileUp, Trash2, CheckCircle2, RotateCcw } from "lucide-react"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Loader2, FileText, MessageSquare, Star, Eye, Check, CheckCircle2, RotateCcw } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { format, parseISO } from "date-fns"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { UploadModal } from "@/app/generic-components/UploadModal"
-import { v4 as uuidv4 } from 'uuid'
-import { performExtraction } from '@/lib/extractionUtils'
 import supabase from "@/lib/supabase/client";
 import {
   updateDocumentWorkflow,
   shouldTriggerWorkflowUpdate,
   WORKFLOW_OUTCOME_LABELS,
   TASK_STAGE_WORKFLOW_MAPPING,
-  getWorkflowLogsForIndividual,
-  setupWorkflowRealtimeSubscription,
-  setupTaskRealtimeSubscription,
-  cleanupRealtimeSubscriptions
+  getWorkflowLogsForIndividual
 } from "../utils/workflowSyncService";
 
 const sanitizeFilename = (filename: string): string => {
@@ -197,6 +192,47 @@ const collectTaskTriggerDocumentIds = (sourceDocumentMap: any) => {
   });
 
   return triggerIds;
+};
+
+const StageUploadDialogLoadingState = () => {
+  return (
+    <div className="flex-1 overflow-hidden flex flex-col">
+      {/* Header area matching the dialog structure */}
+      <div className="px-6 pt-2 border-b bg-muted/10">
+        <div className="flex gap-2 overflow-hidden py-1">
+          {/* Fake tab skeleton */}
+          <div className="px-4 py-2 bg-slate-100 rounded-md border border-slate-200 animate-pulse">
+            <div className="h-4 w-24 bg-slate-200 rounded"></div>
+          </div>
+          <div className="px-4 py-2 bg-slate-100 rounded-md border border-slate-200 animate-pulse">
+            <div className="h-4 w-20 bg-slate-200 rounded"></div>
+          </div>
+          <div className="px-4 py-2 bg-slate-100 rounded-md border border-slate-200 animate-pulse">
+            <div className="h-4 w-28 bg-slate-200 rounded"></div>
+          </div>
+        </div>
+      </div>
+
+      {/* Content area with loading message */}
+      <div className="flex-1 overflow-auto relative bg-slate-50/50">
+        <div className="flex items-center justify-center h-full p-6">
+          <div className="text-center space-y-4">
+            <div className="flex items-center justify-center gap-3">
+              <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+              <span className="text-lg font-semibold text-slate-800">Loading Stage Documents</span>
+            </div>
+            <p className="text-sm text-muted-foreground max-w-md">
+              Preparing document requirements, checking existing uploads, and loading workflow information...
+            </p>
+            <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
+              <FileText className="h-4 w-4" />
+              <span>Please wait a moment</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 // --- Sub-Component: Document Tab Panel ---
@@ -535,7 +571,6 @@ export function StageUploadDialog({
   const [pendingDocuments, setPendingDocuments] = useState<Record<string, any>>({});
   const [selectedSourceDocs, setSelectedSourceDocs] = useState<Record<string, any[]>>({ selected: [] });
   const [workflowDocuments, setWorkflowDocuments] = useState<Record<string, any>>({});
-  const [realtimeSubscriptions, setRealtimeSubscriptions] = useState<any[]>([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0); // Trigger to reload data after revert
   const [previewState, setPreviewState] = useState({
     isOpen: false,
@@ -581,7 +616,25 @@ export function StageUploadDialog({
       childLevelType: selectedStageTask.childLevelType
     };
     return stage.documents.filter((doc: any) => isDocumentApplicableToTask(doc, task, childContext));
-  }, [stage, task, selectedStageTask?.childLevelId]);
+  }, [stage?.documents, task, selectedStageTask?.childLevelId, selectedStageTask?.childLevelType]);
+
+  const applicableDocumentsById = useMemo(() => {
+    return applicableDocuments.reduce((acc, doc: any) => {
+      acc[doc.id] = doc;
+      return acc;
+    }, {} as Record<string, any>);
+  }, [applicableDocuments]);
+
+  const applicableKycIds = useMemo(() => {
+    return [...new Set(applicableDocuments.map((doc: any) => doc.kycId).filter(Boolean))];
+  }, [applicableDocuments]);
+
+  const pendingDocumentCount = useMemo(() => Object.keys(pendingDocuments).length, [pendingDocuments]);
+
+  const hasSpecialDocuments = useMemo(
+    () => applicableDocuments.some((doc: any) => doc.isSpecial),
+    [applicableDocuments]
+  );
 
   const individualName = useMemo(() =>
     task?.applicant_name || task?.principal_member_name || 'Individual',
@@ -594,7 +647,7 @@ export function StageUploadDialog({
         setActiveDocumentTab(firstDocId);
       }
     }
-  }, [open, applicableDocuments.length]);
+  }, [open, applicableDocuments, activeDocumentTab]);
 
   useEffect(() => {
     if (!open) {
@@ -611,21 +664,19 @@ export function StageUploadDialog({
   useEffect(() => {
     if (!open || !stage?.documents || !task?.individual_id) return;
 
+    let isCancelled = false;
+
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        const uniqueKycIds = [...new Set(applicableDocuments
-          .map((d: any) => d.kycId)
-          .filter(Boolean))];
-
         const promises: Promise<any>[] = [];
 
-        if (uniqueKycIds.length > 0) {
+        if (applicableKycIds.length > 0) {
           promises.push(
             supabase
               .from('acc_portal_kyc')
               .select('id, fields, name, display_name, document_type')
-              .in('id', uniqueKycIds)
+              .in('id', applicableKycIds)
           );
         } else {
           promises.push(Promise.resolve({ data: [] }));
@@ -634,7 +685,7 @@ export function StageUploadDialog({
         promises.push(
           supabase
             .from('acc_portal_directors_documents')
-            .select('*')
+            .select('id, document_id, file_path, created_at, extracted_details')
             .eq('director_id', task.individual_id)
             .order('created_at', { ascending: false })
         );
@@ -644,11 +695,11 @@ export function StageUploadDialog({
         );
 
         const [kycRes, userDocsRes, workflowRes] = await Promise.all(promises);
+        if (isCancelled) return;
 
         const newKycMap = new Map();
         const newDocFieldsMap: Record<string, any[]> = {};
         const workflowDocMap: Record<string, any> = {};
-
         const triggerDocIdsFromWorkflow = new Set<string>();
 
         if (kycRes.data) {
@@ -657,6 +708,13 @@ export function StageUploadDialog({
             newKycMap.set(kycData.id, transformed);
           });
         }
+
+        const documentsByTypeId = (userDocsRes.data || []).reduce((acc: Record<string, any[]>, doc: any) => {
+          const key = String(doc.document_id);
+          if (!acc[key]) acc[key] = [];
+          acc[key].push(doc);
+          return acc;
+        }, {});
 
         applicableDocuments.forEach((doc: any) => {
           let fields = [];
@@ -741,7 +799,7 @@ export function StageUploadDialog({
         if (userDocsRes.data) {
           applicableDocuments.forEach((stageDoc: any) => {
             if (stageDoc.kycId) {
-              const matching = userDocsRes.data.filter((d: any) => d.document_id === stageDoc.kycId);
+              const matching = documentsByTypeId[String(stageDoc.kycId)] || [];
 
               const processedMatching = matching.map((doc: any) => {
                 // Only use direct document ID mapping - avoid document_type_id fallback to prevent cross-contamination
@@ -770,56 +828,59 @@ export function StageUploadDialog({
           });
         }
 
-        setKycDocuments(newKycMap);
-        setDocFieldsMap(newDocFieldsMap);
-        setExistingDocuments(groupedDocs);
-        setWorkflowDocuments(workflowDocMap);
+        if (!isCancelled) {
+          setKycDocuments(newKycMap);
+          setDocFieldsMap(newDocFieldsMap);
+          setExistingDocuments(groupedDocs);
+          setWorkflowDocuments(workflowDocMap);
+        }
 
       } catch (error) {
         console.error("Error initializing stage upload dialog:", error);
-        toast({ title: "Error loading data", description: "Please close and try again.", variant: "destructive" });
+        if (!isCancelled) {
+          toast({ title: "Error loading data", description: "Please close and try again.", variant: "destructive" });
+        }
       } finally {
-        setIsLoading(false);
+        if (!isCancelled) {
+          setIsLoading(false);
+        }
       }
     };
 
     fetchData();
-  }, [open, stage?.documents, task?.individual_id, applicableDocuments, refreshTrigger, currentTaskTriggerDocumentIds, task?.id]);
+    return () => {
+      isCancelled = true;
+    };
+  }, [open, stage?.documents, task?.individual_id, applicableDocuments, applicableKycIds, refreshTrigger, currentTaskTriggerDocumentIds, task?.id]);
 
   useEffect(() => {
-    if (!stage?.id || !applicableDocuments.length || !task?.id) return;
+    if (!stage?.id || !applicableDocuments.length) return;
 
-    const checkLockedDocuments = async () => {
-      const { data: taskData } = await supabase
-        .from('tm_tasks')
-        .select('source_document_id')
-        .eq('id', task.id)
-        .single();
+    const stageSourceDocs = Array.isArray(task?.source_document_id?.[stage.id])
+      ? task.source_document_id[stage.id]
+      : [];
 
-      if (taskData?.source_document_id) {
-        const newLockedDocs = { ...lockedDocuments };
-        const newLinkedDocs = { ...linkedDocuments };
-
-        applicableDocuments.forEach((doc: any) => {
-          const docInstance = taskData.source_document_id[stage.id]?.find(
-            (d: any) => d.document_id === doc.kycId
-          );
-
-          if (docInstance) {
-            newLockedDocs[doc.id] = true;
-            newLinkedDocs[doc.id] = docInstance;
-          } else {
-            newLockedDocs[doc.id] = false;
-          }
-        });
-
-        setLockedDocuments(newLockedDocs);
-        setLinkedDocuments(newLinkedDocs);
+    const sourceDocsByDocumentId = stageSourceDocs.reduce((acc: Record<string, any>, docInstance: any) => {
+      if (docInstance?.document_id) {
+        acc[String(docInstance.document_id)] = docInstance;
       }
-    };
+      return acc;
+    }, {});
 
-    checkLockedDocuments();
-  }, [stage?.id, task?.id, JSON.stringify(applicableDocuments)]);
+    const nextLockedDocuments: Record<string, boolean> = {};
+    const nextLinkedDocuments: Record<string, any> = {};
+
+    applicableDocuments.forEach((doc: any) => {
+      const docInstance = sourceDocsByDocumentId[String(doc.kycId)];
+      nextLockedDocuments[doc.id] = Boolean(docInstance);
+      if (docInstance) {
+        nextLinkedDocuments[doc.id] = docInstance;
+      }
+    });
+
+    setLockedDocuments(nextLockedDocuments);
+    setLinkedDocuments(nextLinkedDocuments);
+  }, [stage?.id, task?.source_document_id, applicableDocuments]);
 
   const handleDocumentSelection = useCallback((docId: string, docInstanceId: string, kycId: string) => {
     if (!stage?.id || !task?.id) return;
@@ -970,16 +1031,35 @@ export function StageUploadDialog({
 
       const currentDate = new Date().toISOString();
       const updatedLinkedDocs = { ...linkedDocuments };
-      const updatedLockedDocs = { ...lockedDocuments };
       const updatedSourceDocs = { ...selectedSourceDocs };
       const uploadedDocIds = new Set<string>();
       const uploadedDocumentsForWorkflow: Array<{ id: string; document_id: string; stage_doc_id: string }> = [];
+
+      const fieldMetadataByDocId = Object.entries(docFieldsMap).reduce((acc, [docId, fields]) => {
+        const fieldIdToName = new Map();
+        const validFieldNames = new Set();
+
+        const collectFieldInfo = (fieldList: any[]) => {
+          if (!Array.isArray(fieldList)) return;
+          fieldList.forEach((field: any) => {
+            if (field.id && field.name) fieldIdToName.set(field.id, field.name);
+            if (field.name) validFieldNames.add(field.name);
+
+            if (field.fields) collectFieldInfo(field.fields);
+            if (field.arrayConfig?.fields) collectFieldInfo(field.arrayConfig.fields);
+          });
+        };
+
+        collectFieldInfo(fields as any[]);
+        acc[docId] = { fieldIdToName, validFieldNames };
+        return acc;
+      }, {} as Record<string, { fieldIdToName: Map<any, any>; validFieldNames: Set<any> }>);
 
       for (const [docId, docData] of Object.entries(pendingDocuments)) {
         if (!docData) continue;
 
         const baseDocId = docId.split('_')[0];
-        const docConfig = applicableDocuments.find(doc => doc.id === baseDocId);
+        const docConfig = applicableDocumentsById[baseDocId];
         if (!docConfig) continue;
 
         try {
@@ -1008,24 +1088,9 @@ export function StageUploadDialog({
           if (file) {
             const rawDetails = docData.extractedData || {};
             const cleanedDetails = {};
-            const fieldIdToName = new Map();
-            const validFieldNames = new Set();
-
-            const collectFieldInfo = (fields) => {
-              if (!Array.isArray(fields)) return;
-              fields.forEach(field => {
-                if (field.id && field.name) fieldIdToName.set(field.id, field.name);
-                if (field.name) validFieldNames.add(field.name);
-
-                if (field.fields) collectFieldInfo(field.fields);
-                if (field.arrayConfig?.fields) collectFieldInfo(field.arrayConfig.fields);
-              });
-            };
-
-            const fullDocFields = docFieldsMap[baseDocId];
-            if (fullDocFields) {
-              collectFieldInfo(fullDocFields);
-            }
+            const fieldMetadata = fieldMetadataByDocId[baseDocId];
+            const fieldIdToName = fieldMetadata?.fieldIdToName || new Map();
+            const validFieldNames = fieldMetadata?.validFieldNames || new Set();
 
             Object.entries(rawDetails).forEach(([key, value]) => {
               if (fieldIdToName.has(key)) {
@@ -1083,7 +1148,6 @@ export function StageUploadDialog({
             fromExistingDocument: !file
           });
 
-          updatedLockedDocs[baseDocId] = true;
           uploadedDocIds.add(docId);
 
           if (!updatedSourceDocs[stage.id]) {
@@ -1154,7 +1218,7 @@ export function StageUploadDialog({
             ...Object.fromEntries(
               Array.from(uploadedDocIds).map(docId => {
                 const baseDocId = docId.split('_')[0];
-                const docConfig = applicableDocuments.find(doc => doc.id === baseDocId);
+                const docConfig = applicableDocumentsById[baseDocId];
                 return [docId, {
                   id: updatedLinkedDocs[docId]?.id,
                   document_id: docConfig?.kycId,
@@ -1297,7 +1361,7 @@ export function StageUploadDialog({
     } finally {
       setIsSaving(false);
     }
-  }, [stage, task, pendingDocuments, linkedDocuments, selectedSourceDocs, onTaskAction, onOpenChange, applicableDocuments, lockedDocuments, docFieldsMap]);
+  }, [stage, task, pendingDocuments, linkedDocuments, selectedSourceDocs, onTaskAction, onOpenChange, applicableDocumentsById, docFieldsMap, workflowDocuments]);
 
   const handleUploadSuccess = useCallback((newDocument: any, originatingDoc: any) => {
     if (!originatingDoc?.id) return;
@@ -1393,7 +1457,7 @@ export function StageUploadDialog({
                     )}
                   </div>
                   <div>
-                    {applicableDocuments.some((doc: any) => doc.isSpecial) && (
+                    {hasSpecialDocuments && (
                       <div className="p-2 flex gap-3">
                         <Star className="h-5 w-5 text-amber-600 flex-shrink-0" />
                         <p className="text-sm text-amber-700">
@@ -1409,13 +1473,13 @@ export function StageUploadDialog({
               </DialogHeader>
             </div>
             <div className="flex items-center gap-2">
-              {Object.keys(pendingDocuments).length > 0 && (
+              {pendingDocumentCount > 0 && (
                 <span className="text-sm text-muted-foreground">
-                  {Object.keys(pendingDocuments).length} document(s) pending save
+                  {pendingDocumentCount} document(s) pending save
                 </span>
               )}
               <Button
-                disabled={Object.keys(pendingDocuments).length === 0 || isSaving}
+                disabled={pendingDocumentCount === 0 || isSaving}
                 onClick={saveAllDocuments}
                 className="ml-4"
               >
@@ -1425,7 +1489,7 @@ export function StageUploadDialog({
                     Saving...
                   </>
                 ) : (
-                  `Save All (${Object.keys(pendingDocuments).length})`
+                  `Save All (${pendingDocumentCount})`
                 )}
               </Button>
             </div>
@@ -1456,9 +1520,7 @@ export function StageUploadDialog({
 
               <div className="flex-1 overflow-auto relative bg-slate-50/50">
                 {isLoading ? (
-                  <div className="flex items-center justify-center h-full">
-                    <Loader2 className="h-10 w-10 animate-spin text-muted-foreground" />
-                  </div>
+                  <StageUploadDialogLoadingState />
                 ) : (
                   applicableDocuments.map((doc: any) => (
                     <div

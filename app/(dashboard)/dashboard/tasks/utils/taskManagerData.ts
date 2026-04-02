@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { supabase } from "@/lib/supabase/client"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 
 // Types
 export interface Task {

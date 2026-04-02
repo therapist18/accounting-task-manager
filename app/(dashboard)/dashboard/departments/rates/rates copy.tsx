@@ -16,7 +16,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import supabase from "@/lib/supabase/client"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import * as XLSX from 'xlsx'
 
 type RateDefinition = {
@@ -99,11 +99,11 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
 
   const openRateDialog = (type: 'processing' | 'issuance', subdeptId: string, className: string | undefined, rateIndex: number) => {
     setRateContext({ type, subdeptId, className, rateIndex })
-    
+
     // Get current rate definition if exists
     const currentDept = departments.find(d => d.id === activeDept)
     const subdept = currentDept?.tm_subdepartments?.find(s => s.id.toString() === subdeptId)
-    
+
     let currentRate: ClassRate | undefined
     if (className && subdept?.classes) {
       const cls = subdept.classes.find(c => c.name === className)
@@ -150,7 +150,7 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
 
     currentDept.tm_subdepartments.forEach((subdept, subdeptIdx) => {
       const subdeptIndex = (subdeptIdx + 1).toString()
-      
+
       if (subdept.classes && subdept.classes.length > 0) {
         // Add subdepartment header
         flatData.push({
@@ -168,7 +168,7 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
         if (expandedSubdepts.has(subdept.id)) {
           subdept.classes.forEach((cls, clsIdx) => {
             const classIndex = `${subdeptIndex}.${clsIdx + 1}`
-            
+
             // Add class header
             flatData.push({
               subdeptId: subdept.id,
@@ -224,10 +224,10 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
 
   const saveRateDefinition = async () => {
     if (!rateContext) return
-    
+
     // Validate rates
-    if (isNaN(rateDefinition.ksh) || isNaN(rateDefinition.usd) || 
-        rateDefinition.ksh <= 0 || rateDefinition.usd <= 0) {
+    if (isNaN(rateDefinition.ksh) || isNaN(rateDefinition.usd) ||
+      rateDefinition.ksh <= 0 || rateDefinition.usd <= 0) {
       toast({
         title: "Validation Error",
         description: "Please enter valid positive numbers for both KSH and USD rates",
@@ -238,10 +238,10 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
 
     try {
       setIsSubmitting(true)
-      
+
       const currentDept = departments.find(d => d.id === activeDept)
       const subdept = currentDept?.tm_subdepartments?.find(s => s.id.toString() === rateContext.subdeptId)
-      
+
       if (!subdept) return
 
       let updatedRates: ClassRate[]
@@ -261,8 +261,8 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
         }
 
         // Update database
-        const updatedClasses = subdept.classes.map(c => 
-          c.name === rateContext.className 
+        const updatedClasses = subdept.classes.map(c =>
+          c.name === rateContext.className
             ? { ...c, rates: updatedRates }
             : c
         )
@@ -275,10 +275,10 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
         if (error) throw error
 
         // Update local state
-        setDepartments(prevDepts => 
+        setDepartments(prevDepts =>
           prevDepts.map(dept => ({
             ...dept,
-            tm_subdepartments: dept.tm_subdepartments?.map(sd => 
+            tm_subdepartments: dept.tm_subdepartments?.map(sd =>
               sd.id.toString() === rateContext.subdeptId
                 ? { ...sd, classes: updatedClasses }
                 : sd
@@ -306,10 +306,10 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
         if (error) throw error
 
         // Update local state
-        setDepartments(prevDepts => 
+        setDepartments(prevDepts =>
           prevDepts.map(dept => ({
             ...dept,
-            tm_subdepartments: dept.tm_subdepartments?.map(sd => 
+            tm_subdepartments: dept.tm_subdepartments?.map(sd =>
               sd.id.toString() === rateContext.subdeptId
                 ? { ...sd, upload_rates: updatedRates }
                 : sd
@@ -338,16 +338,16 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
   }
 
   const updateRateField = async (
-    subdeptId: string, 
-    className: string | undefined, 
-    rateIndex: number, 
-    field: string, 
+    subdeptId: string,
+    className: string | undefined,
+    rateIndex: number,
+    field: string,
     value: any
   ) => {
     try {
       const currentDept = departments.find(d => d.id === activeDept)
       const subdept = currentDept?.tm_subdepartments?.find(s => s.id.toString() === subdeptId)
-      
+
       if (!subdept) return
 
       if (className && subdept.classes) {
@@ -357,7 +357,7 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
 
         const updatedRates = [...cls.rates]
         const fieldPath = field.split('.')
-        
+
         // Create nested object structure if it doesn't exist
         let current = updatedRates[rateIndex]
         for (let i = 0; i < fieldPath.length - 1; i++) {
@@ -368,8 +368,8 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
         }
         current[fieldPath[fieldPath.length - 1]] = value
 
-        const updatedClasses = subdept.classes.map(c => 
-          c.name === className 
+        const updatedClasses = subdept.classes.map(c =>
+          c.name === className
             ? { ...c, rates: updatedRates }
             : c
         )
@@ -382,10 +382,10 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
         if (error) throw error
 
         // Update local state
-        setDepartments(prevDepts => 
+        setDepartments(prevDepts =>
           prevDepts.map(dept => ({
             ...dept,
-            tm_subdepartments: dept.tm_subdepartments?.map(sd => 
+            tm_subdepartments: dept.tm_subdepartments?.map(sd =>
               sd.id.toString() === subdeptId
                 ? { ...sd, classes: updatedClasses }
                 : sd
@@ -398,7 +398,7 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
 
         const updatedRates = [...subdept.upload_rates]
         const fieldPath = field.split('.')
-        
+
         let current = updatedRates[rateIndex]
         for (let i = 0; i < fieldPath.length - 1; i++) {
           if (!current[fieldPath[i]]) {
@@ -416,10 +416,10 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
         if (error) throw error
 
         // Update local state
-        setDepartments(prevDepts => 
+        setDepartments(prevDepts =>
           prevDepts.map(dept => ({
             ...dept,
-            tm_subdepartments: dept.tm_subdepartments?.map(sd => 
+            tm_subdepartments: dept.tm_subdepartments?.map(sd =>
               sd.id.toString() === subdeptId
                 ? { ...sd, upload_rates: updatedRates }
                 : sd
@@ -437,16 +437,16 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
     }
   }
 
-  const MultiSelectDropdown = <T extends string | number>({ 
-    value, 
-    options, 
-    onChange, 
-    placeholder 
-  }: { 
-    value: T[], 
-    options: T[], 
+  const MultiSelectDropdown = <T extends string | number>({
+    value,
+    options,
+    onChange,
+    placeholder
+  }: {
+    value: T[],
+    options: T[],
     onChange: (value: T[]) => void,
-    placeholder: string 
+    placeholder: string
   }) => {
     const [isOpen, setIsOpen] = useState(false)
 
@@ -486,7 +486,7 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
   const getRateValue = (rate: ClassRate, type: 'processing' | 'issuance', currency: 'KSH' | 'USD') => {
     const feeData = type === 'processing' ? rate.processingFee : rate.issuanceFee
     if (!feeData?.rate) return feeData?.amount || 0
-    
+
     if (currency === 'KSH') {
       return feeData.currency === 'KSH' ? feeData.amount : (feeData.amount * feeData.rate.ksh)
     } else {
@@ -576,7 +576,7 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                     <TableHead className="text-xs border w-24">Currency</TableHead>
                     <TableHead className="text-xs border w-24">KSH/USD</TableHead>
                     <TableHead className="text-xs border w-20">Rate</TableHead>
-                    
+
                     {/* Issuance Fee Headers */}
                     <TableHead className="text-xs border w-32">Issuance Fee Amount</TableHead>
                     <TableHead className="text-xs border w-24">Currency</TableHead>
@@ -584,12 +584,12 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                     <TableHead className="text-xs border w-40">Issuance Period Denomination</TableHead>
                     <TableHead className="text-xs border w-32">No of Issuance Period</TableHead>
                     <TableHead className="text-xs border w-20">Rate</TableHead>
-                    
+
                     {/* BCL Consultancy Headers */}
                     <TableHead className="text-xs border w-24">Tier 1</TableHead>
                     <TableHead className="text-xs border w-24">Tier 2</TableHead>
                     <TableHead className="text-xs border w-24">Tier 3</TableHead>
-                    
+
                     {/* Officer Headers */}
                     <TableHead className="text-xs border w-24">Officer 1</TableHead>
                     <TableHead className="text-xs border w-24">Officer 2</TableHead>
@@ -611,8 +611,8 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                                   className="h-6 w-6 p-0"
                                   onClick={() => toggleSubdeptExpansion(item.subdeptId)}
                                 >
-                                  {item.isExpanded ? 
-                                    <Minus className="h-4 w-4" /> : 
+                                  {item.isExpanded ?
+                                    <Minus className="h-4 w-4" /> :
                                     <Plus className="h-4 w-4" />
                                   }
                                 </Button>
@@ -646,7 +646,7 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                         <TableCell className={cn("border", item.className ? "pl-12" : "pl-4")}>
                           {item.className ? item.className : item.subdeptName}
                         </TableCell>
-                        
+
                         {/* Processing Fee Columns */}
                         <TableCell className="border p-0">
                           <Input
@@ -654,10 +654,10 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                             className="h-8 text-xs border-0 shadow-none focus-visible:ring-1 focus-visible:ring-ring"
                             value={item.rate.processingFee?.amount ?? ''}
                             onChange={(e) => updateRateField(
-                              item.subdeptId.toString(), 
-                              item.className, 
-                              item.rateIndex, 
-                              'processingFee.amount', 
+                              item.subdeptId.toString(),
+                              item.className,
+                              item.rateIndex,
+                              'processingFee.amount',
                               e.target.value === '' ? '' : parseFloat(e.target.value)
                             )}
                             placeholder="0.00"
@@ -669,10 +669,10 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                           <Select
                             value={item.rate.processingFee?.currency || 'KSH'}
                             onValueChange={(value) => updateRateField(
-                              item.subdeptId.toString(), 
-                              item.className, 
-                              item.rateIndex, 
-                              'processingFee.currency', 
+                              item.subdeptId.toString(),
+                              item.className,
+                              item.rateIndex,
+                              'processingFee.currency',
                               value as 'KSH' | 'USD'
                             )}
                           >
@@ -686,8 +686,8 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                           </Select>
                         </TableCell>
                         <TableCell className="text-xs border p-2">
-                          {item.rate.processingFee?.rate ? 
-                            `${item.rate.processingFee.rate.ksh.toFixed(2)} / ${item.rate.processingFee.rate.usd.toFixed(2)}` : 
+                          {item.rate.processingFee?.rate ?
+                            `${item.rate.processingFee.rate.ksh.toFixed(2)} / ${item.rate.processingFee.rate.usd.toFixed(2)}` :
                             'Set rate'}
                         </TableCell>
                         <TableCell className="border p-1">
@@ -696,9 +696,9 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                             size="sm"
                             className="h-8 w-full text-xs"
                             onClick={() => openRateDialog(
-                              'processing', 
-                              item.subdeptId.toString(), 
-                              item.className, 
+                              'processing',
+                              item.subdeptId.toString(),
+                              item.className,
                               item.rateIndex
                             )}
                           >
@@ -706,7 +706,7 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                             Rate
                           </Button>
                         </TableCell>
-                        
+
                         {/* Issuance Fee Columns */}
                         <TableCell className="border p-0">
                           <Input
@@ -714,10 +714,10 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                             className="h-8 text-xs border-0 shadow-none focus-visible:ring-1 focus-visible:ring-ring"
                             value={item.rate.issuanceFee?.amount ?? ''}
                             onChange={(e) => updateRateField(
-                              item.subdeptId.toString(), 
-                              item.className, 
-                              item.rateIndex, 
-                              'issuanceFee.amount', 
+                              item.subdeptId.toString(),
+                              item.className,
+                              item.rateIndex,
+                              'issuanceFee.amount',
                               e.target.value === '' ? '' : parseFloat(e.target.value)
                             )}
                             placeholder="0.00"
@@ -729,10 +729,10 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                           <Select
                             value={item.rate.issuanceFee?.currency || 'KSH'}
                             onValueChange={(value) => updateRateField(
-                              item.subdeptId.toString(), 
-                              item.className, 
-                              item.rateIndex, 
-                              'issuanceFee.currency', 
+                              item.subdeptId.toString(),
+                              item.className,
+                              item.rateIndex,
+                              'issuanceFee.currency',
                               value as 'KSH' | 'USD'
                             )}
                           >
@@ -746,8 +746,8 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                           </Select>
                         </TableCell>
                         <TableCell className="text-xs border p-2">
-                          {item.rate.issuanceFee?.rate ? 
-                            `${item.rate.issuanceFee.rate.ksh.toFixed(2)} / ${item.rate.issuanceFee.rate.usd.toFixed(2)}` : 
+                          {item.rate.issuanceFee?.rate ?
+                            `${item.rate.issuanceFee.rate.ksh.toFixed(2)} / ${item.rate.issuanceFee.rate.usd.toFixed(2)}` :
                             'Set rate'}
                         </TableCell>
                         <TableCell className="border p-0">
@@ -756,10 +756,10 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                               value={item.rate.issuanceFee?.periodDenomination || []}
                               options={[...PERIOD_DENOMINATIONS]}
                               onChange={(value) => updateRateField(
-                                item.subdeptId.toString(), 
-                                item.className, 
-                                item.rateIndex, 
-                                'issuanceFee.periodDenomination', 
+                                item.subdeptId.toString(),
+                                item.className,
+                                item.rateIndex,
+                                'issuanceFee.periodDenomination',
                                 value
                               )}
                               placeholder="Select"
@@ -773,10 +773,10 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                               value={item.rate.issuanceFee?.issuancePeriods || []}
                               options={[...ISSUANCE_PERIODS]}
                               onChange={(value) => updateRateField(
-                                item.subdeptId.toString(), 
-                                item.className, 
-                                item.rateIndex, 
-                                'issuanceFee.issuancePeriods', 
+                                item.subdeptId.toString(),
+                                item.className,
+                                item.rateIndex,
+                                'issuanceFee.issuancePeriods',
                                 value
                               )}
                               placeholder="Select"
@@ -790,9 +790,9 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                             size="sm"
                             className="h-8 w-full text-xs"
                             onClick={() => openRateDialog(
-                              'issuance', 
-                              item.subdeptId.toString(), 
-                              item.className, 
+                              'issuance',
+                              item.subdeptId.toString(),
+                              item.className,
                               item.rateIndex
                             )}
                           >
@@ -800,7 +800,7 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                             Rate
                           </Button>
                         </TableCell>
-                        
+
                         {/* BCL Consultancy Columns */}
                         <TableCell className="border p-0">
                           <Input
@@ -808,10 +808,10 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                             className="h-8 text-xs border-0 shadow-none focus-visible:ring-1 focus-visible:ring-ring"
                             value={item.rate.bclConsultancy?.tier1 ?? ''}
                             onChange={(e) => updateRateField(
-                              item.subdeptId.toString(), 
-                              item.className, 
-                              item.rateIndex, 
-                              'bclConsultancy.tier1', 
+                              item.subdeptId.toString(),
+                              item.className,
+                              item.rateIndex,
+                              'bclConsultancy.tier1',
                               e.target.value === '' ? '' : parseFloat(e.target.value)
                             )}
                             placeholder="0.00"
@@ -825,10 +825,10 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                             className="h-8 text-xs border-0 shadow-none focus-visible:ring-1 focus-visible:ring-ring"
                             value={item.rate.bclConsultancy?.tier2 ?? ''}
                             onChange={(e) => updateRateField(
-                              item.subdeptId.toString(), 
-                              item.className, 
-                              item.rateIndex, 
-                              'bclConsultancy.tier2', 
+                              item.subdeptId.toString(),
+                              item.className,
+                              item.rateIndex,
+                              'bclConsultancy.tier2',
                               e.target.value === '' ? '' : parseFloat(e.target.value)
                             )}
                             placeholder="0.00"
@@ -842,10 +842,10 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                             className="h-8 text-xs border-0 shadow-none focus-visible:ring-1 focus-visible:ring-ring"
                             value={item.rate.bclConsultancy?.tier3 ?? ''}
                             onChange={(e) => updateRateField(
-                              item.subdeptId.toString(), 
-                              item.className, 
-                              item.rateIndex, 
-                              'bclConsultancy.tier3', 
+                              item.subdeptId.toString(),
+                              item.className,
+                              item.rateIndex,
+                              'bclConsultancy.tier3',
                               e.target.value === '' ? '' : parseFloat(e.target.value)
                             )}
                             placeholder="0.00"
@@ -853,7 +853,7 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                             min="0"
                           />
                         </TableCell>
-                        
+
                         {/* Officer Columns */}
                         <TableCell className="border p-0">
                           <Input
@@ -861,10 +861,10 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                             className="h-8 text-xs border-0 shadow-none focus-visible:ring-1 focus-visible:ring-ring"
                             value={item.rate.officer?.officer1 ?? ''}
                             onChange={(e) => updateRateField(
-                              item.subdeptId.toString(), 
-                              item.className, 
-                              item.rateIndex, 
-                              'officer.officer1', 
+                              item.subdeptId.toString(),
+                              item.className,
+                              item.rateIndex,
+                              'officer.officer1',
                               e.target.value === '' ? '' : parseFloat(e.target.value)
                             )}
                             placeholder="0.00"
@@ -878,10 +878,10 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                             className="h-8 text-xs border-0 shadow-none focus-visible:ring-1 focus-visible:ring-ring"
                             value={item.rate.officer?.officer2 ?? ''}
                             onChange={(e) => updateRateField(
-                              item.subdeptId.toString(), 
-                              item.className, 
-                              item.rateIndex, 
-                              'officer.officer2', 
+                              item.subdeptId.toString(),
+                              item.className,
+                              item.rateIndex,
+                              'officer.officer2',
                               e.target.value === '' ? '' : parseFloat(e.target.value)
                             )}
                             placeholder="0.00"
@@ -895,10 +895,10 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                             className="h-8 text-xs border-0 shadow-none focus-visible:ring-1 focus-visible:ring-ring"
                             value={item.rate.officer?.officer3 ?? ''}
                             onChange={(e) => updateRateField(
-                              item.subdeptId.toString(), 
-                              item.className, 
-                              item.rateIndex, 
-                              'officer.officer3', 
+                              item.subdeptId.toString(),
+                              item.className,
+                              item.rateIndex,
+                              'officer.officer3',
                               e.target.value === '' ? '' : parseFloat(e.target.value)
                             )}
                             placeholder="0.00"
@@ -915,7 +915,7 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
           </TabsContent>
         ))}
       </Tabs>
- 
+
       {/* Rate Definition Dialog */}
       <Dialog open={isRateDialogOpen} onOpenChange={setIsRateDialogOpen}>
         <DialogContent>
@@ -925,7 +925,7 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
               Set the exchange rates for KSH and USD for this {rateContext?.type} fee.
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-4">
             <div>
               <Label htmlFor="ksh-rate">KSH Rate</Label>
@@ -962,7 +962,7 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
               </p>
             </div>
           </div>
-          
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsRateDialogOpen(false)}>
               Cancel
@@ -975,4 +975,4 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
       </Dialog>
     </div>
   )
- }
+}

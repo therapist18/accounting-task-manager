@@ -20,7 +20,7 @@ import { DocumentExtraction, Stage, StageDocument, TimeConfig, NewStage, EntityO
 import { createKYCDocument } from "../kycDocuments"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 
 type DocumentExtraction = any; type Stage = any; type StageDocument = any; type TimeConfig = any; type NewStage = any; type EntityOption = any; type DepartmentOption = any;
 

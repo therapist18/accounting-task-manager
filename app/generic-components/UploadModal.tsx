@@ -10,8 +10,54 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label"
 import { ExtractionPreview } from '@/components/ExtractionPreview'
 import { FileUpload } from '@/components/ui/file-upload'
-import { toast } from 'sonner'
+import { toast } from "@/lib/hooks/use-toast"
 import supabase from '@/lib/supabase/client'
+
+const toastControllers = new Map<string, ReturnType<typeof toast>>();
+
+const showLoadingToast = (message: string, id?: string) => {
+  const title = 'Processing';
+  const description = message;
+
+  if (id && toastControllers.has(id)) {
+    toastControllers.get(id)?.update({ id, title, description, open: true });
+    return id;
+  }
+
+  const controller = toast({ title, description });
+  toastControllers.set(controller.id, controller);
+  return controller.id;
+};
+
+const showSuccessToast = (message: string, id?: string) => {
+  const title = 'Success';
+  const description = message;
+
+  if (id && toastControllers.has(id)) {
+    const controller = toastControllers.get(id)!;
+    controller.update({ id, title, description, open: true });
+    return id;
+  }
+
+  const controller = toast({ title, description });
+  toastControllers.set(controller.id, controller);
+  return controller.id;
+};
+
+const showErrorToast = (message: string, id?: string) => {
+  const title = 'Error';
+  const description = message;
+
+  if (id && toastControllers.has(id)) {
+    const controller = toastControllers.get(id)!;
+    controller.update({ id, title, description, variant: 'destructive', open: true });
+    return id;
+  }
+
+  const controller = toast({ title, description, variant: 'destructive' });
+  toastControllers.set(controller.id, controller);
+  return controller.id;
+};
 
 interface DocumentField {
   id: string
@@ -558,13 +604,17 @@ export function UploadModal({
     return finalSelectedDoc?.document_ids?.[0] || finalSelectedDoc?.kyc_document_id || selectedDoc?.document_ids?.[0] || selectedDoc?.kyc_document_id;
   }, [finalSelectedDoc, selectedDoc]);
 
+  const showExtractionProgressToast = (fileName, message, toastId) => {
+    return showLoadingToast(`${fileName}: ${message}`, toastId);
+  };
+
   const handleFileUpload = async (files: File[]) => {
     const requiredDropdowns = dropdowns?.filter(d => d.required) || [];
     const missingRequiredDropdowns = requiredDropdowns.filter(d => !d.value);
 
     if (missingRequiredDropdowns.length > 0) {
       const missingLabels = missingRequiredDropdowns.map(d => d.label).join(', ');
-      toast.error(`Please select: ${missingLabels}`);
+      showErrorToast(`Please select: ${missingLabels}`);
       return;
     }
 
@@ -599,7 +649,7 @@ export function UploadModal({
     if (!allowMultipleTypes) {
       try {
         const processedDocsPromises = newDocs.map(async (doc) => {
-          const extractionToastId = toast.loading(`Extracting from ${doc.fileName}...`);
+          const extractionToastId = showLoadingToast(`Extraction in progress for ${doc.fileName}...`);
 
           const createEmptyData = () => {
             const emptyData = {};
@@ -621,12 +671,13 @@ export function UploadModal({
                 doc.fileUrl,
                 fieldsToExtract,
                 finalSelectedDoc?.name || documentName,
-                (progressMessage) => toast.loading(`${doc.fileName}: ${progressMessage}`, { id: extractionToastId }),
+                (progressMessage) => showExtractionProgressToast(doc.fileName, progressMessage, extractionToastId),
+                doc.fileName,
               );
               extractedData = result.extractedData;
               success = result.success;
             } else {
-              toast.success(`${doc.fileName} processed (no extraction needed)`, { id: extractionToastId });
+              showSuccessToast(`${doc.fileName} processed (no extraction needed)`, extractionToastId);
             }
 
             if (!extractedData || (typeof extractedData === 'object' && Object.keys(extractedData).length === 0)) {
@@ -650,7 +701,7 @@ export function UploadModal({
               status: 'valid'
             };
 
-            toast.success(`Processed ${doc.fileName}`, { id: extractionToastId });
+            showSuccessToast(`Processed ${doc.fileName}`, extractionToastId);
 
             let validation = { status: 'valid' as const, message: 'Document passed validation' };
             if (finalSelectedDoc?.fields?.length > 0) {
@@ -666,7 +717,7 @@ export function UploadModal({
           } catch (error) {
             console.error(`Error processing ${doc.fileName}:`, error);
 
-            toast.error(`Extraction failed for ${doc.fileName}. Please enter details manually.`, { id: extractionToastId });
+            showErrorToast(`Extraction failed for ${doc.fileName}. Please enter details manually.`, extractionToastId);
 
             const emptyData = createEmptyData();
 
@@ -686,7 +737,7 @@ export function UploadModal({
 
       } catch (error) {
         console.error('Error in file upload:', error);
-        toast.error(`An error occurred while processing files: ${error.message}`);
+        showErrorToast(`An error occurred while processing files: ${error.message}`);
       }
     }
   };
@@ -702,7 +753,7 @@ export function UploadModal({
       d.id === docId ? { ...d, selectedDocTypeId: newDocTypeId, validationStatus: 'pending', validationMessage: 'Re-extracting...' } : d
     ));
 
-    const extractionToastId = toast.loading(`Extracting ${doc.fileName} as ${selectedDocType.display_name || selectedDocType.name}...`);
+    const extractionToastId = showLoadingToast(`Extraction in progress for ${doc.fileName}...`);
 
     try {
       const fieldsToExtract = selectedDocType.fields || [];
@@ -714,12 +765,13 @@ export function UploadModal({
           doc.fileUrl,
           fieldsToExtract,
           selectedDocType.display_name || selectedDocType.name,
-          (progressMessage) => toast.loading(`${doc.fileName}: ${progressMessage}`, { id: extractionToastId }),
+          (progressMessage) => showExtractionProgressToast(doc.fileName, progressMessage, extractionToastId),
+          doc.fileName,
         );
         extractedData = result.extractedData;
         success = result.success;
       } else {
-        toast.success(`${doc.fileName} processed (no extraction needed)`, { id: extractionToastId });
+        showSuccessToast(`${doc.fileName} processed (no extraction needed)`, extractionToastId);
       }
 
       if (!extractedData || (typeof extractedData === 'object' && Object.keys(extractedData).length === 0)) {
@@ -749,7 +801,7 @@ export function UploadModal({
         selectedDocTypeId: newDocTypeId
       };
 
-      toast.success(`Extracted from ${doc.fileName}`, { id: extractionToastId });
+      showSuccessToast(`Extracted from ${doc.fileName}`, extractionToastId);
 
       const isCompanyUpload = !!company?.id;
       const validationContext = {
@@ -777,7 +829,7 @@ export function UploadModal({
       ));
     } catch (error) {
       console.error(`Error processing ${doc.fileName}:`, error);
-      toast.error(`Extraction failed. Please enter details manually.`, { id: extractionToastId });
+      showErrorToast(`Extraction failed. Please enter details manually.`, extractionToastId);
       const emptyData = {};
       if (selectedDocType.fields) {
         selectedDocType.fields.forEach(field => {
@@ -806,7 +858,7 @@ export function UploadModal({
       : finalSelectedDoc;
 
     if (!docTypeToUse) {
-      toast.error('Please select a document type first');
+      showErrorToast('Please select a document type first');
       return;
     }
 
@@ -816,7 +868,7 @@ export function UploadModal({
       )
     );
 
-    const extractionToastId = toast.loading(`Re-extracting from ${docToUpdate.fileName}...`);
+    const extractionToastId = showLoadingToast(`Extraction in progress for ${docToUpdate.fileName}...`);
     const isCompanyUpload = !!company?.id;
     const validationContext = {
       isCompanyUpload,
@@ -839,19 +891,20 @@ export function UploadModal({
           docToUpdate.fileUrl,
           fieldsToExtract,
           docTypeToUse.display_name || docTypeToUse.name || documentName,
-          (progressMessage) => toast.loading(`${docToUpdate.fileName}: ${progressMessage}`, { id: extractionToastId }),
+          (progressMessage) => showExtractionProgressToast(docToUpdate.fileName, progressMessage, extractionToastId),
+          docToUpdate.fileName,
         );
         extractedData = result.extractedData;
         success = result.success;
       } else {
-        toast.success(`${docToUpdate.fileName} processed (no extraction needed)`, { id: extractionToastId });
+        showSuccessToast(`${docToUpdate.fileName} processed (no extraction needed)`, extractionToastId);
       }
 
       const newExtractedData = typeof extractedData === 'string' ? JSON.parse(extractedData) : extractedData || {};
       const updatedDocForValidation = { ...docToUpdate, extractedData: newExtractedData, status: success ? 'valid' : 'pending' };
 
       if (fieldsToExtract.length > 0) {
-        toast.success(`Re-extracted from ${docToUpdate.fileName}`, { id: extractionToastId });
+        showSuccessToast(`Re-extracted from ${docToUpdate.fileName}`, extractionToastId);
       }
 
       const validation = await validateDocument(updatedDocForValidation, validationContext);
@@ -866,7 +919,7 @@ export function UploadModal({
         )
       );
     } catch (error) {
-      toast.error(`Re-extraction failed for ${docToUpdate.fileName}. Please enter details manually.`, { id: extractionToastId });
+      showErrorToast(`Re-extraction failed for ${docToUpdate.fileName}. Please enter details manually.`, extractionToastId);
       const emptyData = {};
       if (docTypeToUse.fields) {
         docTypeToUse.fields.forEach(field => {
@@ -889,14 +942,14 @@ export function UploadModal({
 
   const handleSaveUploads = async () => {
     if (uploadedDocs.length === 0) {
-      toast.error('Please select at least one file to upload');
+      showErrorToast('Please select at least one file to upload');
       return;
     }
 
     if (allowMultipleTypes) {
       const docsWithoutType = uploadedDocs.filter(doc => !doc.selectedDocTypeId);
       if (docsWithoutType.length > 0) {
-        toast.error('Please select a document type for all uploaded files.');
+        showErrorToast('Please select a document type for all uploaded files.');
         return;
       }
     }
@@ -938,7 +991,7 @@ export function UploadModal({
 
   const proceedWithUpload = async () => {
     setIsUploading(true);
-    const toastId = toast.loading('Processing documents...');
+    const toastId = showLoadingToast('Processing documents...');
 
     try {
       const effectiveIsCompany = isCompanyUpload || selectedMember?.type === 'company' || targetTable === 'acc_portal_kyc_uploads';
@@ -962,7 +1015,7 @@ export function UploadModal({
       const isQuickAdd = !effectiveIsCompany && additionalFields?.isFormContext;
 
       if (!shouldSkipSave && !isQuickAdd && !entityIdToUse) {
-        toast.error('Missing ID. Please ensure an entity is selected.', { id: toastId });
+        showErrorToast('Missing ID. Please ensure an entity is selected.', toastId);
         setIsUploading(false);
         return;
       }
@@ -975,7 +1028,7 @@ export function UploadModal({
       });
 
       if (invalidDocs.length > 0) {
-        toast.error('Validation errors must be fixed first.', { id: toastId });
+        showErrorToast('Validation errors must be fixed first.', toastId);
         setIsUploading(false);
         return;
       }
@@ -1073,13 +1126,13 @@ export function UploadModal({
         }
       }
 
-      toast.success('Successfully uploaded and processed!', { id: toastId });
+      showSuccessToast('Successfully uploaded and processed!', toastId);
       setUploadedDocs([]);
       setIsUploading(false);
       onClose();
 
     } catch (error) {
-      toast.error(error.message || 'Upload failed', { id: toastId });
+      showErrorToast(error.message || 'Upload failed', toastId);
       setIsUploading(false);
     }
   };

@@ -20,7 +20,7 @@ import { supabase } from "@/lib/supabase/client"
 import { ComboBox } from "@/components/ui/combobox"
 import type { Stage, TimeConfig, StageDocument, DocumentExtraction, EntityOption } from "../types"
 import { createKYCDocument, updateKYCDocument } from "../kycDocuments"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 
 type Stage = any; type TimeConfig = any; type StageDocument = any; type DocumentExtraction = any; type EntityOption = any;
 
@@ -624,35 +624,35 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
 function MultiEntityPicker({ entities, selectedEntities = [], onSelectionChange, loading = false, placeholder = "Select target entities..." }: { entities: EntityOption[], selectedEntities: Array<{ entityType: 'subdept' | 'class' | 'subclass', subdept_id: number, class_id?: string | number, subclass_id?: string | number, entityName: string }>, onSelectionChange: (selectedEntities: any[]) => void, loading?: boolean, placeholder?: string }) {
   const [open, setOpen] = useState(false);
   // Inside MultiEntityPicker (around line 301)
- // Inside MultiEntityPicker (around line 301)
-const toggleEntity = (entity: EntityOption) => {
-  // Use the same helper to get a comparable key for the selection
-  const entityKey = getEntityKey(entity); 
-  
-  // Check if this specific entity key already exists in our targeted list
-  const isSelected = selectedEntities.some(selected => 
-    getEntityKey(selected?.job_level) === entityKey
-  );
+  // Inside MultiEntityPicker (around line 301)
+  const toggleEntity = (entity: EntityOption) => {
+    // Use the same helper to get a comparable key for the selection
+    const entityKey = getEntityKey(entity);
 
-  if (isSelected) {
-    onSelectionChange(selectedEntities.filter(selected => 
-      getEntityKey(selected?.job_level) !== entityKey
-    ));
-  } else {
-    const newEntity = {
-      entityName: entity.name.replace(/^→\s*/g, ''),
-      automationId: null,
-      job_level: {
-        department_id: entity.department_id,
-        subdepartment_id: entity.subdept_id || 0,
-        class_id: entity.class_id || null,
-        subclass_id: entity.subclass_id || null,
-        level: entity.subclass_id ? 4 : entity.class_id ? 3 : 2
-      }
-    };
-    onSelectionChange([...selectedEntities, newEntity]);
-  }
-};
+    // Check if this specific entity key already exists in our targeted list
+    const isSelected = selectedEntities.some(selected =>
+      getEntityKey(selected?.job_level) === entityKey
+    );
+
+    if (isSelected) {
+      onSelectionChange(selectedEntities.filter(selected =>
+        getEntityKey(selected?.job_level) !== entityKey
+      ));
+    } else {
+      const newEntity = {
+        entityName: entity.name.replace(/^→\s*/g, ''),
+        automationId: null,
+        job_level: {
+          department_id: entity.department_id,
+          subdepartment_id: entity.subdept_id || 0,
+          class_id: entity.class_id || null,
+          subclass_id: entity.subclass_id || null,
+          level: entity.subclass_id ? 4 : entity.class_id ? 3 : 2
+        }
+      };
+      onSelectionChange([...selectedEntities, newEntity]);
+    }
+  };
   const isEntitySelected = (entity: EntityOption) => selectedEntities.some(selected => getEntityKey(selected) === getEntityKey(entity));
   const groupedEntities = entities.reduce((acc, entity) => {
     const subdeptName = entities.find(e => e.type === 'subdept' && e.subdept_id === entity.subdept_id)?.name || 'Unknown';

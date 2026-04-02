@@ -23,7 +23,7 @@ import {
   ListTree
 } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import { cn } from "@/lib/utils"
 import {
   Command,
@@ -616,7 +616,7 @@ export function DataSourceConfiguration({
                                 }
                               })}
                               options={masterFields.map(f => ({ label: f.label, value: f.id }))}
-                                 placeholder="Select Field 2"
+                              placeholder="Select Field 2"
                               searchPlaceholder="Search master fields..."
                             />
                           </div>
@@ -648,44 +648,44 @@ export function DataSourceConfiguration({
                             ))}
                           </SelectContent>
                         </Select>
-                       <div className="flex justify-between">
-                         <div className="space-y-2">
-                          <Label className="text-[10px] font-bold uppercase text-purple-700">Start Date Path</Label>
-                          <SearchableSelect
-                            value={source.computed_config?.dateDiffConfig?.startDatePath || ""}
-                            onValueChange={(v: any) => updateSource(index, {
-                              computed_config: {
-                                ...source.computed_config,
-                                dateDiffConfig: {
-                                  ...source.computed_config?.dateDiffConfig,
-                                  startDatePath: v
+                        <div className="flex justify-between">
+                          <div className="space-y-2">
+                            <Label className="text-[10px] font-bold uppercase text-purple-700">Start Date Path</Label>
+                            <SearchableSelect
+                              value={source.computed_config?.dateDiffConfig?.startDatePath || ""}
+                              onValueChange={(v: any) => updateSource(index, {
+                                computed_config: {
+                                  ...source.computed_config,
+                                  dateDiffConfig: {
+                                    ...source.computed_config?.dateDiffConfig,
+                                    startDatePath: v
+                                  }
                                 }
-                              }
-                            })}
-                             options={masterFields.map(f => ({ label: f.label, value: f.id }))}
-                            placeholder="Select Start Date Field"
-                            searchPlaceholder="Search master fields..."
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="text-[10px] font-bold uppercase text-purple-700">End Date Path</Label>
-                          <SearchableSelect
-                            value={source.computed_config?.dateDiffConfig?.endDatePath || ""}
-                            onValueChange={(v: any) => updateSource(index, {
-                              computed_config: {
-                                ...source.computed_config,
-                                dateDiffConfig: {
-                                  ...source.computed_config?.dateDiffConfig,
-                                  endDatePath: v
+                              })}
+                              options={masterFields.map(f => ({ label: f.label, value: f.id }))}
+                              placeholder="Select Start Date Field"
+                              searchPlaceholder="Search master fields..."
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-[10px] font-bold uppercase text-purple-700">End Date Path</Label>
+                            <SearchableSelect
+                              value={source.computed_config?.dateDiffConfig?.endDatePath || ""}
+                              onValueChange={(v: any) => updateSource(index, {
+                                computed_config: {
+                                  ...source.computed_config,
+                                  dateDiffConfig: {
+                                    ...source.computed_config?.dateDiffConfig,
+                                    endDatePath: v
+                                  }
                                 }
-                              }
-                            })}
-                             options={masterFields.map(f => ({ label: f.label, value: f.id }))}
-                            placeholder="Select End Date Field"
-                            searchPlaceholder="Search master fields..."
-                          />
+                              })}
+                              options={masterFields.map(f => ({ label: f.label, value: f.id }))}
+                              placeholder="Select End Date Field"
+                              searchPlaceholder="Search master fields..."
+                            />
+                          </div>
                         </div>
-                       </div>
                       </div>
                     )}
                   </div>

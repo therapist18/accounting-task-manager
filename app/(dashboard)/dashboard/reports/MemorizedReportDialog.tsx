@@ -14,7 +14,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { Badge } from "@/components/ui/badge"
 import { supabase } from "@/lib/supabase/client"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import {
   Loader2, Plus, Minus, Pencil, Trash2, X, Save, Star, Filter,
   Table as TableIcon, ChevronsUpDown, ChevronUp,

@@ -11,7 +11,7 @@ import { Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertCircle, P
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog"
 import { EnquiryDialog } from "./components/EnquiryDialog"
 import { format } from 'date-fns';
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { EditTaskDialog } from "./components/EditTaskDialog"
 import { fetchDepartments } from "../departments/departments/database"
@@ -85,7 +85,7 @@ export default function DepartmentTasksManager({
   const [isAllExpanded, setIsAllExpanded] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [stageDialogKey, setStageDialogKey] = useState(0);
-  const [realtimeSubscription, setRealtimeSubscription] = useState<any>(null);
+  const realtimeSubscriptionRef = useRef<any>(null);
   useEffect(() => {
     const headers = activeDepartmentTab === '1'
       ? ENHANCED_TABLE_HEADERS_IMMIGRATION
@@ -353,14 +353,21 @@ export default function DepartmentTasksManager({
     tableRowsCacheRef.current.clear();
   }, []);
 
-  const loadTasksData = useCallback(async (departmentId?: string, subdepartmentId?: string) => {
+  const loadTasksData = useCallback(async (departmentId?: string, subdepartmentId?: string, forceRefresh: boolean = false) => {
     if (!departmentId) return null;
 
     const cacheKey = `${departmentId}-${subdepartmentId || 'all'}`;
+
+    // Clear cache if force refresh is requested
+    if (forceRefresh) {
+      tasksCacheRef.current.delete(cacheKey);
+      tableRowsCacheRef.current.clear();
+    }
+
     const cached = tasksCacheRef.current.get(cacheKey);
     const now = Date.now();
 
-    if (cached && (now - cached.timestamp) < CACHE_DURATION) {
+    if (cached && (now - cached.timestamp) < CACHE_DURATION && !forceRefresh) {
       setTasks(cached.tasks);
       setStages(cached.stages);
       return cached;
@@ -443,6 +450,19 @@ export default function DepartmentTasksManager({
       });
     }
   }, [activeDepartmentTab, activeSubdepartmentTab, loadTasksData, fetchTmUsers])
+
+  const isTaskRelevantToActiveView = useCallback((task: any) => {
+    if (!task || !activeDepartmentTab) return false;
+
+    const jobLevel = task.job_level || {};
+    const departmentId = jobLevel.department_id ?? task.department_id;
+    const subdepartmentId = jobLevel.subdepartment_id ?? task.subdepartment_id;
+
+    const matchesDepartment = departmentId?.toString() === activeDepartmentTab;
+    const matchesSubdepartment = !activeSubdepartmentTab || subdepartmentId?.toString() === activeSubdepartmentTab;
+
+    return matchesDepartment && matchesSubdepartment;
+  }, [activeDepartmentTab, activeSubdepartmentTab])
 
   const getKycFields = useCallback((doc: any) => {
     if (!doc.kycId) return Promise.resolve([]);
@@ -1874,13 +1894,19 @@ export default function DepartmentTasksManager({
     onTaskUpdate?.(updatedTask);
     setEditDialogOpen(false);
     setEditingTask(null);
-    loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
+    loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true);
   }
 
   const handleEnquiryCreated = useCallback(async (newEnquiry: any) => {
     try {
+      // Update local state immediately for instant UI feedback
       setTasks(prevTasks => [newEnquiry, ...prevTasks])
-      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
+
+      // Refresh data from server to ensure consistency with force refresh
+      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true);
+
+      // Call parent callback to update higher-level state
+      onTaskUpdate?.(newEnquiry);
 
       toast({
         title: "Success",
@@ -2054,7 +2080,7 @@ export default function DepartmentTasksManager({
         renderMode={renderMode}
         taskName={task.name}
         clientName={task.client_name || task.clientName}
-        onFetchData={() => loadTasksData(activeDepartmentTab, activeSubdepartmentTab)}
+        onFetchData={() => loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true)}
       />
     );
   };
@@ -2576,157 +2602,62 @@ export default function DepartmentTasksManager({
 
   // Realtime subscription for tm_tasks table
   useEffect(() => {
-    // Set up realtime subscription
+    if (!activeDepartmentTab) return;
+
+    if (realtimeSubscriptionRef.current) {
+      supabase.removeChannel(realtimeSubscriptionRef.current);
+      realtimeSubscriptionRef.current = null;
+    }
+
+    const refreshTasksForRealtimeChange = async () => {
+      clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
+      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true);
+    };
+
     const subscription = supabase
-      .channel('tm_tasks_duplicate_changes')
+      .channel(`tm_tasks_changes:${activeDepartmentTab}:${activeSubdepartmentTab || 'all'}`)
       .on(
         'postgres_changes',
         {
-          event: '*',
+          event: '*', // Listen to all changes (INSERT, UPDATE, DELETE)
           schema: 'public',
           table: 'tm_tasks'
         },
         async (payload) => {
           console.log('Realtime update received:', payload);
 
-          // Handle different event types
-          if (payload.eventType === 'INSERT') {
-            // New task inserted - add to local state if it matches current filters
-            const newTask = payload.new;
-            const taskDeptId = newTask.job_level?.department_id;
-            const taskSubdeptId = newTask.job_level?.subdepartment_id;
+          const newTask = payload.new;
+          const oldTask = payload.old;
+          const isRelevant = isTaskRelevantToActiveView(newTask) || isTaskRelevantToActiveView(oldTask);
 
-            // Check if the new task matches the current department/subdepartment filter
-            if (activeDepartmentTab &&
-              (!taskDeptId || taskDeptId.toString() === activeDepartmentTab) &&
-              (!activeSubdepartmentTab || !taskSubdeptId || taskSubdeptId.toString() === activeSubdepartmentTab)) {
+          if (isRelevant) {
+            console.log('Refreshing data due to relevant realtime change');
+            await refreshTasksForRealtimeChange();
 
-              // Process the new task using the same logic as fetchTasks
-              const jobLevel = newTask.job_level || {};
-              const officer = newTask.participants_details?.find((p: any) => p.role?.includes('officer'));
-              const taskManager = newTask.participants_details?.find((p: any) => p.role?.includes('task_manager'));
-              const company = newTask.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
-
-              const processedTask: UtilTask = {
-                ...newTask,
-                applicant_name: newTask.applicant_details?.name || newTask.applicant_name || '',
-                company_name: company?.name || '',
-                department_id: jobLevel.department_id,
-                subdepartment_id: jobLevel.subdepartment_id,
-                class_id: jobLevel.class_id,
-                subclass_id: jobLevel.subclass_id,
-                job_level: {
-                  level: jobLevel.level || 0,
-                  class_id: jobLevel.class_id || '',
-                  subclass_id: jobLevel.subclass_id || null,
-                  department_id: jobLevel.department_id,
-                  subdepartment_id: jobLevel.subdepartment_id
-                },
-                officer: officer ? {
-                  id: officer.id,
-                  name: officer.name,
-                  email: officer.email || '',
-                  phone: officer.phone || ''
-                } : undefined,
-                task_manager: taskManager ? {
-                  id: taskManager.id,
-                  name: taskManager.name,
-                  email: taskManager.email || '',
-                  phone: taskManager.phone || ''
-                } : undefined
-              };
-
-              setTasks(prevTasks => [processedTask, ...prevTasks]);
-
-              // Clear cache for this department to ensure fresh data on manual refresh
-              clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
-
+            if (payload.eventType === 'INSERT') {
               toast({
                 title: "New Task Added",
-                description: `Task "${processedTask.applicant_name}" has been added.`,
+                description: "A new task has been added to the current view.",
                 variant: "default"
               });
-            }
-          } else if (payload.eventType === 'UPDATE') {
-            // Task updated - update local state
-            const updatedTask = payload.new;
-            const oldTask = payload.old;
+            } else if (payload.eventType === 'UPDATE') {
+              const hasSignificantChange = newTask?.status !== oldTask?.status ||
+                JSON.stringify(newTask?.job_level || {}) !== JSON.stringify(oldTask?.job_level || {});
 
-            setTasks(prevTasks => {
-              return prevTasks.map(task => {
-                if (task.id === updatedTask.id) {
-                  // Process the updated task using the same logic as fetchTasks
-                  const jobLevel = updatedTask.job_level || {};
-                  const officer = updatedTask.participants_details?.find((p: any) => p.role?.includes('officer'));
-                  const taskManager = updatedTask.participants_details?.find((p: any) => p.role?.includes('task_manager'));
-                  const company = updatedTask.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
-
-                  const processedTask: UtilTask = {
-                    ...updatedTask,
-                    applicant_name: updatedTask.applicant_details?.name || updatedTask.applicant_name || '',
-                    company_name: company?.name || '',
-                    department_id: jobLevel.department_id,
-                    subdepartment_id: jobLevel.subdepartment_id,
-                    class_id: jobLevel.class_id,
-                    subclass_id: jobLevel.subclass_id,
-                    job_level: {
-                      level: jobLevel.level || 0,
-                      class_id: jobLevel.class_id || '',
-                      subclass_id: jobLevel.subclass_id || null,
-                      department_id: jobLevel.department_id,
-                      subdepartment_id: jobLevel.subdepartment_id
-                    },
-                    officer: officer ? {
-                      id: officer.id,
-                      name: officer.name,
-                      email: officer.email || '',
-                      phone: officer.phone || ''
-                    } : undefined,
-                    task_manager: taskManager ? {
-                      id: taskManager.id,
-                      name: taskManager.name,
-                      email: taskManager.email || '',
-                      phone: taskManager.phone || ''
-                    } : undefined
-                  };
-
-                  // Clear cache for this department to ensure fresh data on manual refresh
-                  clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
-
-                  // Show notification for significant changes
-                  if (oldTask.status !== updatedTask.status) {
-                    toast({
-                      title: "Task Status Updated",
-                      description: `Task "${processedTask.applicant_name}" status changed to "${updatedTask.status}".`,
-                      variant: "default"
-                    });
-                  }
-
-                  return processedTask;
-                }
-                return task;
-              });
-            });
-          } else if (payload.eventType === 'DELETE') {
-            // Task deleted - remove from local state
-            const deletedTask = payload.old;
-
-            setTasks(prevTasks => {
-              const updatedTasks = prevTasks.filter(task => task.id !== deletedTask.id);
-
-              // Clear cache for this department to ensure fresh data on manual refresh
-              clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
-
-              if (prevTasks.length > updatedTasks.length) {
+              if (hasSignificantChange) {
                 toast({
-                  title: "Task Deleted",
-                  description: `Task has been removed.`,
+                  title: "Task Updated",
+                  description: "Task information has been updated.",
                   variant: "default"
                 });
               }
-
-              return updatedTasks;
-            });
+            } else if (payload.eventType === 'DELETE') {
+              toast({
+                title: "Task Removed",
+                description: "A task has been removed from the current view.",
+                variant: "default"
+              });
+            }
           }
         }
       )
@@ -2737,32 +2668,24 @@ export default function DepartmentTasksManager({
           console.error('Realtime subscription error for tm_tasks');
           toast({
             title: "Realtime Error",
-            description: "Failed to establish realtime connection. Refreshing data manually.",
+            description: "Failed to establish realtime connection. Manual refresh may be needed.",
             variant: "destructive"
           });
         }
       });
 
-    setRealtimeSubscription(subscription);
+    realtimeSubscriptionRef.current = subscription;
 
-    // Cleanup subscription on unmount
     return () => {
       if (subscription) {
         supabase.removeChannel(subscription);
+        if (realtimeSubscriptionRef.current === subscription) {
+          realtimeSubscriptionRef.current = null;
+        }
         console.log('Realtime subscription cleaned up');
       }
     };
-  }, [activeDepartmentTab, activeSubdepartmentTab, clearTasksCache]); // Re-subscribe when filters change
-
-  // Cleanup realtime subscription when component unmounts or filters change
-  useEffect(() => {
-    return () => {
-      if (realtimeSubscription) {
-        supabase.removeChannel(realtimeSubscription);
-        console.log('Realtime subscription cleaned up on filter change');
-      }
-    };
-  }, [activeDepartmentTab, activeSubdepartmentTab, realtimeSubscription]);
+  }, [activeDepartmentTab, activeSubdepartmentTab, clearTasksCache, isTaskRelevantToActiveView, loadTasksData]); // Re-subscribe when filters change
 
   useEffect(() => {
     if (activeDepartmentTab && departments.length > 0) {

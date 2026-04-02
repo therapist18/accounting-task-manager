@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
 import { supabase } from "@/lib/supabase/client"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import { getTableFields, getGroupedFields, FormField } from "./formFields"
 import ColumnVisibilityControl, { ColumnVisibilityOption } from "@/app/(dashboard)/dashboard/departments/main-shared-components/column-visibility"
 import { DocumentType, Subdepartment, DocumentField, ClientData, Department, GroupedDocuments, SubdepartmentClass, TruncatedText, SectionHeader, OptimizedCheckbox } from "./types"
@@ -43,14 +43,14 @@ export default function DocumentsFieldsTransposed() {
   const [documentTab, setDocumentTab] = useState<"company" | "individual">("company")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  
+
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [expandedDocColumns, setExpandedDocColumns] = useState<Set<string>>(new Set())
   const [expandedCategoryColumns, setExpandedCategoryColumns] = useState<Set<string>>(new Set())
-  
+
   const [availableRows, setAvailableRows] = useState<ColumnVisibilityOption[]>([])
   const [rowVisibility, setRowVisibility] = useState<Record<string, boolean>>({})
-  
+
   const [pendingChanges, setPendingChanges] = useState<{ documents: Record<string, any>; clientFields: Record<string, any> }>({ documents: {}, clientFields: {} })
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -68,45 +68,45 @@ export default function DocumentsFieldsTransposed() {
   // Memoized data for columns (documents/fields)
   const visibleColumns = useMemo(() => {
     const columns: Array<{ type: 'category' | 'document' | 'field' | 'form-section' | 'form-field' | 'platform' | 'platform-field', data: any, key: string, parentKey?: string }> = []
-    
+
     // Documents and Fields
     Object.entries(groupedDocuments).sort(([a], [b]) => parseInt(a === 'other' ? '999' : a) - parseInt(b === 'other' ? '999' : b))
-    .forEach(([categoryKey, group]) => {
-      columns.push({ type: 'category', data: group, key: `cat-${categoryKey}` })
-      if (expandedCategoryColumns.has(categoryKey)) {
-        group.documents.forEach(doc => {
-          columns.push({ type: 'document', data: doc, key: `doc-${doc.id}`, parentKey: `cat-${categoryKey}` })
-          if (expandedDocColumns.has(doc.id) && doc.hasFields) {
-            // CRITICAL FIX: This recursively handles nested fields
-            doc.fields
-              .filter(field => !field.parentId || expandedDocColumns.has(field.parentId))
-              .forEach(field => {
-                columns.push({ type: 'field', data: { ...field, docId: doc.id }, key: `field-${doc.id}-${field.id}`, parentKey: `doc-${doc.id}` })
-              })
-          }
-        })
-      }
-    })
+      .forEach(([categoryKey, group]) => {
+        columns.push({ type: 'category', data: group, key: `cat-${categoryKey}` })
+        if (expandedCategoryColumns.has(categoryKey)) {
+          group.documents.forEach(doc => {
+            columns.push({ type: 'document', data: doc, key: `doc-${doc.id}`, parentKey: `cat-${categoryKey}` })
+            if (expandedDocColumns.has(doc.id) && doc.hasFields) {
+              // CRITICAL FIX: This recursively handles nested fields
+              doc.fields
+                .filter(field => !field.parentId || expandedDocColumns.has(field.parentId))
+                .forEach(field => {
+                  columns.push({ type: 'field', data: { ...field, docId: doc.id }, key: `field-${doc.id}-${field.id}`, parentKey: `doc-${doc.id}` })
+                })
+            }
+          })
+        }
+      })
 
     // Client Form Fields
     Object.entries(groupedClientFields.formSections).forEach(([sectionKey, section]) => {
-        columns.push({ type: 'form-section', data: section, key: `form-section-${sectionKey}` })
-        section.fields.filter(f => f.showInTable).forEach(field => {
-            columns.push({ type: 'form-field', data: field, key: `form-field-${field.name}` })
-        })
+      columns.push({ type: 'form-section', data: section, key: `form-section-${sectionKey}` })
+      section.fields.filter(f => f.showInTable).forEach(field => {
+        columns.push({ type: 'form-field', data: field, key: `form-field-${field.name}` })
+      })
     })
 
     // Platform Credentials
     Object.entries(groupedClientFields.platformCredentials).forEach(([platformKey, platform]) => {
-        columns.push({ type: 'platform', data: platform, key: `platform-${platformKey}` })
-        platform.fields.filter(f => f.showInTable).forEach(field => {
-            columns.push({ type: 'platform-field', data: { ...field, platformKey }, key: `platform-${platformKey}-${field.name}` })
-        })
+      columns.push({ type: 'platform', data: platform, key: `platform-${platformKey}` })
+      platform.fields.filter(f => f.showInTable).forEach(field => {
+        columns.push({ type: 'platform-field', data: { ...field, platformKey }, key: `platform-${platformKey}-${field.name}` })
+      })
     })
 
     return columns
   }, [groupedDocuments, groupedClientFields, expandedCategoryColumns, expandedDocColumns])
-  
+
   // Memoized data for table header structure
   const headerGroups = useMemo(() => {
     const groups = []
@@ -131,7 +131,7 @@ export default function DocumentsFieldsTransposed() {
     currentDepartment.subdepartments.forEach(subdept => {
       const subdeptKey = getColumnKey(subdept.id, null);
       if (rowVisibility[subdeptKey] && !subdept.hasClasses) {
-          rows.push({ type: 'subdepartment', data: { subdept }, indices: { clsIndex: null, subclsIndex: null }, key: subdeptKey });
+        rows.push({ type: 'subdepartment', data: { subdept }, indices: { clsIndex: null, subclsIndex: null }, key: subdeptKey });
       } else if (subdept.hasClasses) {
         subdept.classes.forEach((cls, clsIndex) => {
           const classKey = getColumnKey(subdept.id, clsIndex)
@@ -156,58 +156,58 @@ export default function DocumentsFieldsTransposed() {
     setLoading(true)
     setError(null)
     try {
-        const [deptsResponse, documentsResponse, requirementsResponse] = await Promise.all([
-            supabase.from('tm_departments').select(`*, tm_subdepartments (*, classes)`).order('order', { ascending: true }),
-            supabase.from('acc_portal_kyc').select('*').order('main_category_number', { ascending: true, nullsLast: true }).order('custom_order', { ascending: true, nullsLast: true }),
-            supabase.from('tm_class_requirements').select('documents_and_fields, client_fields, class_id')
-        ]);
-        if (deptsResponse.error) throw deptsResponse.error; if (documentsResponse.error) throw documentsResponse.error; if (requirementsResponse.error) throw requirementsResponse.error;
-        
-        const transformedDepartments = (deptsResponse.data || []).map(dept => ({...dept, subdepartments: (dept.tm_subdepartments || []).sort((a,b) => (a.order||0) - (b.order||0)).map(sub => ({...sub, hasClasses:!!sub.classes?.length, classes: (sub.classes || []).map(c => ({...c, subclasses: c.subclasses || []}))}))}));
-        const processedDocuments = (documentsResponse.data || []).map(doc => ({ ...doc, fields: Array.isArray(doc.fields) ? processDocumentFields(doc.fields) : [], hasFields: Array.isArray(doc.fields) && doc.fields.length > 0, display_name: doc.display_name || doc.name }));
-        
-        const documentSettings = {}; const clientFieldSettings = {};
-        requirementsResponse.data?.forEach(req => {
-            if (Array.isArray(req.documents_and_fields)) req.documents_and_fields.forEach(item => { if(item?.id !== undefined) documentSettings[item.id] = { ap: !!(item.ap || item.display), dp: !!item.dp, understudy: !!item.understudy, references: !!item.references, kycdocumentid: item.kycdocumentid || null }});
-            if (Array.isArray(req.client_fields)) req.client_fields.forEach(item => { if(item?.id !== undefined) clientFieldSettings[item.id] = { ap: !!(item.ap || item.display), dp: !!item.dp, understudy: !!item.understudy, references: !!item.references }});
-        });
+      const [deptsResponse, documentsResponse, requirementsResponse] = await Promise.all([
+        supabase.from('tm_departments').select(`*, tm_subdepartments (*, classes)`).order('order', { ascending: true }),
+        supabase.from('acc_portal_kyc').select('*').order('main_category_number', { ascending: true, nullsLast: true }).order('custom_order', { ascending: true, nullsLast: true }),
+        supabase.from('tm_class_requirements').select('documents_and_fields, client_fields, class_id')
+      ]);
+      if (deptsResponse.error) throw deptsResponse.error; if (documentsResponse.error) throw documentsResponse.error; if (requirementsResponse.error) throw requirementsResponse.error;
 
-        const rowsForVisibility = [];
-        transformedDepartments.forEach(dept => {
-            (dept.subdepartments || []).forEach(subdept => {
-                if (subdept.hasClasses) {
-                    (subdept.classes || []).forEach((cls, clsIndex) => {
-                        if (cls.subclasses?.length) {
-                             cls.subclasses.forEach((subcls, subclsIndex) => {
-                                 rowsForVisibility.push({ id: getColumnKey(subdept.id, clsIndex, subclsIndex), label: `${subdept.name} > ${cls.name} > ${subcls.name}`, isDefault: subcls.default_display === true, group: subdept.name });
-                             });
-                        } else {
-                            rowsForVisibility.push({ id: getColumnKey(subdept.id, clsIndex), label: `${subdept.name} > ${cls.name}`, isDefault: cls.default_display === true, group: subdept.name });
-                        }
-                    });
-                } else {
-                    rowsForVisibility.push({ id: getColumnKey(subdept.id, null), label: subdept.name, isDefault: subdept.default_display === true, group: dept.name });
-                }
+      const transformedDepartments = (deptsResponse.data || []).map(dept => ({ ...dept, subdepartments: (dept.tm_subdepartments || []).sort((a, b) => (a.order || 0) - (b.order || 0)).map(sub => ({ ...sub, hasClasses: !!sub.classes?.length, classes: (sub.classes || []).map(c => ({ ...c, subclasses: c.subclasses || [] })) })) }));
+      const processedDocuments = (documentsResponse.data || []).map(doc => ({ ...doc, fields: Array.isArray(doc.fields) ? processDocumentFields(doc.fields) : [], hasFields: Array.isArray(doc.fields) && doc.fields.length > 0, display_name: doc.display_name || doc.name }));
+
+      const documentSettings = {}; const clientFieldSettings = {};
+      requirementsResponse.data?.forEach(req => {
+        if (Array.isArray(req.documents_and_fields)) req.documents_and_fields.forEach(item => { if (item?.id !== undefined) documentSettings[item.id] = { ap: !!(item.ap || item.display), dp: !!item.dp, understudy: !!item.understudy, references: !!item.references, kycdocumentid: item.kycdocumentid || null } });
+        if (Array.isArray(req.client_fields)) req.client_fields.forEach(item => { if (item?.id !== undefined) clientFieldSettings[item.id] = { ap: !!(item.ap || item.display), dp: !!item.dp, understudy: !!item.understudy, references: !!item.references } });
+      });
+
+      const rowsForVisibility = [];
+      transformedDepartments.forEach(dept => {
+        (dept.subdepartments || []).forEach(subdept => {
+          if (subdept.hasClasses) {
+            (subdept.classes || []).forEach((cls, clsIndex) => {
+              if (cls.subclasses?.length) {
+                cls.subclasses.forEach((subcls, subclsIndex) => {
+                  rowsForVisibility.push({ id: getColumnKey(subdept.id, clsIndex, subclsIndex), label: `${subdept.name} > ${cls.name} > ${subcls.name}`, isDefault: subcls.default_display === true, group: subdept.name });
+                });
+              } else {
+                rowsForVisibility.push({ id: getColumnKey(subdept.id, clsIndex), label: `${subdept.name} > ${cls.name}`, isDefault: cls.default_display === true, group: subdept.name });
+              }
             });
+          } else {
+            rowsForVisibility.push({ id: getColumnKey(subdept.id, null), label: subdept.name, isDefault: subdept.default_display === true, group: dept.name });
+          }
         });
-        
-        startTransition(() => {
-            setDepartments(transformedDepartments);
-            setDocuments(processedDocuments);
-            setDocumentAllocations(documentSettings);
-            setClientFieldAllocations(clientFieldSettings);
-            const enrichedRows = rowsForVisibility.map(r => ({ ...r, visible: r.isDefault }));
-            setAvailableRows(enrichedRows);
-            if (transformedDepartments.length > 0) setActiveTab(transformedDepartments[0].id);
-            setRowVisibility(enrichedRows.reduce((acc, row) => ({ ...acc, [row.id]: row.isDefault }), {}));
-            const categoryKeys = Object.keys(groupDocumentsByCategory(processedDocuments.filter(doc => doc.category === CATEGORY_MAPPING[documentTab])));
-            setExpandedCategoryColumns(new Set(categoryKeys));
-        });
+      });
+
+      startTransition(() => {
+        setDepartments(transformedDepartments);
+        setDocuments(processedDocuments);
+        setDocumentAllocations(documentSettings);
+        setClientFieldAllocations(clientFieldSettings);
+        const enrichedRows = rowsForVisibility.map(r => ({ ...r, visible: r.isDefault }));
+        setAvailableRows(enrichedRows);
+        if (transformedDepartments.length > 0) setActiveTab(transformedDepartments[0].id);
+        setRowVisibility(enrichedRows.reduce((acc, row) => ({ ...acc, [row.id]: row.isDefault }), {}));
+        const categoryKeys = Object.keys(groupDocumentsByCategory(processedDocuments.filter(doc => doc.category === CATEGORY_MAPPING[documentTab])));
+        setExpandedCategoryColumns(new Set(categoryKeys));
+      });
     } catch (err) { console.error('Error fetching data:', err); setError('Failed to load data. Please try again.'); } finally { setLoading(false); }
   }, [documentTab, getColumnKey]);
 
   useEffect(() => { fetchData() }, [fetchData]);
-  
+
   // --- TOGGLE & EVENT HANDLERS ---
   const handleDisplayToggle = useCallback((allocationId, subdeptId, clsIndex, subclsIndex, columnType, checked) => {
     const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === subdeptId);
@@ -222,30 +222,30 @@ export default function DocumentsFieldsTransposed() {
     setPendingChanges(prev => ({ ...prev, clientFields: { ...prev.clientFields, [allocationKey]: { ...prev.clientFields[allocationKey], [columnType]: checked } } }));
     setHasUnsavedChanges(true);
   }, [currentDepartment]);
-  
+
   const getAllocationStatus = useCallback((...args) => getAllocationStatusUtil(...args, documentAllocations, currentDepartment), [documentAllocations, currentDepartment]);
   const getClientFieldAllocationStatus = useCallback((...args) => getClientFieldAllocationStatusUtil(...args, clientFieldAllocations, currentDepartment), [clientFieldAllocations, currentDepartment]);
 
   const toggleRowExpansion = useCallback((rowKey) => setExpandedRows(prev => toggleSetItem(prev, rowKey)), []);
   const toggleDocColumnExpansion = useCallback((docId) => setExpandedDocColumns(prev => toggleSetItem(prev, docId)), []);
   const toggleCategoryColumnExpansion = useCallback((catKey) => setExpandedCategoryColumns(prev => toggleSetItem(prev, catKey)), []);
-  
-  const handleRowVisibilityChange = useCallback((rowId, visible) => setRowVisibility(prev => ({...prev, [rowId]: visible})), []);
+
+  const handleRowVisibilityChange = useCallback((rowId, visible) => setRowVisibility(prev => ({ ...prev, [rowId]: visible })), []);
   const handleShowAllRows = useCallback(() => setRowVisibility(availableRows.reduce((acc, row) => ({ ...acc, [row.id]: true }), {})), [availableRows]);
   const handleHideAllRows = useCallback(() => setRowVisibility(availableRows.reduce((acc, row) => ({ ...acc, [row.id]: false }), {})), [availableRows]);
   const handleResetRowsToDefault = useCallback(() => setRowVisibility(availableRows.reduce((acc, row) => ({ ...acc, [row.id]: row.isDefault }), {})), [availableRows]);
 
   const expandAll = useCallback(() => {
     startTransition(() => {
-        setExpandedRows(new Set(visibleRows.map(r => r.key)));
-        setExpandedCategoryColumns(new Set(Object.keys(groupedDocuments)));
-        setExpandedDocColumns(new Set(documents.filter(d => d.hasFields).map(d => d.id)));
+      setExpandedRows(new Set(visibleRows.map(r => r.key)));
+      setExpandedCategoryColumns(new Set(Object.keys(groupedDocuments)));
+      setExpandedDocColumns(new Set(documents.filter(d => d.hasFields).map(d => d.id)));
     });
   }, [visibleRows, groupedDocuments, documents]);
   const collapseAll = useCallback(() => {
     startTransition(() => {
-        setExpandedRows(new Set());
-        setExpandedDocColumns(new Set());
+      setExpandedRows(new Set());
+      setExpandedDocColumns(new Set());
     });
   }, []);
 
@@ -263,16 +263,16 @@ export default function DocumentsFieldsTransposed() {
     <div className="w-full min-h-screen">
       <div className="mx-auto p-4">
         <div className="flex justify-between items-center mb-4">
-            <div><h1 className="text-3xl font-semibold text-gray-900">Document Management (Transposed)</h1></div>
-            <div className="flex gap-3">
-                {hasUnsavedChanges && (<>
-                    <Button variant="outline" onClick={handleDiscardChanges} disabled={isSaving}>Discard</Button>
-                    <Button onClick={handleSaveAllChanges} disabled={isSaving} className="bg-green-600 hover:bg-green-700">{isSaving ? 'Saving...' : 'Save All'}</Button>
-                </>)}
-                <ColumnVisibilityControl columns={updatedAvailableRows} onVisibilityChange={handleRowVisibilityChange} onShowAll={handleShowAllRows} onHideAll={handleHideAllRows} onResetToDefault={handleResetRowsToDefault} title="Row Visibility" description="Show/hide department/class rows" />
-                <Button variant="outline" onClick={expandAll}><Expand className="h-4 w-4 mr-2" />Expand All</Button>
-                <Button variant="outline" onClick={collapseAll}><Minimize2 className="h-4 w-4 mr-2" />Collapse All</Button>
-            </div>
+          <div><h1 className="text-3xl font-semibold text-gray-900">Document Management (Transposed)</h1></div>
+          <div className="flex gap-3">
+            {hasUnsavedChanges && (<>
+              <Button variant="outline" onClick={handleDiscardChanges} disabled={isSaving}>Discard</Button>
+              <Button onClick={handleSaveAllChanges} disabled={isSaving} className="bg-green-600 hover:bg-green-700">{isSaving ? 'Saving...' : 'Save All'}</Button>
+            </>)}
+            <ColumnVisibilityControl columns={updatedAvailableRows} onVisibilityChange={handleRowVisibilityChange} onShowAll={handleShowAllRows} onHideAll={handleHideAllRows} onResetToDefault={handleResetRowsToDefault} title="Row Visibility" description="Show/hide department/class rows" />
+            <Button variant="outline" onClick={expandAll}><Expand className="h-4 w-4 mr-2" />Expand All</Button>
+            <Button variant="outline" onClick={collapseAll}><Minimize2 className="h-4 w-4 mr-2" />Collapse All</Button>
+          </div>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -294,10 +294,10 @@ export default function DocumentsFieldsTransposed() {
                               <TableHead className="sticky left-[250px] z-30 bg-blue-700 w-[80px] border-b border-r border-blue-500"></TableHead>
                               {headerGroups.map(group => (
                                 <TableHead key={group.header.key} colSpan={group.children.length || 1} className="bg-blue-600 text-white p-2 text-center border-b border-l border-r border-blue-400">
-                                    <div className="flex items-center justify-center gap-2">
-                                        <MemoizedTruncatedText text={group.header.data.mainCategory || group.header.data.title} maxLength={20} className="font-semibold" />
-                                        {group.header.type === 'category' && <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-white hover:bg-blue-700" onClick={() => toggleCategoryColumnExpansion(group.header.data.mainCategoryNumber)}>{expandedCategoryColumns.has(group.header.data.mainCategoryNumber) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}</Button>}
-                                    </div>
+                                  <div className="flex items-center justify-center gap-2">
+                                    <MemoizedTruncatedText text={group.header.data.mainCategory || group.header.data.title} maxLength={20} className="font-semibold" />
+                                    {group.header.type === 'category' && <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-white hover:bg-blue-700" onClick={() => toggleCategoryColumnExpansion(group.header.data.mainCategoryNumber)}>{expandedCategoryColumns.has(group.header.data.mainCategoryNumber) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}</Button>}
+                                  </div>
                                 </TableHead>
                               ))}
                             </TableRow>
@@ -307,12 +307,12 @@ export default function DocumentsFieldsTransposed() {
                               <TableHead className="sticky left-[50px] z-30 bg-blue-700 text-white p-2 border-b border-r border-blue-500">Department/Class</TableHead>
                               <TableHead className="sticky left-[250px] z-30 bg-blue-700 text-white p-2 border-b border-r border-blue-500">Type</TableHead>
                               {headerGroups.flatMap(group => group.children.map(col => (
-                                  <TableHead key={col.key} className="bg-blue-500 text-white p-2 text-center border-b border-l border-r border-blue-400 w-[150px] min-w-[150px]">
-                                    <div className="flex items-center justify-center gap-1 text-xs" style={{ paddingLeft: col.type === 'field' ? `${col.data.level * 15}px` : '0px' }}>
-                                        <MemoizedTruncatedText text={col.data.display_name || col.data.tableHeader || col.data.label || col.data.name} maxLength={15} />
-                                        {col.data.hasFields && <Button variant="ghost" size="sm" className="h-4 w-4 p-0 text-white hover:bg-blue-600" onClick={() => toggleDocColumnExpansion(col.data.id)}>{expandedDocColumns.has(col.data.id) ? <Minus className="h-3 w-3"/> : <Plus className="h-3 w-3"/>}</Button>}
-                                    </div>
-                                  </TableHead>
+                                <TableHead key={col.key} className="bg-blue-500 text-white p-2 text-center border-b border-l border-r border-blue-400 w-[150px] min-w-[150px]">
+                                  <div className="flex items-center justify-center gap-1 text-xs" style={{ paddingLeft: col.type === 'field' ? `${col.data.level * 15}px` : '0px' }}>
+                                    <MemoizedTruncatedText text={col.data.display_name || col.data.tableHeader || col.data.label || col.data.name} maxLength={15} />
+                                    {col.data.hasFields && <Button variant="ghost" size="sm" className="h-4 w-4 p-0 text-white hover:bg-blue-600" onClick={() => toggleDocColumnExpansion(col.data.id)}>{expandedDocColumns.has(col.data.id) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}</Button>}
+                                  </div>
+                                </TableHead>
                               )))}
                             </TableRow>
                           </TableHeader>
@@ -324,9 +324,9 @@ export default function DocumentsFieldsTransposed() {
                               const { clsIndex, subclsIndex } = indices;
 
                               let mainLabel = ''; let subLabel = '';
-                              if(row.type === 'subdepartment') mainLabel = subdept.name;
-                              if(row.type === 'class') { mainLabel = subdept.name; subLabel = data.cls.name; }
-                              if(row.type === 'subclass') { mainLabel = data.cls.name; subLabel = data.subcls.name; }
+                              if (row.type === 'subdepartment') mainLabel = subdept.name;
+                              if (row.type === 'class') { mainLabel = subdept.name; subLabel = data.cls.name; }
+                              if (row.type === 'subclass') { mainLabel = data.cls.name; subLabel = data.subcls.name; }
 
                               const rowTypes = ['ap', 'dp', ...(shouldShowUnderstudy(subdept, clsIndex) ? ['understudy'] : []), ...(shouldShowReferences(subdept) ? ['references'] : [])];
                               const displayRowTypes = isRowExpanded ? rowTypes : ['ap'];
@@ -334,18 +334,18 @@ export default function DocumentsFieldsTransposed() {
                               return displayRowTypes.map((rowType, typeIndex) => (
                                 <TableRow key={`${key}-${rowType}`}>
                                   {typeIndex === 0 && <TableCell rowSpan={displayRowTypes.length} className="sticky left-0 z-10 bg-gray-50 border-b border-r text-center w-[50px]"><Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => toggleRowExpansion(key)}>{isRowExpanded ? <ChevronsDown className="h-4 w-4" /> : <ChevronsRight className="h-4 w-4" />}</Button></TableCell>}
-                                  {typeIndex === 0 && <TableCell rowSpan={displayRowTypes.length} className="sticky left-[50px] z-10 bg-gray-50 border-b border-r font-medium text-gray-800 p-2 w-[200px]"><MemoizedTruncatedText text={mainLabel} className="font-semibold"/>{subLabel && <MemoizedTruncatedText text={subLabel} className="text-sm text-gray-600"/>}</TableCell>}
+                                  {typeIndex === 0 && <TableCell rowSpan={displayRowTypes.length} className="sticky left-[50px] z-10 bg-gray-50 border-b border-r font-medium text-gray-800 p-2 w-[200px]"><MemoizedTruncatedText text={mainLabel} className="font-semibold" />{subLabel && <MemoizedTruncatedText text={subLabel} className="text-sm text-gray-600" />}</TableCell>}
                                   <TableCell className="sticky left-[250px] z-10 bg-gray-100 border-b border-r font-semibold text-xs uppercase p-2 w-[80px]">{rowType === 'understudy' ? 'US' : rowType === 'references' ? 'REF' : rowType}</TableCell>
-                                  
+
                                   {headerGroups.flatMap(group => group.children.map(col => {
-                                    if(col.data.type === 'array' || col.data.type === 'array-container' || col.data.type === 'object' || col.data.isArrayItem) return <TableCell key={col.key} className="text-center border p-2">-</TableCell>;
+                                    if (col.data.type === 'array' || col.data.type === 'array-container' || col.data.type === 'object' || col.data.isArrayItem) return <TableCell key={col.key} className="text-center border p-2">-</TableCell>;
                                     let allocationId, handler, isChecked;
                                     if (col.type === 'document') { allocationId = col.data.id; handler = handleDisplayToggle; isChecked = getAllocationStatus(allocationId, subdept.id, clsIndex, subclsIndex, rowType); }
                                     else if (col.type === 'field') { allocationId = `${col.data.docId}-${col.data.id}`; handler = handleDisplayToggle; isChecked = getAllocationStatus(allocationId, subdept.id, clsIndex, subclsIndex, rowType); }
                                     else if (col.type === 'form-field') { allocationId = `form-field-${col.data.name}`; handler = handleClientFieldToggle; isChecked = getClientFieldAllocationStatus(allocationId, subdept.id, clsIndex, subclsIndex, rowType); }
                                     else if (col.type === 'platform-field') { allocationId = `platform-${col.data.platformKey}-${col.data.name}`; handler = handleClientFieldToggle; isChecked = getClientFieldAllocationStatus(allocationId, subdept.id, clsIndex, subclsIndex, rowType); }
                                     if (!allocationId) return <TableCell key={col.key} className="text-center border p-2"></TableCell>;
-                                    
+
                                     return <TableCell key={`${col.key}-${rowType}`} className="text-center border p-2"><MemoizedCheckbox checked={isChecked} onCheckedChange={(c) => handler(allocationId, subdept.id, clsIndex, subclsIndex, rowType, c)} allocationKey={`${rowType}-${col.key}-${key}`} /></TableCell>
                                   }))}
                                 </TableRow>

@@ -3,7 +3,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import dayjs from 'dayjs'; // Import dayjs library
 import { supabase } from "@/utils/supabase/client";
-import { toast } from "sonner";
+import { toast } from "@/lib/hooks/use-toast"
 
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
 
@@ -347,17 +347,12 @@ export const performExtraction = async (
   let attempts = 0;
   const MAX_ATTEMPTS = 3;
 
+  onProgress?.('Preparing document for extraction...');
+
   while (attempts < MAX_ATTEMPTS) {
     try {
       const progressMessage = `Attempt ${attempts + 1}/${MAX_ATTEMPTS}: Processing document...`;
       onProgress?.(progressMessage);
-
-      // Also show direct toast for better visibility
-      if (attempts === 0) {
-        toast.loading(progressMessage, { id: 'extraction-progress' });
-      } else {
-        toast.loading(progressMessage, { id: 'extraction-progress' });
-      }
 
       const filePart = await fileToGenerativePart(fileUrl, originalFileName);
       const fieldPrompts = formatFieldPrompts(fields);
@@ -472,7 +467,7 @@ export const performExtraction = async (
       const resultMessage = validationErrors.length > 0
         ? 'Data extracted with some validation issues. Please review and correct if needed.'
         : 'Data extracted successfully';
-      toast.success(resultMessage, { id: 'extraction-progress' });
+      onProgress?.('Extraction complete. Validating extracted fields...');
       return {
         extractedData: mappedData,
         success: true,
@@ -489,11 +484,10 @@ export const performExtraction = async (
       if (attempts < MAX_ATTEMPTS) {
         const retryMessage = `Extraction failed. Retrying with same API key (Attempt ${attempts + 1}/${MAX_ATTEMPTS})...`;
         onProgress?.(retryMessage);
-        toast.loading(retryMessage, { id: 'extraction-progress' });
         await delay(2000); // Wait 2 seconds before retrying
       } else {
         const errorMessage = `Extraction failed after ${MAX_ATTEMPTS} attempts. Please enter the data manually.`;
-        toast.error(errorMessage, { id: 'extraction-progress' });
+        onProgress?.(errorMessage);
         return {
           extractedData: {},
           success: false,
@@ -506,7 +500,7 @@ export const performExtraction = async (
   }
 
   const finalErrorMessage = 'Extraction failed after all attempts. Please enter the data manually.';
-  toast.error(finalErrorMessage, { id: 'extraction-progress' });
+  onProgress?.(finalErrorMessage);
   return {
     extractedData: {},
     success: false,

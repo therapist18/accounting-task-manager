@@ -12,7 +12,7 @@ import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog"
 import { Building, Briefcase } from "lucide-react"
 import { EnquiryDialog } from "./components/EnquiryDialog"
 import { format } from 'date-fns';
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { EditTaskDialog } from "./components/EditTaskDialog"
 import { fetchDepartments } from "../departments/departments/database"
@@ -90,8 +90,8 @@ export default function DepartmentTasksManager({
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages']))
   const [expandedImmigrationStatus, setExpandedImmigrationStatus] = useState<Set<string>>(new Set())
   useEffect(() => {
-    const headers = activeDepartmentTab === '1' 
-      ? ENHANCED_TABLE_HEADERS_IMMIGRATION 
+    const headers = activeDepartmentTab === '1'
+      ? ENHANCED_TABLE_HEADERS_IMMIGRATION
       : ENHANCED_TABLE_HEADERS;
     setCurrentTableHeaders(headers);
     setVisibleHeaders(new Set(headers.filter(h => h.default).map(h => h.id)));
@@ -429,44 +429,44 @@ export default function DepartmentTasksManager({
 
   const determineCurrentStage = useCallback((task: any, stages: any[]) => {
     if (!task.stages || !stages.length) return null;
-  
+
     // Sort stages by order_num
     const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-  
+
     // Get all stages that have status or date in task.stages
     const stagesWithStatus = sortedStages.filter(stage => {
       const stageData = task.stages[stage.id];
       return stageData && (stageData.status || stageData.date);
     });
-  
+
     // If no stages have status/date, return the first stage
     if (stagesWithStatus.length === 0) {
       return sortedStages[0] || null;
     }
-  
+
     // Find all completed stages (with status completed or date)
     const completedStages = sortedStages.filter(stage => {
       const stageData = task.stages[stage.id];
       return stageData && (stageData.status === 'completed' || stageData.date);
     });
-  
+
     // If we have completed stages, find the last one in the sequence
     if (completedStages.length > 0) {
       // Find the highest order_num among completed stages
-      const lastCompletedStage = completedStages.reduce((prev, current) => 
+      const lastCompletedStage = completedStages.reduce((prev, current) =>
         (prev.order_num || 0) > (current.order_num || 0) ? prev : current
       );
-  
+
       // If there's a next stage after the last completed one, return it
       const nextStageIndex = sortedStages.findIndex(s => s.id === lastCompletedStage.id) + 1;
       if (nextStageIndex < sortedStages.length) {
         return sortedStages[nextStageIndex];
       }
-      
+
       // Otherwise return the last completed stage
       return lastCompletedStage;
     }
-  
+
     // If no completed stages but we have stages with status, return the first one
     return stagesWithStatus[0] || sortedStages[0] || null;
   }, []);
@@ -1666,7 +1666,7 @@ export default function DepartmentTasksManager({
         stageData,
         hasDate: !!stageData.date
       });
-      
+
       return (
         <div className="flex flex-col items-center gap-0.5">
           {stageData.date && (
@@ -1684,9 +1684,9 @@ export default function DepartmentTasksManager({
         taskId: task.id,
         requiresUpload: row.stage?.requires_upload !== false
       });
-  
+
       const requiresUpload = row.stage?.requires_upload !== false;
-      
+
       return (
         <EditableStageCell
           key={row.stage.id}
@@ -2741,7 +2741,7 @@ export default function DepartmentTasksManager({
         departments={departments}
         users={Array.from(tmUsers.values())}
         officers={Array.from(tmUsers.values()).filter(u => u.role === 'officer')}
-        allDocuments={allDocuments} 
+        allDocuments={allDocuments}
         onTaskUpdate={handleTaskUpdate}
       />
 

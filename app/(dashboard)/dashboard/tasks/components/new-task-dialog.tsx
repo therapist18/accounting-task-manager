@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge"
 import { User, Building2, Users, FileText, Loader2, Info } from "lucide-react"
 import supabase from "@/lib/supabase/client"
 import { Department, DepartmentWithDetails, Subdepartment, fetchDepartments, TaskManagerAssistant } from "@/app/(dashboard)/dashboard/departments/departments/database"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 
 interface Officer {
   id: string
@@ -257,7 +257,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
       // Create a map for quick department lookup
       const deptMap = new Map<string, Department>()
       depts.forEach(dept => deptMap.set(dept.id, dept))
-      
+
       // Update state with the fetched data
       setDepartments(depts)
       setDepartmentMap(deptMap)
@@ -286,13 +286,13 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
     // Check both taskManager and task_manager properties
     const manager = selectedSubdepartment?.taskManager || selectedSubdepartment?.task_manager;
     if (!manager?.id) return [];
-    
+
     const managerId = manager.id.toString();
     const managerUser = allUsers.find(u => u.id === managerId);
-    
+
     // If we have a direct name on the manager object, use it
     const managerName = manager.name || managerUser?.name || 'Unnamed Manager';
-    
+
     return [{
       id: managerId,
       name: managerName,
@@ -304,20 +304,20 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
     // Check both taskAssistants and task_assistant arrays
     const assistants = selectedSubdepartment?.taskAssistants || selectedSubdepartment?.task_assistant || [];
     if (!Array.isArray(assistants) || assistants.length === 0) return [];
-    
+
     return assistants.map(assistant => {
       // Get the user ID from either userId or id field
       const assistantId = (assistant.userId || assistant.id)?.toString();
       if (!assistantId) return null;
-      
+
       // Find the user in allUsers - ensure we're comparing strings
       const assistantUser = allUsers.find(u => u.id.toString() === assistantId.toString());
-      
+
       if (!assistantUser) {
         console.warn(`Could not find user with ID: ${assistantId}`);
         return null;
       }
-      
+
       return {
         id: assistantId,
         name: assistantUser.name || `User ${assistantId}`,
@@ -325,28 +325,28 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
       };
     }).filter(Boolean); // Remove any null entries
   }, [selectedSubdepartment, allUsers]);
-  
+
   // Available officers (users linked to the selected department or with officer role)
   const availableOfficers = useMemo(() => {
     if (!selectedSubdepartment?.department_id) return [];
-    
+
     return allUsers
       .filter(user => {
         if (!user) return false;
-        
+
         // Include users who are either:
         // 1. Assigned to this department (if department_id is a string, convert to number for comparison)
         const isInDepartment = user.department_id?.toString() === selectedSubdepartment.department_id.toString();
-        
+
         // 2. Have a role of officer or staff
         const role = (user.role || '').toLowerCase();
         const isOfficerOrStaff = role.includes('officer') || role.includes('staff');
-        
+
         return isInDepartment || isOfficerOrStaff;
       })
       .map(officer => {
         if (!officer) return null;
-        
+
         return {
           id: officer.id.toString(),
           name: officer.name || `User ${officer.id}`,
@@ -355,14 +355,14 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
       })
       .filter(Boolean); // Remove any null entries
   }, [allUsers, selectedSubdepartment?.department_id]);
-  
+
   // Log for debugging
   useEffect(() => {
   }, [availableTaskAssistants, availableOfficers, formData]);
 
   // Get subdepartments from the department map
   const fetchSubdepartments = useCallback((departmentId: string) => {
-    
+
     if (!departmentId) {
       setSubdepartments([])
       setFormData(prev => ({
@@ -376,14 +376,14 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
     }
 
     let department = departmentMap.get(departmentId)
-    
+
     if (!department && typeof departmentId === 'string') {
       const numericId = parseInt(departmentId, 10)
       if (!isNaN(numericId)) {
         department = departmentMap.get(numericId as any)
       }
     }
-    
+
     if (!department) {
       for (const [key, dept] of departmentMap.entries()) {
         if (key.toString() === departmentId.toString()) {
@@ -392,7 +392,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
         }
       }
     }
-    
+
     if (!department) {
       setSubdepartments([])
       return
@@ -400,12 +400,12 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
 
     // Get subdepartments from the department
     const subdepts = department.subdepartments || []
-    
+
     // Update subdepartments with task manager/assistant details
     const updatedSubdepts = subdepts.map(subdept => {
       const taskManager = allUsers.find(user => user.id === subdept.task_manager?.id)
       const taskAssistant = allUsers.find(user => user.id === subdept.task_assistant?.id)
-      
+
       return {
         ...subdept,
         taskManager: taskManager || null,
@@ -534,7 +534,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
         const selectedSubdept = subdepartments.find(s => s.id.toString() === prev.subdepartment_id.toString());
         const selectedClass = selectedSubdept?.classes?.find(c => c.id.toString() === prev.class_id);
         const selectedSubclass = selectedClass?.subClasses?.find(sc => sc.id.toString() === value);
-        
+
         return {
           ...prev,
           subclass_id: value,
@@ -605,11 +605,11 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
       const actualClientId = formData.applicant_type === 'dependent'
         ? formData.principal_member_id
         : null;
-      
+
       // Find the selected subdepartment and department
       const selectedSubdept = subdepartments.find(sd => sd.id.toString() === formData.subdepartment_id);
       const selectedDept = departments.find(d => d.id === formData.department_id);
-      
+
       if (!selectedSubdept || !selectedDept) {
         throw new Error('Selected department or subdepartment not found');
       }
@@ -623,10 +623,10 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
         // Basic task info
         job_description: formData.job_description,
         status: formData.status || 'registered',
-        date_initiated: formData.date_initiated 
-          ? new Date(formData.date_initiated).toISOString() 
+        date_initiated: formData.date_initiated
+          ? new Date(formData.date_initiated).toISOString()
           : new Date().toISOString(),
-        
+
         // Relationship IDs
         department_id: Number(formData.department_id),
         subdepartment_id: Number(formData.subdepartment_id),
@@ -635,13 +635,13 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
         task_manager_id: formData.task_manager_id ? Number(formData.task_manager_id) : null,
         task_assistant_id: formData.task_assistant_id ? Number(formData.task_assistant_id) : null,
         officer_id: formData.officer_id ? Number(formData.officer_id) : null,
-        
+
         // Application specific fields
         applicant_type: formData.applicant_type,
         applicant_name: formData.applicant_name || null,
         r_number: formData.r_number || null,
         principal_member_name: formData.principal_member_name || null,
-        
+
         // Additional fields
         renewal_status: formData.renewal_status || 'New',
         account_used: formData.account_used || null,
@@ -650,7 +650,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
-      
+
       // Call the API to create the task
       const { data: newTask, error } = await supabase
         .from('tm_tasks')
@@ -670,12 +670,12 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
       // Create a complete task object with all relationships for the callback
       const taskWithRelationships = {
         ...newTask,
-        department: selectedDept ? { 
-          id: selectedDept.id, 
-          name: selectedDept.name 
+        department: selectedDept ? {
+          id: selectedDept.id,
+          name: selectedDept.name
         } : null,
-        subdepartment: selectedSubdept ? { 
-          id: selectedSubdept.id, 
+        subdepartment: selectedSubdept ? {
+          id: selectedSubdept.id,
           name: selectedSubdept.name,
           task_manager: selectedSubdept.task_manager,
           task_assistant: selectedSubdept.task_assistant
@@ -720,7 +720,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
       // Reset the form and close the dialog
       resetForm();
       onOpenChange(false);
-      
+
       // Call the onCreate callback with the complete task data
       onCreate?.(taskWithRelationships);
     } catch (error) {
@@ -734,13 +734,13 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
       setLoading(false);
     }
   }, [formData, loading, onOpenChange, onCreate, resetForm])
- 
+
   const selectedDepartment = useMemo(() => {
     if (!formData.department_id) return null;
     const dept = departments.find(d => d.id.toString() === formData.department_id.toString());
     return dept || null;
   }, [departments, formData.department_id]);
-  
+
   // Get available classes from the selected subdepartment
   const availableClasses = useMemo(() => {
     if (!selectedSubdepartment) return [];
@@ -777,10 +777,10 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
   // Get available subclasses from the selected class
   const availableSubclasses = useMemo(() => {
     if (!formData.class_id || !selectedSubdepartment?.classes) return [];
-    
+
     const selectedClass = selectedSubdepartment.classes.find(c => c.id.toString() === formData.class_id);
     if (!selectedClass?.subClasses) return [];
-    
+
     return selectedClass.subClasses.map(subClass => ({
       id: subClass.id.toString(),
       name: subClass.name,
@@ -847,7 +847,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
 
         <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
           <div className="px-6 py-2 space-y-6 overflow-y-auto flex-1">
-            
+
             {/* Job Details Section */}
             <div className="space-y-4 rounded-lg border p-4 bg-white shadow-sm">
               <div className="flex items-center gap-2">
@@ -923,9 +923,8 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                     <RadioGroupItem value="principal" id="principal" className="peer sr-only" />
                     <Label
                       htmlFor="principal"
-                      className={`flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground cursor-pointer ${
-                        formData.applicant_type === 'principal' ? 'border-primary bg-blue-50' : ''
-                      }`}
+                      className={`flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground cursor-pointer ${formData.applicant_type === 'principal' ? 'border-primary bg-blue-50' : ''
+                        }`}
                     >
                       <User className="h-6 w-6 mb-2 text-blue-600" />
                       <span className="font-medium">Principal</span>
@@ -935,9 +934,8 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                     <RadioGroupItem value="dependent" id="dependent" className="peer sr-only" />
                     <Label
                       htmlFor="dependent"
-                      className={`flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground cursor-pointer ${
-                        formData.applicant_type === 'dependent' ? 'border-primary bg-blue-50' : ''
-                      }`}
+                      className={`flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground cursor-pointer ${formData.applicant_type === 'dependent' ? 'border-primary bg-blue-50' : ''
+                        }`}
                     >
                       <Users className="h-6 w-6 mb-2 text-blue-600" />
                       <span className="font-medium">Dependent</span>
@@ -1026,12 +1024,12 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                     required
                   >
                     <SelectTrigger>
-                      <SelectValue 
+                      <SelectValue
                         placeholder={
-                          departments.length === 0 
-                            ? "Loading departments..." 
+                          departments.length === 0
+                            ? "Loading departments..."
                             : "Select department"
-                        } 
+                        }
                       />
                     </SelectTrigger>
                     <SelectContent>
@@ -1050,7 +1048,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="subdepartment" className="text-sm font-medium text-gray-700">
-                  Subdepartment *
+                    Subdepartment *
                   </Label>
                   <Select
                     value={formData.subdepartment_id}
@@ -1072,14 +1070,14 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                     disabled={!formData.department_id || availableSubdepartments.length === 0}
                   >
                     <SelectTrigger>
-                      <SelectValue 
+                      <SelectValue
                         placeholder={
-                          !formData.department_id 
-                            ? "Select department first" 
-                            : availableSubdepartments.length === 0 
-                              ? "No subdepartments available" 
+                          !formData.department_id
+                            ? "Select department first"
+                            : availableSubdepartments.length === 0
+                              ? "No subdepartments available"
                               : "Select subdepartment"
-                        } 
+                        }
                       />
                     </SelectTrigger>
                     <SelectContent>
@@ -1115,14 +1113,14 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                     disabled={!formData.subdepartment_id || availableClasses.length === 0}
                   >
                     <SelectTrigger>
-                      <SelectValue 
+                      <SelectValue
                         placeholder={
-                          !formData.subdepartment_id 
-                            ? "Select subdepartment first" 
-                            : availableClasses.length === 0 
-                              ? "No classes available" 
+                          !formData.subdepartment_id
+                            ? "Select subdepartment first"
+                            : availableClasses.length === 0
+                              ? "No classes available"
                               : "Select class"
-                        } 
+                        }
                       />
                     </SelectTrigger>
                     <SelectContent>
@@ -1157,14 +1155,14 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                     disabled={!formData.class_id || availableSubclasses.length === 0}
                   >
                     <SelectTrigger>
-                      <SelectValue 
+                      <SelectValue
                         placeholder={
-                          !formData.class_id 
-                            ? "Select class first" 
+                          !formData.class_id
+                            ? "Select class first"
                             : availableSubclasses.length === 0
                               ? "No subclasses available"
                               : "Select subclass"
-                        } 
+                        }
                       />
                     </SelectTrigger>
                     <SelectContent>
@@ -1279,7 +1277,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select officer">
-                        {formData.officer_id && formData.officer_id !== 'none' 
+                        {formData.officer_id && formData.officer_id !== 'none'
                           ? availableOfficers.find(o => o.id === formData.officer_id)?.name || 'Select officer'
                           : 'Select officer'}
                       </SelectValue>
@@ -1300,7 +1298,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
             {/* Additional Fields Section */}
             <div className="space-y-4 rounded-lg border p-4 bg-white shadow-sm">
               <h3 className="text-lg font-semibold text-gray-900">Additional Fields</h3>
-              
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="account-used" className="text-sm font-medium text-gray-700">

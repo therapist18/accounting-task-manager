@@ -10,7 +10,7 @@ import { format, parseISO } from "date-fns"
 import { StageTimer } from "@/components/stage-timer"
 import EditableStageCell from "./EditableStageCell"
 import { EditTaskDialog } from "./EditTaskDialog"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import ColumnVisibilityControl, { ColumnVisibilityOption } from "../../departments/main-shared-components/column-visibility"
 
 interface StagesTableProps {
@@ -153,7 +153,7 @@ export function StagesTable({
     const stageColumnsList = departmentStages.map(stage => {
       const config = stageVisibilityConfig[stage.id];
       const stageKey = `stage_${stage.name.toLowerCase().replace(/\s+/g, '_')}`;
-      
+
       return {
         key: stageKey,
         header: stage.name,
@@ -163,20 +163,20 @@ export function StagesTable({
         sortable: true,
         stage: stage,
         isDefault: config ? config.display : true,
-render: (value: any, task: any, index: number, stage: any) => {
-  const taskStageStatus = getTaskStageStatus?.(task.id, stage.id);
+        render: (value: any, task: any, index: number, stage: any) => {
+          const taskStageStatus = getTaskStageStatus?.(task.id, stage.id);
 
-  return (
-    <EditableStageCell
-      stage={stage}
-      task={task}
-      value={taskStageStatus?.completedAt || taskStageStatus?.date}
-      onSave={handleStageStatusSave}
-      onDocumentUpload={onStageDocumentUpload}
-      onShowDocuments={onShowUploadDialog}
-    />
-  );
-}
+          return (
+            <EditableStageCell
+              stage={stage}
+              task={task}
+              value={taskStageStatus?.completedAt || taskStageStatus?.date}
+              onSave={handleStageStatusSave}
+              onDocumentUpload={onStageDocumentUpload}
+              onShowDocuments={onShowUploadDialog}
+            />
+          );
+        }
       };
     });
 
@@ -194,7 +194,7 @@ render: (value: any, task: any, index: number, stage: any) => {
   const initializeColumnVisibility = useCallback(() => {
     const columns = generateStageColumns();
     const initialVisibility = {};
-    
+
     columns.forEach(col => {
       if (columnVisibility[col.key] === undefined) {
         initialVisibility[col.key] = col.isDefault !== false;
@@ -284,7 +284,7 @@ render: (value: any, task: any, index: number, stage: any) => {
       const headers = visibleColumns.map(col => col.header);
       const csvContent = [
         headers.join(','),
-        ...exportData.map(row => 
+        ...exportData.map(row =>
           headers.map(header => `"${(row[header] || '').toString().replace(/"/g, '""')}"`).join(',')
         )
       ].join('\n');

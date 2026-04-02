@@ -8,14 +8,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { 
-  FileText, 
-  Info, 
-  Download, 
-  Check, 
-  X, 
-  AlertTriangle, 
-  Eye, 
+import {
+  FileText,
+  Info,
+  Download,
+  Check,
+  X,
+  AlertTriangle,
+  Eye,
   MessageSquare,
   Clock,
   User,
@@ -24,7 +24,7 @@ import {
   XCircle,
   Loader2
 } from "lucide-react"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { format } from "date-fns"
 
@@ -112,7 +112,7 @@ export function DocumentPreviewDialog({
 
   const validateExtractedData = () => {
     const errors: Record<string, string> = {}
-    
+
     // Add validation logic based on document type
     if (document?.document_type === 'passport') {
       if (!extractedData.passport_number) {
@@ -442,7 +442,7 @@ export function DocumentPreviewDialog({
           <TabsContent value="review" className="space-y-6">
             <div className="space-y-4">
               <h4 className="font-medium">Review Decision</h4>
-              
+
               <div className="space-y-4">
                 <div>
                   <Label htmlFor="review-comments">Review Comments</Label>
@@ -468,7 +468,7 @@ export function DocumentPreviewDialog({
                     )}
                     Approve Document
                   </Button>
-                  
+
                   <Button
                     variant="destructive"
                     onClick={() => handleReviewSubmit('rejected')}
@@ -488,7 +488,7 @@ export function DocumentPreviewDialog({
 
           <TabsContent value="history" className="space-y-4">
             <h4 className="font-medium">Review History</h4>
-            
+
             <div className="space-y-4">
               {documentHistory.length > 0 ? (
                 documentHistory.map((entry) => (
@@ -523,7 +523,7 @@ export function DocumentPreviewDialog({
 
           <TabsContent value="related" className="space-y-4">
             <h4 className="font-medium">Related Documents</h4>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {relatedDocuments.length > 0 ? (
                 relatedDocuments.map((doc) => (

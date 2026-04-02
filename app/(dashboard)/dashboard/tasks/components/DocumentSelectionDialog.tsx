@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Loader2, FileText, Eye, AlertTriangle, CheckCircle } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import { format } from 'date-fns'
 
 interface DocumentSelectionDialogProps {
@@ -28,7 +28,7 @@ interface DocumentSelectionDialogProps {
   onDocumentLinked: () => void
 }
 
-interface DirectorDocument {    
+interface DirectorDocument {
   id: string
   director_id: number
   document_id: string
@@ -85,9 +85,9 @@ export function DocumentSelectionDialog({
   // Map documents to stages
   const mapDocumentsToStages = useCallback(() => {
     const stageMap = new Map<string, DirectorDocument[]>()
-    
+
     // Get applicable stages
-    const applicableStages = stages.filter(stage => 
+    const applicableStages = stages.filter(stage =>
       stage && isStageApplicableToTask(stage, task)
     ).sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
 
@@ -95,15 +95,15 @@ export function DocumentSelectionDialog({
       if (!stage.documents || stage.documents.length === 0) return
 
       const stageDocuments: DirectorDocument[] = []
-      
+
       stage.documents.forEach(stageDoc => {
         if (!isDocumentApplicableToTask(stageDoc, task)) return
-        
+
         // Find director documents that match this stage document type
-        const matchingDocs = directorDocuments.filter(dirDoc => 
+        const matchingDocs = directorDocuments.filter(dirDoc =>
           dirDoc.document_id === stageDoc.kycId
         )
-        
+
         stageDocuments.push(...matchingDocs)
       })
 
@@ -120,7 +120,7 @@ export function DocumentSelectionDialog({
     if (!task?.source_document_id) return
 
     try {
-      const selections = typeof task.source_document_id === 'string' 
+      const selections = typeof task.source_document_id === 'string'
         ? JSON.parse(task.source_document_id)
         : task.source_document_id
 
@@ -150,7 +150,7 @@ export function DocumentSelectionDialog({
     setSaving(true)
     try {
       const selectionsObject = Object.fromEntries(selectedDocuments)
-      
+
       const { error } = await supabase
         .from('tm_tasks')
         .update({
@@ -184,12 +184,12 @@ export function DocumentSelectionDialog({
   // Get document preview URL
   const getDocumentPreviewUrl = (document: DirectorDocument) => {
     if (!document.file_path) return null
-    
+
     const bucketName = 'kyc-documents'
-    const filePath = document.file_path.startsWith(bucketName) 
-      ? document.file_path 
+    const filePath = document.file_path.startsWith(bucketName)
+      ? document.file_path
       : `${bucketName}/${document.file_path}`
-    
+
     return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`
   }
 
@@ -279,7 +279,7 @@ export function DocumentSelectionDialog({
                             <div className="flex items-start gap-3">
                               <Checkbox
                                 checked={isSelected}
-                                onCheckedChange={(checked) => 
+                                onCheckedChange={(checked) =>
                                   handleDocumentSelect(stageId, document.id, checked as boolean)
                                 }
                                 className="mt-1"

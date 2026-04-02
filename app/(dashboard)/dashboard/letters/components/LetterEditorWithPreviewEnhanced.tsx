@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Download, FileText, Image as ImageIcon, File } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
+import { useToast } from '@/lib/hooks/use-toast';
 
 interface LetterEditorWithPreviewEnhancedProps {
   companyId?: string;
@@ -169,13 +169,13 @@ export function LetterEditorWithPreviewEnhanced({
         <div>
           <h2 className="text-2xl font-bold">Letter Editor</h2>
           <p className="text-muted-foreground">
-            {selectedLetterhead 
+            {selectedLetterhead
               ? `Using: ${selectedLetterhead.name}`
               : 'Select a letterhead to start writing'
             }
           </p>
         </div>
-        
+
         {selectedLetterhead && (
           <div className="flex gap-2">
             <Button
@@ -208,7 +208,7 @@ export function LetterEditorWithPreviewEnhanced({
                   Choose how to display the letterhead background
                 </p>
               </div>
-              
+
               <div className="flex gap-2">
                 <Button
                   variant={previewMode === 'image' ? 'default' : 'outline'}
@@ -219,7 +219,7 @@ export function LetterEditorWithPreviewEnhanced({
                   <ImageIcon className="h-4 w-4 mr-2" />
                   Image Preview
                 </Button>
-                
+
                 <Button
                   variant={previewMode === 'pdf' ? 'default' : 'outline'}
                   size="sm"
@@ -232,7 +232,7 @@ export function LetterEditorWithPreviewEnhanced({
                     <div className="ml-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
                   )}
                 </Button>
-                
+
                 <Button
                   variant={previewMode === 'none' ? 'default' : 'outline'}
                   size="sm"
@@ -266,9 +266,9 @@ export function LetterEditorWithPreviewEnhanced({
       {selectedLetterhead ? (
         <Card className="overflow-hidden">
           <CardContent className="p-0">
-            <div 
+            <div
               className="relative mx-auto"
-              style={{ 
+              style={{
                 width: '800px',
                 height: '1050px',
                 backgroundColor: '#f5f5f5'
@@ -283,7 +283,7 @@ export function LetterEditorWithPreviewEnhanced({
                   style={{ pointerEvents: 'none' }}
                 />
               )}
-              
+
               {previewMode === 'pdf' && pdfPreviewUrl && (
                 <iframe
                   src={pdfPreviewUrl}
@@ -292,7 +292,7 @@ export function LetterEditorWithPreviewEnhanced({
                   style={{ pointerEvents: 'none' }}
                 />
               )}
-              
+
               {previewMode === 'none' && (
                 <div className="absolute inset-0 flex items-center justify-center bg-white">
                   <div className="text-center">
@@ -389,20 +389,20 @@ export function LetterEditorWithPreviewEnhanced({
               <li>• Download as Word to get the merged document with your letterhead</li>
               <li>• Download as PDF for a ready-to-print version</li>
             </ul>
-            
+
             {previewMode === 'pdf' && (
               <div className="mt-4 p-3 bg-blue-50 rounded-lg">
                 <p className="text-sm text-blue-800">
-                  <strong>PDF Preview:</strong> Generated on-demand using the current content. 
+                  <strong>PDF Preview:</strong> Generated on-demand using the current content.
                   This shows exactly how the final PDF will look.
                 </p>
               </div>
             )}
-            
+
             {previewMode === 'image' && selectedLetterhead.preview_image_url && (
               <div className="mt-4 p-3 bg-green-50 rounded-lg">
                 <p className="text-sm text-green-800">
-                  <strong>Image Preview:</strong> This is a static preview generated during upload. 
+                  <strong>Image Preview:</strong> This is a static preview generated during upload.
                   The final document will use the original .docx file for perfect quality.
                 </p>
               </div>

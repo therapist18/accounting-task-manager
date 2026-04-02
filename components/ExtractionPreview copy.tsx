@@ -24,7 +24,7 @@ import {
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import Image from 'next/image'
-import { toast } from 'sonner'
+import { toast } from "@/lib/hooks/use-toast"
 import dynamic from 'next/dynamic'
 import { Badge } from '@/components/ui/badge'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -302,7 +302,7 @@ function ExtractionPreview({
   useEffect(() => {
     console.log('🔄 Initializing form data from extractedData:', extractedData);
     setLocalFormData(extractedData || {});
-    
+
     // Auto-expand sections that have data
     const newExpandedSections: Record<string, boolean> = {};
     Object.keys(extractedData || {}).forEach(key => {
@@ -338,18 +338,18 @@ function ExtractionPreview({
   const getFieldValue = useCallback((field: Field): any => {
     // First try field name, then field ID
     let value = localFormData[field.name] ?? localFormData[field.id];
-    
+
     // For array fields, ensure we use field names consistently
     if (Array.isArray(value)) {
       value = value.map(item => {
         if (!item || typeof item !== 'object') return item;
-        
+
         const newItem = {};
         // Process each field in the array config to ensure consistent naming
         if (field.arrayConfig?.fields) {
           field.arrayConfig.fields.forEach(subField => {
             const fieldName = subField.name || subField.id;
-            
+
             // Always use field name as the primary key
             if (item[fieldName] !== undefined) {
               newItem[fieldName] = item[fieldName];
@@ -357,12 +357,12 @@ function ExtractionPreview({
               // If we only have the ID, use it but also set the name
               newItem[fieldName] = item[subField.id];
             }
-            
+
             // Maintain backward compatibility with ID keys
             if (fieldName !== subField.id) {
               newItem[subField.id] = newItem[fieldName];
             }
-            
+
             // Initialize with empty string if no value exists
             if (newItem[fieldName] === undefined) {
               newItem[fieldName] = '';
@@ -372,7 +372,7 @@ function ExtractionPreview({
         return newItem;
       });
     }
-    
+
     console.log('🔍 Getting value for field:', {
       fieldName: field.name,
       fieldId: field.id,
@@ -413,21 +413,21 @@ function ExtractionPreview({
 
     const currentArray = Array.isArray(getFieldValue(field)) ? [...getFieldValue(field)] : [];
     while (currentArray.length <= itemIndex) currentArray.push({});
-    
+
     // Always use field name as the primary key, with fallback to ID
     const fieldName = subField.name || subField.id;
-    
+
     // Create updated item with both name and ID mappings
-    const updatedItem = { 
+    const updatedItem = {
       ...currentArray[itemIndex],
       [fieldName]: value
     };
-    
+
     // Maintain backward compatibility with ID keys
     if (fieldName !== subField.id) {
       updatedItem[subField.id] = value;
     }
-    
+
     currentArray[itemIndex] = updatedItem;
     handleFieldChange(field, currentArray);
   }, [viewMode, getFieldValue, handleFieldChange]);
@@ -437,21 +437,21 @@ function ExtractionPreview({
     if (viewMode) return;
     const currentArray = Array.isArray(getFieldValue(field)) ? [...getFieldValue(field)] : [];
     const newItem = {};
-    
+
     // Initialize new item with empty values for all sub-fields using consistent naming
     if (field.arrayConfig?.fields) {
       field.arrayConfig.fields.forEach(subField => {
         const fieldName = subField.name || subField.id;
         // Always use field name as the primary key
         newItem[fieldName] = '';
-        
+
         // Maintain backward compatibility with ID keys
         if (fieldName !== subField.id) {
           newItem[subField.id] = '';
         }
       });
     }
-    
+
     currentArray.push(newItem);
     handleFieldChange(field, currentArray);
   }, [viewMode, getFieldValue, handleFieldChange]);
@@ -483,7 +483,7 @@ function ExtractionPreview({
   // Render individual field
   const renderSimpleField = useCallback((field: Field, value: any, onChange: (value: any) => void) => {
     const displayName = toTitleCase(field.name) || field.id;
-    
+
     return (
       <div className="space-y-2">
         <Label htmlFor={field.id} className="text-sm font-medium text-foreground">
@@ -543,7 +543,7 @@ function ExtractionPreview({
               )}
             </div>
           </CollapsibleTrigger>
-          
+
           <CollapsibleContent className="space-y-3 mt-3">
             {arrayData.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground bg-muted/20 rounded-lg border-2 border-dashed">
@@ -575,17 +575,17 @@ function ExtractionPreview({
                       // Use field name as the primary key, with fallback to ID
                       const fieldName = subField.name || subField.id;
                       // Get value using field name first, then fall back to ID
-                      const subFieldValue = (item && typeof item === 'object') 
+                      const subFieldValue = (item && typeof item === 'object')
                         ? (item[fieldName] !== undefined ? item[fieldName] : (item[subField.id] || ''))
                         : '';
-                      
+
                       const subFieldDisplayName = toTitleCase(subField.name) || subField.id;
                       const inputId = `${field.id}-${itemIndex}-${fieldName.replace(/\s+/g, '-').toLowerCase()}`;
-                      
+
                       return (
                         <div key={`${field.id}-${itemIndex}-${fieldName}`} className="grid grid-cols-1 gap-2">
-                          <Label 
-                            htmlFor={inputId} 
+                          <Label
+                            htmlFor={inputId}
                             className="text-sm font-medium text-foreground"
                           >
                             {subFieldDisplayName}
@@ -618,7 +618,7 @@ function ExtractionPreview({
   // Main render function for fields
   const renderField = useCallback((field: Field) => {
     const isArrayField = field.isArray || field.type === 'array';
-    
+
     if (isArrayField && field.arrayConfig?.fields) {
       return renderArrayField(field);
     }
@@ -672,7 +672,7 @@ function ExtractionPreview({
   }
 
   const content = (
-    <div 
+    <div
       className="space-y-6 max-w-9xl"
       data-doc-id={documentId}
       data-doc-index={documentIndex}

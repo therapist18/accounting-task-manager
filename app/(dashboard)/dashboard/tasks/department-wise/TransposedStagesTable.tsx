@@ -10,7 +10,7 @@ import { format, parseISO } from "date-fns"
 import { StageTimer } from "@/components/stage-timer"
 import { EditableStageCell } from "./EditableStageCell"
 import { EditTaskDialog } from "./EditTaskDialog"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import ColumnVisibilityControl, { ColumnVisibilityOption } from "../../departments/main-shared-components/column-visibility"
 
 interface TransposedStagesTableProps {
@@ -153,7 +153,7 @@ export function TransposedStagesTable({
     const stageColumnsList = departmentStages.map(stage => {
       const config = stageVisibilityConfig[stage.id];
       const stageKey = `stage_${stage.name.toLowerCase().replace(/\s+/g, '_')}`;
-      
+
       return {
         key: stageKey,
         header: stage.name,
@@ -194,7 +194,7 @@ export function TransposedStagesTable({
   const initializeColumnVisibility = useCallback(() => {
     const columns = generateStageColumns();
     const initialVisibility = {};
-    
+
     columns.forEach(col => {
       if (columnVisibility[col.key] === undefined) {
         initialVisibility[col.key] = col.isDefault !== false;
@@ -284,7 +284,7 @@ export function TransposedStagesTable({
       const headers = visibleColumns.map(col => col.header);
       const csvContent = [
         headers.join(','),
-        ...exportData.map(row => 
+        ...exportData.map(row =>
           headers.map(header => `"${(row[header] || '').toString().replace(/"/g, '""')}"`).join(',')
         )
       ].join('\n');

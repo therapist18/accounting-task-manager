@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Eye, Loader2, FileText, Trash2, RotateCcw } from "lucide-react";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/hooks/use-toast";
 import { format, parseISO } from "date-fns";
 import { supabase } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";

@@ -7,8 +7,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Officer } from '@/app/(dashboard)/dashboard/users-management/officers/components/officers-fields';
 import { OfficerDialog } from '../../users-management/officers/components/officer-dialog';
 import { format } from 'date-fns';
-import { 
-  MoreHorizontal, Search, FileSpreadsheet, Plus, 
+import {
+  MoreHorizontal, Search, FileSpreadsheet, Plus,
   ArrowUpDown, ChevronDown, PanelLeftClose, PanelLeftOpen
 } from 'lucide-react';
 import {
@@ -34,7 +34,7 @@ import { fetchDepartments } from '../departments';
 import supabase from '@/lib/supabase/client';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
-import { toast } from 'sonner';
+import { toast } from "@/lib/hooks/use-toast";
 
 interface DepartmentMap {
   [key: string]: {
@@ -141,14 +141,14 @@ export default function OfficersPage() {
       deptName = departments[currentDept.department_id].name;
       if (currentDept.subdepartment_ids && Array.isArray(currentDept.subdepartment_ids)) {
         subDeptNames = currentDept.subdepartment_ids
-            .map((id: string) => departments[currentDept.department_id]?.subdepartments[id])
-            .filter(Boolean);
-      } 
+          .map((id: string) => departments[currentDept.department_id]?.subdepartments[id])
+          .filter(Boolean);
+      }
       else if (currentDept.subdepartment_id && departments[currentDept.department_id]?.subdepartments[currentDept.subdepartment_id]) {
         subDeptNames = [departments[currentDept.department_id].subdepartments[currentDept.subdepartment_id]];
       }
     } else if (currentDept.department?.name) {
-        deptName = currentDept.department.name;
+      deptName = currentDept.department.name;
     }
 
     return {
@@ -216,12 +216,12 @@ export default function OfficersPage() {
   const handleSaveOfficer = async (formData: any) => {
     setIsLoading(true);
     // DEBUG: Verify subdepartment_ids are now present
-    console.log("Submitting form data:", formData); 
+    console.log("Submitting form data:", formData);
 
     try {
       const {
         department_id,
-        subdepartment_ids, 
+        subdepartment_ids,
         department_start_date,
         department_end_date,
         start_date,
@@ -237,17 +237,17 @@ export default function OfficersPage() {
         name: coreUserData.name,
         email: coreUserData.email || null,
         ...(coreUserData.password ? { password: coreUserData.password } : {}),
-        
+
         status_history: [{
           status: 'active',
           start_date: start_date || new Date().toISOString(),
           end_date: end_date || null
         }],
-        
+
         // This updates the tm_users JSONB column
         department_history: [{
           department_id: department_id,
-          subdepartment_ids: subDeptIdsArray, 
+          subdepartment_ids: subDeptIdsArray,
           subdepartment_id: subDeptIdsArray.length > 0 ? subDeptIdsArray[0] : null,
           start_date: department_start_date || new Date().toISOString(),
           end_date: department_end_date || null
@@ -289,8 +289,8 @@ export default function OfficersPage() {
           }
 
           // B. Append new history entry
-          const currentHistory = Array.isArray(subDeptData?.officer_history) 
-            ? subDeptData.officer_history 
+          const currentHistory = Array.isArray(subDeptData?.officer_history)
+            ? subDeptData.officer_history
             : [];
 
           const newHistoryEntry = {
@@ -303,7 +303,7 @@ export default function OfficersPage() {
           // C. Update the table with the new array
           const { error: updateError } = await supabase
             .from('tm_subdepartments')
-            .update({ 
+            .update({
               officer_history: [...currentHistory, newHistoryEntry],
               updated_at: new Date().toISOString()
             })
@@ -351,9 +351,9 @@ export default function OfficersPage() {
           if (subData && Array.isArray(subData.officer_history)) {
             // Filter out the officer being deleted
             // We check against 'officer_id' or 'id' to be safe with JSON variations
-            const updatedHistory = subData.officer_history.filter((record: any) => 
-               String(record.officer_id) !== String(officerId) && 
-               String(record.id) !== String(officerId)
+            const updatedHistory = subData.officer_history.filter((record: any) =>
+              String(record.officer_id) !== String(officerId) &&
+              String(record.id) !== String(officerId)
             );
 
             // Only update if changes were made
@@ -371,7 +371,7 @@ export default function OfficersPage() {
 
       // 3. Delete from 'tm_users' (Delete Table 2)
       await deleteOfficer(officerId);
-      
+
       // 4. Update UI
       setOfficers(officers.filter(officer => officer.id !== officerId));
       toast.success('Officer deleted completely');
@@ -386,61 +386,61 @@ export default function OfficersPage() {
 
   const handleExportExcel = async () => {
     try {
-        const workbook = new ExcelJS.Workbook();
-        const sheetName = activeTab === 'active' ? 'Active Officers' : 'Inactive Officers';
-        const sheet = workbook.addWorksheet(sheetName);
-        const dataToExport = activeTab === 'active' ? sortedActiveOfficers : sortedInactiveOfficers;
-  
-        sheet.columns = [
-          { header: '#', key: 'index', width: 10 },
-          { header: 'Name', key: 'name', width: 30 },
-          { header: 'Email', key: 'email', width: 35 },
-          { header: 'Department', key: 'department', width: 30 },
-          { header: 'Subdepartments', key: 'subdepartment', width: 40 },
-          { header: 'Status', key: 'status', width: 15 },
-          { header: 'Assignment Start', key: 'startDate', width: 20 },
-          { header: 'Assignment End', key: 'endDate', width: 20 },
-          { header: 'Created At', key: 'createdAt', width: 20 },
-        ];
-  
-        sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-        sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
-  
-        dataToExport.forEach((officer, index) => {
-          const deptInfo = getCurrentDepartment(officer);
-          sheet.addRow({
-            index: index + 1,
-            name: officer.name,
-            email: officer.email || '-',
-            department: deptInfo.name,
-            subdepartment: deptInfo.subNames.join(', '),
-            status: activeTab === 'active' ? 'Active' : 'Inactive',
-            startDate: deptInfo.startDate ? format(new Date(deptInfo.startDate), 'yyyy-MM-dd') : '-',
-            endDate: deptInfo.endDate ? format(new Date(deptInfo.endDate), 'yyyy-MM-dd') : '-',
-            createdAt: officer.created_at ? format(new Date(officer.created_at), 'yyyy-MM-dd') : '-',
-          });
+      const workbook = new ExcelJS.Workbook();
+      const sheetName = activeTab === 'active' ? 'Active Officers' : 'Inactive Officers';
+      const sheet = workbook.addWorksheet(sheetName);
+      const dataToExport = activeTab === 'active' ? sortedActiveOfficers : sortedInactiveOfficers;
+
+      sheet.columns = [
+        { header: '#', key: 'index', width: 10 },
+        { header: 'Name', key: 'name', width: 30 },
+        { header: 'Email', key: 'email', width: 35 },
+        { header: 'Department', key: 'department', width: 30 },
+        { header: 'Subdepartments', key: 'subdepartment', width: 40 },
+        { header: 'Status', key: 'status', width: 15 },
+        { header: 'Assignment Start', key: 'startDate', width: 20 },
+        { header: 'Assignment End', key: 'endDate', width: 20 },
+        { header: 'Created At', key: 'createdAt', width: 20 },
+      ];
+
+      sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
+
+      dataToExport.forEach((officer, index) => {
+        const deptInfo = getCurrentDepartment(officer);
+        sheet.addRow({
+          index: index + 1,
+          name: officer.name,
+          email: officer.email || '-',
+          department: deptInfo.name,
+          subdepartment: deptInfo.subNames.join(', '),
+          status: activeTab === 'active' ? 'Active' : 'Inactive',
+          startDate: deptInfo.startDate ? format(new Date(deptInfo.startDate), 'yyyy-MM-dd') : '-',
+          endDate: deptInfo.endDate ? format(new Date(deptInfo.endDate), 'yyyy-MM-dd') : '-',
+          createdAt: officer.created_at ? format(new Date(officer.created_at), 'yyyy-MM-dd') : '-',
         });
-  
-        const buffer = await workbook.xlsx.writeBuffer();
-        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        saveAs(blob, `Officers_${sheetName.replace(' ', '_')}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
-  
-        toast.success('Export successful');
-      } catch (error) {
-        console.error('Export failed:', error);
-        toast.error('Failed to export Excel');
-      }
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `Officers_${sheetName.replace(' ', '_')}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+
+      toast.success('Export successful');
+    } catch (error) {
+      console.error('Export failed:', error);
+      toast.error('Failed to export Excel');
+    }
   };
 
   const renderSortArrow = (key: SortKey) => {
     if (sortConfig.key !== key) return <ArrowUpDown className="ml-2 h-3 w-3 opacity-50" />;
-    return sortConfig.direction === 'asc' ? 
-      <ChevronDown className="ml-2 h-3 w-3 text-white rotate-180 transition-transform" /> : 
+    return sortConfig.direction === 'asc' ?
+      <ChevronDown className="ml-2 h-3 w-3 text-white rotate-180 transition-transform" /> :
       <ChevronDown className="ml-2 h-3 w-3 text-white transition-transform" />;
   };
 
   const getTotalColumns = () => {
-    let cols = 7; 
+    let cols = 7;
     if (showDeptDates) cols += 2;
     if (showStatusDates) cols += 1;
     cols += 2;
@@ -462,16 +462,16 @@ export default function OfficersPage() {
             <TableHead className="text-white font-semibold transition-colors min-w-[200px]">
               <div className="flex items-center justify-between">
                 <div className="flex items-center cursor-pointer hover:underline" onClick={() => handleSort('department')}>
-                    Department {renderSortArrow('department')}
+                  Department {renderSortArrow('department')}
                 </div>
-                <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className="h-6 w-6 p-0 hover:bg-blue-500 text-white"
-                    onClick={() => setShowDeptDates(!showDeptDates)}
-                    title={showDeptDates ? "Collapse dates" : "Expand dates"}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 hover:bg-blue-500 text-white"
+                  onClick={() => setShowDeptDates(!showDeptDates)}
+                  title={showDeptDates ? "Collapse dates" : "Expand dates"}
                 >
-                    {showDeptDates ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
+                  {showDeptDates ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
                 </Button>
               </div>
             </TableHead>
@@ -479,35 +479,35 @@ export default function OfficersPage() {
               <div className="flex items-center">Subdepartments {renderSortArrow('subdepartment')}</div>
             </TableHead>
             {showDeptDates && (
-                <>
-                    <TableHead className="text-white font-semibold bg-blue-700 animate-in fade-in slide-in-from-left-2">
-                        Assigned From
-                    </TableHead>
-                    <TableHead className="text-white font-semibold bg-blue-700 animate-in fade-in slide-in-from-left-2">
-                        Assigned To
-                    </TableHead>
-                </>
+              <>
+                <TableHead className="text-white font-semibold bg-blue-700 animate-in fade-in slide-in-from-left-2">
+                  Assigned From
+                </TableHead>
+                <TableHead className="text-white font-semibold bg-blue-700 animate-in fade-in slide-in-from-left-2">
+                  Assigned To
+                </TableHead>
+              </>
             )}
             <TableHead className="text-white font-semibold transition-colors">
-                 <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center cursor-pointer hover:underline" onClick={() => handleSort('status')}>
-                        Status {renderSortArrow('status')}
-                    </div>
-                    <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="h-6 w-6 p-0 hover:bg-blue-500 text-white"
-                        onClick={() => setShowStatusDates(!showStatusDates)}
-                        title={showStatusDates ? "Collapse status history" : "Expand status history"}
-                    >
-                        {showStatusDates ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
-                    </Button>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center cursor-pointer hover:underline" onClick={() => handleSort('status')}>
+                  Status {renderSortArrow('status')}
                 </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 hover:bg-blue-500 text-white"
+                  onClick={() => setShowStatusDates(!showStatusDates)}
+                  title={showStatusDates ? "Collapse status history" : "Expand status history"}
+                >
+                  {showStatusDates ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
+                </Button>
+              </div>
             </TableHead>
             {showStatusDates && (
-                 <TableHead className="text-white font-semibold bg-blue-700 animate-in fade-in slide-in-from-left-2">
-                    Status Since
-                </TableHead>
+              <TableHead className="text-white font-semibold bg-blue-700 animate-in fade-in slide-in-from-left-2">
+                Status Since
+              </TableHead>
             )}
             <TableHead className="text-white font-semibold cursor-pointer hover:bg-blue-700 transition-colors" onClick={() => handleSort('created_at')}>
               <div className="flex items-center">Created {renderSortArrow('created_at')}</div>
@@ -540,79 +540,79 @@ export default function OfficersPage() {
                     <TableCell className="font-medium text-gray-500">{index + 1}</TableCell>
                     <TableCell className="font-medium">{officer.name}</TableCell>
                     <TableCell>{officer.email || '-'}</TableCell>
-                    
+
                     <TableCell>
-                        <span className={cn("font-medium", !deptInfo.name && "text-muted-foreground")}>
-                            {deptInfo.name}
-                        </span>
+                      <span className={cn("font-medium", !deptInfo.name && "text-muted-foreground")}>
+                        {deptInfo.name}
+                      </span>
                     </TableCell>
 
                     <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                            {deptInfo.subNames.length > 0 ? (
-                                <>
-                                    <Badge variant="secondary" className="text-[10px] font-normal">{deptInfo.subNames[0]}</Badge>
-                                    {deptInfo.subNames.length > 1 && (
-                                        <Badge variant="outline" className="text-[10px] text-muted-foreground" title={deptInfo.subNames.slice(1).join(', ')}>
-                                            +{deptInfo.subNames.length - 1}
-                                        </Badge>
-                                    )}
-                                </>
-                            ) : (
-                                <span className="text-muted-foreground italic">-</span>
+                      <div className="flex flex-wrap gap-1">
+                        {deptInfo.subNames.length > 0 ? (
+                          <>
+                            <Badge variant="secondary" className="text-[10px] font-normal">{deptInfo.subNames[0]}</Badge>
+                            {deptInfo.subNames.length > 1 && (
+                              <Badge variant="outline" className="text-[10px] text-muted-foreground" title={deptInfo.subNames.slice(1).join(', ')}>
+                                +{deptInfo.subNames.length - 1}
+                              </Badge>
                             )}
-                        </div>
+                          </>
+                        ) : (
+                          <span className="text-muted-foreground italic">-</span>
+                        )}
+                      </div>
                     </TableCell>
 
                     {showDeptDates && (
-                        <>
-                            <TableCell className="bg-blue-50/30 text-xs animate-in fade-in slide-in-from-left-2 whitespace-nowrap">
-                                {deptInfo.startDate ? format(new Date(deptInfo.startDate), 'MMM d, yyyy') : '-'}
-                            </TableCell>
-                            <TableCell className="bg-blue-50/30 text-xs animate-in fade-in slide-in-from-left-2 whitespace-nowrap">
-                                {deptInfo.endDate ? format(new Date(deptInfo.endDate), 'MMM d, yyyy') : <span className="text-green-600 font-medium">Present</span>}
-                            </TableCell>
-                        </>
+                      <>
+                        <TableCell className="bg-blue-50/30 text-xs animate-in fade-in slide-in-from-left-2 whitespace-nowrap">
+                          {deptInfo.startDate ? format(new Date(deptInfo.startDate), 'MMM d, yyyy') : '-'}
+                        </TableCell>
+                        <TableCell className="bg-blue-50/30 text-xs animate-in fade-in slide-in-from-left-2 whitespace-nowrap">
+                          {deptInfo.endDate ? format(new Date(deptInfo.endDate), 'MMM d, yyyy') : <span className="text-green-600 font-medium">Present</span>}
+                        </TableCell>
+                      </>
                     )}
 
                     <TableCell>
-                        <Badge variant={statusInfo?.status === 'active' ? 'default' : 'secondary'}>
-                            {statusInfo?.status || 'Unknown'}
-                        </Badge>
+                      <Badge variant={statusInfo?.status === 'active' ? 'default' : 'secondary'}>
+                        {statusInfo?.status || 'Unknown'}
+                      </Badge>
                     </TableCell>
 
                     {showStatusDates && (
-                        <TableCell className="bg-blue-50/30 text-xs animate-in fade-in slide-in-from-left-2 whitespace-nowrap">
-                            {statusInfo?.start_date ? format(new Date(statusInfo.start_date), 'MMM d, yyyy') : '-'}
-                        </TableCell>
+                      <TableCell className="bg-blue-50/30 text-xs animate-in fade-in slide-in-from-left-2 whitespace-nowrap">
+                        {statusInfo?.start_date ? format(new Date(statusInfo.start_date), 'MMM d, yyyy') : '-'}
+                      </TableCell>
                     )}
 
                     <TableCell className="text-gray-500 text-sm whitespace-nowrap">
-                        {officer.created_at ? format(new Date(officer.created_at), 'MMM d, yyyy') : '-'}
+                      {officer.created_at ? format(new Date(officer.created_at), 'MMM d, yyyy') : '-'}
                     </TableCell>
-                    
+
                     <TableCell className="text-gray-500 text-sm whitespace-nowrap">
-                        {officer.updated_at ? format(new Date(officer.updated_at), 'MMM d, yyyy') : '-'}
+                      {officer.updated_at ? format(new Date(officer.updated_at), 'MMM d, yyyy') : '-'}
                     </TableCell>
 
                     <TableCell>
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" className="h-8 w-8 p-0">
-                                <span className="sr-only">Open menu</span>
-                                <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                <DropdownMenuItem onClick={() => { setSelectedOfficer(officer); setIsDialogOpen(true); }}>
-                                Edit
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleDeleteOfficer(officer.id!)} className="text-red-600">
-                                Delete
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" className="h-8 w-8 p-0">
+                            <span className="sr-only">Open menu</span>
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                          <DropdownMenuItem onClick={() => { setSelectedOfficer(officer); setIsDialogOpen(true); }}>
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleDeleteOfficer(officer.id!)} className="text-red-600">
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 </React.Fragment>

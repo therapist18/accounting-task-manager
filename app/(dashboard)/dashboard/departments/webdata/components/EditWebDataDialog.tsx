@@ -11,7 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Badge } from "@/components/ui/badge"
 import { FileText, Info, X, Link2, Plus, User, Users } from "lucide-react"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import supabase from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 
@@ -58,8 +58,8 @@ interface EditWebDataDialogProps {
   allAutomationData: any[] // <-- ADDED: The full data structure
   onSave: (updatedWebData: any) => Promise<void>
   isSubmitting: boolean
-  context: { 
-    subdepartmentName: string 
+  context: {
+    subdepartmentName: string
     availableForms?: Array<{ id: string; name: string }>
     entryContext?: {
       automationId: string
@@ -182,10 +182,10 @@ export function EditWebDataDialog({
       const { data, error } = await supabase.from('tm_job_fields').select('*').order('label')
       if (error) throw error
       setAllMasterFields(data || [])
-    } catch (error) { 
-      toast({ title: 'Error', description: 'Failed to load master fields', variant: 'destructive' }) 
-    } finally { 
-      setLoadingMasterFields(false) 
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to load master fields', variant: 'destructive' })
+    } finally {
+      setLoadingMasterFields(false)
     }
   }
 
@@ -229,15 +229,15 @@ export function EditWebDataDialog({
         masterFieldIds: (formData.masterFields || []).map(f => f.id.toString()),
         kycDocumentId: formData.kycDocumentId || null
       };
-      
+
       // Create a deep copy of the full data structure to avoid mutating the parent state
       const automationDataCopy = JSON.parse(JSON.stringify(allAutomationData || []));
-      
+
       // Find the document within the copied data structure
       const documentIndex = automationDataCopy.findIndex(
         doc => doc.documentId === context.entryContext.documentId
       );
-      
+
       let targetDocument;
 
       if (documentIndex > -1) {
@@ -246,23 +246,23 @@ export function EditWebDataDialog({
       } else {
         // If the document doesn't exist, create it (preserves fallback logic)
         targetDocument = {
-            automationId: context.entryContext.automationId,
-            documentId: context.entryContext.documentId,
-            documentName: context.entryContext.documentName,
-            fields: [],
-            kycDocsUpload: [] // You might want to populate this from props if needed
+          automationId: context.entryContext.automationId,
+          documentId: context.entryContext.documentId,
+          documentName: context.entryContext.documentName,
+          fields: [],
+          kycDocsUpload: [] // You might want to populate this from props if needed
         };
         automationDataCopy.push(targetDocument);
       }
-      
+
       // Ensure the 'fields' array exists on the target document
       if (!targetDocument.fields) {
         targetDocument.fields = [];
       }
-      
+
       // Find the specific field to update within the document's 'fields' array
       const fieldIndex = targetDocument.fields.findIndex(f => f.id === updatedFieldData.id);
-      
+
       if (fieldIndex > -1) {
         // If the field exists, update it by merging with existing data
         // This preserves any properties not edited by the dialog (e.g., 'value')
@@ -274,7 +274,7 @@ export function EditWebDataDialog({
         // If the field is new to this document, add it
         targetDocument.fields.push(updatedFieldData);
       }
-      
+
       const finalUpdatedData = automationDataCopy;
 
       console.log('EditWebDataDialog - Submitting updated field:', updatedFieldData);
@@ -286,10 +286,10 @@ export function EditWebDataDialog({
 
     } catch (error) {
       console.error('EditWebDataDialog - Error saving:', error);
-      toast({ 
-        title: 'Error', 
-        description: error instanceof Error ? error.message : 'Failed to save webData', 
-        variant: 'destructive' 
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to save webData',
+        variant: 'destructive'
       });
     } finally {
       setIsSubmitting(false);
@@ -340,9 +340,9 @@ export function EditWebDataDialog({
     });
   };
 
-  const handleClose = () => { 
-    onOpenChange(false); 
-    setFormData(null); 
+  const handleClose = () => {
+    onOpenChange(false);
+    setFormData(null);
     setSelectedFormId('');
   }
 
@@ -418,8 +418,8 @@ export function EditWebDataDialog({
             </div>
             <div className="space-y-2">
               <Label>Entity Type</Label>
-              <Select 
-                value={formData.entityType || 'both'} 
+              <Select
+                value={formData.entityType || 'both'}
                 onValueChange={(value) => setFormData(prev => ({ ...prev, entityType: value }))}
               >
                 <SelectTrigger><SelectValue /></SelectTrigger>

@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Plus, Edit, Trash2, GripVertical } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import type { FieldSection } from "../types/database"
 
 export function SectionManagement() {
@@ -32,7 +32,7 @@ export function SectionManagement() {
       .from('tm_field_sections')
       .select('*')
       .order('order_index')
-    
+
     if (!sectionsError && sectionsData) {
       setSections(sectionsData.map(section => ({
         ...section,
@@ -58,14 +58,14 @@ export function SectionManagement() {
             updated_at: new Date().toISOString()
           })
           .eq('id', editingSection.id)
-        
+
         if (error) throw error
         toast({ title: "Success", description: "Section updated successfully" })
       } else {
         const { error } = await supabase
           .from('tm_field_sections')
           .insert([formData])
-        
+
         if (error) throw error
         toast({ title: "Success", description: "Section created successfully" })
       }
@@ -146,11 +146,10 @@ export function SectionManagement() {
                     {section.description}
                   </TableCell>
                   <TableCell>
-                    <span className={`px-2 py-1 text-xs rounded-full ${
-                      section.is_active 
-                        ? 'bg-green-100 text-green-800' 
+                    <span className={`px-2 py-1 text-xs rounded-full ${section.is_active
+                        ? 'bg-green-100 text-green-800'
                         : 'bg-gray-100 text-gray-800'
-                    }`}>
+                      }`}>
                       {section.is_active ? 'Active' : 'Inactive'}
                     </span>
                   </TableCell>

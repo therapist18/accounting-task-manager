@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Upload, FileText, AlertCircle, CheckCircle } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
+import { useToast } from '@/lib/hooks/use-toast';
 import { fetchCompanies, type Company } from '../../companies/database';
 
 interface LetterheadUploadDialogNewProps {

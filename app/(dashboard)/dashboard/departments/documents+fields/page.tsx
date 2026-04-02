@@ -8,7 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { Plus, Minus, Search, X, Download, Upload } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import ColumnVisibilityControl, { ColumnVisibilityOption } from "@/app/(dashboard)/dashboard/departments/main-shared-components/column-visibility"
 import { DocumentType, Department, OptimizedCheckbox } from "./components/types"
 import { CATEGORY_MAPPING } from "./components/config"
@@ -27,8 +27,8 @@ const MemoizedCheckbox = memo(OptimizedCheckbox)
 
 // Shared tab definitions used for export sheet names & import sheet lookup
 const DOC_TABS = [
-  { value: "company",     label: "Company Documents" },
-  { value: "individual",  label: "Individual Documents" },
+  { value: "company", label: "Company Documents" },
+  { value: "individual", label: "Individual Documents" },
   { value: "application", label: "Application Documents" },
 ] as const
 
@@ -191,10 +191,10 @@ export default function DocumentsFields() {
     const filteredByCategory = documents.filter(doc => doc.category === CATEGORY_MAPPING[documentTab]);
     const filteredBySearch = searchQuery
       ? filteredByCategory.filter(doc =>
-          (doc.display_name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
-          (doc.name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
-          doc.fields?.some(field => field?.name?.toLowerCase()?.includes(searchQuery.toLowerCase()))
-        )
+        (doc.display_name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+        (doc.name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+        doc.fields?.some(field => field?.name?.toLowerCase()?.includes(searchQuery.toLowerCase()))
+      )
       : filteredByCategory;
     return filterAndSortDocuments(filteredBySearch, documentTab);
   }, [documents, documentTab, searchQuery]);
@@ -390,9 +390,9 @@ export default function DocumentsFields() {
 
       const savePromises = Object.entries(changesByHierarchy).map(async ([hierarchyKey, data]) => {
         const parts = hierarchyKey.split('_');
-        const sdId  = parts[0] ? parseInt(parts[0]) : null;
+        const sdId = parts[0] ? parseInt(parts[0]) : null;
         const clsId = parts[1] ? parseInt(parts[1]) : null;
-        const scId  = parts[2] ? parseInt(parts[2]) : null;
+        const scId = parts[2] ? parseInt(parts[2]) : null;
 
         let level = 2;
         if (scId) level = 4;
@@ -492,11 +492,11 @@ export default function DocumentsFields() {
   ) => {
     const tabGrouped = groupedDocsByTab[tabValue] || {};
 
-    const headerFill    = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF002060' } };
+    const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF002060' } };
     const subHeaderFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } };
-    const lightFill     = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } };
-    const whiteFont     = { color: { argb: 'FFFFFFFF' }, bold: true };
-    const centerAlign   = { vertical: 'middle', horizontal: 'center' };
+    const lightFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } };
+    const whiteFont = { color: { argb: 'FFFFFFFF' }, bold: true };
+    const centerAlign = { vertical: 'middle', horizontal: 'center' };
 
     const HEADER_START = 3; // rows 1-2 are meta/instructions, rows 3-6 are 4-level column headers
 
@@ -515,14 +515,14 @@ export default function DocumentsFields() {
 
     // Fixed columns: #, Name, Document ID, Field ID (cols 1-4)
     const fixedHeaders = ['#', 'Document / Field Name', 'Document ID', 'Field ID'];
-    const fixedWidths  = [8, 52, 38, 14];
+    const fixedWidths = [8, 52, 38, 14];
     fixedHeaders.forEach((text, i) => {
       const colNum = i + 1;
       worksheet.mergeCells(HEADER_START, colNum, HEADER_START + 3, colNum);
       const cell = worksheet.getCell(HEADER_START, colNum);
       cell.value = text;
-      cell.fill  = headerFill;
-      cell.font  = whiteFont;
+      cell.fill = headerFill;
+      cell.font = whiteFont;
       cell.alignment = centerAlign;
       worksheet.getColumn(colNum).width = fixedWidths[i];
     });
@@ -546,18 +546,18 @@ export default function DocumentsFields() {
         if (lastSd && sdStart) {
           // Add border to the right of the previous subdepartment
           subdepartmentBoundaries.push(actualColIdx - 1);
-          try { worksheet.mergeCells(HEADER_START, sdStart, HEADER_START, actualColIdx - 1); } catch {}
+          try { worksheet.mergeCells(HEADER_START, sdStart, HEADER_START, actualColIdx - 1); } catch { }
         }
         lastSd = col.subdept; sdStart = actualColIdx;
         const cell = worksheet.getCell(HEADER_START, actualColIdx);
         cell.value = col.subdept.name;
-        cell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E78' } };
-        cell.font  = whiteFont; cell.alignment = centerAlign;
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E78' } };
+        cell.font = whiteFont; cell.alignment = centerAlign;
       }
       if (idx === tabCols.length - 1) {
         // Add border to the right of the last subdepartment
         subdepartmentBoundaries.push(actualColIdx + colSpan - 1);
-        try { worksheet.mergeCells(HEADER_START, sdStart, HEADER_START, actualColIdx + colSpan - 1); } catch {}
+        try { worksheet.mergeCells(HEADER_START, sdStart, HEADER_START, actualColIdx + colSpan - 1); } catch { }
       }
 
       // Class header (row HEADER_START+1)
@@ -565,15 +565,15 @@ export default function DocumentsFields() {
       const uniqueClassId = `${col.subdept.id}-${col.clsIndex}`;
       if (!lastCls || lastCls.id !== uniqueClassId) {
         if (lastCls && clsStart) {
-          try { worksheet.mergeCells(HEADER_START + 1, clsStart, HEADER_START + 1, actualColIdx - 1); } catch {}
+          try { worksheet.mergeCells(HEADER_START + 1, clsStart, HEADER_START + 1, actualColIdx - 1); } catch { }
         }
         lastCls = { id: uniqueClassId }; clsStart = actualColIdx;
         const cell = worksheet.getCell(HEADER_START + 1, actualColIdx);
         cell.value = className;
-        cell.fill  = subHeaderFill; cell.font = whiteFont; cell.alignment = centerAlign;
+        cell.fill = subHeaderFill; cell.font = whiteFont; cell.alignment = centerAlign;
       }
       if (idx === tabCols.length - 1) {
-        try { worksheet.mergeCells(HEADER_START + 1, clsStart, HEADER_START + 1, actualColIdx + colSpan - 1); } catch {}
+        try { worksheet.mergeCells(HEADER_START + 1, clsStart, HEADER_START + 1, actualColIdx + colSpan - 1); } catch { }
       }
 
       // Subclass header (row HEADER_START+2)
@@ -582,10 +582,10 @@ export default function DocumentsFields() {
         : '-';
       const scCell = worksheet.getCell(HEADER_START + 2, actualColIdx);
       scCell.value = subclassName;
-      scCell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF5B9BD5' } };
-      scCell.font  = { color: { argb: 'FFFFFFFF' } }; scCell.alignment = centerAlign;
+      scCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF5B9BD5' } };
+      scCell.font = { color: { argb: 'FFFFFFFF' } }; scCell.alignment = centerAlign;
       if (colSpan > 1) {
-        try { worksheet.mergeCells(HEADER_START + 2, actualColIdx, HEADER_START + 2, actualColIdx + colSpan - 1); } catch {}
+        try { worksheet.mergeCells(HEADER_START + 2, actualColIdx, HEADER_START + 2, actualColIdx + colSpan - 1); } catch { }
       }
 
       // Entity-type header (row HEADER_START+3)
@@ -593,8 +593,8 @@ export default function DocumentsFields() {
       specs.forEach((entityType, sIdx) => {
         const specCell = worksheet.getCell(HEADER_START + 3, actualColIdx + sIdx);
         specCell.value = entityType;
-        specCell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFBDD7EE' } };
-        specCell.font  = { bold: true }; specCell.alignment = centerAlign;
+        specCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFBDD7EE' } };
+        specCell.font = { bold: true }; specCell.alignment = centerAlign;
         worksheet.getColumn(actualColIdx + sIdx).width = 15;
       });
 
@@ -603,9 +603,9 @@ export default function DocumentsFields() {
 
     // Helper: allocation lookup for export
     const getAlloc = (id: string, sdId, cIdx, scIdx, type) => {
-      const sd  = currentDepartment?.subdepartments?.find(s => s.id === sdId);
+      const sd = currentDepartment?.subdepartments?.find(s => s.id === sdId);
       const cls = cIdx !== null ? sd?.classes?.[cIdx] : null;
-      const sc  = (cls && scIdx !== null) ? cls.subclasses?.[scIdx] : null;
+      const sc = (cls && scIdx !== null) ? cls.subclasses?.[scIdx] : null;
       const classIdPart = sc ? `${sdId}_${cls.id}_${sc.id}` : cls ? `${sdId}_${cls.id}` : `${sdId}`;
       const key = `${id}::${classIdPart}`;
       return (pendingChanges.documents[key]?.[type] ?? documentAllocations[key]?.[type]) === true;
@@ -772,8 +772,8 @@ export default function DocumentsFields() {
           const specs = col.isExpanded ? col.specifications : [col.specifications[0]];
           specs.forEach(spec => {
             colMetaMap[cIdx] = {
-              subdept:     col.subdept,
-              clsIndex:    col.clsIndex,
+              subdept: col.subdept,
+              clsIndex: col.clsIndex,
               subclsIndex: col.subclsIndex,
               spec
             };
@@ -787,7 +787,7 @@ export default function DocumentsFields() {
         worksheet.eachRow((row, rowNumber) => {
           if (rowNumber < 7) return;
 
-          const docId   = String(row.getCell(3).value ?? '').trim();
+          const docId = String(row.getCell(3).value ?? '').trim();
           const fieldId = String(row.getCell(4).value ?? '').trim();
           if (!docId) return; // category summary row — no docId
 
@@ -806,9 +806,9 @@ export default function DocumentsFields() {
             rowYes++;
 
             // Derive hierarchy key from column metadata
-            const sd  = meta.subdept;
+            const sd = meta.subdept;
             const cls = meta.clsIndex !== null ? sd.classes?.[meta.clsIndex] : null;
-            const sc  = (cls && meta.subclsIndex !== null) ? cls.subclasses?.[meta.subclsIndex] : null;
+            const sc = (cls && meta.subclsIndex !== null) ? cls.subclasses?.[meta.subclsIndex] : null;
             const hierarchyKey = [sd.id, cls?.id, sc?.id]
               .filter(id => id !== null && id !== undefined)
               .join('_');
@@ -838,9 +838,9 @@ export default function DocumentsFields() {
       // ── Build upserts ─────────────────────────────────────────────────────
       const upsertPromises = Object.entries(importChanges).map(async ([hierarchyKey, entityMap]) => {
         const parts = hierarchyKey.split('_');
-        const sdId  = parts[0] ? parseInt(parts[0]) : null;
+        const sdId = parts[0] ? parseInt(parts[0]) : null;
         const clsId = parts[1] ? parseInt(parts[1]) : null;
-        const scId  = parts[2] ? parseInt(parts[2]) : null;
+        const scId = parts[2] ? parseInt(parts[2]) : null;
 
         let level = 2;
         if (scId) level = 4;
@@ -892,7 +892,7 @@ export default function DocumentsFields() {
 
         // Prune empty docs
         const finalDocs = Array.from(docsMap.values()).filter(doc => {
-          const hasDocFlags   = Object.keys(doc).some(k => !['id', 'fields', 'updated_at'].includes(k) && doc[k] === true);
+          const hasDocFlags = Object.keys(doc).some(k => !['id', 'fields', 'updated_at'].includes(k) && doc[k] === true);
           const hasFieldFlags = (doc.fields || []).some((f: any) =>
             Object.keys(f).some(k => !['id', 'updated_at'].includes(k) && f[k] === true)
           );
@@ -936,9 +936,9 @@ export default function DocumentsFields() {
   // ─────────────────────────────────────────────────────────────────────────────
   // UI helpers
   // ─────────────────────────────────────────────────────────────────────────────
-  const toggleColumnExpansion   = (key) => setExpandedColumns(prev => toggleSetItem(prev, key));
+  const toggleColumnExpansion = (key) => setExpandedColumns(prev => toggleSetItem(prev, key));
   const toggleCategoryExpansion = (key) => setExpandedCategories(prev => toggleSetItem(prev, key));
-  const toggleItemExpansion     = (key) => setExpandedItems(prev => toggleSetItem(prev, key));
+  const toggleItemExpansion = (key) => setExpandedItems(prev => toggleSetItem(prev, key));
 
   const handleDiscardChanges = useCallback(() => {
     setPendingChanges({ documents: {}, clientFields: {} });
@@ -1152,7 +1152,7 @@ export default function DocumentsFields() {
 
                               {isCatExpanded && group.documents.map((doc, docIndex) => {
                                 const isDocExpanded = expandedItems.has(doc.id);
-                                const docHasFields  = doc.fields && doc.fields.length > 0;
+                                const docHasFields = doc.fields && doc.fields.length > 0;
                                 return (
                                   <React.Fragment key={`doc-${doc.id}`}>
                                     <TableRow className="group hover:bg-blue-50">

@@ -19,7 +19,7 @@ import ColumnVisibilityControl, { type ColumnVisibilityOption } from "../main-sh
 import EntityVisibilityControl, { type EntityVisibilityOption } from "../main-shared-components/entity-visibility"
 import * as XLSX from "xlsx"
 import * as ExcelJS from "exceljs"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 
 // Simple UUID generator for client-side use
 const generateId = () => {

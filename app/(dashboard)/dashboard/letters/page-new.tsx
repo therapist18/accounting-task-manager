@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Upload, FileText, Settings } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
+import { useToast } from '@/lib/hooks/use-toast';
 import { fetchCompanies, type Company } from '../companies/database';
 import { supabase } from '@/lib/supabase/client';
 
@@ -143,13 +143,13 @@ export default function LetterGenerationModuleNew() {
             <div>
               <h1 className="text-2xl font-bold">Letter Generation</h1>
               <p className="text-muted-foreground">
-                {selectedCompany 
+                {selectedCompany
                   ? `Writing for: ${selectedCompany.company_name}`
                   : 'Select a company to start'
                 }
               </p>
             </div>
-            
+
             {selectedCompanyId && (
               <Button
                 onClick={() => setUploadDialogOpen(true)}

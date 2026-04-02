@@ -15,7 +15,7 @@ import {
   Loader2, SkipForward, Clock3, MoreHorizontal, CheckCircle2,
   Timer, AlertCircle
 } from "lucide-react"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { format, parse, isValid } from "date-fns"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
@@ -399,9 +399,11 @@ export default function EditableStageCell({
         updatedExtractedDetails.skip_reason = skipReason || selectedSkipReason;
       }
 
+      // Save the stage data
       await onSave(stage.id, task.id, finalValue, updatedExtractedDetails);
       setIsEditing(false);
 
+      // Show success message
       toast({
         title: "Success",
         description: isSkipped ? "Stage marked as skipped" : "Stage updated successfully",
@@ -409,8 +411,23 @@ export default function EditableStageCell({
 
       // Fetch and update states after successful submission
       if (onFetchData) {
-        await onFetchData();
+        try {
+          await onFetchData();
+        } catch (fetchError) {
+          console.error('Error refreshing data after save:', fetchError);
+          toast({
+            title: "Warning",
+            description: "Stage saved but data refresh failed. Please refresh manually.",
+            variant: "default"
+          });
+        }
       }
+
+      // Clear any cached data that might be stale
+      if (linkedDocument?.document_type_id) {
+        documentFieldsCache.delete(linkedDocument.document_type_id);
+      }
+
     } catch (error) {
       console.error('Error saving stage:', error);
       toast({
@@ -421,7 +438,7 @@ export default function EditableStageCell({
     } finally {
       setIsLoading(false);
     }
-  }, [editValue, onSave, stage?.id, task?.id, linkedDocument, selectedSkipReason, previewDocuments, currentPreviewIndex]);
+  }, [editValue, onSave, stage?.id, task?.id, linkedDocument, selectedSkipReason, previewDocuments, currentPreviewIndex, onFetchData]);
 
   const checkPreviousStages = useCallback(async () => {
     if (!task.stages || !stages || stages.length === 0) return true;

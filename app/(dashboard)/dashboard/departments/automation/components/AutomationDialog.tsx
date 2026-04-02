@@ -33,7 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import {
   Loader2, Trash2, Save, Plus, Search, Check, X,
   FileText, Database, Paperclip, Settings2, GripVertical, // GripVertical is used for the drag handle

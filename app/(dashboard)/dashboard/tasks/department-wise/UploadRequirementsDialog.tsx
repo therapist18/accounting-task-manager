@@ -25,7 +25,7 @@ import {
   Layers,
   Building
 } from "lucide-react"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -126,7 +126,7 @@ export function UploadRequirementsDialog({
     if (!individualData?.id) {
       return [];
     }
-    
+
     try {
       const { data: documents, error } = await supabase
         .from('acc_portal_directors_documents')
@@ -209,7 +209,7 @@ export function UploadRequirementsDialog({
 
     try {
       setLoadingApplicant(true);
-      
+
       let documents = [];
       let companies = [];
       let billToInfo = null;
@@ -232,7 +232,7 @@ export function UploadRequirementsDialog({
           if (individualData.bill_to) {
             billToInfo = individualData.bill_to;
           }
-          
+
           // Get director roles from employment_history
           if (individualData.employment_history?.length > 0) {
             // Filter for director roles and get unique company IDs
@@ -241,29 +241,29 @@ export function UploadRequirementsDialog({
                 .filter((emp: any) => emp.role?.toLowerCase() === 'director' && emp.company_id)
                 .map((emp: any) => emp.company_id)
             )];
-            
+
             if (directorCompanyIds.length > 0) {
               // Fetching director company details
-              
+
               // Fetch company details in a single query
               const { data: companyDetails, error: companyError } = await supabase
                 .from('acc_portal_company_duplicate')
                 .select('id, company_name, registration_number')
                 .in('id', directorCompanyIds);
-              
+
               if (companyError) {
                 return;
               } else if (companyDetails?.length > 0) {
                 // Create a map of company ID to company details
                 const companyMap = new Map(companyDetails.map(company => [company.id.toString(), company]));
-                
+
                 // Map employment history to company objects with details
                 const directorCompanies = individualData.employment_history
                   .filter((emp: any) => emp.role?.toLowerCase() === 'director' && emp.company_id)
                   .map((emp: any) => {
                     const companyId = emp.company_id.toString();
                     const companyDetails = companyMap.get(companyId) || {};
-                    
+
                     return {
                       id: companyId,
                       name: companyDetails.company_name || `Company ${companyId}`,
@@ -276,7 +276,7 @@ export function UploadRequirementsDialog({
                       on_payroll: emp.on_payroll
                     };
                   });
-                
+
                 // Add director companies to companies array
                 companies.push(...directorCompanies);
                 // Director companies added
@@ -298,7 +298,7 @@ export function UploadRequirementsDialog({
           if (error) {
             return null;
           }
-          
+
           return companyData ? {
             id: companyData.id,
             name: companyData.company_name,
@@ -315,10 +315,10 @@ export function UploadRequirementsDialog({
       // Add billing company from bill_to if it exists
       let billingCompany = null;
       if (billToInfo) {
-        const billingCompanyId = billToInfo.company || 
-                               (typeof billToInfo === 'object' && billToInfo.company_id) ||
-                               (typeof billToInfo === 'object' && billToInfo.companyId);
-        
+        const billingCompanyId = billToInfo.company ||
+          (typeof billToInfo === 'object' && billToInfo.company_id) ||
+          (typeof billToInfo === 'object' && billToInfo.companyId);
+
         if (billingCompanyId) {
           // Fetching billing company details
           billingCompany = await fetchCompanyDetails(billingCompanyId);
@@ -346,8 +346,8 @@ export function UploadRequirementsDialog({
             .eq('id', task.bill_to.company)
             .single();
 
-              if (companyData && !companyError) {
-            
+          if (companyData && !companyError) {
+
             companies = [{
               id: companyData.id,
               name: companyData.company_name,
@@ -367,13 +367,13 @@ export function UploadRequirementsDialog({
         // Fetch documents for this individual using their data
         documents = await fetchApplicantDocuments(individualData);
         setApplicantDocuments(documents);
-        
+
         // Get the billing company from individual data if available
         const billingCompany = individualData.bill_to?.company
           ? {
-              type: 'billing',
-              is_primary: true
-            }
+            type: 'billing',
+            is_primary: true
+          }
           : null;
 
         // We've already processed the directorship history earlier
@@ -383,7 +383,7 @@ export function UploadRequirementsDialog({
         // Ensure companies are unique by ID
         const uniqueCompanies = [];
         const companyIds = new Set();
-        
+
         // Add all companies, ensuring no duplicates
         companies.forEach(company => {
           if (company.id && !companyIds.has(company.id)) {
@@ -391,7 +391,7 @@ export function UploadRequirementsDialog({
             companyIds.add(company.id);
           }
         });
-        
+
         // Update the companies array with deduplicated list
         companies = uniqueCompanies;
 
@@ -474,14 +474,14 @@ export function UploadRequirementsDialog({
       if (error) throw error;
 
       // Update the requirement with the company's documents
-      setRequirementsWithDocuments(prev => 
-        prev.map(req => 
-          req.id === requirementId 
-            ? { 
-                ...req, 
-                companyDocuments: companyDocs || [],
-                documents: [...(req.documents || []), ...(companyDocs || [])]
-              } 
+      setRequirementsWithDocuments(prev =>
+        prev.map(req =>
+          req.id === requirementId
+            ? {
+              ...req,
+              companyDocuments: companyDocs || [],
+              documents: [...(req.documents || []), ...(companyDocs || [])]
+            }
             : req
         )
       );
@@ -496,7 +496,7 @@ export function UploadRequirementsDialog({
 
   const getDocumentForRequirement = (requirement: any) => {
     if (!requirement) return [];
-    
+
     // If it's a company requirement and a company is selected, return company documents
     if (requirement.type === 'company' && selectedCompanies[requirement.id]) {
       return requirement.companyDocuments || [];
@@ -504,7 +504,7 @@ export function UploadRequirementsDialog({
 
     // Otherwise return regular applicant documents
     if (!requirement.kycDocumentId) return [];
-    
+
     return applicantDocuments.filter(doc =>
       doc.document_id === requirement.kycDocumentId ||
       doc.kyc_document_id === requirement.kycDocumentId
@@ -516,7 +516,7 @@ export function UploadRequirementsDialog({
       const current = prev[requirementId] || [];
       const requirement = requirementsWithDocuments.find(r => r.id === requirementId);
       const requiredCount = requirement?.requiredDocumentCount || 1;
-      
+
       if (checked) {
         // If we're at the required count, don't add more unless it's a multi-select
         if (current.length >= requiredCount && !requirement?.allowMultiple) {
@@ -746,54 +746,54 @@ export function UploadRequirementsDialog({
   };
 
   // Update the save selections function
-const handleSaveSelections = async () => {
-  try {
-    setIsLoading(true);
-    
-    // Prepare the selections data
-    const selectionsData = Object.entries(selectedDocuments).map(([requirementId, documents]) => {
-      const requirement = requirementsWithDocuments.find(r => r.id === requirementId);
-      
-      return {
-        requirementId,
-        requirementName: requirement?.name,
-        requirementType: requirement?.type,
-        selectedDocuments: documents,
-        selectedCompany: requirement?.type === 'company' ? selectedCompanies[requirementId] : null,
-        companyDetails: requirement?.type === 'company' && selectedCompanies[requirementId] 
-          ? applicantCompanies.find(c => c.id === selectedCompanies[requirementId])
-          : null
-      };
-    });
-    
-    // Save to your task requirements or create a new table for tracking selections
-    const { error } = await supabase
-      .from('tm_task')
-      .upsert({
-        task_id: task.id,
-        selections: selectionsData,
-        updated_at: new Date().toISOString()
+  const handleSaveSelections = async () => {
+    try {
+      setIsLoading(true);
+
+      // Prepare the selections data
+      const selectionsData = Object.entries(selectedDocuments).map(([requirementId, documents]) => {
+        const requirement = requirementsWithDocuments.find(r => r.id === requirementId);
+
+        return {
+          requirementId,
+          requirementName: requirement?.name,
+          requirementType: requirement?.type,
+          selectedDocuments: documents,
+          selectedCompany: requirement?.type === 'company' ? selectedCompanies[requirementId] : null,
+          companyDetails: requirement?.type === 'company' && selectedCompanies[requirementId]
+            ? applicantCompanies.find(c => c.id === selectedCompanies[requirementId])
+            : null
+        };
       });
-    
-    if (error) throw error;
-    
-    toast({
-      title: "Success",
-      description: "Document selections and company assignments saved successfully",
-      variant: "default"
-    });
-    
-    onUploadComplete?.();
-  } catch (error) {
-    toast({
-      title: "Error",
-      description: "Failed to save selections. Please try again.",
-      variant: "destructive"
-    });
-  } finally {
-    setIsLoading(false);
-  }
-};
+
+      // Save to your task requirements or create a new table for tracking selections
+      const { error } = await supabase
+        .from('tm_task')
+        .upsert({
+          task_id: task.id,
+          selections: selectionsData,
+          updated_at: new Date().toISOString()
+        });
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Document selections and company assignments saved successfully",
+        variant: "default"
+      });
+
+      onUploadComplete?.();
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to save selections. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
     <>

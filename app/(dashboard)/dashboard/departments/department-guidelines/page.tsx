@@ -19,7 +19,7 @@ import { Separator } from "@/components/ui/separator"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Checkbox } from "@/components/ui/checkbox"
 import supabase from "@/lib/supabase/client"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import { DepartmentSidebar } from "../main-shared-components/department-sidebar"
 import type { Department } from "./database"
 
@@ -40,13 +40,13 @@ const generateGuidelineId = (index: number, existingGuidelines: ApiGuideline[] =
   if (existingGuidelines.length === 0) {
     return index.toString();
   }
-  
+
   // Find the highest existing ID
   const maxId = existingGuidelines.reduce((max, guideline) => {
     const id = parseInt(guideline.id || '0', 10);
     return isNaN(id) ? max : Math.max(max, id);
   }, -1);
-  
+
   return (maxId + 1 + index).toString();
 }
 
@@ -94,17 +94,17 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
   // Dialog states
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
-  const [deleteContext, setDeleteContext] = useState<{type: string, index: number} | null>(null)
+  const [deleteContext, setDeleteContext] = useState<{ type: string, index: number } | null>(null)
   const [editingContext, setEditingContext] = useState<EditingContext | null>(null)
   const [newGuidelines, setNewGuidelines] = useState<{
-    title: string, 
+    title: string,
     content: string,
     type: 'general' | 'process' | 'warning' | 'tip',
     isImportant: boolean,
     isVisible: boolean,
     category: string
   }[]>([{
-    title: '', 
+    title: '',
     content: '',
     type: 'general',
     isImportant: false,
@@ -116,7 +116,7 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
   // Edit states
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [editForm, setEditForm] = useState({
-    title: '', 
+    title: '',
     content: '',
     type: 'general' as 'general' | 'process' | 'warning' | 'tip',
     isImportant: false,
@@ -166,8 +166,8 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
 
   const openGuidelinesDialog = (context: EditingContext) => {
     setEditingContext(context)
-    setNewGuidelines([{ 
-      title: '', 
+    setNewGuidelines([{
+      title: '',
       content: '',
       type: 'general',
       isImportant: false,
@@ -180,8 +180,8 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
   const handleCloseDialog = () => {
     setIsDialogOpen(false)
     setEditingContext(null)
-    setNewGuidelines([{ 
-      title: '', 
+    setNewGuidelines([{
+      title: '',
       content: '',
       type: 'general',
       isImportant: false,
@@ -312,14 +312,14 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
           // Process classes from JSONB column
           const classes = (subdept.classes || []).map(cls => {
             const classId = `${subdept.id}_${cls.id}`
-            
+
             // Find class guidelines from API
-            const classGuidelinesRecord = guidelines?.find(guideline => 
+            const classGuidelinesRecord = guidelines?.find(guideline =>
               guideline.class_id === classId && guideline.type === 'class'
             )
-            
+
             console.log(`Looking for class guidelines with ID: ${classId}`, classGuidelinesRecord)
-            
+
             const classGuidelines = classGuidelinesRecord?.guidelines?.map((g: any, idx: number) => ({
               id: g.id?.toString() || generateGuidelineId(idx, classGuidelinesRecord.guidelines),
               title: g.title || '',
@@ -334,12 +334,12 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
             // Process subclasses from JSONB
             const subClasses = (cls.subClasses || []).map(subCls => {
               const subClassId = `${classId}_${subCls.id}`
-              
+
               // Find subclass guidelines from API
-              const subClassGuidelinesRecord = guidelines?.find(guideline => 
+              const subClassGuidelinesRecord = guidelines?.find(guideline =>
                 guideline.class_id === subClassId && guideline.type === 'subclass'
               )
-              
+
               const subClassGuidelines = subClassGuidelinesRecord?.guidelines?.map((g: any, idx: number) => ({
                 id: g.id?.toString() || generateGuidelineId(idx, subClassGuidelinesRecord.guidelines),
                 title: g.title || '',
@@ -366,12 +366,12 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
           })
 
           // Process subdepartment guidelines
-          const subdeptGuidelinesRecord = guidelines?.find(guideline => 
+          const subdeptGuidelinesRecord = guidelines?.find(guideline =>
             guideline.class_id === subdept.id.toString() && guideline.type === 'subdepartment'
           )
-          
+
           console.log(`Looking for subdept guidelines with ID: ${subdept.id.toString()}`, subdeptGuidelinesRecord)
-          
+
           const uploadGuidelines = subdeptGuidelinesRecord?.guidelines?.map((g: any, idx: number) => ({
             id: g.id?.toString() || generateGuidelineId(idx, subdeptGuidelinesRecord.guidelines),
             title: g.title || '',
@@ -415,8 +415,8 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
   }, [])
 
   const addNewGuideline = () => {
-    setNewGuidelines([...newGuidelines, { 
-      title: '', 
+    setNewGuidelines([...newGuidelines, {
+      title: '',
       content: '',
       type: 'general',
       isImportant: false,
@@ -448,7 +448,7 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
 
     try {
       setIsSubmitting(true)
-      
+
       // Get existing guidelines based on context
       let classId = '';
       let existingGuidelines: any[] = [];
@@ -510,15 +510,15 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
       if (error) throw error;
 
       await refreshDepartments()
-  
+
       toast({
         title: "Success",
         description: `Added ${validGuidelines.length} guideline${validGuidelines.length > 1 ? 's' : ''} successfully`,
         variant: "default"
       })
-  
+
       handleCloseDialog()
-  
+
     } catch (error) {
       console.error('Error adding guidelines:', error)
       toast({
@@ -536,7 +536,7 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
     const safeGuidelines = guidelines || [];
 
     console.log('Rendering guidelines:', safeGuidelines, 'for context:', context)
-    
+
     const handleEdit = (index: number) => {
       setEditingIndex(index)
       setEditForm({
@@ -551,7 +551,7 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
 
     const handleSaveEdit = async () => {
       if (editingIndex === null || !editingContext) return
-    
+
       try {
         const updatedGuidelines = [...safeGuidelines]
         updatedGuidelines[editingIndex] = {
@@ -563,17 +563,17 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
           isVisible: editForm.isVisible,
           category: editForm.category.trim()
         }
-    
+
         await saveGuidelinesForContext(context, updatedGuidelines)
         await refreshDepartments()
         setEditingIndex(null)
-    
+
         toast({
           title: "Success",
           description: "Guideline updated successfully",
           variant: "default"
         })
-    
+
       } catch (error) {
         console.error('Error updating guideline:', error)
         toast({
@@ -583,24 +583,24 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
         })
       }
     }
- 
+
     const handleMove = async (index: number, direction: 'up' | 'down') => {
       const newIndex = direction === 'up' ? index - 1 : index + 1
       if (newIndex < 0 || newIndex >= safeGuidelines.length) return
-    
+
       try {
         const updatedGuidelines = [...safeGuidelines]
-        ;[updatedGuidelines[index], updatedGuidelines[newIndex]] = 
-         [updatedGuidelines[newIndex], updatedGuidelines[index]]
-    
+          ;[updatedGuidelines[index], updatedGuidelines[newIndex]] =
+            [updatedGuidelines[newIndex], updatedGuidelines[index]]
+
         // Update order values
         updatedGuidelines.forEach((guideline, i) => {
           guideline.order = i
         })
-    
+
         await saveGuidelinesForContext(context, updatedGuidelines)
         await refreshDepartments()
-    
+
       } catch (error) {
         console.error('Error moving guideline:', error)
         toast({
@@ -610,7 +610,7 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
         })
       }
     }
- 
+
     const getTypeIcon = (type: string) => {
       switch (type) {
         case 'warning':
@@ -623,7 +623,7 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
           return <BookOpen className="h-4 w-4 text-gray-500" />
       }
     }
- 
+
     const getTypeBadgeVariant = (type: string) => {
       switch (type) {
         case 'warning':
@@ -636,7 +636,7 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
           return 'outline'
       }
     }
- 
+
     return (
       <div className="relative h-[calc(80vh-200px)] border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm">
         <Table>
@@ -649,401 +649,401 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
               <TableHead className="w-24">Category</TableHead>
               <TableHead className="w-20">Status</TableHead>
               <TableHead className="w-56">Actions</TableHead>
-           </TableRow>
-         </TableHeader>
-         <TableBody>
-           {safeGuidelines.length > 0 ? (
-             safeGuidelines.map((guideline, idx) => (
-               <TableRow key={guideline.id || guideline.tempId || idx} className="group hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                 <TableCell className="font-medium">
-                   <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs">
-                     {idx + 1}
-                   </span>
-                 </TableCell>
-                 <TableCell>
-                   {editingIndex === idx ? (
-                     <Input
-                       value={editForm.title}
-                       onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
-                       className="h-9"
-                       autoFocus
-                     />
-                   ) : (
-                     <div className="flex items-center space-x-2">
-                       {getTypeIcon(guideline.type)}
-                       <span className="font-medium">{guideline.title}</span>
-                       {guideline.isImportant && (
-                         <AlertTriangle className="h-3 w-3 text-red-500" />
-                       )}
-                     </div>
-                   )}
-                 </TableCell>
-                 <TableCell>
-                   {editingIndex === idx ? (
-                     <Textarea
-                       value={editForm.content}
-                       onChange={(e) => setEditForm({ ...editForm, content: e.target.value })}
-                       className="min-h-[60px]"
-                       placeholder="Guideline content"
-                     />
-                   ) : (
-                     <div className="max-w-xs">
-                       <p className={cn(
-                         "text-sm line-clamp-3",
-                         !guideline.content ? 'text-gray-400 italic' : ''
-                       )}>
-                         {guideline.content || 'No content'}
-                       </p>
-                     </div>
-                   )}
-                 </TableCell>
-                 <TableCell>
-                   {editingIndex === idx ? (
-                     <select
-                       value={editForm.type}
-                       onChange={(e) => setEditForm({ ...editForm, type: e.target.value as any })}
-                       className="h-9 px-2 border rounded"
-                     >
-                       <option value="general">General</option>
-                       <option value="process">Process</option>
-                       <option value="warning">Warning</option>
-                       <option value="tip">Tip</option>
-                     </select>
-                   ) : (
-                     <Badge variant={getTypeBadgeVariant(guideline.type)}>
-                       {guideline.type}
-                     </Badge>
-                   )}
-                 </TableCell>
-                 <TableCell>
-                   {editingIndex === idx ? (
-                     <Input
-                       value={editForm.category}
-                       onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
-                       className="h-9"
-                       placeholder="Category"
-                     />
-                   ) : (
-                     <span className={cn(
-                       "text-xs px-2 py-1 rounded-full",
-                       guideline.category 
-                         ? "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300" 
-                         : "text-gray-400 italic"
-                     )}>
-                       {guideline.category || 'No category'}
-                     </span>
-                   )}
-                 </TableCell>
-                 <TableCell>
-                   {editingIndex === idx ? (
-                     <div className="flex flex-col space-y-1">
-                       <label className="flex items-center space-x-1">
-                         <Checkbox
-                           checked={editForm.isImportant}
-                           onCheckedChange={(checked) => setEditForm({ ...editForm, isImportant: Boolean(checked) })}
-                         />
-                         <span className="text-xs">Important</span>
-                       </label>
-                       <label className="flex items-center space-x-1">
-                         <Checkbox
-                           checked={editForm.isVisible}
-                           onCheckedChange={(checked) => setEditForm({ ...editForm, isVisible: Boolean(checked) })}
-                         />
-                         <span className="text-xs">Visible</span>
-                       </label>
-                     </div>
-                   ) : (
-                     <div className="flex flex-col space-y-1">
-                       <div className="flex items-center space-x-1">
-                         {guideline.isImportant ? (
-                           <AlertTriangle className="h-3 w-3 text-red-500" />
-                         ) : (
-                           <div className="h-3 w-3" />
-                         )}
-                         <span className="text-xs">{guideline.isImportant ? 'Important' : 'Normal'}</span>
-                       </div>
-                       <div className="flex items-center space-x-1">
-                         {guideline.isVisible ? (
-                           <Eye className="h-3 w-3 text-green-500" />
-                         ) : (
-                           <EyeOff className="h-3 w-3 text-gray-400" />
-                         )}
-                         <span className="text-xs">{guideline.isVisible ? 'Visible' : 'Hidden'}</span>
-                       </div>
-                     </div>
-                   )}
-                 </TableCell>
-                 <TableCell>
-                   <div className="flex items-center space-x-1">
-                     {editingIndex === idx ? (
-                       <>
-                         <Button
-                           variant="ghost"
-                           size="sm"
-                           className="h-8 w-8 p-0 text-green-600"
-                           onClick={handleSaveEdit}
-                         >
-                           <Check className="h-4 w-4" />
-                         </Button>
-                         <Button
-                           variant="ghost"
-                           size="sm"
-                           className="h-8 w-8 p-0"
-                           onClick={() => setEditingIndex(null)}
-                         >
-                           <X className="h-4 w-4" />
-                         </Button>
-                       </>
-                     ) : (
-                       <>
-                         <Button
-                           variant="ghost"
-                           size="sm"
-                           className="h-8 w-8 p-0 text-blue-600"
-                           onClick={() => handleEdit(idx)}
-                         >
-                           <Pencil className="h-3.5 w-3.5" />
-                         </Button>
-                         <Button
-                           variant="ghost"
-                           size="sm"
-                           className="h-8 w-8 p-0"
-                           onClick={() => handleMove(idx, 'up')}
-                           disabled={idx === 0}
-                         >
-                           <ArrowUp className="h-3.5 w-3.5" />
-                         </Button>
-                         <Button
-                           variant="ghost"
-                           size="sm"
-                           className="h-8 w-8 p-0"
-                           onClick={() => handleMove(idx, 'down')}
-                          disabled={idx === safeGuidelines.length - 1}
-                        >
-                          <ArrowDown className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0 text-red-500"
-                          onClick={() => handleDeleteClick(context.type, idx)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {safeGuidelines.length > 0 ? (
+              safeGuidelines.map((guideline, idx) => (
+                <TableRow key={guideline.id || guideline.tempId || idx} className="group hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                  <TableCell className="font-medium">
+                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs">
+                      {idx + 1}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    {editingIndex === idx ? (
+                      <Input
+                        value={editForm.title}
+                        onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                        className="h-9"
+                        autoFocus
+                      />
+                    ) : (
+                      <div className="flex items-center space-x-2">
+                        {getTypeIcon(guideline.type)}
+                        <span className="font-medium">{guideline.title}</span>
+                        {guideline.isImportant && (
+                          <AlertTriangle className="h-3 w-3 text-red-500" />
+                        )}
+                      </div>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    {editingIndex === idx ? (
+                      <Textarea
+                        value={editForm.content}
+                        onChange={(e) => setEditForm({ ...editForm, content: e.target.value })}
+                        className="min-h-[60px]"
+                        placeholder="Guideline content"
+                      />
+                    ) : (
+                      <div className="max-w-xs">
+                        <p className={cn(
+                          "text-sm line-clamp-3",
+                          !guideline.content ? 'text-gray-400 italic' : ''
+                        )}>
+                          {guideline.content || 'No content'}
+                        </p>
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {editingIndex === idx ? (
+                      <select
+                        value={editForm.type}
+                        onChange={(e) => setEditForm({ ...editForm, type: e.target.value as any })}
+                        className="h-9 px-2 border rounded"
+                      >
+                        <option value="general">General</option>
+                        <option value="process">Process</option>
+                        <option value="warning">Warning</option>
+                        <option value="tip">Tip</option>
+                      </select>
+                    ) : (
+                      <Badge variant={getTypeBadgeVariant(guideline.type)}>
+                        {guideline.type}
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {editingIndex === idx ? (
+                      <Input
+                        value={editForm.category}
+                        onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
+                        className="h-9"
+                        placeholder="Category"
+                      />
+                    ) : (
+                      <span className={cn(
+                        "text-xs px-2 py-1 rounded-full",
+                        guideline.category
+                          ? "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
+                          : "text-gray-400 italic"
+                      )}>
+                        {guideline.category || 'No category'}
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {editingIndex === idx ? (
+                      <div className="flex flex-col space-y-1">
+                        <label className="flex items-center space-x-1">
+                          <Checkbox
+                            checked={editForm.isImportant}
+                            onCheckedChange={(checked) => setEditForm({ ...editForm, isImportant: Boolean(checked) })}
+                          />
+                          <span className="text-xs">Important</span>
+                        </label>
+                        <label className="flex items-center space-x-1">
+                          <Checkbox
+                            checked={editForm.isVisible}
+                            onCheckedChange={(checked) => setEditForm({ ...editForm, isVisible: Boolean(checked) })}
+                          />
+                          <span className="text-xs">Visible</span>
+                        </label>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col space-y-1">
+                        <div className="flex items-center space-x-1">
+                          {guideline.isImportant ? (
+                            <AlertTriangle className="h-3 w-3 text-red-500" />
+                          ) : (
+                            <div className="h-3 w-3" />
+                          )}
+                          <span className="text-xs">{guideline.isImportant ? 'Important' : 'Normal'}</span>
+                        </div>
+                        <div className="flex items-center space-x-1">
+                          {guideline.isVisible ? (
+                            <Eye className="h-3 w-3 text-green-500" />
+                          ) : (
+                            <EyeOff className="h-3 w-3 text-gray-400" />
+                          )}
+                          <span className="text-xs">{guideline.isVisible ? 'Visible' : 'Hidden'}</span>
+                        </div>
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center space-x-1">
+                      {editingIndex === idx ? (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-green-600"
+                            onClick={handleSaveEdit}
+                          >
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => setEditingIndex(null)}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-blue-600"
+                            onClick={() => handleEdit(idx)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => handleMove(idx, 'up')}
+                            disabled={idx === 0}
+                          >
+                            <ArrowUp className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => handleMove(idx, 'down')}
+                            disabled={idx === safeGuidelines.length - 1}
+                          >
+                            <ArrowDown className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-red-500"
+                            onClick={() => handleDeleteClick(context.type, idx)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center py-8 text-gray-500">
+                  <div className="flex flex-col items-center space-y-2">
+                    <BookOpen className="h-8 w-8 text-gray-400" />
+                    <p>No guidelines added yet</p>
+                    <p className="text-xs text-gray-400">Click the button above to add guidelines</p>
                   </div>
                 </TableCell>
               </TableRow>
-            ))
-          ) : (
-            <TableRow>
-              <TableCell colSpan={7} className="text-center py-8 text-gray-500">
-                <div className="flex flex-col items-center space-y-2">
-                  <BookOpen className="h-8 w-8 text-gray-400" />
-                  <p>No guidelines added yet</p>
-                  <p className="text-xs text-gray-400">Click the button above to add guidelines</p>
-                </div>
-              </TableCell>
-            </TableRow>
-          )}
-        </TableBody>
-      </Table>
-    </div>
-  )
-}
-
-// Main content area with sidebar and guidelines
-const renderSidebarView = () => {
-  return (
-    <div className="flex h-[calc(100vh-200px)] border rounded-lg overflow-hidden">
-      {/* Department Sidebar */}
-      <DepartmentSidebar
-        departments={departments}
-        activeDept={activeDept}
-        activeSubdept={activeSubdept[activeDept] || ''}
-        onDeptClick={handleDeptClick}
-        onSubdeptClick={handleSubdeptClick}
-        onClassClick={handleClassClick}
-        onSubclassClick={handleSubclassClick}
-        onToggleExpand={handleToggleExpand}
-        expandedItems={expandedItems}
-      />
-
-      {/* Main Content */}
-      <div className="flex-1 p-6 bg-white dark:bg-gray-900">
-        {renderMainContent()}
-      </div>
-</div>
-     
-    )
-}
-
-const renderMainContent = () => {
-  const currentDept = departments.find(d => d.id === activeDept)
-  if (!currentDept) {
-    return (
-      <div className="flex items-center justify-center h-full text-gray-500">
-        <div className="text-center">
-          <BookOpen className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-          <p className="text-lg font-medium">Select a department</p>
-          <p className="text-sm">Choose a department from the sidebar to view its guidelines</p>
-        </div>
+            )}
+          </TableBody>
+        </Table>
       </div>
     )
   }
 
-  const currentSubdeptId = activeSubdept[currentDept.id]
-  const currentSubdept = currentDept.tm_subdepartments?.find(s => s.id.toString() === currentSubdeptId)
-
-  if (!currentSubdept) {
+  // Main content area with sidebar and guidelines
+  const renderSidebarView = () => {
     return (
-      <div className="space-y-6">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{currentDept.name}</h2>
-          {currentDept.description && (
-            <p className="text-gray-600 dark:text-gray-400">{currentDept.description}</p>
-          )}
+      <div className="flex h-[calc(100vh-200px)] border rounded-lg overflow-hidden">
+        {/* Department Sidebar */}
+        <DepartmentSidebar
+          departments={departments}
+          activeDept={activeDept}
+          activeSubdept={activeSubdept[activeDept] || ''}
+          onDeptClick={handleDeptClick}
+          onSubdeptClick={handleSubdeptClick}
+          onClassClick={handleClassClick}
+          onSubclassClick={handleSubclassClick}
+          onToggleExpand={handleToggleExpand}
+          expandedItems={expandedItems}
+        />
+
+        {/* Main Content */}
+        <div className="flex-1 p-6 bg-white dark:bg-gray-900">
+          {renderMainContent()}
         </div>
-        <div className="flex items-center justify-center h-64 text-gray-500">
+      </div>
+
+    )
+  }
+
+  const renderMainContent = () => {
+    const currentDept = departments.find(d => d.id === activeDept)
+    if (!currentDept) {
+      return (
+        <div className="flex items-center justify-center h-full text-gray-500">
           <div className="text-center">
             <BookOpen className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-            <p className="text-lg font-medium">Select a subdepartment</p>
-            <p className="text-sm">Choose a subdepartment to view and manage guidelines</p>
+            <p className="text-lg font-medium">Select a department</p>
+            <p className="text-sm">Choose a department from the sidebar to view its guidelines</p>
           </div>
         </div>
-      </div>
-    )
-  }
+      )
+    }
 
-  const activeClassKey = `${currentDept.id}-${currentSubdept.id}`
-  const currentClassId = activeClass[activeClassKey]
-  const currentClass = currentSubdept.classes?.find(c => c.id.toString() === currentClassId)
+    const currentSubdeptId = activeSubdept[currentDept.id]
+    const currentSubdept = currentDept.tm_subdepartments?.find(s => s.id.toString() === currentSubdeptId)
 
-  const activeSubclassKey = `${activeClassKey}-${currentClassId}`
-  const currentSubclassId = activeSubclass[activeSubclassKey]
-  const currentSubclass = currentClass?.subClasses?.find(sc => sc.id.toString() === currentSubclassId)
-
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="border-b pb-4">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{currentDept.name}</h2>
-        <h3 className="text-lg text-gray-600 dark:text-gray-400">{currentSubdept.name}</h3>
-        {currentClass && (
-          <div className="flex items-center space-x-2 mt-2">
-            <Badge variant="outline">{currentClass.name}</Badge>
-            {currentSubclass && (
-              <>
-                <ChevronRight className="h-4 w-4 text-gray-400" />
-                <Badge variant="outline">{currentSubclass.name}</Badge>
-              </>
+    if (!currentSubdept) {
+      return (
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{currentDept.name}</h2>
+            {currentDept.description && (
+              <p className="text-gray-600 dark:text-gray-400">{currentDept.description}</p>
             )}
+          </div>
+          <div className="flex items-center justify-center h-64 text-gray-500">
+            <div className="text-center">
+              <BookOpen className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+              <p className="text-lg font-medium">Select a subdepartment</p>
+              <p className="text-sm">Choose a subdepartment to view and manage guidelines</p>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    const activeClassKey = `${currentDept.id}-${currentSubdept.id}`
+    const currentClassId = activeClass[activeClassKey]
+    const currentClass = currentSubdept.classes?.find(c => c.id.toString() === currentClassId)
+
+    const activeSubclassKey = `${activeClassKey}-${currentClassId}`
+    const currentSubclassId = activeSubclass[activeSubclassKey]
+    const currentSubclass = currentClass?.subClasses?.find(sc => sc.id.toString() === currentSubclassId)
+
+    return (
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="border-b pb-4">
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{currentDept.name}</h2>
+          <h3 className="text-lg text-gray-600 dark:text-gray-400">{currentSubdept.name}</h3>
+          {currentClass && (
+            <div className="flex items-center space-x-2 mt-2">
+              <Badge variant="outline">{currentClass.name}</Badge>
+              {currentSubclass && (
+                <>
+                  <ChevronRight className="h-4 w-4 text-gray-400" />
+                  <Badge variant="outline">{currentSubclass.name}</Badge>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Content based on current selection */}
+        {currentSubclass ? (
+          // Show subclass guidelines
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-lg font-medium flex items-center space-x-2">
+                <BookOpen className="h-5 w-5 text-orange-600" />
+                <span>Sub-class Guidelines: {currentSubclass.name}</span>
+              </h4>
+              <Button
+                onClick={() => openGuidelinesDialog({
+                  type: 'subclass',
+                  departmentId: currentDept.id,
+                  subdepartmentId: currentSubdept.id,
+                  classId: currentClass?.id.toString(),
+                  subclassId: currentSubclass.id.toString()
+                })}
+                size="sm"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Guidelines
+              </Button>
+            </div>
+            {renderGuidelines(currentSubclass.guidelines, {
+              type: 'subclass',
+              departmentId: currentDept.id,
+              subdepartmentId: currentSubdept.id,
+              classId: currentClass?.id.toString(),
+              subclassId: currentSubclass.id.toString()
+            })}
+          </div>
+        ) : currentClass ? (
+          // Show class guidelines
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-lg font-medium flex items-center space-x-2">
+                <BookOpen className="h-5 w-5 text-blue-600" />
+                <span>Class Guidelines: {currentClass.name}</span>
+              </h4>
+              <Button
+                onClick={() => openGuidelinesDialog({
+                  type: 'class',
+                  departmentId: currentDept.id,
+                  subdepartmentId: currentSubdept.id,
+                  classId: currentClass.id.toString()
+                })}
+                size="sm"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Guidelines
+              </Button>
+            </div>
+            {renderGuidelines(currentClass.guidelines, {
+              type: 'class',
+              departmentId: currentDept.id,
+              subdepartmentId: currentSubdept.id,
+              classId: currentClass.id.toString()
+            })}
+          </div>
+        ) : (
+          // Show subdepartment guidelines
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-lg font-medium flex items-center space-x-2">
+                <BookOpen className="h-5 w-5 text-green-600" />
+                <span>Subdepartment Guidelines</span>
+              </h4>
+              <Button
+                onClick={() => openGuidelinesDialog({
+                  type: 'subdepartment',
+                  departmentId: currentDept.id,
+                  subdepartmentId: currentSubdept.id
+                })}
+                size="sm"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Guidelines
+              </Button>
+            </div>
+            {renderGuidelines(currentSubdept.upload_guidelines, {
+              type: 'subdepartment',
+              departmentId: currentDept.id,
+              subdepartmentId: currentSubdept.id
+            })}
           </div>
         )}
       </div>
+    )
+  }
 
-      {/* Content based on current selection */}
-      {currentSubclass ? (
-        // Show subclass guidelines
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h4 className="text-lg font-medium flex items-center space-x-2">
-              <BookOpen className="h-5 w-5 text-orange-600" />
-              <span>Sub-class Guidelines: {currentSubclass.name}</span>
-            </h4>
-            <Button
-              onClick={() => openGuidelinesDialog({
-                type: 'subclass',
-                departmentId: currentDept.id,
-                subdepartmentId: currentSubdept.id,
-                classId: currentClass?.id.toString(),
-                subclassId: currentSubclass.id.toString()
-              })}
-              size="sm"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Guidelines
-            </Button>
-          </div>
-          {renderGuidelines(currentSubclass.guidelines, {
-            type: 'subclass',
-            departmentId: currentDept.id,
-            subdepartmentId: currentSubdept.id,
-            classId: currentClass?.id.toString(),
-            subclassId: currentSubclass.id.toString()
-          })}
+  if (!departments || departments.length === 0) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <div className="text-center">
+          <BookOpen className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+          <p className="text-lg font-medium text-gray-600">No departments found</p>
+          <p className="text-sm text-gray-500">Create departments first to manage guidelines</p>
         </div>
-      ) : currentClass ? (
-        // Show class guidelines
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h4 className="text-lg font-medium flex items-center space-x-2">
-              <BookOpen className="h-5 w-5 text-blue-600" />
-              <span>Class Guidelines: {currentClass.name}</span>
-            </h4>
-            <Button
-              onClick={() => openGuidelinesDialog({
-                type: 'class',
-                departmentId: currentDept.id,
-                subdepartmentId: currentSubdept.id,
-                classId: currentClass.id.toString()
-              })}
-              size="sm"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Guidelines
-            </Button>
-          </div>
-          {renderGuidelines(currentClass.guidelines, {
-            type: 'class',
-            departmentId: currentDept.id,
-            subdepartmentId: currentSubdept.id,
-            classId: currentClass.id.toString()
-          })}
-        </div>
-      ) : (
-        // Show subdepartment guidelines
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h4 className="text-lg font-medium flex items-center space-x-2">
-              <BookOpen className="h-5 w-5 text-green-600" />
-              <span>Subdepartment Guidelines</span>
-            </h4>
-            <Button
-              onClick={() => openGuidelinesDialog({
-                type: 'subdepartment',
-                departmentId: currentDept.id,
-                subdepartmentId: currentSubdept.id
-              })}
-              size="sm"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Guidelines
-            </Button>
-          </div>
-          {renderGuidelines(currentSubdept.upload_guidelines, {
-            type: 'subdepartment',
-            departmentId: currentDept.id,
-            subdepartmentId: currentSubdept.id
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
-if (!departments || departments.length === 0) {
-  return (
-    <div className="flex items-center justify-center p-8">
-      <div className="text-center">
-        <BookOpen className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-        <p className="text-lg font-medium text-gray-600">No departments found</p>
-        <p className="text-sm text-gray-500">Create departments first to manage guidelines</p>
       </div>
-    </div>
-  )
-}
+    )
+  }
 
   return (
     <div className="mx-auto py-6">
@@ -1055,145 +1055,145 @@ if (!departments || departments.length === 0) {
       </div>
 
       {/* Delete Confirmation Dialog */}
-    <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Delete Guideline</DialogTitle>
-          <DialogDescription>
-            Are you sure you want to delete this guideline? This action cannot be undone.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            onClick={handleDeleteConfirm}
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? 'Deleting...' : 'Delete'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Guideline</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this guideline? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteConfirm}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-    {/* Add Guidelines Dialog */}
-    <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden">
-        <DialogHeader>
-          <DialogTitle>Add Multiple Guidelines</DialogTitle>
-          <DialogDescription>
-            Add multiple guidelines to {editingContext?.type === 'subdepartment' ? 'subdepartment' : 
-              editingContext?.type === 'class' ? 'class' : 'sub-class'}
-          </DialogDescription>
-        </DialogHeader>
+      {/* Add Guidelines Dialog */}
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>Add Multiple Guidelines</DialogTitle>
+            <DialogDescription>
+              Add multiple guidelines to {editingContext?.type === 'subdepartment' ? 'subdepartment' :
+                editingContext?.type === 'class' ? 'class' : 'sub-class'}
+            </DialogDescription>
+          </DialogHeader>
 
-        <ScrollArea className="max-h-[60vh] pr-4">
-          <div className="space-y-4">
-            {newGuidelines.map((guideline, idx) => (
-              <Card key={idx} className="p-4 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 border-l-4 border-l-purple-500">
-                <div className="space-y-4">
-                  {/* Title and Remove Button */}
-                  <div className="flex items-center justify-between">
-                    <Label className="text-sm font-semibold flex items-center">
-                      <BookOpen className="h-4 w-4 mr-2" />
-                      Guideline {idx + 1}
-                    </Label>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-red-500"
-                      onClick={() => removeNewGuideline(idx)}
-                      disabled={newGuidelines.length <= 1}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
+          <ScrollArea className="max-h-[60vh] pr-4">
+            <div className="space-y-4">
+              {newGuidelines.map((guideline, idx) => (
+                <Card key={idx} className="p-4 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 border-l-4 border-l-purple-500">
+                  <div className="space-y-4">
+                    {/* Title and Remove Button */}
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-semibold flex items-center">
+                        <BookOpen className="h-4 w-4 mr-2" />
+                        Guideline {idx + 1}
+                      </Label>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-red-500"
+                        onClick={() => removeNewGuideline(idx)}
+                        disabled={newGuidelines.length <= 1}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
 
-                  {/* Title Input */}
-                  <div className="space-y-2">
-                    <Label htmlFor={`title-${idx}`}>
-                      Title *
-                    </Label>
-                    <Input
-                      id={`title-${idx}`}
-                      value={guideline.title}
-                      onChange={(e) => handleNewGuidelineChange(idx, 'title', e.target.value)}
-                      placeholder="Enter guideline title"
-                      className="font-medium"
-                    />
-                  </div>
-
-                  {/* Content Textarea */}
-                  <div className="space-y-2">
-                    <Label htmlFor={`content-${idx}`}>
-                      Content
-                    </Label>
-                    <Textarea
-                      id={`content-${idx}`}
-                      value={guideline.content}
-                      onChange={(e) => handleNewGuidelineChange(idx, 'content', e.target.value)}
-                      placeholder="Enter detailed guideline content..."
-                      className="min-h-[100px]"
-                    />
-                  </div>
-
-                  {/* Type and Category Row */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Title Input */}
                     <div className="space-y-2">
-                      <Label htmlFor={`category-${idx}`}>
-                        Category
+                      <Label htmlFor={`title-${idx}`}>
+                        Title *
                       </Label>
                       <Input
-                        id={`category-${idx}`}
-                        value={guideline.category}
-                        onChange={(e) => handleNewGuidelineChange(idx, 'category', e.target.value)}
-                        placeholder="e.g., Documentation, Process, Safety"
+                        id={`title-${idx}`}
+                        value={guideline.title}
+                        onChange={(e) => handleNewGuidelineChange(idx, 'title', e.target.value)}
+                        placeholder="Enter guideline title"
+                        className="font-medium"
                       />
                     </div>
+
+                    {/* Content Textarea */}
+                    <div className="space-y-2">
+                      <Label htmlFor={`content-${idx}`}>
+                        Content
+                      </Label>
+                      <Textarea
+                        id={`content-${idx}`}
+                        value={guideline.content}
+                        onChange={(e) => handleNewGuidelineChange(idx, 'content', e.target.value)}
+                        placeholder="Enter detailed guideline content..."
+                        className="min-h-[100px]"
+                      />
+                    </div>
+
+                    {/* Type and Category Row */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor={`category-${idx}`}>
+                          Category
+                        </Label>
+                        <Input
+                          id={`category-${idx}`}
+                          value={guideline.category}
+                          onChange={(e) => handleNewGuidelineChange(idx, 'category', e.target.value)}
+                          placeholder="e.g., Documentation, Process, Safety"
+                        />
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </Card>
-            ))}
+                </Card>
+              ))}
+            </div>
+          </ScrollArea>
+
+          <div className="pt-4 border-t">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={addNewGuideline}
+              className="w-full"
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Add Another Guideline
+            </Button>
           </div>
-        </ScrollArea>
 
-        <div className="pt-4 border-t">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={addNewGuideline}
-            className="w-full"
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Add Another Guideline
-          </Button>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={handleCloseDialog}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleAddMultipleGuidelines}
-            disabled={!newGuidelines.some(guideline => guideline.title.trim() !== '') || isSubmitting}
-            className="bg-purple-600 hover:bg-purple-700"
-          >
-            {isSubmitting ? (
-              <>
-                <div className="animate-spin -ml-1 mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
-                Adding...
-              </>
-            ) : (
-              `Add ${newGuidelines.filter(guideline => guideline.title.trim() !== '').length} Guidelines`
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  </div>
-)
+          <DialogFooter>
+            <Button variant="outline" onClick={handleCloseDialog}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddMultipleGuidelines}
+              disabled={!newGuidelines.some(guideline => guideline.title.trim() !== '') || isSubmitting}
+              className="bg-purple-600 hover:bg-purple-700"
+            >
+              {isSubmitting ? (
+                <>
+                  <div className="animate-spin -ml-1 mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
+                  Adding...
+                </>
+              ) : (
+                `Add ${newGuidelines.filter(guideline => guideline.title.trim() !== '').length} Guidelines`
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
 }

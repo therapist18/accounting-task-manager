@@ -3,7 +3,7 @@
 import React from "react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 
 interface ExtractionPreviewDialogProps {
   open: boolean

@@ -5,13 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Download, Trash2, RefreshCw, Save, FileText, Loader2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { handleDocumentDownload } from '../generic-functions/documentSorting';
-import { toast } from 'sonner';
+import { toast } from "@/lib/hooks/use-toast";
 
 // Reusable DeleteConfirmationDialog component
-const DeleteConfirmationDialog = ({ 
-  isOpen, 
-  onClose, 
-  onConfirm, 
+const DeleteConfirmationDialog = ({
+  isOpen,
+  onClose,
+  onConfirm,
   isDeleting,
   title = 'Confirm Deletion',
   description = 'Are you sure you want to delete this document? This action cannot be undone.'
@@ -28,15 +28,15 @@ const DeleteConfirmationDialog = ({
         </DialogDescription>
       </DialogHeader>
       <DialogFooter className="flex justify-end gap-2">
-        <Button 
-          variant="outline" 
-          onClick={onClose} 
+        <Button
+          variant="outline"
+          onClick={onClose}
           disabled={isDeleting}
         >
           Cancel
         </Button>
-        <Button 
-          variant="destructive" 
+        <Button
+          variant="destructive"
           onClick={onConfirm}
           disabled={isDeleting}
           className="flex items-center gap-2"
@@ -103,7 +103,7 @@ export const DocumentActions: React.FC<DocumentActionsProps> = ({
 
   const handleDelete = async () => {
     if (!onDelete) return;
-    
+
     setIsDeleting(true);
     try {
       // Pass the document data to the onDelete callback
@@ -120,17 +120,17 @@ export const DocumentActions: React.FC<DocumentActionsProps> = ({
       setIsDeleting(false);
     }
   };
-  
+
   const handleRetry = async () => {
     if (!onRetry) return;
     setIsRetrying(true);
     try {
-        await onRetry(document);
+      await onRetry(document);
     } catch (error) {
-        // Error handling usually done in parent/callback, but just in case
-        console.error("Retry failed in Action wrapper", error);
+      // Error handling usually done in parent/callback, but just in case
+      console.error("Retry failed in Action wrapper", error);
     } finally {
-        setIsRetrying(false);
+      setIsRetrying(false);
     }
   }
 
@@ -162,7 +162,7 @@ export const DocumentActions: React.FC<DocumentActionsProps> = ({
 
   const hasFile = Boolean(document?.file_path || document?.fileUrl);
   const downloadTitle = hasFile ? 'Download Document' : 'No file available for download';
-  
+
   const downloadButtonProps = hasFile ? {} : {
     'aria-disabled': true,
     'data-disabled': true,
@@ -243,11 +243,11 @@ export const DocumentActions: React.FC<DocumentActionsProps> = ({
           className="flex items-center gap-1 hover:bg-blue-50 text-blue-600 border-blue-200"
           disabled={isRetrying}
         >
-            {isRetrying ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-                <RefreshCw className="h-4 w-4" />
-            )}
+          {isRetrying ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="h-4 w-4" />
+          )}
           {showLabels && <span>Retry</span>}
         </Button>
       )}

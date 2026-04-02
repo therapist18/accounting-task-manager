@@ -2,7 +2,7 @@
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
-import { toast } from 'sonner';
+import { toast } from "@/lib/hooks/use-toast";
 /**
  * Formats a download filename by removing timestamps and converting to uppercase
  * Example: 'aa_sample_-_limited_CR-12_-_BLUE_COPY_20251111_103523.pdf' -> 'AA SAMPLE - LIMITED - CR 12 - BLUE COPY.PDF'
@@ -10,30 +10,30 @@ import { toast } from 'sonner';
  * @returns Formatted filename in uppercase without timestamps
  */
 export const formatDownloadFilename = (filename: string): string => {
-  try {
-    // Extract just the filename without path
-    const baseName = filename.split('/').pop() || '';
-    
-    // Remove file extension and split into parts
-    const [nameWithoutExt] = baseName.split('.');
-    if (!nameWithoutExt) return '';
-    
-    // Remove timestamp and trailing underscores (matches _YYYYMMDD_HHMMSS pattern)
-    const cleanName = nameWithoutExt
-      .replace(/_\d{8}_\d{6}$/, '')  // Remove timestamp
-      .replace(/_+$/, '')             // Remove any trailing underscores
-      .replace(/_/g, ' ')             // Replace remaining underscores with spaces
-      .replace(/\s+/g, ' ')          // Replace multiple spaces with single space
-      .trim()                         // Trim any leading/trailing spaces
-      .toUpperCase();                 // Convert to uppercase
-    
-    // Add the extension back (in uppercase)
-    const extension = filename.split('.').pop()?.toUpperCase() || '';
-    return extension ? `${cleanName}.${extension}` : cleanName;
-  } catch (error) {
-    console.error('Error formatting filename:', error);
-    return filename; // Return original if there's an error
-  }
+    try {
+        // Extract just the filename without path
+        const baseName = filename.split('/').pop() || '';
+
+        // Remove file extension and split into parts
+        const [nameWithoutExt] = baseName.split('.');
+        if (!nameWithoutExt) return '';
+
+        // Remove timestamp and trailing underscores (matches _YYYYMMDD_HHMMSS pattern)
+        const cleanName = nameWithoutExt
+            .replace(/_\d{8}_\d{6}$/, '')  // Remove timestamp
+            .replace(/_+$/, '')             // Remove any trailing underscores
+            .replace(/_/g, ' ')             // Replace remaining underscores with spaces
+            .replace(/\s+/g, ' ')          // Replace multiple spaces with single space
+            .trim()                         // Trim any leading/trailing spaces
+            .toUpperCase();                 // Convert to uppercase
+
+        // Add the extension back (in uppercase)
+        const extension = filename.split('.').pop()?.toUpperCase() || '';
+        return extension ? `${cleanName}.${extension}` : cleanName;
+    } catch (error) {
+        console.error('Error formatting filename:', error);
+        return filename; // Return original if there's an error
+    }
 };
 
 /**
@@ -115,7 +115,7 @@ export const handleDocumentDownload = async (
             const fileExtension = doc.file_path.substring(doc.file_path.lastIndexOf('.'));
             const formattedFilename = formatDownloadFilename(doc.file_path);
             const downloadFilename = formattedFilename || `${baseFilename}${fileExtension}`;
-            
+
             const url = window.URL.createObjectURL(fileData);
             downloadFile(url, downloadFilename);
         } else if (format === 'excel' && doc.extracted_details) {
@@ -131,7 +131,7 @@ export const handleDocumentDownload = async (
             doc.text(`Document: ${docType}`, 20, y);
             y += 10;
             doc.setFontSize(12);
-            
+
             Object.entries(doc.extracted_details).forEach(([key, value]) => {
                 if (y > 280) {
                     doc.addPage();
@@ -140,7 +140,7 @@ export const handleDocumentDownload = async (
                 doc.text(`${key}: ${value}`, 20, y);
                 y += 10;
             });
-            
+
             doc.save(`${baseFilename}_${timestamp}.pdf`);
         }
 
@@ -229,28 +229,28 @@ export const parseDateString = (dateInput: string | Date | null | undefined): Da
  */
 export const parseDate = (dateStr: string | null | undefined): Date | null => {
     if (!dateStr || typeof dateStr !== 'string') return null;
-    
+
     // Handle DD/MM/YYYY format
     const parts = dateStr.split('/');
     if (parts.length === 3) {
         const day = parseInt(parts[0], 10);
         const month = parseInt(parts[1], 10) - 1; // months are 0-indexed
         const year = parseInt(parts[2], 10);
-        
+
         // Create date in local time and set to noon to avoid timezone issues
         const date = new Date(year, month, day, 12, 0, 0);
-        
+
         // Check if the date is valid
         if (isNaN(date.getTime())) return null;
-        
+
         // Check if the parsed values match the input (to catch invalid dates like 31/02/2023)
         if (date.getDate() !== day || date.getMonth() !== month || date.getFullYear() !== year) {
             return null;
         }
-        
+
         return date;
     }
-    
+
     // Handle ISO format and other date strings
     const date = new Date(dateStr);
     return isNaN(date.getTime()) ? null : date;
@@ -264,15 +264,15 @@ export const parseDate = (dateStr: string | null | undefined): Date | null => {
  */
 export const getExpiryDate = <T extends { extracted_details?: Record<string, any> }>(
     doc: T,
-    docType?: { 
-        fields?: Array<{ 
-            name: string; 
+    docType?: {
+        fields?: Array<{
+            name: string;
             isEffectiveTo?: boolean;
         }>;
     } | null
 ): Date | null => {
     if (!docType) return null;
-    
+
     try {
         // Look for a field marked as the expiry date (isEffectiveTo: true)
         const expiryDateField = docType.fields?.find(field => field.isEffectiveTo)?.name;
@@ -303,7 +303,7 @@ export const getDaysUntilExpiry = <T extends { extracted_details?: Record<string
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        
+
         const timeDiff = expiryDate.getTime() - today.getTime();
         return Math.ceil(timeDiff / (1000 * 3600 * 24));
     } catch (error) {
@@ -322,22 +322,22 @@ export const getDocumentStatus = <T extends { extracted_details?: Record<string,
     doc: T,
     docType?: {
         grace_period_days?: string | number;
-        fields?: Array<{ 
-            name: string; 
+        fields?: Array<{
+            name: string;
             isEffectiveTo?: boolean;
         }>;
     } | null
 ): 'expired' | 'grace' | 'safe' | 'missing' => {
     if (!doc) return 'missing';
-    
+
     const daysRemaining = getDaysUntilExpiry(doc, docType);
     if (daysRemaining === null) return 'missing';
-    
+
     // Get grace period from docType, default to 30 if not provided or invalid
-    const gracePeriodDays = docType?.grace_period_days 
+    const gracePeriodDays = docType?.grace_period_days
         ? Math.max(1, parseInt(String(docType.grace_period_days), 10) || 30)
         : 30;
-    
+
     if (daysRemaining < 0) return 'expired';
     if (daysRemaining <= gracePeriodDays) return 'grace';
     return 'safe';
@@ -369,9 +369,9 @@ export const getStatusClass = (status: 'expired' | 'grace' | 'safe' | 'missing')
  */
 export const formatDateForDisplay = (date: string | Date | null | undefined): string => {
     if (!date) return '';
-    
+
     let dateObj: Date;
-    
+
     if (typeof date === 'string') {
         // Handle string dates (could be in various formats)
         const parsedDate = parseDate(date);
@@ -382,12 +382,12 @@ export const formatDateForDisplay = (date: string | Date | null | undefined): st
     } else {
         return '';
     }
-    
+
     // Format as DD/MM/YYYY
     const day = String(dateObj.getDate()).padStart(2, '0');
     const month = String(dateObj.getMonth() + 1).padStart(2, '0');
     const year = dateObj.getFullYear();
-    
+
     return `${day}/${month}/${year}`;
 };
 
@@ -415,7 +415,7 @@ export const sortDocumentsByLatest = <T extends { extracted_details?: Record<str
                 const date = parseDateString(doc.extracted_details[effectiveDateField]);
                 if (date) return date;
             }
-            
+
             // Fall back to created_at if no effective date is found
             return new Date(doc.created_at);
         };

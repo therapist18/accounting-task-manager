@@ -17,7 +17,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import supabase from "@/lib/supabase/client"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import {
   Check, Link2, Merge, Plus, X, FileText, Upload, User, Users,
   AlertTriangle, Zap, Search, Loader2, ChevronRight, LayoutGrid, Webhook,
@@ -251,13 +251,13 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
 
   // 3. HANDLERS (Corrected Reference issues)
   const updateGroup = (id, field, value) => setWebDataGroups(prev => prev.map(g => g.id === id ? { ...g, [field]: value } : g));
-  
+
   const removeGroup = (id) => setWebDataGroups(prev => prev.filter(g => g.id !== id));
-  
+
   const linkMasterFieldToGroup = (groupId: string, field: JobField) => {
     setWebDataGroups(prev => prev.map(g => g.id === groupId ? { ...g, linkedMasterFields: [...g.linkedMasterFields, field] } : g));
   };
-  
+
   const unlinkMasterFieldFromGroup = (groupId: string, fieldId: number) => {
     setWebDataGroups(prev => prev.map(g => g.id === groupId ? { ...g, linkedMasterFields: g.linkedMasterFields.filter(f => f.id !== fieldId) } : g));
   };
@@ -303,7 +303,7 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
 
       const { data: existingRecord } = await query.maybeSingle();
       const finalWebData = existingRecord ? [...(existingRecord.webData || []).filter(e => e.documentId !== selectedFormId), newFormEntry] : [newFormEntry];
-      
+
       const { error } = await supabase.from('tm_class_requirements').upsert({
         ...(existingRecord?.id && { id: existingRecord.id }),
         job_level: { department_id: Number(context.departmentId), subdepartment_id: Number(context.subdepartmentId), class_id: context.classId || null, subclass_id: context.subclassId || null, level: context.subclassId ? 4 : context.classId ? 3 : 2 },
@@ -320,7 +320,7 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
 
   const filteredMasterFields = useMemo(() => masterFields.filter(f => f.label?.toLowerCase().includes(fieldSearch.toLowerCase()) || f.field_key?.toLowerCase().includes(fieldSearch.toLowerCase())), [masterFields, fieldSearch]);
   const allLinkedMasterFieldIds = useMemo(() => new Set(webDataGroups.flatMap(g => g.linkedMasterFields.map(f => f.id))), [webDataGroups]);
- const availableForPicking = useMemo(() => masterFields.filter(f => !allLinkedMasterFieldIds.has(f.id)), [masterFields, allLinkedMasterFieldIds]);
+  const availableForPicking = useMemo(() => masterFields.filter(f => !allLinkedMasterFieldIds.has(f.id)), [masterFields, allLinkedMasterFieldIds]);
   const applicableForms = useMemo(() => formDocuments.filter(f => !f.isSpecial || f.targetEntities?.some(t => Number(t.job_level?.subdepartment_id) === Number(context?.subdepartmentId))), [formDocuments, context]);
   const selectedForm = useMemo(() => formDocuments.find(f => f.id === selectedFormId), [selectedFormId, formDocuments]);
   const automationIdForContext = useMemo(() => getAutomationIdFromForm(selectedForm), [selectedForm, getAutomationIdFromForm]);
@@ -341,10 +341,10 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
               <DialogTitle className="text-2xl font-bold">WebData Configuration</DialogTitle>
               <div className="flex items-center gap-2 mt-1 text-slate-500 text-sm">
                 <Badge variant="outline" className="bg-slate-50">{context?.subdepartmentName}</Badge>
-                {context?.className && <><ChevronRight className="h-3 w-3"/> <span className="text-blue-600 font-medium">{context.className}</span></>}
+                {context?.className && <><ChevronRight className="h-3 w-3" /> <span className="text-blue-600 font-medium">{context.className}</span></>}
               </div>
             </div>
-            <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)}><X className="h-5 w-5"/></Button>
+            <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)}><X className="h-5 w-5" /></Button>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
             <div className="space-y-2">
@@ -355,7 +355,7 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                   <SelectItem value="none" className="italic text-amber-600">Manual Entry (No Automation)</SelectItem>
                   {applicableForms.map(f => (
                     <SelectItem key={f.id} value={f.id}>
-                      <div className="flex items-center gap-2">{f.name} {getAutomationIdFromForm(f) && <Zap className="h-3 w-3 fill-green-500 text-green-500"/>}</div>
+                      <div className="flex items-center gap-2">{f.name} {getAutomationIdFromForm(f) && <Zap className="h-3 w-3 fill-green-500 text-green-500" />}</div>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -363,7 +363,7 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
             </div>
             {selectedFormId && (
               <div className={cn("p-3 rounded-lg border flex items-center gap-3", automationIdForContext ? "bg-green-50 border-green-200" : "bg-slate-50")}>
-                {automationIdForContext ? <Zap className="h-5 w-5 fill-green-600 text-green-600"/> : <Webhook className="h-5 w-5 text-slate-400"/>}
+                {automationIdForContext ? <Zap className="h-5 w-5 fill-green-600 text-green-600" /> : <Webhook className="h-5 w-5 text-slate-400" />}
                 <div className="text-xs font-semibold">{automationIdForContext ? "Automated via Stage Config" : "Manual Processing Only"}</div>
               </div>
             )}
@@ -394,25 +394,25 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                       </div>
                     </CardHeader>
                     <CardContent className="p-3 overflow-auto max-h-[180px] bg-slate-50/30">
-                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                         {filteredMasterFields.map(f => {
                           const used = allLinkedMasterFieldIds.has(f.id);
                           return (
                             <div key={f.id} className={cn("flex items-center space-x-2 p-1.5 rounded border bg-white", used && "opacity-50 grayscale bg-slate-50")}>
-                              <Checkbox id={`f-${f.id}`} checked={selectedTopLevelFieldIds.has(f.id)} onCheckedChange={c => setSelectedTopLevelFieldIds(prev => {const n = new Set(prev); c ? n.add(f.id) : n.delete(f.id); return n})} disabled={used} />
+                              <Checkbox id={`f-${f.id}`} checked={selectedTopLevelFieldIds.has(f.id)} onCheckedChange={c => setSelectedTopLevelFieldIds(prev => { const n = new Set(prev); c ? n.add(f.id) : n.delete(f.id); return n })} disabled={used} />
                               <label htmlFor={`f-${f.id}`} className="text-[11px] font-medium truncate flex-1 cursor-pointer">{f.label}</label>
                               {used && <Check className="h-3 w-3 text-green-600" />}
                             </div>
                           )
                         })}
-                       </div>
+                      </div>
                     </CardContent>
                     <div className="p-2 border-t flex justify-end"><Button size="sm" onClick={() => {
-                        const newGroups = masterFields.filter(f => selectedTopLevelFieldIds.has(f.id)).map(f => ({
-                          id: crypto.randomUUID(), efnsDisplayName: f.label, variableName: f.field_key.toLowerCase().replace(/[^a-z0-9]+(.)/g, (_, chr) => chr.toUpperCase()), fieldType: 'text', entityType: 'principal', linkedMasterFields: [f]
-                        }));
-                        setWebDataGroups(prev => [...prev, ...newGroups]);
-                        setSelectedTopLevelFieldIds(new Set());
+                      const newGroups = masterFields.filter(f => selectedTopLevelFieldIds.has(f.id)).map(f => ({
+                        id: crypto.randomUUID(), efnsDisplayName: f.label, variableName: f.field_key.toLowerCase().replace(/[^a-z0-9]+(.)/g, (_, chr) => chr.toUpperCase()), fieldType: 'text', entityType: 'principal', linkedMasterFields: [f]
+                      }));
+                      setWebDataGroups(prev => [...prev, ...newGroups]);
+                      setSelectedTopLevelFieldIds(new Set());
                     }} disabled={selectedTopLevelFieldIds.size === 0} className="h-7 text-xs">Add Selected</Button></div>
                   </Card>
 
@@ -428,7 +428,7 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                             <div className="space-y-1"><Label className="text-[10px] font-bold">Input Type</Label><Select value={group.fieldType} onValueChange={v => updateGroup(group.id, 'fieldType', v)}><SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="text">Text</SelectItem><SelectItem value="number">Number</SelectItem><SelectItem value="date">Date</SelectItem><SelectItem value="array">Array (Component Group)</SelectItem></SelectContent></Select></div>
                             <div className="space-y-1"><Label className="text-[10px] font-bold">Target Applicant</Label><Select value={group.entityType} onValueChange={v => updateGroup(group.id, 'entityType', v)}><SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="both">Both</SelectItem><SelectItem value="principal">Principal</SelectItem><SelectItem value="dependant">Dependant</SelectItem></SelectContent></Select></div>
                           </div>
-                          
+
                           <div className="flex flex-wrap gap-2 pt-2 border-t items-center">
                             <span className="text-[9px] font-bold text-slate-400 uppercase">Sources:</span>
                             {group.linkedMasterFields.map(f => <Badge key={f.id} variant="secondary" className="text-[9px] h-5 py-0 px-1 gap-1">{f.label}<X className="h-2.5 w-2.5 cursor-pointer" onClick={() => unlinkMasterFieldFromGroup(group.id, f.id)} /></Badge>)}
@@ -437,10 +437,10 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
 
                           {group.fieldType === 'array' && (
                             <div className="mt-3 p-3 border rounded bg-blue-50/40 space-y-2">
-                               <div className="flex justify-between items-center"><Label className="text-[10px] font-bold text-blue-700">Sub-Fields</Label><Button size="xs" variant="outline" className="h-5 text-[9px]" onClick={() => addArrayItem(group.id)}>+ Add Item</Button></div>
-                               {group.arrayItems?.map((ai, i) => (
-                                 <div key={i} className="flex gap-2 items-end"><Input value={ai.name} onChange={e => handleArrayItemChange(group.id, i, 'name', e.target.value)} placeholder="Name" className="h-7 text-[10px] flex-1 bg-white" /><Input value={ai.variableName} onChange={e => handleArrayItemChange(group.id, i, 'variableName', e.target.value)} placeholder="ID" className="h-7 text-[10px] font-mono flex-1 bg-white" /><Button size="icon" variant="ghost" className="h-7 w-7 text-red-400" onClick={() => removeArrayItem(group.id, i)}><Trash2 className="h-3.5 w-3.5" /></Button></div>
-                               ))}
+                              <div className="flex justify-between items-center"><Label className="text-[10px] font-bold text-blue-700">Sub-Fields</Label><Button size="xs" variant="outline" className="h-5 text-[9px]" onClick={() => addArrayItem(group.id)}>+ Add Item</Button></div>
+                              {group.arrayItems?.map((ai, i) => (
+                                <div key={i} className="flex gap-2 items-end"><Input value={ai.name} onChange={e => handleArrayItemChange(group.id, i, 'name', e.target.value)} placeholder="Name" className="h-7 text-[10px] flex-1 bg-white" /><Input value={ai.variableName} onChange={e => handleArrayItemChange(group.id, i, 'variableName', e.target.value)} placeholder="ID" className="h-7 text-[10px] font-mono flex-1 bg-white" /><Button size="icon" variant="ghost" className="h-7 w-7 text-red-400" onClick={() => removeArrayItem(group.id, i)}><Trash2 className="h-3.5 w-3.5" /></Button></div>
+                              ))}
                             </div>
                           )}
                           <Button variant="ghost" size="icon" className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 h-6 w-6 text-slate-300 hover:text-red-500" onClick={() => removeGroup(group.id)}><X className="h-4 w-4" /></Button>
@@ -451,19 +451,19 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                 </TabsContent>
 
                 <TabsContent value="documents" className="h-full m-0 overflow-auto bg-slate-50 p-4 rounded-lg">
-                   <div className="grid grid-cols-3 gap-3">
-                      {filteredKycDocuments.map(doc => (
-                        <div key={doc.id} className={cn("p-3 border rounded-lg bg-white shadow-sm flex items-start gap-3", selectedKycDocuments.has(doc.id) && "border-blue-500 ring-1 ring-blue-500")}>
-                          <Checkbox checked={selectedKycDocuments.has(doc.id)} onCheckedChange={c => {
-                             const n = new Map(selectedKycDocuments); c ? n.set(doc.id, 'both') : n.delete(doc.id); setSelectedKycDocuments(n);
-                          }} />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-[12px] font-bold truncate">{doc.display_name}</p>
-                            <p className="text-[10px] text-slate-500">{doc.document_type} • {doc.max_file_size_mb}MB</p>
-                          </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    {filteredKycDocuments.map(doc => (
+                      <div key={doc.id} className={cn("p-3 border rounded-lg bg-white shadow-sm flex items-start gap-3", selectedKycDocuments.has(doc.id) && "border-blue-500 ring-1 ring-blue-500")}>
+                        <Checkbox checked={selectedKycDocuments.has(doc.id)} onCheckedChange={c => {
+                          const n = new Map(selectedKycDocuments); c ? n.set(doc.id, 'both') : n.delete(doc.id); setSelectedKycDocuments(n);
+                        }} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[12px] font-bold truncate">{doc.display_name}</p>
+                          <p className="text-[10px] text-slate-500">{doc.document_type} • {doc.max_file_size_mb}MB</p>
                         </div>
-                      ))}
-                   </div>
+                      </div>
+                    ))}
+                  </div>
                 </TabsContent>
               </div>
             </Tabs>
@@ -472,7 +472,7 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
 
         <DialogFooter className="p-4 bg-white border-t flex justify-between items-center">
           <div className="text-[11px] font-medium text-slate-500">{webDataGroups.length} Fields link ready</div>
-          <div className="flex gap-2"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleSubmit} disabled={!selectedFormId || isSubmitting} className="bg-blue-600 px-6 font-bold">{isSubmitting ? <Loader2 className="h-4 w-4 animate-spin"/> : "Save Configuration"}</Button></div>
+          <div className="flex gap-2"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleSubmit} disabled={!selectedFormId || isSubmitting} className="bg-blue-600 px-6 font-bold">{isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save Configuration"}</Button></div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

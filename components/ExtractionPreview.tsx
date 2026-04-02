@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import Image from 'next/image'
-import { toast } from 'sonner'
+import { toast } from "@/lib/hooks/use-toast"
 import dynamic from 'next/dynamic'
 import { Textarea } from '@/components/ui/textarea';
 import DocumentActions from '@/app/generic-components/DocumentActions';

@@ -19,7 +19,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { supabase } from "@/lib/supabase/client"
 import type { FieldSection, MasterField, FieldSource } from "../types/database"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import type { FieldSection, MasterField } from "../types/database"
 
 interface EnhancedAddFieldDialogProps {
@@ -136,7 +136,7 @@ export function EnhancedAddFieldDialog({ open, onOpenChange, onSuccess, sections
           <DialogTitle>Add Master Field</DialogTitle>
           <DialogDescription>Create a new master field with section assignment and display configuration.</DialogDescription>
         </DialogHeader>
-        
+
         <Tabs defaultValue="basic" className="w-full">
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="basic">Basic Info</TabsTrigger>
@@ -144,7 +144,7 @@ export function EnhancedAddFieldDialog({ open, onOpenChange, onSuccess, sections
             <TabsTrigger value="behavior">Behavior</TabsTrigger>
             <TabsTrigger value="sources">Data Sources</TabsTrigger>
           </TabsList>
-          
+
           <form onSubmit={handleSubmit}>
             <TabsContent value="basic" className="space-y-4">
               <div className="grid grid-cols-2 gap-4">

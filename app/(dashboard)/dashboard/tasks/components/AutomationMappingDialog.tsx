@@ -24,7 +24,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
-import { toast } from '@/hooks/use-toast';
+import { toast } from '@/lib/hooks/use-toast';
 import supabase from '@/lib/supabase/client';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';

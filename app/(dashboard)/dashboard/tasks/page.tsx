@@ -8,7 +8,7 @@ import { useCallback, useState } from "react";
 import { Department } from "../departments/departments/database";
 import { Task } from "@/lib/types";
 import supabase from "@/lib/supabase/client";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/hooks/use-toast";
 
 export default function Page() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -16,76 +16,76 @@ export default function Page() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-const handleStageStatusSave = useCallback(async (stageId: string, taskId: string, date: string) => {
-  try {
-    // 1. Get current task stages (Lightweight fetch)
-    const { data: currentTask, error: fetchError } = await supabase
-      .from('tm_tasks')
-      .select('stages, status')
-      .eq('id', taskId)
-      .single()
+  const handleStageStatusSave = useCallback(async (stageId: string, taskId: string, date: string) => {
+    try {
+      // 1. Get current task stages (Lightweight fetch)
+      const { data: currentTask, error: fetchError } = await supabase
+        .from('tm_tasks')
+        .select('stages, status')
+        .eq('id', taskId)
+        .single()
 
-    if (fetchError) throw fetchError
+      if (fetchError) throw fetchError
 
-    // 2. Determine the new status based on stage ID
-    let newStatus = 'completed';
-    let taskStatusUpdate = {};
+      // 2. Determine the new status based on stage ID
+      let newStatus = 'completed';
+      let taskStatusUpdate = {};
 
-    if (stageId === 'caefd742-5de5-4341-a3bb-81d7b9dd2b73') {
-      newStatus = 'endorsed';
-      taskStatusUpdate = { status: 'endorsed' };
-    } else if (stageId === '072b9710-45df-4a05-ba65-01b4ef29d61d') {
-      newStatus = 'write_up_completed';
-      taskStatusUpdate = { status: 'write_up_completed' };
-    } else if (stageId === 'a19b270e-6d1e-4e6d-b2bc-f21db72cde08') {
-      taskStatusUpdate = { status: 'in_progress' };
-    }
-
-    // 3. Prepare Update Payload
-    const existingStages = currentTask?.stages || {}
-    const timestamp = new Date().toISOString()
-
-    const updatedStages = {
-      ...existingStages,
-      [stageId]: {
-        ...existingStages[stageId],
-        date: date, // Using the passed date string directly
-        status: newStatus,
-        completedAt: timestamp,
-        updatedAt: timestamp
+      if (stageId === 'caefd742-5de5-4341-a3bb-81d7b9dd2b73') {
+        newStatus = 'endorsed';
+        taskStatusUpdate = { status: 'endorsed' };
+      } else if (stageId === '072b9710-45df-4a05-ba65-01b4ef29d61d') {
+        newStatus = 'write_up_completed';
+        taskStatusUpdate = { status: 'write_up_completed' };
+      } else if (stageId === 'a19b270e-6d1e-4e6d-b2bc-f21db72cde08') {
+        taskStatusUpdate = { status: 'in_progress' };
       }
-    }
 
-    // 4. Execute Update
-    const { error: updateError } = await supabase
-      .from('tm_tasks')
-      .update({
-        ...taskStatusUpdate,
-        stages: updatedStages,
-        updated_at: timestamp
+      // 3. Prepare Update Payload
+      const existingStages = currentTask?.stages || {}
+      const timestamp = new Date().toISOString()
+
+      const updatedStages = {
+        ...existingStages,
+        [stageId]: {
+          ...existingStages[stageId],
+          date: date, // Using the passed date string directly
+          status: newStatus,
+          completedAt: timestamp,
+          updatedAt: timestamp
+        }
+      }
+
+      // 4. Execute Update
+      const { error: updateError } = await supabase
+        .from('tm_tasks')
+        .update({
+          ...taskStatusUpdate,
+          stages: updatedStages,
+          updated_at: timestamp
+        })
+        .eq('id', taskId)
+
+      if (updateError) throw updateError
+
+      toast({
+        title: "Success",
+        description: `Stage marked as ${newStatus.replace('_', ' ')}`,
       })
-      .eq('id', taskId)
 
-    if (updateError) throw updateError
+      return Promise.resolve()
+    } catch (error: any) {
+      console.error('Error saving stage status:', error)
 
-    toast({
-      title: "Success",
-      description: `Stage marked as ${newStatus.replace('_', ' ')}`,
-    })
+      toast({
+        title: "Error",
+        description: "Failed to update stage status",
+        variant: "destructive"
+      })
 
-    return Promise.resolve()
-  } catch (error: any) {
-    console.error('Error saving stage status:', error)
-    
-    toast({
-      title: "Error",
-      description: "Failed to update stage status",
-      variant: "destructive"
-    })
-    
-    throw error
-  }
-}, []) // Removed the dependencies since we don't need them here
+      throw error
+    }
+  }, []) // Removed the dependencies since we don't need them here
 
   return (
     <>

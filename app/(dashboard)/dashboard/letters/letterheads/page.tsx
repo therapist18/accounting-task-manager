@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Upload, FileText, Trash2, Edit, Star, Download, Eye } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
+import { useToast } from '@/lib/hooks/use-toast';
 import { supabase } from '@/lib/supabase/client';
 import { LetterheadUploadDialog } from '../components/LetterheadUploadDialog';
 import { LetterheadEditDialog } from '../components/LetterheadEditDialog';
@@ -16,7 +16,7 @@ import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
-  AlertDialogContent, 
+  AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,

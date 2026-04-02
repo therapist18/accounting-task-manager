@@ -22,7 +22,7 @@ import { supabase } from "@/lib/supabase/client"
 import { AutomationDialog } from "./components/AutomationDialog"
 import { Loader2, Edit, Trash2, Download, Plus, Search } from "lucide-react"
 import { format } from "date-fns"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 
 export default function AutomationPage() {
   const [isAutomationDialogOpen, setIsAutomationDialogOpen] = useState(false)
@@ -41,7 +41,7 @@ export default function AutomationPage() {
   }, [])
 
   useEffect(() => {
-    const filtered = automations.filter(automation => 
+    const filtered = automations.filter(automation =>
       automation.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       automation.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       automation.category?.toLowerCase().includes(searchTerm.toLowerCase())
@@ -56,7 +56,7 @@ export default function AutomationPage() {
         .from('tm_automations')
         .select('*')
         .order('created_at', { ascending: false })
-      
+
       if (error) throw error
       setAutomations(data || [])
       setFilteredAutomations(data || [])
@@ -75,7 +75,7 @@ export default function AutomationPage() {
   const handleSaveAutomation = async (automationData: any) => {
     try {
       setLoading(true)
-      
+
       if (currentAutomation?.id) {
         // Update existing automation
         const { error } = await supabase
@@ -85,7 +85,7 @@ export default function AutomationPage() {
             updated_at: new Date().toISOString()
           })
           .eq('id', currentAutomation.id)
-        
+
         if (error) throw error
         toast({
           title: "Success",
@@ -100,16 +100,16 @@ export default function AutomationPage() {
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           }])
-        
+
         if (error) throw error
         toast({
           title: "Success",
           description: "Automation created successfully",
         })
       }
-      
+
       await fetchAutomations()
-      setFilteredAutomations(automations.filter(automation => 
+      setFilteredAutomations(automations.filter(automation =>
         automation.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         automation.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         automation.category?.toLowerCase().includes(searchTerm.toLowerCase())
@@ -140,23 +140,23 @@ export default function AutomationPage() {
 
   const confirmDeleteAutomation = async () => {
     if (!automationToDelete?.id) return
-    
+
     try {
       setIsDeleting(true)
       const { error } = await supabase
         .from('tm_automations')
         .delete()
         .eq('id', automationToDelete.id)
-      
+
       if (error) throw error
-      
+
       toast({
         title: "Success",
         description: "Automation deleted successfully",
       })
-      
+
       await fetchAutomations()
-      setFilteredAutomations(automations.filter(automation => 
+      setFilteredAutomations(automations.filter(automation =>
         automation.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         automation.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         automation.category?.toLowerCase().includes(searchTerm.toLowerCase())
@@ -181,19 +181,19 @@ export default function AutomationPage() {
       const { data, error } = await supabase
         .from('tm_automations')
         .select('*')
-      
+
       if (error) throw error
-      
+
       // Convert to CSV
       const headers = Object.keys(data[0] || {}).join(',')
-      const rows = data.map(item => 
-        Object.values(item).map(field => 
+      const rows = data.map(item =>
+        Object.values(item).map(field =>
           typeof field === 'string' ? `"${field.replace(/"/g, '""')}"` : field
         ).join(',')
       )
-      
+
       const csvContent = [headers, ...rows].join('\n')
-      
+
       // Download file
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
       const url = URL.createObjectURL(blob)
@@ -203,7 +203,7 @@ export default function AutomationPage() {
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
-      
+
       toast({
         title: "Success",
         description: "Automations exported successfully",
@@ -230,8 +230,8 @@ export default function AutomationPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             onClick={handleExportAutomations}
             disabled={exporting || automations.length === 0}
           >
@@ -247,7 +247,7 @@ export default function AutomationPage() {
               </>
             )}
           </Button>
-          <Button 
+          <Button
             onClick={() => {
               setCurrentAutomation(null)
               setIsAutomationDialogOpen(true)
@@ -287,7 +287,7 @@ export default function AutomationPage() {
               <p className="text-sm text-muted-foreground">
                 {searchTerm ? 'Try adjusting your search terms' : 'Get started by creating your first automation'}
               </p>
-              <Button 
+              <Button
                 className="mt-4"
                 onClick={() => setIsAutomationDialogOpen(true)}
               >
@@ -335,7 +335,7 @@ export default function AutomationPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className="border-r">
-                        {automation.updated_at 
+                        {automation.updated_at
                           ? format(new Date(automation.updated_at), 'PPpp')
                           : 'N/A'}
                       </TableCell>

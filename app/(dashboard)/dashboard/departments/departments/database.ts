@@ -1,6 +1,6 @@
 // @ts-nocheck
 import supabase from '@/lib/supabase/client'
-import { toast } from 'sonner'
+import { toast } from "@/lib/hooks/use-toast"
 
 // Helper function to generate sequential requirement IDs
 const generateRequirementId = (existingRequirements: any[] = []): string => {

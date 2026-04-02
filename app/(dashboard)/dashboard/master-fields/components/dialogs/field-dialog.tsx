@@ -36,7 +36,7 @@ import { COMPUTED_FUNCTIONS, ARITHMETIC_OPERATIONS, DATE_DIFF_UNITS, LINKING_VAR
 import { ScrollArea } from "@/components/ui/scroll-area"
 
 import { supabase } from "@/lib/supabase/client"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/lib/hooks/use-toast"
 import type { JobField, JobFieldUpdate } from "../../types/database"
 import { Calculator, FunctionSquare, Database, Settings2, Check, ChevronsUpDown, Link2, Plus, Trash2, Edit2, Save, ArrowDown, Fingerprint, X } from "lucide-react"
 import { Card, CardDescription, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -1081,7 +1081,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                                                     <SelectValue placeholder="Select end date field" />
                                                                 </SelectTrigger>
                                                                 <SelectContent>
-                                                                  {masterFields.map(field => (
+                                                                    {masterFields.map(field => (
                                                                         <SelectItem key={`${card.id}-end-${field.id}`} value={field.id}>
                                                                             {field.label}
                                                                         </SelectItem>
@@ -1092,7 +1092,7 @@ export function FieldDialog({ open, onOpenChange, field, onSuccess, availableFie
                                                     </div>
                                                 )}
                                             </div>
-                                        )} 
+                                        )}
                                     </div>
 
                                     {/* DATA SOURCES SECTION FOR CARD */}
