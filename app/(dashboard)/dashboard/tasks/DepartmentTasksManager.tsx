@@ -29,7 +29,7 @@ import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKyc
 import { LinkSourceDocumentDialog } from './components/LinkSourceDocumentDialog';
 import { StandardTable } from './overall-view/StandardTable';
 import { EnhancedTable } from './overall-view/EnhancedTable';
-import { ENHANCED_TABLE_HEADERS_IMMIGRATION, STATS_HEADERS, calculateAge, getEnhancedImmigrationStatus, getCurrentStageStatus, renderImmigrationStatusCell, renderCurrentStageStatusCell, getCellContent as utilGetCellContent, sortTasks, filterTasksBySearch, ENHANCED_TABLE_HEADERS, isDocumentApplicable, fetchAndEnhanceIndividuals, getRawCellValue, enhanceTasksWithIndividualData } from './overall-view/tableUtils';
+import { ENHANCED_TABLE_HEADERS_IMMIGRATION, STATS_HEADERS, calculateAge, getEnhancedImmigrationStatus, getCurrentStageStatus, renderImmigrationStatusCell, renderCurrentStageStatusCell, getCellContent as utilGetCellContent, sortTasks, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, filterTasksBySearch, ENHANCED_TABLE_HEADERS, isDocumentApplicable, fetchAndEnhanceIndividuals, getRawCellValue, enhanceTasksWithIndividualData } from './overall-view/tableUtils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { OtherDialog } from "./components/OtherDialog"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
@@ -38,6 +38,10 @@ import { NewCompanyInquiryDialog } from "./components/NewCompanyInquiryDialog"
 import { ExtractionPreviewDialog } from "./components/ExtractionPreviewDialog"
 import { ClassSelectionDialog } from "./components/ClassSelectionDialog"
 import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, formatWorkflowRestrictionReason, taskBundleService } from "./utils/workflowBundleHelpers"
+import { determineCurrentStage, getStageProgress } from './utils/stageUtils'
+import { calculateStageDate } from './utils/dateUtils'
+import { getInheritedOfficer } from '../departments/departments/database'
+import { fetchAuthOfficers, getOfficerDisplayName } from "./utils/authOfficers"
 
 export default function DepartmentTasksManager({
   error,
@@ -129,6 +133,7 @@ export default function DepartmentTasksManager({
   const [taskDependants, setTaskDependants] = useState<Map<string, any[]>>(new Map());
   const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(new Map());
   const [companyInquiryDialogOpen, setCompanyInquiryDialogOpen] = useState(false);
+  const [realOfficers, setRealOfficers] = useState<any[]>([]);
 
   useEffect(() => {
     const loadDepartments = async () => {
@@ -140,7 +145,6 @@ export default function DepartmentTasksManager({
       }
     };
     loadDepartments();
-    console.log('Departments data:', JSON.stringify(departments, null, 2));
   }, []);
 
   const isStageApplicableToTask = useCallback((stage: any, task: any, departments: any[]): boolean => {
@@ -267,6 +271,23 @@ export default function DepartmentTasksManager({
     return linkedDocs;
   }, [allDocuments]);
 
+  // Helper function to fetch officers from scanner_users API
+  const fetchOfficersFromApi = useCallback(async () => {
+    try {
+      const officerArray = await fetchAuthOfficers();
+      setRealOfficers(officerArray);
+      return officerArray;
+    } catch (error) {
+      console.error('Error fetching officers from API:', error);
+      setRealOfficers([]);
+      return [];
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchOfficersFromApi();
+  }, [fetchOfficersFromApi]);
+
   const getActiveStaffFromSubdepartment = useCallback((subdepartmentId: string) => {
     if (!subdepartmentId || !departments.length) {
       return { officers: [], managers: [], assistants: [] };
@@ -278,9 +299,35 @@ export default function DepartmentTasksManager({
     const subdepartment = department.tm_subdepartments?.find(s => s.id.toString() === subdepartmentId);
     if (!subdepartment) return { officers: [], managers: [], assistants: [] };
 
-    const activeOfficers = subdepartment.officer_history
-      ? subdepartment.officer_history.filter(h => !h.end_date)
-      : [];
+    // Create a mock department structure for inheritance logic
+    const departmentForInheritance = {
+      ...department,
+      officers_history: [] // Departments don't have officers_history in the current schema
+    };
+
+    // Use inheritance logic for officers
+    const inheritedOfficer = getInheritedOfficer(
+      subdepartment.officer_history || [],
+      departmentForInheritance
+    );
+
+    // Find the real officer from cached scanner_users
+    let activeOfficers = [];
+    if (inheritedOfficer && realOfficers.length > 0) {
+      const realOfficer = realOfficers.find(officer =>
+        officer.id === inheritedOfficer.id.toString() ||
+        officer.id === inheritedOfficer.id
+      );
+
+      if (realOfficer) {
+        activeOfficers = [{
+          id: realOfficer.id,
+          name: `${realOfficer.firstName} ${realOfficer.lastName}`.trim(),
+          email: realOfficer.email,
+          isActive: realOfficer.isActive
+        }];
+      }
+    }
     const activeManagers = subdepartment.manager_history
       ? subdepartment.manager_history.filter(h => !h.end_date)
       : [];
@@ -289,15 +336,15 @@ export default function DepartmentTasksManager({
       : [];
 
     const officers = activeOfficers.map(oh => {
-      const user = tmUsers.get(parseInt(oh.id.toString()));
-      const displayName = user?.name || `Officer ${oh.id}`;
+      const displayName = getOfficerDisplayName(oh);
       return {
         id: oh.id.toString(),
         name: displayName,
-        email: user?.email || '',
-        display_name: displayName
+        email: oh.email || '',
+        display_name: displayName,
+        isInherited: !subdepartment.officer_history?.some(h => !h.end_date && h.id === oh.id)
       };
-    }).filter(o => o.name !== `Officer ${o.id}`);
+    });
 
     const managers = activeManagers.map(mh => {
       const user = tmUsers.get(parseInt(mh.id.toString()));
@@ -322,7 +369,7 @@ export default function DepartmentTasksManager({
     }).filter(a => a.name !== `Assistant ${a.id}`);
 
     return { officers, managers, assistants };
-  }, [departments, activeDepartmentTab, tmUsers]);
+  }, [departments, activeDepartmentTab, tmUsers, realOfficers]);
 
   const fetchTmUsers = useCallback(async () => {
     try {
@@ -1501,18 +1548,11 @@ export default function DepartmentTasksManager({
       return cached.rows;
     }
 
-    console.log('Generating table rows with stages:', {
-      allStages: stages?.map(s => ({ id: s.id, name: s.name, status: s.status })),
-      visibleStageIds: Array.from(visibleStageIds),
-      showNAStages
-    });
-
     // Filter stages based on visibility
     const allStages = stages
       .filter(stage => stage && visibleStageIds.has(stage.id.toString()))
       .sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
 
-    console.log('Final filtered stages:', allStages.map(s => ({ id: s.id, name: s.name })));
     const rows = []
 
     // Stats Section
@@ -1874,15 +1914,8 @@ export default function DepartmentTasksManager({
       d.id === task.department_id ||
       d.id.toString() === task.department_id?.toString()
     );
-
-    // Get the department specification
     const specification = department?.specification || 'individual';
-    console.log(`[DepartmentTasksManager] Department Specification: ${specification} (Task ID: ${task.id})`);
-
-    // Store the task for editing
     setEditingTask(task);
-
-    // Show the appropriate dialog based on specification
     if (specification === 'company') {
       setCompanyInquiryDialogOpen(true);
     } else {
@@ -1899,13 +1932,8 @@ export default function DepartmentTasksManager({
 
   const handleEnquiryCreated = useCallback(async (newEnquiry: any) => {
     try {
-      // Update local state immediately for instant UI feedback
       setTasks(prevTasks => [newEnquiry, ...prevTasks])
-
-      // Refresh data from server to ensure consistency with force refresh
       await loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true);
-
-      // Call parent callback to update higher-level state
       onTaskUpdate?.(newEnquiry);
 
       toast({
@@ -2473,6 +2501,11 @@ export default function DepartmentTasksManager({
                     size="sm"
                   >
                     {officer.name}
+                    {officer.isInherited && (
+                      <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200">
+                        Inherited
+                      </Badge>
+                    )}
                     <Badge variant="secondary" className="text-xs">
                       {getTaskCountForOfficer(officer.id)}
                     </Badge>
@@ -2515,16 +2548,9 @@ export default function DepartmentTasksManager({
 
   useEffect(() => {
     if (stages && stages.length > 0) {
-      // Show all stages if showNAStages is true, otherwise filter out N/A stages
       const applicableStages = showNAStages
         ? [...stages]
         : stages.filter(stage => !stage.status || stage.status !== 'N/A');
-
-      console.log('Setting initial visible stages:', {
-        allStages: stages.map(s => ({ id: s.id, name: s.name, status: s.status })),
-        applicableStages: applicableStages.map(s => ({ id: s.id, name: s.name, status: s.status })),
-        showNAStages
-      });
       setVisibleStageIds(new Set(applicableStages.map(s => s.id.toString())));
     } else {
       setVisibleStageIds(new Set());
@@ -2624,14 +2650,11 @@ export default function DepartmentTasksManager({
           table: 'tm_tasks'
         },
         async (payload) => {
-          console.log('Realtime update received:', payload);
-
           const newTask = payload.new;
           const oldTask = payload.old;
           const isRelevant = isTaskRelevantToActiveView(newTask) || isTaskRelevantToActiveView(oldTask);
 
           if (isRelevant) {
-            console.log('Refreshing data due to relevant realtime change');
             await refreshTasksForRealtimeChange();
 
             if (payload.eventType === 'INSERT') {
@@ -3114,10 +3137,7 @@ export default function DepartmentTasksManager({
                         getTaskHierarchy={getTaskHierarchy}
                         getStaffName={getStaffName}
                         onDocumentPreview={async (doc) => {
-                          console.log('Document preview clicked:', doc);
                           setPreviewDocument(doc);
-
-                          // If there's a document ID, try to fetch the extracted data
                           if (doc.document_id) {
                             try {
                               const { data: extractionData, error } = await supabase
@@ -3227,7 +3247,7 @@ export default function DepartmentTasksManager({
           onEnquiryCreated={handleEnquiryCreated}
           departments={departments}
           users={Array.from(tmUsers.values())}
-          officers={Array.from(tmUsers.values()).filter(u => u.role === 'officer')}
+          officers={realOfficers}
         />
       ) : (
         <OtherDialog
@@ -3256,7 +3276,7 @@ export default function DepartmentTasksManager({
           initialData={editingTask}  // Pass the task data as initialData
           departments={departments}
           users={Array.from(tmUsers.values())}
-          officers={subdepartmentOfficers}
+          officers={realOfficers}
           onEnquiryCreated={(updatedTask) => {
             handleTaskUpdate(updatedTask);
             setCompanyInquiryDialogOpen(false);

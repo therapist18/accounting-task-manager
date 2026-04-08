@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Plus, X, Clock, User, FileText, Info, Pencil, MessageSquare, Star, Trash2, Check, Zap, Webhook, Layers, LayoutGrid } from "lucide-react"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
@@ -16,8 +15,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command"
-import { supabase } from "@/lib/supabase/client"
-import { ComboBox } from "@/components/ui/combobox"
+import { SearchableSelect } from "@/components/ui/searchable-select"
+import supabase from "@/lib/supabase/client"
 import type { Stage, TimeConfig, StageDocument, DocumentExtraction, EntityOption } from "../types"
 import { createKYCDocument, updateKYCDocument } from "../kycDocuments"
 import { toast } from "@/lib/hooks/use-toast"
@@ -571,15 +570,17 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
                   </div>
                   <Separator />
                   <FormField label="Follow Up With" description="Who to contact when this stage is done.">
-                    <Select value={formData.follow_up || 'none'} onValueChange={(value) => setFormData(prev => (prev ? { ...prev, follow_up: value === 'none' ? null : value as 'Client' | 'Officer' | 'BCL' } : null))}>
-                      <SelectTrigger><SelectValue placeholder="Select follow up person" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">No follow up required</SelectItem>
-                        <SelectItem value="Client">Client</SelectItem>
-                        <SelectItem value="Officer">Officer</SelectItem>
-                        <SelectItem value="BCL">BCL</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <SearchableSelect
+                      value={formData.follow_up || 'none'}
+                      onValueChange={(value) => setFormData(prev => (prev ? { ...prev, follow_up: value === 'none' ? null : value as 'Client' | 'Officer' | 'BCL' } : null))}
+                      options={[
+                        { value: 'none', label: 'No follow up required' },
+                        { value: 'Client', label: 'Client' },
+                        { value: 'Officer', label: 'Officer' },
+                        { value: 'BCL', label: 'BCL' }
+                      ]}
+                      placeholder="Select follow up person"
+                    />
                   </FormField>
                 </SectionWrapper>
               </TabsContent>
@@ -742,14 +743,14 @@ function DocumentCard({ doc, docIndex, entityOptions, loadingEntities, kycDocume
             <Button type="button" variant={documentMode === 'new' ? 'default' : 'outline'} size="sm" onClick={() => handleModeChange('new')} className={`justify-start ${documentMode === 'new' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white'}`}><Plus className="h-4 w-4 mr-2" />{doc.kycId && !doc.linkedKycDocument ? "Edit as New" : "Create New"}</Button>
             <Button type="button" variant={documentMode === 'existing' ? 'default' : 'outline'} size="sm" onClick={() => handleModeChange('existing')} className={`justify-start ${documentMode === 'existing' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white'}`} disabled={loadingKycDocs}><FileText className="h-4 w-4 mr-2" /> Link Existing</Button>
           </div>
-          {documentMode === 'existing' && (<div className="space-y-2 pt-2"><Label className="text-sm text-gray-600">Select Existing Document</Label><ComboBox options={kycDocuments.map(d => ({ value: d.id, label: d.display_name || d.name }))} value={doc.linkedKycDocument || ''} onValueChange={handleKycDocumentSelect} placeholder={loadingKycDocs ? "Loading..." : "Choose a document"} emptyText="No documents found" disabled={loadingKycDocs} loading={loadingKycDocs} className="w-full bg-white" /><p className="text-xs text-green-600 flex items-center gap-1"><Check className="h-3 w-3" /> Document linked. Fields are now read-only.</p></div>)}
+          {documentMode === 'existing' && (<div className="space-y-2 pt-2"><Label className="text-sm text-gray-600">Select Existing Document</Label><SearchableSelect options={kycDocuments.map(d => ({ value: d.id, label: d.display_name || d.name }))} value={doc.linkedKycDocument || ''} onValueChange={handleKycDocumentSelect} placeholder={loadingKycDocs ? "Loading..." : "Choose a document"} emptyText="No documents found" disabled={loadingKycDocs} loading={loadingKycDocs} className="w-full bg-white" /><p className="text-xs text-green-600 flex items-center gap-1"><Check className="h-3 w-3" /> Document linked. Fields are now read-only.</p></div>)}
         </div>
         {doc.isSpecial && (<div className="space-y-2 p-4 bg-amber-50 border border-amber-300 rounded-lg"><Label className="font-medium flex items-center gap-2 text-amber-800"><Star className="h-4 w-4 text-amber-500" />Target Entities</Label><MultiEntityPicker entities={entityOptions} selectedEntities={doc.targetEntities || []} onSelectionChange={(selectedEntities) => onUpdateDocument(doc.id, { targetEntities: selectedEntities })} loading={loadingEntities} placeholder="Select which entities need this document..." /></div>)}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Document Name *</Label><Input value={doc.name || ''} onChange={(e) => onUpdateDocument(doc.id, { name: e.target.value })} placeholder="e.g., Application Form" disabled={isLinkedDocument} /></div>
-          <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Document Type</Label><Select value={doc.documentType} onValueChange={(value) => onUpdateDocument(doc.id, { documentType: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="upload">Upload Only</SelectItem><SelectItem value="extraction">Data Extraction Only</SelectItem><SelectItem value="both">Upload + Extraction</SelectItem></SelectContent></Select></div>
-          <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Input Type</Label><Select value={doc.inputType || 'file'} onValueChange={(value) => onUpdateDocument(doc.id, { inputType: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="file">File Upload</SelectItem><SelectItem value="message">Message/Text</SelectItem><SelectItem value="both">Both</SelectItem></SelectContent></Select></div>
-          <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Doc Type</Label><Select value={doc.docType || 'normal_doc'} onValueChange={(value: 'form' | 'normal_doc') => onUpdateDocument(doc.id, { docType: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="form">Form</SelectItem><SelectItem value="normal_doc">Normal Doc</SelectItem></SelectContent></Select></div>
+          <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Document Type</Label><SearchableSelect value={doc.documentType} onValueChange={(value) => onUpdateDocument(doc.id, { documentType: value })} options={[{ value: 'upload', label: 'Upload Only' }, { value: 'extraction', label: 'Data Extraction Only' }, { value: 'both', label: 'Upload + Extraction' }]} placeholder="Select document type" /></div>
+          <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Input Type</Label><SearchableSelect value={doc.inputType || 'file'} onValueChange={(value) => onUpdateDocument(doc.id, { inputType: value })} options={[{ value: 'file', label: 'File Upload' }, { value: 'message', label: 'Message/Text' }, { value: 'both', label: 'Both' }]} placeholder="Select input type" /></div>
+          <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Doc Type</Label><SearchableSelect value={doc.docType || 'normal_doc'} onValueChange={(value: 'form' | 'normal_doc') => onUpdateDocument(doc.id, { docType: value })} options={[{ value: 'form', label: 'Form' }, { value: 'normal_doc', label: 'Normal Doc' }]} placeholder="Select doc type" /></div>
         </div>
         <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Description</Label><Textarea value={doc.description || ''} onChange={(e) => onUpdateDocument(doc.id, { description: e.target.value })} placeholder="Brief description of this document's purpose..." rows={2} /></div>
         <div className="flex items-center space-x-2"><Checkbox checked={doc.isRequired} onCheckedChange={(checked) => onUpdateDocument(doc.id, { isRequired: checked as boolean })} className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600" /><Label className="text-sm font-normal text-gray-700">This document is required for stage completion</Label></div>
@@ -797,10 +798,10 @@ function DocumentCard({ doc, docIndex, entityOptions, loadingEntities, kycDocume
                           </div>
                         </div>
                         <div>
-                          <ComboBox
+                          <SearchableSelect
                             options={[
                               { value: 'none', label: 'No automation' },
-                              ...(automationTypes?.map(a => ({ value: a.id, label: a.name, icon: <Webhook /> })))
+                              ...(automationTypes?.map(a => ({ value: a.id, label: a.name })))
                             ]}
                             value={entity.automationId || 'none'}
                             onValueChange={(val) => {

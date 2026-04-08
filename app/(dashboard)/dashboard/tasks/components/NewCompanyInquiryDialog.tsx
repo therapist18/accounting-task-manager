@@ -20,6 +20,8 @@ import { toast } from "@/lib/hooks/use-toast"
 import { format } from "date-fns"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { getInheritedOfficer } from "../../departments/departments/database"
+import { fetchAuthOfficers, normalizeAuthOfficer } from "../utils/authOfficers"
 
 // Photo document IDs
 const COMPANY_LOGO_ID = 'f7a75607-bff9-4995-8bde-0256e86da435';
@@ -91,7 +93,7 @@ export function NewCompanyInquiryDialog({
 
     const [departments, setDepartments] = useState<any[]>(propDepartments || [])
     const [localUsers, setLocalUsers] = useState<any[]>(users || [])
-    const [localOfficers, setLocalOfficers] = useState<any[]>(officers || [])
+    const [localOfficers, setLocalOfficers] = useState<any[]>(() => (officers || []).map(normalizeAuthOfficer))
     const [taskType, setTaskType] = useState<'new' | 'renewal'>('new')
     const [availableOfficers, setAvailableOfficers] = useState([])
     const [availableManagers, setAvailableManagers] = useState([])
@@ -185,6 +187,61 @@ export function NewCompanyInquiryDialog({
         { value: 'none', label: 'No Assistant' },
         ...localUsers.map(a => ({ value: a.id.toString(), label: a.name }))
     ], [localUsers]);
+
+    // Get inherited officer for the selected subdepartment
+    const getInheritedOfficerForSubdepartment = useCallback(async (subdepartmentId: string) => {
+        if (!subdepartmentId || !formData.department_id) return null;
+
+        try {
+            // Get the parent department (without officers_history since it doesn't exist)
+            const { data: department, error: deptError } = await supabase
+                .from('tm_departments')
+                .select('id, name')
+                .eq('id', formData.department_id)
+                .single();
+
+            if (deptError) throw deptError;
+
+            // Get the subdepartment with its officer history
+            const { data: subdepartment, error: subError } = await supabase
+                .from('tm_subdepartments')
+                .select('id, name, officer_history')
+                .eq('id', subdepartmentId)
+                .single();
+
+            if (subError) throw subError;
+
+            // Fetch real officers from scanner_users
+            const realOfficers = await fetchAuthOfficers();
+
+            // Create a mock department structure for inheritance logic
+            const departmentForInheritance = {
+                ...department,
+                officers_history: [] // Departments don't have officers_history in the current schema
+            };
+
+            // Use the inheritance logic to get officer ID
+            const inheritedOfficer = getInheritedOfficer(
+                subdepartment.officer_history || [],
+                departmentForInheritance
+            );
+
+            // Find the real officer from scanner_users
+            if (inheritedOfficer && realOfficers.length > 0) {
+                const realOfficer = realOfficers.find(officer =>
+                    officer.id === inheritedOfficer.id.toString() ||
+                    officer.id === inheritedOfficer.id
+                );
+
+                if (realOfficer) return normalizeAuthOfficer(realOfficer);
+            }
+
+            return null;
+        } catch (error) {
+            console.error('Error getting inherited officer:', error);
+            return null;
+        }
+    }, [formData.department_id]);
 
     // Helper function to construct Supabase storage URL
     const getSupabaseImageUrl = useCallback((filePath: string | null): string | null => {
@@ -320,6 +377,24 @@ export function NewCompanyInquiryDialog({
             resetForm();
         }
     }, [open, initialData]);
+
+    // Auto-set inherited officer when subdepartment changes
+    useEffect(() => {
+        const updateInheritedOfficer = async () => {
+            if (formData.subdepartment_id && formData.department_id) {
+                const inheritedOfficer = await getInheritedOfficerForSubdepartment(formData.subdepartment_id);
+                if (inheritedOfficer && !formData.officer_id) {
+                    // Only auto-set if no officer is currently selected
+                    setFormData(prev => ({
+                        ...prev,
+                        officer_id: inheritedOfficer.id.toString()
+                    }));
+                }
+            }
+        };
+
+        updateInheritedOfficer();
+    }, [formData.subdepartment_id, formData.department_id, getInheritedOfficerForSubdepartment, formData.officer_id]);
 
     const loadCompanies = useCallback(async () => {
         setLoadingCompanies(true);
@@ -542,18 +617,23 @@ export function NewCompanyInquiryDialog({
         try {
             const [usersResult, officersResult] = await Promise.all([
                 supabase.from('tm_users').select('*').order('name'),
-                supabase.from('tm_users').select('*').eq('role', 'officer').order('name')
+                fetchAuthOfficers()
             ]);
             setLocalUsers(usersResult.data || []);
-            setLocalOfficers(officersResult.data || []);
+            setLocalOfficers(officersResult);
         } finally {
             setLoadingStaff(false);
         }
     }, []);
 
     useEffect(() => {
-        if (open && localUsers.length === 0) loadStaffData();
-    }, [open, localUsers.length, loadStaffData]);
+        if (users.length > 0) setLocalUsers(users);
+        if (officers.length > 0) setLocalOfficers(officers.map(normalizeAuthOfficer));
+
+        if (open && (localUsers.length === 0 || localOfficers.length === 0)) {
+            loadStaffData();
+        }
+    }, [open, users, officers, localUsers.length, localOfficers.length, loadStaffData]);
 
 
     const handleOfficialSelection = (officialId: number) => {

@@ -1,6 +1,6 @@
 // @ts-nocheck
 "use client"
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useMemo } from "react"
 import {
   fetchUsers,
   fetchOfficers,
@@ -13,8 +13,13 @@ import {
   assignOfficerToDepartment,
   assignManagerToSubdepartment,
   assignAssistantsToSubdepartment,
+  getCurrentAssignments,
   getCurrentOfficer,
+  getCurrentOfficers,
+  getInheritedOfficer,
+  getInheritedOfficers,
   getCurrentManager,
+  getCurrentManagers,
   getCurrentAssistants,
   Department,
   Subdepartment,
@@ -27,6 +32,7 @@ import {
   RequirementForm,
   DepartmentForm,
   User,
+  Officer,
   OfficerHistory,
   ManagerHistory,
   AssistantHistory
@@ -51,6 +57,7 @@ import { Badge } from "@/components/ui/badge"
 import ExcelJS from 'exceljs'
 import { saveAs } from 'file-saver'
 import { ENTITY_TYPES } from "@/lib/constants/entity-types"
+import { getOfficerDisplayName } from "../../tasks/utils/authOfficers"
 // Helper function for deep cloning
 const deepClone = (obj: any) => JSON.parse(JSON.stringify(obj))
 
@@ -87,22 +94,22 @@ const generateHierarchicalIndex = (
 };
 
 // Officer History Popover Component
-function OfficerHistoryPopover({ officers_history, users, children }: {
+function OfficerHistoryPopover({ officers_history, officers, children }: {
   officers_history: OfficerHistory[],
-  users: User[],
+  officers: Officer[],
   children: React.ReactNode
 }) {
-  const sortedHistory = [...officers_history].sort((a, b) => 
+  const sortedHistory = [...officers_history].sort((a, b) =>
     new Date(b.start_date).getTime() - new Date(a.start_date).getTime()
   )
 
   const getAssignmentDuration = (history: OfficerHistory): string => {
     const startDate = new Date(history.start_date)
     const endDate = history.end_date ? new Date(history.end_date) : new Date()
-    
+
     const diffTime = Math.abs(endDate.getTime() - startDate.getTime())
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-    
+
     if (diffDays < 30) {
       return `${diffDays} day${diffDays !== 1 ? 's' : ''}`
     } else if (diffDays < 365) {
@@ -133,15 +140,15 @@ function OfficerHistoryPopover({ officers_history, users, children }: {
           </h4>
           <div className="space-y-2 max-h-64 overflow-y-auto">
             {sortedHistory.map((officer, index) => {
-              const user = users.find(u => u.id === officer.id)
+              const user = officers.find(o => o.id === officer.id)
               const isCurrent = !officer.end_date
               const duration = getAssignmentDuration(officer)
-              
+
               return (
                 <div key={index} className={`p-3 rounded border ${isCurrent ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
                   <div className="flex items-center justify-between mb-2">
                     <div>
-                      <p className="font-medium text-gray-900">{user?.name || 'Unknown Officer'}</p>
+                      <p className="font-medium text-gray-900">{user ? getOfficerDisplayName(user) : 'Unknown Officer'}</p>
                       <p className="text-xs text-gray-500">{user?.email}</p>
                     </div>
                     {isCurrent && (
@@ -183,17 +190,17 @@ function ManagerHistoryPopover({ manager_history, users, children }: {
   users: User[],
   children: React.ReactNode
 }) {
-  const sortedHistory = [...manager_history].sort((a, b) => 
+  const sortedHistory = [...manager_history].sort((a, b) =>
     new Date(b.start_date).getTime() - new Date(a.start_date).getTime()
   )
 
   const getAssignmentDuration = (history: ManagerHistory): string => {
     const startDate = new Date(history.start_date)
     const endDate = history.end_date ? new Date(history.end_date) : new Date()
-    
+
     const diffTime = Math.abs(endDate.getTime() - startDate.getTime())
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-    
+
     if (diffDays < 30) {
       return `${diffDays} day${diffDays !== 1 ? 's' : ''}`
     } else if (diffDays < 365) {
@@ -227,7 +234,7 @@ function ManagerHistoryPopover({ manager_history, users, children }: {
               const user = users.find(u => u.id === manager.id)
               const isCurrent = !manager.end_date
               const duration = getAssignmentDuration(manager)
-              
+
               return (
                 <div key={index} className={`p-3 rounded border ${isCurrent ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
                   <div className="flex items-center justify-between mb-2">
@@ -274,17 +281,17 @@ function AssistantHistoryPopover({ assistant_history, users, children }: {
   users: User[],
   children: React.ReactNode
 }) {
-  const sortedHistory = [...assistant_history].sort((a, b) => 
+  const sortedHistory = [...assistant_history].sort((a, b) =>
     new Date(b.start_date).getTime() - new Date(a.start_date).getTime()
   )
 
   const getAssignmentDuration = (history: AssistantHistory): string => {
     const startDate = new Date(history.start_date)
     const endDate = history.end_date ? new Date(history.end_date) : new Date()
-    
+
     const diffTime = Math.abs(endDate.getTime() - startDate.getTime())
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-    
+
     if (diffDays < 30) {
       return `${diffDays} day${diffDays !== 1 ? 's' : ''}`
     } else if (diffDays < 365) {
@@ -325,7 +332,7 @@ function AssistantHistoryPopover({ assistant_history, users, children }: {
                   {currentAssistants.map((assistant, index) => {
                     const user = users.find(u => u.id === assistant.id)
                     const duration = getAssignmentDuration(assistant)
-                    
+
                     return (
                       <div key={index} className="p-3 rounded border bg-green-50 border-green-200">
                         <div className="flex items-center justify-between mb-2">
@@ -367,7 +374,7 @@ function AssistantHistoryPopover({ assistant_history, users, children }: {
                   {historicalAssistants.map((assistant, index) => {
                     const user = users.find(u => u.id === assistant.id)
                     const duration = getAssignmentDuration(assistant)
-                    
+
                     return (
                       <div key={index} className="p-3 rounded border bg-gray-50 border-gray-200">
                         <div className="mb-2">
@@ -414,13 +421,17 @@ function AssistantHistoryPopover({ assistant_history, users, children }: {
 }
 
 // User Details Popover Component
-function UserDetailsPopover({ userId, users, role, children }: {
+function UserDetailsPopover({ userId, users, officers = [], role, children }: {
   userId: string,
   users: User[],
+  officers?: Officer[],
   role: 'manager' | 'assistant' | 'officer',
   children: React.ReactNode
 }) {
-  const user = users.find(u => u.id === userId)
+  const officer = role === 'officer' ? officers.find(o => o.id === userId) : null
+  const user = role === 'officer'
+    ? (officer ? { name: getOfficerDisplayName(officer), email: officer.email } : null)
+    : users.find(u => u.id === userId)
 
   if (!user) return <span className="text-gray-500">{children}</span>
 
@@ -473,7 +484,7 @@ export default function Departments() {
   const [expandedSubClasses, setExpandedSubClasses] = useState<{ [key: string]: boolean }>({});
   const [isOrderChanged, setIsOrderChanged] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
-  
+
   // Initial Form State
   const [departmentForm, setDepartmentForm] = useState<DepartmentForm>({
     name: '',
@@ -482,7 +493,7 @@ export default function Departments() {
     subdepartments: [],
     officerId: ''
   })
-  
+
   const toggleAllDepartments = (expand: boolean) => {
     const updates = {};
     filteredDepartments.forEach((dept) => {
@@ -503,43 +514,43 @@ export default function Departments() {
     setExpanded(updates);
   };
 
-const fetchData = async (isSilent = false) => {
-  try {
-    // Only show the global loader if it's the first time or not a silent refresh
-    if (!isSilent) setLoading(true);
-    
-    const departmentsData = await fetchDepartments();
-    
-    // Simply update the state with the fresh data
-    setDepartments(departmentsData);
-    
-    // If we are editing, we might want to refresh the expanded states 
-    // but usually, keeping the current expanded keys is better for UX.
-  } catch (error) {
-    console.error('Error fetching data:', error);
-    toast.error('Failed to sync data. Please try again.');
-  } finally {
-    if (!isSilent) setLoading(false);
-  }
-};
-
-useEffect(() => {
-  async function loadInitialData() {
-    // First load is NOT silent
-    await fetchData(false); 
+  const fetchData = async (isSilent = false) => {
     try {
-      const [usersData, officersData] = await Promise.all([
-        fetchUsers(),
-        fetchOfficers()
-      ]);
-      setUsers(usersData);
-      setOfficers(officersData);
+      // Only show the global loader if it's the first time or not a silent refresh
+      if (!isSilent) setLoading(true);
+
+      const departmentsData = await fetchDepartments();
+
+      // Simply update the state with the fresh data
+      setDepartments(departmentsData);
+
+      // If we are editing, we might want to refresh the expanded states 
+      // but usually, keeping the current expanded keys is better for UX.
     } catch (error) {
-      toast.error('Failed to load users');
+      console.error('Error fetching data:', error);
+      toast.error('Failed to sync data. Please try again.');
+    } finally {
+      if (!isSilent) setLoading(false);
     }
-  }
-  loadInitialData();
-}, []);
+  };
+
+  useEffect(() => {
+    async function loadInitialData() {
+      // First load is NOT silent
+      await fetchData(false);
+      try {
+        const [usersData, officersData] = await Promise.all([
+          fetchUsers(),
+          fetchOfficers()
+        ]);
+        setUsers(usersData);
+        setOfficers(officersData);
+      } catch (error) {
+        toast.error('Failed to load users');
+      }
+    }
+    loadInitialData();
+  }, []);
 
   // --- REORDERING LOGIC ---
   const handleReorder = (list: any[], index: number, direction: 'up' | 'down') => {
@@ -569,7 +580,7 @@ useEffect(() => {
         const { officers_history, ...rest } = dept;
         return rest;
       });
-      
+
       await saveOrderAndDefaultDisplay(cleanDepartments);
       toast.success("Order and display settings saved successfully!");
       setIsOrderChanged(false);
@@ -635,83 +646,83 @@ useEffect(() => {
       )
     );
 
- // Inside handleSaveDepartment function in Departments.tsx
-const handleSaveDepartment = async () => {
-  setSaving(true);
-  try {
-    // 1. Core Department Update
-    if (editingDepartmentId) {
-       await updateExistingDepartment(departmentForm);
-    } else {
-       const newDept = await createNewDepartment(departmentForm);
-       setEditingDepartmentId(newDept.id);
-    }
+  // Inside handleSaveDepartment function in Departments.tsx
+  const handleSaveDepartment = async () => {
+    setSaving(true);
+    try {
+      // 1. Core Department Update
+      if (editingDepartmentId) {
+        await updateExistingDepartment(departmentForm);
+      } else {
+        const newDept = await createNewDepartment(departmentForm);
+        setEditingDepartmentId(newDept.id);
+      }
 
-    // 2. Loop through subdepartments and UPSERT them
-    // This replaces the separate "createNewSubdepartment" vs "updateExistingSubdepartment" logic
-    // which was causing the confusion and the duplicate name error.
-    for (const sub of departmentForm.subdepartments) {
-      const isNew = !sub.id;
-      
-      // Duplication check ONLY if it's a new subdepartment or name changed
-      if (isNew) {
-        const { data: existing } = await supabase
-          .from('tm_subdepartments')
-          .select('id')
-          .ilike('name', sub.name.trim())
-          .eq('department_id', editingDepartmentId)
-          .limit(1);
+      // 2. Loop through subdepartments and UPSERT them
+      // This replaces the separate "createNewSubdepartment" vs "updateExistingSubdepartment" logic
+      // which was causing the confusion and the duplicate name error.
+      for (const sub of departmentForm.subdepartments) {
+        const isNew = !sub.id;
 
-        if (existing?.length > 0) {
-          toast.error(`Subdepartment "${sub.name}" already exists. Skipping create.`);
-          continue;
+        // Duplication check ONLY if it's a new subdepartment or name changed
+        if (isNew) {
+          const { data: existing } = await supabase
+            .from('tm_subdepartments')
+            .select('id')
+            .ilike('name', sub.name.trim())
+            .eq('department_id', editingDepartmentId)
+            .limit(1);
+
+          if (existing?.length > 0) {
+            toast.error(`Subdepartment "${sub.name}" already exists. Skipping create.`);
+            continue;
+          }
+        }
+
+        // Prepare payload
+        const payload = {
+          name: sub.name.trim(),
+          description: sub.description,
+          department_id: editingDepartmentId,
+          default_display: sub.default_display,
+          classes: sub.classes || [],
+          officer_history: sub.officer_history || [],
+          manager_history: sub.manager_history || [],
+          assistant_history: sub.assistant_history || [],
+          entity_types: sub.entity_types || []
+        };
+
+        if (isNew) {
+          const { data: newSub } = await supabase
+            .from('tm_subdepartments')
+            .insert(payload)
+            .select().single();
+          if (newSub) await saveClassRequirements(newSub.id, sub.classes);
+        } else {
+          await supabase
+            .from('tm_subdepartments')
+            .update(payload)
+            .eq('id', sub.id);
+          await updateClassRequirements(sub.id, sub.classes);
         }
       }
 
-      // Prepare payload
-      const payload = {
-        name: sub.name.trim(),
-        description: sub.description,
-        department_id: editingDepartmentId,
-        default_display: sub.default_display,
-        classes: sub.classes || [],
-        officer_history: sub.officer_history || [],
-        manager_history: sub.manager_history || [],
-        assistant_history: sub.assistant_history || [],
-        entity_types: sub.entity_types || []
-      };
-
-      if (isNew) {
-        const { data: newSub } = await supabase
-          .from('tm_subdepartments')
-          .insert(payload)
-          .select().single();
-        if (newSub) await saveClassRequirements(newSub.id, sub.classes);
-      } else {
-        await supabase
-          .from('tm_subdepartments')
-          .update(payload)
-          .eq('id', sub.id);
-        await updateClassRequirements(sub.id, sub.classes);
-      }
+      toast.success('Department structure saved successfully!');
+      setIsAddDepartmentOpen(false);
+      await fetchData();
+    } catch (error) {
+      console.error('Save error:', error);
+      toast.error(error.message || 'Failed to save.');
+    } finally {
+      setSaving(false);
     }
-
-    toast.success('Department structure saved successfully!');
-    setIsAddDepartmentOpen(false);
-    await fetchData();
-  } catch (error) {
-    console.error('Save error:', error);
-    toast.error(error.message || 'Failed to save.');
-  } finally {
-    setSaving(false);
-  }
-};
+  };
 
   const createNewDepartment = async (formData: DepartmentForm) => {
-    const { officerId, subdepartments, ...departmentData } = formData;
+    const { officerId, subdepartments, officers_history = [], ...departmentData } = formData;
     const { data: newDept, error: deptError } = await supabase
       .from('tm_departments')
-      .insert([departmentData])
+      .insert([{ ...departmentData, officers_history }])
       .select('*')
       .single();
 
@@ -725,10 +736,10 @@ const handleSaveDepartment = async () => {
 
   const updateExistingDepartment = async (formData: DepartmentForm) => {
     if (!editingDepartmentId) return;
-    const { officerId, subdepartments, ...departmentData } = formData;
+    const { officerId, subdepartments, officers_history = [], ...departmentData } = formData;
     const { data: updatedDept, error: deptError } = await supabase
       .from('tm_departments')
-      .update(departmentData)
+      .update({ ...departmentData, officers_history })
       .eq('id', editingDepartmentId)
       .select('*')
       .single();
@@ -740,7 +751,7 @@ const handleSaveDepartment = async () => {
   const createNewSubdepartment = async (formData: any = departmentForm) => {
     if (formData.subdepartments.length === 0) throw new Error('No subdepartment data provided');
     const subdept = formData.subdepartments[0];
-    
+
     // Duplication Check
     const { data: existingSubdept } = await supabase
       .from('tm_subdepartments')
@@ -759,7 +770,7 @@ const handleSaveDepartment = async () => {
       .eq('department_id', editingDepartmentId)
       .order('order', { ascending: false })
       .limit(1);
-    
+
     const nextOrder = (maxOrder?.[0]?.order || 0) + 1;
 
     const { data: newSubdept, error: createError } = await supabase
@@ -787,7 +798,7 @@ const handleSaveDepartment = async () => {
   const updateExistingSubdepartment = async (formData: any = departmentForm) => {
     if (formData.subdepartments.length === 0) throw new Error('No subdepartment data');
     const subdept = formData.subdepartments[0];
-    
+
     const { data: currentSubdept } = await supabase
       .from('tm_subdepartments')
       .select('department_id')
@@ -828,7 +839,7 @@ const handleSaveDepartment = async () => {
       .eq('id', editingSubdepartmentId);
 
     if (updateError) throw updateError;
-    
+
     if (subdept.classes && subdept.classes.length > 0) {
       await updateClassRequirements(editingSubdepartmentId, subdept.classes);
     }
@@ -853,7 +864,7 @@ const handleSaveDepartment = async () => {
         })
         .select()
         .single();
-        
+
       if (error) continue;
 
       if (subdept.classes && subdept.classes.length > 0) {
@@ -867,15 +878,15 @@ const handleSaveDepartment = async () => {
   // 1. Delete Department
   const handleDeleteDepartment = async (departmentId: string) => {
     if (!confirm('Are you sure you want to delete this department? This will delete all subdepartments and data within it.')) return;
-    
+
     try {
       setLoading(true);
       // Depending on DB setup, you might need to delete subdepartments first if cascade isn't on.
       // Assuming cascade is on or we rely on the error.
       const { error } = await supabase.from('tm_departments').delete().eq('id', departmentId);
-      
+
       if (error) throw error;
-      
+
       toast.success('Department deleted successfully!');
       await fetchData();
     } catch (error) {
@@ -889,13 +900,13 @@ const handleSaveDepartment = async () => {
   // 2. Delete Subdepartment
   const handleDeleteSubdepartment = async (subdepartmentId: string) => {
     if (!confirm('Are you sure you want to delete this subdepartment?')) return;
-    
+
     try {
       setLoading(true);
       const { error } = await supabase.from('tm_subdepartments').delete().eq('id', subdepartmentId);
-      
+
       if (error) throw error;
-      
+
       toast.success('Subdepartment deleted successfully!');
       await fetchData();
     } catch (error) {
@@ -915,17 +926,17 @@ const handleSaveDepartment = async () => {
       description: '',
       default_display: true,
       subdepartments: [],
+      officers_history: [],
       officerId: ''
     });
     setIsAddDepartmentOpen(true);
   };
 
-const handleEditDepartment = (dept) => {
+  const handleEditDepartment = (dept) => {
     setEditingDepartmentId(dept.id);
     setEditingSubdepartmentId(null);
-    const currentOfficer = getCurrentOfficer(dept.officers_history || []);
-   
-   const mappedSubdepartments = (dept.tm_subdepartments || []).map(sub => ({
+    const associatedOfficerIds = getDepartmentAssociatedOfficerIds(dept);
+    const mappedSubdepartments = (dept.tm_subdepartments || []).map(sub => ({
       id: sub.id, // Important: pass ID so the save function updates instead of creating new
       name: sub.name,
       description: sub.description || '',
@@ -942,7 +953,7 @@ const handleEditDepartment = (dept) => {
         isVisible: cls.isVisible ?? true,
         default_display: cls.default_display ?? true,
         entity_types: cls.entity_types || [],
-         subClasses: (cls.subClasses || []).map(sc => ({
+        subClasses: (cls.subClasses || []).map(sc => ({
           id: sc.id,
           name: sc.name,
           description: sc.description || '',
@@ -959,9 +970,10 @@ const handleEditDepartment = (dept) => {
       name: dept.name,
       description: dept.description || '',
       default_display: dept.default_display ?? true,
-      entity_types: dept.entity_types || [], 
-      subdepartments: mappedSubdepartments,   
-      officerId: currentOfficer?.id || ''
+      entity_types: dept.entity_types || [],
+      subdepartments: mappedSubdepartments,
+      officers_history: associatedOfficerIds.map((id) => ({ id, start_date: new Date().toISOString() })),
+      officerId: ''
     });
 
     setIsAddDepartmentOpen(true);
@@ -981,8 +993,13 @@ const handleEditDepartment = (dept) => {
         taskManagerId: '',
         taskAssistantIds: [],
         default_display: true,
-        officerId: '', 
+        entity_types: [],
+        officer_history: [],
+        manager_history: [],
+        assistant_history: [],
+        officerId: '',
       }],
+      officers_history: [],
       officerId: ''
     });
     setIsAddDepartmentOpen(true);
@@ -995,24 +1012,22 @@ const handleEditDepartment = (dept) => {
     const fullSubdept = department.tm_subdepartments?.find(sd => sd.id === subdept.id);
     if (!fullSubdept) return;
 
-    const currentManager = getCurrentManager(fullSubdept.manager_history || []);
-    const currentAssistants = getCurrentAssistants(fullSubdept.assistant_history || []);
-    const currentOfficer = getCurrentOfficer(fullSubdept.officer_history || []);
-
     setDepartmentForm({
       name: department.name,
       description: department.description || '',
       default_display: department.default_display || true,
+      entity_types: department.entity_types || [],
       subdepartments: [{
         ...fullSubdept,
-        officerId: currentOfficer?.id || '',
-        taskManagerId: currentManager?.id || '',
-        taskAssistantIds: currentAssistants.map(a => a.id),
+        officerId: '',
+        taskManagerId: '',
+        taskAssistantIds: [],
         officer_history: fullSubdept.officer_history || [],
         manager_history: fullSubdept.manager_history || [],
         assistant_history: fullSubdept.assistant_history || [],
       }],
-      officerId: '' 
+      officers_history: department.officers_history || [],
+      officerId: ''
     });
 
     setEditingDepartmentId(department.id);
@@ -1027,6 +1042,7 @@ const handleEditDepartment = (dept) => {
         description: '',
         default_display: true,
         subdepartments: [],
+        officers_history: [],
         officerId: ''
       });
       setEditingDepartmentId(null);
@@ -1034,16 +1050,88 @@ const handleEditDepartment = (dept) => {
     }
   }, [isAddDepartmentOpen]);
 
+  const allOfficers = useMemo(() => {
+    const merged = new Map<string, Officer>()
+
+    officers.forEach((officer) => {
+      merged.set(officer.id, officer)
+    })
+
+    users
+      .filter((user) => user.role === 'officer')
+      .forEach((user) => {
+        if (!merged.has(user.id)) {
+          merged.set(user.id, {
+            id: user.id,
+            firstName: user.name || '',
+            lastName: '',
+            email: user.email,
+            username: undefined,
+            isActive: true,
+            jobLevels: [],
+            createdAt: new Date().toISOString(),
+            lastLogin: undefined,
+            name: user.name,
+            full_name: user.name,
+          })
+        }
+      })
+
+    return Array.from(merged.values())
+  }, [officers, users]);
+
   const getUserName = (userId: string) => users.find(u => u.id === userId)?.name || 'Unassigned';
-// Change this condition
-if (loading && departments.length === 0) {
-  return (
-    <div className="flex items-center justify-center h-screen bg-gray-50">
-      <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-      <span className="ml-3 text-lg text-gray-600">Initialising Departments...</span>
-    </div>
-  );
-}
+  const getOfficerName = (officerId: string) => {
+    const officer = allOfficers.find(o => o.id === officerId);
+    return officer ? getOfficerDisplayName(officer) : 'Unassigned';
+  };
+  const renderOfficerAssignments = (assignmentIds: string[], emptyLabel = 'Unassigned') => {
+    if (!assignmentIds.length) return <span className="text-gray-400">{emptyLabel}</span>;
+    return (
+      <div className="flex flex-wrap gap-1">
+        {assignmentIds.map((officerId) => (
+          <UserDetailsPopover key={officerId} userId={officerId} users={users} officers={allOfficers} role="officer">
+            <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+              {getOfficerName(officerId)}
+            </Badge>
+          </UserDetailsPopover>
+        ))}
+      </div>
+    );
+  };
+  const renderManagerAssignments = (managerIds: string[], emptyLabel = 'None') => {
+    if (!managerIds.length) return <span className="text-gray-400">{emptyLabel}</span>;
+    return (
+      <div className="flex flex-wrap gap-1">
+        {managerIds.map((managerId) => (
+          <UserDetailsPopover key={managerId} userId={managerId} users={users} officers={allOfficers} role="manager">
+            <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+              {getUserName(managerId)}
+            </Badge>
+          </UserDetailsPopover>
+        ))}
+      </div>
+    );
+  };
+  const getDepartmentAssociatedOfficerIds = (dept: any) => {
+    const directOfficerIds = getCurrentOfficers(dept.officers_history || []).map((officer) => officer.id);
+    if (directOfficerIds.length > 0) return Array.from(new Set(directOfficerIds));
+
+    const inheritedOfficerIds = (dept.tm_subdepartments || []).flatMap((subdept: any) =>
+      getCurrentOfficers(subdept.officer_history || []).map((officer) => officer.id)
+    );
+
+    return Array.from(new Set(inheritedOfficerIds));
+  };
+  // Change this condition
+  if (loading && departments.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gray-50">
+        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+        <span className="ml-3 text-lg text-gray-600">Initialising Departments...</span>
+      </div>
+    );
+  }
 
   const OrderButtons = ({ onReorder, index, listLength, disabled = false }) => (
     <div className="flex flex-col -space-y-1.5">
@@ -1077,12 +1165,12 @@ if (loading && departments.length === 0) {
       const getBoolean = (val: boolean) => val ? 'Yes' : 'No';
 
       filteredDepartments.forEach((dept, dIdx) => {
-        const currentDeptOfficer = getCurrentOfficer(dept.officers_history || []);
+        const currentDeptOfficerIds = getDepartmentAssociatedOfficerIds(dept);
         const deptRow = sheet.addRow({
           index: `${dIdx + 1}`,
           name: dept.name,
           description: dept.description || '',
-          officer: currentDeptOfficer ? getName(currentDeptOfficer.id) : '-',
+          officer: currentDeptOfficerIds.length ? currentDeptOfficerIds.map((officerId) => getOfficerName(officerId)).join(', ') : '-',
           manager: '-',
           assistants: '-',
           display: getBoolean(dept.default_display),
@@ -1090,24 +1178,24 @@ if (loading && departments.length === 0) {
         });
         deptRow.font = { bold: true, size: 12 };
         deptRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF6FF' } };
-        
+
         (dept.tm_subdepartments || []).forEach((sub, sIdx) => {
-          const currentSubOfficer = getCurrentOfficer(sub.officer_history || []);
-          const currentManager = getCurrentManager(sub.manager_history || []);
+          const currentSubOfficers = getInheritedOfficers(sub.officer_history || [], dept);
+          const currentManagers = getCurrentManagers(sub.manager_history || []);
           const currentAssistants = getCurrentAssistants(sub.assistant_history || []);
           const subRow = sheet.addRow({
             index: `${dIdx + 1}.${sIdx + 1}`,
             name: `    ${sub.name}`,
             description: sub.description || '',
-            officer: currentSubOfficer ? getName(currentSubOfficer.id) : '-',
-            manager: currentManager ? getName(currentManager.id) : '-',
+            officer: currentSubOfficers.length ? currentSubOfficers.map((officer) => getOfficerName(officer.id)).join(', ') : '-',
+            manager: currentManagers.length ? currentManagers.map((manager) => getName(manager.id)).join(', ') : '-',
             assistants: currentAssistants.map(a => getName(a.id)).join(', '),
             display: getBoolean(sub.default_display),
             type: 'Subdepartment'
           });
           subRow.outlineLevel = 1;
           subRow.font = { bold: true, color: { argb: 'FF374151' } };
-          
+
           (sub.classes || []).forEach((cls, cIdx) => {
             const classRow = sheet.addRow({
               index: `${dIdx + 1}.${sIdx + 1}.${cIdx + 1}`,
@@ -1164,7 +1252,7 @@ if (loading && departments.length === 0) {
           <Button variant="outline" onClick={() => setIsStatsOpen(true)} className="flex items-center gap-2">
             <BarChart3 className="h-4 w-4" /> Statistics
           </Button>
-           <Button variant="outline" onClick={handleExportExcel} className="flex items-center gap-2 text-green-700 border-green-200 hover:bg-green-50 hover:text-green-800">
+          <Button variant="outline" onClick={handleExportExcel} className="flex items-center gap-2 text-green-700 border-green-200 hover:bg-green-50 hover:text-green-800">
             <DownloadCloud className="h-4 w-4" /> Export Excel
           </Button>
           {isOrderChanged && (
@@ -1217,7 +1305,7 @@ if (loading && departments.length === 0) {
               </TableRow>
             ) : (
               filteredDepartments.map((dept, deptIndex) => {
-                const currentOfficer = getCurrentOfficer(dept.officers_history || []);
+                const currentDepartmentOfficers = getDepartmentAssociatedOfficerIds(dept);
                 return (
                   <React.Fragment key={dept.id}>
                     <TableRow className="bg-blue-50 font-semibold border-b-2 border-gray-200">
@@ -1228,7 +1316,7 @@ if (loading && departments.length === 0) {
                           {expanded[dept.id] ? <Minus className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
                         </Button>
                       </TableCell>
-                      <TableCell className="border-r"><div className="text-gray-400 text-sm">View in stats</div></TableCell>
+                      <TableCell className="border-r">{renderOfficerAssignments(currentDepartmentOfficers)}</TableCell>
                       <TableCell className="border-r"><div className="text-gray-400 text-sm">View in stats</div></TableCell>
                       <TableCell className="border-r"><div className="text-gray-400 text-sm">View in stats</div></TableCell>
                       <TableCell className="text-base text-gray-800 border-r">
@@ -1253,18 +1341,18 @@ if (loading && departments.length === 0) {
                       </TableCell>
                       <TableCell className="text-right border-r">
                         <div className="flex items-center justify-end gap-2">
-                          <DepartmentStats department={dept} subdepartments={dept.tm_subdepartments || []} users={users} />
+                          <DepartmentStats department={dept} subdepartments={dept.tm_subdepartments || []} users={users} officers={allOfficers} />
                           <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); handleEditDepartment(dept); }} className="h-6 w-6 text-gray-500 hover:text-blue-600">
                             <Edit className="h-3.5 w-3.5" />
                           </Button>
                           {/* DELETE DEPARTMENT BUTTON */}
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            onClick={(e) => { 
-                              e.stopPropagation(); 
-                              handleDeleteDepartment(dept.id); 
-                            }} 
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteDepartment(dept.id);
+                            }}
                             className="h-6 w-6 text-red-500 hover:text-red-600 hover:bg-red-50"
                             title="Delete Department"
                           >
@@ -1281,146 +1369,183 @@ if (loading && departments.length === 0) {
                     {expanded[dept.id] && (dept.tm_subdepartments || [])
                       .sort((a, b) => (a.order || 0) - (b.order || 0))
                       .map((subdept, subdeptIndex) => {
-                      const hasClasses = subdept.classes && subdept.classes.length > 0;
-                      const subdeptKey = `subdept-${subdept.id}`;
-                      const isExpanded = expanded[subdeptKey];
-                      const currentManager = getCurrentManager(subdept.manager_history || []);
-                      const currentAssistants = getCurrentAssistants(subdept.assistant_history || []);
-                      const currentOfficerSub = getCurrentOfficer(subdept.officer_history || []);
-                      
-                      return (
-                        <React.Fragment key={subdept.id}>
-                          <TableRow className="hover:bg-gray-50/50 border-b-2 border-gray-200">
-                            <TableCell className="text-center border-r text-gray-500 text-xs">{deptIndex + 1}.{subdeptIndex + 1}</TableCell>
-                            <TableCell className="pl-12 border-r">
-                              <div className="flex justify-between gap-3 font-medium text-gray-700">
-                                <div className="flex items-center gap-2"><Workflow className="h-5 w-5 text-blue-500 flex-shrink-0" /><span>{subdept.name}</span></div>
-                                {hasClasses && (
-                                  <Button variant="ghost" size="icon" onClick={() => toggleExpansion('dept', subdeptKey)} className="h-6 w-6 -ml-2">
-                                    {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                                  </Button>
-                                )}
-                              </div>
-                            </TableCell>
-                            <TableCell className="border-r">
-                              <div className="flex items-center gap-2">
-                                {currentOfficerSub ? (
-                                  <UserDetailsPopover userId={currentOfficerSub.id} users={users} role="officer">
-                                    <div className="flex items-center gap-2"><Shield className="h-4 w-4 text-blue-600" /><span>{getUserName(currentOfficerSub.id)}</span></div>
-                                  </UserDetailsPopover>
-                                ) : <span className="text-gray-400">None</span>}
-                              </div>
-                            </TableCell>
-                            <TableCell className="border-r">
-                              <div className="flex items-center gap-2">
-                                {currentManager ? (
-                                  <UserDetailsPopover userId={currentManager.id} users={users} role="manager">
-                                    <div className="flex items-center gap-2"><UserIcon className="h-4 w-4 text-green-600" /><span>{getUserName(currentManager.id)}</span></div>
-                                  </UserDetailsPopover>
-                                ) : <span className="text-gray-400">None</span>}
-                              </div>
-                            </TableCell>
-                            <TableCell className="border-r">
-                              <div className="flex items-center gap-2">
-                                {currentAssistants.length > 0 ? (
-                                  <div className="flex flex-col space-y-1">
-                                    {currentAssistants.map((assistant, i) => (
-                                      <div key={i} className="flex items-center gap-2">
-                                        <UserDetailsPopover userId={assistant.id} users={users} role="assistant">
-                                          <div className="flex items-center gap-2"><Users className="h-4 w-4 text-purple-600" /><span>{getUserName(assistant.id)}</span></div>
-                                        </UserDetailsPopover>
-                                      </div>
-                                    ))}
-                                  </div>
-                                ) : <span className="text-gray-400">None</span>}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-base text-gray-800 border-r">
-                              {subdept.entity_types && subdept.entity_types.length > 0 ? (
-                                <div className="flex flex-wrap gap-1">
-                                  {subdept.entity_types.map((entityType, index) => {
-                                    const entityConfig = ENTITY_TYPES.find(type => type.value === entityType)
-                                    return (
-                                      <Badge key={index} variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
-                                        {entityConfig?.label || entityType}
-                                      </Badge>
-                                    )
-                                  })}
+                        const hasClasses = subdept.classes && subdept.classes.length > 0;
+                        const subdeptKey = `subdept-${subdept.id}`;
+                        const isExpanded = expanded[subdeptKey];
+                        const currentManagers = getCurrentManagers(subdept.manager_history || []);
+                        const currentAssistants = getCurrentAssistants(subdept.assistant_history || []);
+                        const currentOfficerSub = getInheritedOfficers(subdept.officer_history || [], dept);
+                        const ownOfficerIds = getCurrentOfficers(subdept.officer_history || []).map((officer) => officer.id);
+
+                        return (
+                          <React.Fragment key={subdept.id}>
+                            <TableRow className="hover:bg-gray-50/50 border-b-2 border-gray-200">
+                              <TableCell className="text-center border-r text-gray-500 text-xs">{deptIndex + 1}.{subdeptIndex + 1}</TableCell>
+                              <TableCell className="pl-12 border-r">
+                                <div className="flex justify-between gap-3 font-medium text-gray-700">
+                                  <div className="flex items-center gap-2"><Workflow className="h-5 w-5 text-blue-500 flex-shrink-0" /><span>{subdept.name}</span></div>
+                                  {hasClasses && (
+                                    <Button variant="ghost" size="icon" onClick={() => toggleExpansion('dept', subdeptKey)} className="h-6 w-6 -ml-2">
+                                      {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                                    </Button>
+                                  )}
                                 </div>
-                              ) : (
-                                <span className="text-gray-400 text-sm">All Types</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="border-r">{hasClasses && <span className="text-sm text-gray-600">{subdept.classes.length} Classes</span>}</TableCell>
-                            <TableCell className="text-center border-r">
-                              <Checkbox checked={subdept.default_display || false} onCheckedChange={(checked) => handleSubdepartmentDefaultDisplayToggle(deptIndex, subdeptIndex, Boolean(checked))} />
-                            </TableCell>
-                            <TableCell className="border-r">
-                              <div className="flex items-center justify-end gap-2">
-                                <OrderButtons onReorder={(idx, dir) => handleSubdepartmentReorder(deptIndex, idx, dir)} index={subdeptIndex} listLength={(dept.tm_subdepartments || []).length} disabled={savingOrder} />
-                                <Button variant="outline" size="icon" onClick={() => handleEditSubdepartment(subdept)} className="h-8 w-8"><Edit className="h-4 w-4" /></Button>
-                                <Button variant="outline" size="icon" onClick={() => handleDeleteSubdepartment(subdept.id)} className="h-8 w-8 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-
-                          {isExpanded && hasClasses && (subdept.classes || [])
-                            .sort((a, b) => (a.order || 0) - (b.order || 0))
-                            .map((cls, clsIndex) => {
-                            const classId = `class-${subdept.id}-${cls.id || clsIndex}`;
-                            const hasSubClasses = cls.subClasses && cls.subClasses.length > 0;
-                            const isClassExpanded = expandedClasses[classId];
-
-                            return (
-                              <React.Fragment key={`${subdept.id}-${cls.id || clsIndex}`}>
-                                <TableRow className="bg-gray-50 hover:bg-gray-100/50">
-                                  <TableCell className="text-center border-r text-gray-500 text-xs">{deptIndex + 1}.{subdeptIndex + 1}.{clsIndex + 1}</TableCell>
-                                  <TableCell className="pl-24 border-r flex justify-between">
-                                    <div className="flex items-center gap-2 text-sm">
-                                      <Layers className="h-4 w-4 text-blue-400 flex-shrink-0" /><span className="font-medium text-gray-700">{cls.name}</span>
+                              </TableCell>
+                              <TableCell className="border-r">
+                                <div className="flex items-center gap-2">
+                                  {currentOfficerSub.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1">
+                                      {currentOfficerSub.map((officer) => (
+                                        <UserDetailsPopover key={officer.id} userId={officer.id} users={users} officers={allOfficers} role="officer">
+                                          <div className="flex items-center gap-2">
+                                            <Shield className="h-4 w-4 text-blue-600" />
+                                            <span>{getOfficerName(officer.id)}</span>
+                                            {!ownOfficerIds.includes(officer.id) && (
+                                              <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200">
+                                                Inherited
+                                              </Badge>
+                                            )}
+                                          </div>
+                                        </UserDetailsPopover>
+                                      ))}
                                     </div>
-                                    {hasSubClasses ? (
-                                      <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); toggleExpansion('class', classId); }} className="h-6 w-6 -ml-2">
-                                        {isClassExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                                      </Button>
-                                    ) : <span className="w-6 h-6 flex-shrink-0"></span>}
-                                  </TableCell>
-                                  <TableCell className="border-r"></TableCell>
-                                  <TableCell className="border-r"></TableCell>
-                                  <TableCell className="border-r"></TableCell>
-                                  <TableCell className="border-r">{hasSubClasses && <span className="text-xs text-gray-600">{cls.subClasses.length} Subclasses</span>}</TableCell>
-                                  <TableCell className="text-center border-r">
-                                    <Checkbox checked={cls.default_display || false} onCheckedChange={(checked) => handleClassDefaultDisplayToggle(deptIndex, subdeptIndex, clsIndex, Boolean(checked))} />
-                                  </TableCell>
-                                  <TableCell className="border-r"></TableCell>
-                                </TableRow>
+                                  ) : <span className="text-gray-400">Unassigned</span>}
+                                </div>
+                              </TableCell>
+                              <TableCell className="border-r">
+                                {renderManagerAssignments(currentManagers.map((manager) => manager.id))}
+                              </TableCell>
+                              <TableCell className="border-r">
+                                <div className="flex items-center gap-2">
+                                  {currentAssistants.length > 0 ? (
+                                    <div className="flex flex-col space-y-1">
+                                      {currentAssistants.map((assistant, i) => (
+                                        <div key={i} className="flex items-center gap-2">
+                                          <UserDetailsPopover userId={assistant.id} users={users} role="assistant">
+                                            <div className="flex items-center gap-2"><Users className="h-4 w-4 text-purple-600" /><span>{getUserName(assistant.id)}</span></div>
+                                          </UserDetailsPopover>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : <span className="text-gray-400">None</span>}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-base text-gray-800 border-r">
+                                {subdept.entity_types && subdept.entity_types.length > 0 ? (
+                                  <div className="flex flex-wrap gap-1">
+                                    {subdept.entity_types.map((entityType, index) => {
+                                      const entityConfig = ENTITY_TYPES.find(type => type.value === entityType)
+                                      return (
+                                        <Badge key={index} variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                                          {entityConfig?.label || entityType}
+                                        </Badge>
+                                      )
+                                    })}
+                                  </div>
+                                ) : (
+                                  <span className="text-gray-400 text-sm">All Types</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="border-r">{hasClasses && <span className="text-sm text-gray-600">{subdept.classes.length} Classes</span>}</TableCell>
+                              <TableCell className="text-center border-r">
+                                <Checkbox checked={subdept.default_display || false} onCheckedChange={(checked) => handleSubdepartmentDefaultDisplayToggle(deptIndex, subdeptIndex, Boolean(checked))} />
+                              </TableCell>
+                              <TableCell className="border-r">
+                                <div className="flex items-center justify-end gap-2">
+                                  <OrderButtons onReorder={(idx, dir) => handleSubdepartmentReorder(deptIndex, idx, dir)} index={subdeptIndex} listLength={(dept.tm_subdepartments || []).length} disabled={savingOrder} />
+                                  <Button variant="outline" size="icon" onClick={() => handleEditSubdepartment(subdept)} className="h-8 w-8"><Edit className="h-4 w-4" /></Button>
+                                  <Button variant="outline" size="icon" onClick={() => handleDeleteSubdepartment(subdept.id)} className="h-8 w-8 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
 
-                                {isClassExpanded && hasSubClasses && (cls.subClasses || [])
-                                  .sort((a, b) => (a.order || 0) - (b.order || 0))
-                                  .map((subClass, subClassIndex) => (
-                                  <TableRow key={`${cls.id}-${subClass.id || subClassIndex}`} className="hover:bg-gray-100/70">
-                                    <TableCell className="text-center border-r text-gray-500 text-xs">{deptIndex + 1}.{subdeptIndex + 1}.{clsIndex + 1}.{subClassIndex + 1}</TableCell>
-                                    <TableCell className="pl-32 border-r">
-                                      <div className="flex items-center gap-2 text-sm">
-                                        <span className="w-6 h-6 flex-shrink-0"></span><Target className="h-3.5 w-3.5 text-blue-300 flex-shrink-0" /><span className="font-medium text-gray-700">{subClass.name}</span>
-                                      </div>
-                                    </TableCell>
-                                    <TableCell className="border-r"></TableCell>
-                                    <TableCell className="border-r"></TableCell>
-                                    <TableCell className="border-r"></TableCell>
-                                    <TableCell className="border-r"></TableCell>
-                                    <TableCell className="text-center border-r">
-                                      <Checkbox checked={subClass.default_display || false} onCheckedChange={(checked) => handleSubclassDefaultDisplayToggle(deptIndex, subdeptIndex, clsIndex, subClassIndex, Boolean(checked))} />
-                                    </TableCell>
-                                    <TableCell className="border-r"></TableCell>
-                                  </TableRow>
-                                ))}
-                              </React.Fragment>
-                            );
-                          })}
-                        </React.Fragment>
-                      );
-                    })}
+                            {isExpanded && hasClasses && (subdept.classes || [])
+                              .sort((a, b) => (a.order || 0) - (b.order || 0))
+                              .map((cls, clsIndex) => {
+                                const classId = `class-${subdept.id}-${cls.id || clsIndex}`;
+                                const hasSubClasses = cls.subClasses && cls.subClasses.length > 0;
+                                const isClassExpanded = expandedClasses[classId];
+
+                                return (
+                                  <React.Fragment key={`${subdept.id}-${cls.id || clsIndex}`}>
+                                    <TableRow className="bg-gray-50 hover:bg-gray-100/50">
+                                      <TableCell className="text-center border-r text-gray-500 text-xs">{deptIndex + 1}.{subdeptIndex + 1}.{clsIndex + 1}</TableCell>
+                                      <TableCell className="pl-24 border-r flex justify-between">
+                                        <div className="flex items-center gap-2 text-sm">
+                                          <Layers className="h-4 w-4 text-blue-400 flex-shrink-0" /><span className="font-medium text-gray-700">{cls.name}</span>
+                                        </div>
+                                        {hasSubClasses ? (
+                                          <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); toggleExpansion('class', classId); }} className="h-6 w-6 -ml-2">
+                                            {isClassExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                                          </Button>
+                                        ) : <span className="w-6 h-6 flex-shrink-0"></span>}
+                                      </TableCell>
+                                      <TableCell className="border-r"></TableCell>
+                                      <TableCell className="border-r"></TableCell>
+                                      <TableCell className="border-r"></TableCell>
+                                      <TableCell className="border-r">
+                                        {cls.entity_types && cls.entity_types.length > 0 ? (
+                                          <div className="flex flex-wrap gap-1">
+                                            {cls.entity_types.map((entityType, index) => {
+                                              const entityConfig = ENTITY_TYPES.find(type => type.value === entityType)
+                                              return (
+                                                <Badge key={index} variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                                                  {entityConfig?.label || entityType}
+                                                </Badge>
+                                              )
+                                            })}
+                                          </div>
+                                        ) : (
+                                          <span className="text-gray-400 text-sm">All Types</span>
+                                        )}
+                                      </TableCell>
+                                      <TableCell className="text-center border-r">
+                                        <Checkbox checked={cls.default_display || false} onCheckedChange={(checked) => handleClassDefaultDisplayToggle(deptIndex, subdeptIndex, clsIndex, Boolean(checked))} />
+                                      </TableCell>
+                                      <TableCell className="border-r"></TableCell>
+                                    </TableRow>
+
+                                    {isClassExpanded && hasSubClasses && (cls.subClasses || [])
+                                      .sort((a, b) => (a.order || 0) - (b.order || 0))
+                                      .map((subClass, subClassIndex) => (
+                                        <TableRow key={`${cls.id}-${subClass.id || subClassIndex}`} className="hover:bg-gray-100/70">
+                                          <TableCell className="text-center border-r text-gray-500 text-xs">{deptIndex + 1}.{subdeptIndex + 1}.{clsIndex + 1}.{subClassIndex + 1}</TableCell>
+                                          <TableCell className="pl-32 border-r">
+                                            <div className="flex items-center gap-2 text-sm">
+                                              <span className="w-6 h-6 flex-shrink-0"></span><Target className="h-3.5 w-3.5 text-blue-300 flex-shrink-0" /><span className="font-medium text-gray-700">{subClass.name}</span>
+                                            </div>
+                                          </TableCell>
+                                          <TableCell className="border-r"></TableCell>
+                                          <TableCell className="border-r"></TableCell>
+                                          <TableCell className="border-r"></TableCell>
+                                          <TableCell className="border-r">
+                                            {subClass.entity_types && subClass.entity_types.length > 0 ? (
+                                              <div className="flex flex-wrap gap-1">
+                                                {subClass.entity_types.map((entityType, index) => {
+                                                  const entityConfig = ENTITY_TYPES.find(type => type.value === entityType)
+                                                  return (
+                                                    <Badge key={index} variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                                                      {entityConfig?.label || entityType}
+                                                    </Badge>
+                                                  )
+                                                })}
+                                              </div>
+                                            ) : (
+                                              <span className="text-gray-400 text-sm">All Types</span>
+                                            )}
+                                          </TableCell>
+                                          <TableCell className="text-center border-r">
+                                            <Checkbox checked={subClass.default_display || false} onCheckedChange={(checked) => handleSubclassDefaultDisplayToggle(deptIndex, subdeptIndex, clsIndex, subClassIndex, Boolean(checked))} />
+                                          </TableCell>
+                                          <TableCell className="border-r"></TableCell>
+                                        </TableRow>
+                                      ))}
+                                  </React.Fragment>
+                                );
+                              })}
+                          </React.Fragment>
+                        );
+                      })}
                   </React.Fragment>
                 );
               })
@@ -1436,7 +1561,7 @@ if (loading && departments.length === 0) {
         departmentForm={departmentForm}
         setDepartmentForm={setDepartmentForm}
         users={users}
-        officers={officers}
+        officers={allOfficers}
         editingDepartmentId={editingDepartmentId}
         editingSubdepartmentId={editingSubdepartmentId}
         isSaving={saving}
@@ -1445,6 +1570,7 @@ if (loading && departments.length === 0) {
       <AssignmentStatsDashboard
         departments={departments}
         users={users}
+        officers={allOfficers}
         isOpen={isStatsOpen}
         onClose={() => setIsStatsOpen(false)}
       />

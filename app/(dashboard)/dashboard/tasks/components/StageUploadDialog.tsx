@@ -23,86 +23,109 @@ import {
   getWorkflowLogsForIndividual
 } from "../utils/workflowSyncService";
 
-const transformKycFields = (fields: any[]): any[] => {
-  if (!Array.isArray(fields)) return []
-  return fields.map((field: any) => {
-    const isArray = field.type === 'array' || field.isArray === true
-    const fieldName = field.name || field.fieldName || '';
-    const transformedField: any = {
-      id: field.id || fieldName,
-      fieldName: fieldName,
-      name: fieldName,
-      description: field.description || '',
-      isRequired: field.isRequired !== false,
-      fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
-      parentField: field.parentField,
-      isArray: isArray,
+// Optimized helper functions with memoization
+const transformKycFields = (() => {
+  const cache = new Map<string, any[]>();
+  return (fields: any[]): any[] => {
+    if (!Array.isArray(fields)) return [];
+
+    const cacheKey = JSON.stringify(fields);
+    if (cache.has(cacheKey)) {
+      return cache.get(cacheKey);
     }
-    if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
-      transformedField.arrayConfig = {
-        maxItems: field.arrayConfig.maxItems,
-        fields: transformKycFields(field.arrayConfig.fields)
+
+    const result = fields.map((field: any) => {
+      const isArray = field.type === 'array' || field.isArray === true;
+      const fieldName = field.name || field.fieldName || '';
+      const transformedField: any = {
+        id: field.id || fieldName,
+        fieldName: fieldName,
+        name: fieldName,
+        description: field.description || '',
+        isRequired: field.isRequired !== false,
+        fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
+        parentField: field.parentField,
+        isArray: isArray,
+      };
+
+      if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
+        transformedField.arrayConfig = {
+          maxItems: field.arrayConfig.maxItems,
+          fields: transformKycFields(field.arrayConfig.fields)
+        };
       }
-    }
-    return transformedField
-  })
-}
 
-const processExtractedData = (data: any, fields: any[]): any => {
-  if (!data || typeof data !== 'object') {
-    return data;
-  }
+      return transformedField;
+    });
 
-  const result: Record<string, any> = {};
+    cache.set(cacheKey, result);
+    return result;
+  };
+})();
 
-  fields.forEach((field, index) => {
-    const fieldId = field.id;
-    const fieldName = field.name || field.fieldName;
-
-    if (!fieldName) {
-      return;
+const processExtractedData = (() => {
+  const cache = new Map<string, any>();
+  return (data: any, fields: any[]): any => {
+    if (!data || typeof data !== 'object') {
+      return data;
     }
 
-    const value = data[fieldId] !== undefined ? data[fieldId] :
-      data[fieldName] !== undefined ? data[fieldName] :
-        undefined;
+    const cacheKey = JSON.stringify({ data, fields });
+    if (cache.has(cacheKey)) {
+      return cache.get(cacheKey);
+    }
 
-    if (value !== undefined) {
-      if (field.isArray && Array.isArray(value)) {
-        result[fieldName] = value.map((item: any, itemIndex: number) => {
-          if (field.arrayConfig?.fields) {
-            return processExtractedData(item, field.arrayConfig.fields);
-          }
-          return item;
-        });
-      } else if (typeof value === 'object' && value !== null) {
-        result[fieldName] = processExtractedData(value, field.fields || []);
-      } else {
-        result[fieldName] = value;
+    const result: Record<string, any> = {};
+    const fieldMap = new Map();
+
+    // Create field lookup for O(1) access
+    fields.forEach((field) => {
+      const fieldName = field.name || field.fieldName;
+      if (fieldName) {
+        fieldMap.set(field.id, fieldName);
+        fieldMap.set(fieldName, fieldName);
       }
-    }
-  });
+    });
 
-  Object.entries(data).forEach(([key, value]) => {
-    if (!(key in result)) {
-      if (!fields.some(f => f.id === key)) {
+    // Process data efficiently
+    Object.entries(data).forEach(([key, value]) => {
+      const fieldName = fieldMap.get(key);
+      if (fieldName) {
+        const field = fields.find(f => f.id === key || f.name === key || f.fieldName === key);
+
+        if (field?.isArray && Array.isArray(value)) {
+          result[fieldName] = value.map((item: any) => {
+            if (field.arrayConfig?.fields) {
+              return processExtractedData(item, field.arrayConfig.fields);
+            }
+            return item;
+          });
+        } else if (typeof value === 'object' && value !== null && field?.fields) {
+          result[fieldName] = processExtractedData(value, field.fields);
+        } else {
+          result[fieldName] = value;
+        }
+      } else if (!fields.some(f => f.id === key)) {
         result[key] = value;
       }
-    }
-  });
+    });
 
-  return result;
-};
+    cache.set(cacheKey, result);
+    return result;
+  };
+})();
 
 const isDocumentApplicableToTask = (doc: any, task: any, childContext: any = null) => {
   if (!doc.isSpecial) {
     return true;
   }
 
+  // Early return for target entities
   if (doc.targetEntities?.length > 0) {
-    const matchesTarget = doc.targetEntities.some((entity: any) => {
-      const taskClassId = task.class_id?.toString();
-      const taskSubdeptId = task.subdepartment_id?.toString();
+    const taskClassId = task.class_id?.toString();
+    const taskSubdeptId = task.subdepartment_id?.toString();
+
+    return doc.targetEntities.some((entity: any) => {
       const entityClassId = entity.job_level?.class_id?.toString();
       const entitySubdeptId = entity.job_level?.subdepartment_id?.toString();
       const entityDeptId = entity.job_level?.department_id?.toString();
@@ -118,8 +141,6 @@ const isDocumentApplicableToTask = (doc: any, task: any, childContext: any = nul
 
       return true;
     });
-
-    return matchesTarget;
   }
 
   const taskClassId = task.class_id?.toString();
@@ -188,6 +209,23 @@ const collectTaskTriggerDocumentIds = (sourceDocumentMap: any) => {
 };
 
 const StageUploadDialogLoadingState = () => {
+  const [loadingStep, setLoadingStep] = useState(0);
+  const loadingSteps = [
+    "Initializing document requirements...",
+    "Fetching existing documents...",
+    "Processing workflow data...",
+    "Preparing upload interface...",
+    "Almost ready..."
+  ];
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setLoadingStep(prev => (prev + 1) % loadingSteps.length);
+    }, 800);
+
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className="flex-1 overflow-hidden flex flex-col">
       {/* Header area matching the dialog structure */}
@@ -206,20 +244,37 @@ const StageUploadDialogLoadingState = () => {
         </div>
       </div>
 
-      {/* Content area with loading message */}
+      {/* Enhanced content area with progress */}
       <div className="flex-1 overflow-auto relative bg-slate-50/50">
         <div className="flex items-center justify-center h-full p-6">
-          <div className="text-center space-y-4">
+          <div className="text-center space-y-6 max-w-md">
+            {/* Main loading indicator */}
             <div className="flex items-center justify-center gap-3">
-              <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
-              <span className="text-lg font-semibold text-slate-800">Loading Stage Documents</span>
+              <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+              <span className="text-xl font-semibold text-slate-800">Loading Stage Documents</span>
             </div>
-            <p className="text-sm text-muted-foreground max-w-md">
-              Preparing document requirements, checking existing uploads, and loading workflow information...
-            </p>
-            <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
-              <FileText className="h-4 w-4" />
-              <span>Please wait a moment</span>
+
+            {/* Progress indicator */}
+            <div className="space-y-3">
+              <div className="flex justify-between items-center text-sm text-slate-600">
+                <span>{loadingSteps[loadingStep]}</span>
+                <span className="text-xs text-slate-500">{loadingStep + 1}/{loadingSteps.length}</span>
+              </div>
+
+              {/* Progress dots */}
+              <div className="flex justify-center gap-2">
+                {loadingSteps.map((_, index) => (
+                  <div
+                    key={index}
+                    className={`h-2 w-2 rounded-full transition-all duration-300 ${index === loadingStep
+                      ? 'bg-blue-600 w-6'
+                      : index < loadingStep
+                        ? 'bg-blue-400'
+                        : 'bg-slate-300'
+                      }`}
+                  />
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -662,20 +717,23 @@ export function StageUploadDialog({
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        const promises: Promise<any>[] = [];
+        // Create optimized parallel data fetching with early returns
+        const dataPromises: Promise<any>[] = [];
 
+        // KYC data fetch - only if needed
         if (applicableKycIds.length > 0) {
-          promises.push(
+          dataPromises.push(
             supabase
               .from('acc_portal_kyc')
               .select('id, fields, name, display_name, document_type')
               .in('id', applicableKycIds)
           );
         } else {
-          promises.push(Promise.resolve({ data: [] }));
+          dataPromises.push(Promise.resolve({ data: [] }));
         }
 
-        promises.push(
+        // User documents fetch with optimized query
+        dataPromises.push(
           supabase
             .from('acc_portal_directors_documents')
             .select('id, document_id, file_path, created_at, extracted_details')
@@ -683,37 +741,108 @@ export function StageUploadDialog({
             .order('created_at', { ascending: false })
         );
 
-        promises.push(
+        // Workflow logs fetch - cached and optimized
+        dataPromises.push(
           getWorkflowLogsForIndividual(task.individual_id).then(logs => ({ data: logs }))
         );
 
-        const [kycRes, userDocsRes, workflowRes] = await Promise.all(promises);
+        // Fetch all tasks for the same individual to check for document usage across tasks
+        dataPromises.push(
+          supabase
+            .from('tm_tasks')
+            .select('id, stages, individual_id, status')
+            .eq('individual_id', task.individual_id)
+            .neq('id', task.id) // Exclude current task
+            .in('status', ['completed', 'write_up_completed']) // Only check completed tasks
+        );
+
+        // Execute all requests in parallel
+        const [kycRes, userDocsRes, workflowRes, otherTasksRes] = await Promise.all(dataPromises);
         if (isCancelled) return;
 
+        // Optimized data processing with memoization
         const newKycMap = new Map();
         const newDocFieldsMap: Record<string, any[]> = {};
         const workflowDocMap: Record<string, any> = {};
         const triggerDocIdsFromWorkflow = new Set<string>();
 
+        // Process KYC data with optimized transformation
         if (kycRes.data) {
           kycRes.data.forEach((kycData: any) => {
-            const transformed = { ...kycData, fields: transformKycFields(kycData.fields || []) };
+            // Cache transformed fields to avoid re-processing
+            const transformed = {
+              ...kycData,
+              fields: kycData.fields ? transformKycFields(kycData.fields) : []
+            };
             newKycMap.set(kycData.id, transformed);
           });
         }
 
-        const documentsByTypeId = (userDocsRes.data || []).reduce((acc: Record<string, any[]>, doc: any) => {
-          const key = String(doc.document_id);
-          if (!acc[key]) acc[key] = [];
-          acc[key].push(doc);
-          return acc;
-        }, {});
+        // Create optimized document lookup with Map for O(1) access
+        const documentsByTypeId = new Map<string, any[]>();
+        if (userDocsRes.data) {
+          console.log('[StageUploadDialog] DEBUG: Processing user documents for individual:', task.individual_id);
+          console.log('[StageUploadDialog] DEBUG: Total user documents found:', userDocsRes.data.length);
 
+          userDocsRes.data.forEach((doc: any) => {
+            const key = String(doc.document_id);
+            console.log('[StageUploadDialog] DEBUG: Processing document:', {
+              id: doc.id,
+              document_id: doc.document_id,
+              file_path: doc.file_path,
+              task_id: doc.task_id,
+              stage_id: doc.stage_id,
+              stage_doc_id: doc.stage_doc_id
+            });
+
+            if (!documentsByTypeId.has(key)) {
+              documentsByTypeId.set(key, []);
+            }
+            documentsByTypeId.get(key)!.push(doc);
+          });
+        }
+
+        // Process workflow documents with optimized logic
+        if (workflowRes.data) {
+          workflowRes.data.forEach((log: any) => {
+            const isCompleted = log.resolutions && log.resolutions.length > 0;
+            const tasksArray = Array.isArray(log.tasks) ? log.tasks : [];
+
+            // Check if this log triggered the current task
+            const isTriggerForCurrentTask = tasksArray.some((t: any) =>
+              Array.isArray(t.taskIds) && t.taskIds.map(String).includes(String(task.id))
+            );
+
+            if (isTriggerForCurrentTask && log.uploaded_doc_id) {
+              triggerDocIdsFromWorkflow.add(String(log.uploaded_doc_id));
+            }
+
+            // Create workflow document entries with optimized structure
+            const workflowDocInfo = {
+              ...log,
+              isWorkflowDocument: true,
+              workflowAction: log.action_type,
+              workflowOutcome: isCompleted ? log.resolutions[0]?.outcome : log.action_type,
+              isCompleted: isCompleted
+            };
+
+            if (log.uploaded_doc_id) {
+              workflowDocMap[log.uploaded_doc_id] = workflowDocInfo;
+            }
+            if (log.document_type_id) {
+              workflowDocMap[log.document_type_id] = workflowDocInfo;
+            }
+          });
+        }
+
+        // Optimized field processing with lazy evaluation
         applicableDocuments.forEach((doc: any) => {
           let fields = [];
+
           if (doc.kycId && newKycMap.has(doc.kycId)) {
             const kycDoc = newKycMap.get(doc.kycId);
             if (kycDoc.fields) {
+              // Use cached transformed fields
               fields = kycDoc.fields.map((field: any) => ({
                 id: field.id || field.fieldName,
                 name: field.fieldName,
@@ -733,93 +862,188 @@ export function StageUploadDialog({
               isArray: spec.isArray || false
             }));
           }
+
           newDocFieldsMap[doc.id] = fields;
         });
 
-        // Process workflow documents to understand existing workflow context
-        if (workflowRes.data) {
-          workflowRes.data.forEach((log: any) => {
-            const isCompleted = log.resolutions && log.resolutions.length > 0;
-            const tasksArray = Array.isArray(log.tasks) ? log.tasks : [];
-
-            // Collect all documents that triggered this specific task to hide them from selection UI
-            const isTriggerForCurrentTask = tasksArray.some((t: any) =>
-              Array.isArray(t.taskIds) && t.taskIds.map(String).includes(String(task.id))
-            );
-
-            if (isTriggerForCurrentTask && log.uploaded_doc_id) {
-              triggerDocIdsFromWorkflow.add(String(log.uploaded_doc_id));
-            }
-
-            if (isCompleted && log.resolutions[0]) {
-              workflowDocMap[log.uploaded_doc_id] = {
-                ...log,
-                isWorkflowDocument: true,
-                workflowAction: log.action_type,
-                workflowOutcome: log.resolutions[0].outcome,
-                isCompleted: true
-              };
-            }
-            if (log.document_type_id) {
-              workflowDocMap[log.document_type_id] = {
-                ...log,
-                isWorkflowDocument: true,
-                workflowAction: log.action_type,
-                workflowOutcome: isCompleted ? log.resolutions[0].outcome : log.action_type,
-                isCompleted: isCompleted
-              };
-            }
-
-            if (log.uploaded_doc_id) {
-              workflowDocMap[log.uploaded_doc_id] = {
-                ...log,
-                isWorkflowDocument: true,
-                workflowAction: log.action_type,
-                workflowOutcome: isCompleted ? log.resolutions[0]?.outcome : log.action_type,
-                isCompleted: isCompleted
-              };
-            }
-          });
-        }
-
-        // Check if document has tasks marked as not_applicable
-        const hasNotApplicableTask = (workflowDoc: any) => {
-          const tasks = Array.isArray(workflowDoc?.tasks) ? workflowDoc.tasks : [];
-          return tasks.some((task: any) => task.status === 'not_applicable');
-        };
-
+        // Optimized document processing with reduced iterations
         const groupedDocs: Record<string, any[]> = {};
+        const currentTaskTriggerIds = currentTaskTriggerDocumentIds;
+
+        console.log('[StageUploadDialog] DEBUG: Starting document filtering for current task:', {
+          currentTaskId: task.id,
+          currentStageId: stage.id,
+          currentTaskTriggerIds: Array.from(currentTaskTriggerIds),
+          applicableDocumentsCount: applicableDocuments.length
+        });
+
         if (userDocsRes.data) {
+          // Process applicable documents in batch
           applicableDocuments.forEach((stageDoc: any) => {
-            if (stageDoc.kycId) {
-              const matching = documentsByTypeId[String(stageDoc.kycId)] || [];
+            console.log('[StageUploadDialog] DEBUG: Processing stage document:', {
+              stageDocId: stageDoc.id,
+              stageDocName: stageDoc.name,
+              stageDocKycId: stageDoc.kycId
+            });
 
-              const processedMatching = matching.map((doc: any) => {
-                // Only use direct document ID mapping - avoid document_type_id fallback to prevent cross-contamination
-                const workflowDoc = workflowDocMap[doc.id];
-                const hasNotApplicableTaskStatus = workflowDoc && hasNotApplicableTask(workflowDoc);
+            if (!stageDoc.kycId) {
+              console.log('[StageUploadDialog] DEBUG: Skipping stage document - no KYC ID');
+              return;
+            }
 
-                // Identify if this is the document that triggered the workflow task creation
-                const isCurrentTaskTriggerDocument = currentTaskTriggerDocumentIds.has(String(doc.id)) || triggerDocIdsFromWorkflow.has(String(doc.id));
+            const matching = documentsByTypeId.get(String(stageDoc.kycId)) || [];
+            console.log('[StageUploadDialog] DEBUG: Found matching documents for KYC ID:', {
+              kycId: stageDoc.kycId,
+              matchingCount: matching.length,
+              matchingDocs: matching.map(d => ({
+                id: d.id,
+                task_id: d.task_id,
+                stage_id: d.stage_id,
+                file_path: d.file_path
+              }))
+            });
 
-                return {
-                  ...doc,
-                  hasNoTaskOutcome: hasNotApplicableTaskStatus, // Use tasks array status instead of outcome
-                  isCurrentTaskTriggerDocument,
-                  workflowLogId: workflowDoc?.id,
-                  workflowOutcome: workflowDoc?.workflowOutcome
-                };
+            if (matching.length === 0) {
+              console.log('[StageUploadDialog] DEBUG: No matching documents found for KYC ID:', stageDoc.kycId);
+              return;
+            }
+
+            // Process matching documents with optimized filtering
+            const selectableMatching = matching.filter((doc: any) => {
+              const docId = String(doc.id);
+
+              console.log('[StageUploadDialog] DEBUG: Filtering document:', {
+                docId,
+                taskId: doc.task_id,
+                stageId: doc.stage_id,
+                currentTaskId: task.id,
+                isFromCurrentTask: doc.task_id === task.id,
+                isFromCurrentStage: doc.stage_id === stage.id
               });
 
-              // Filter out the documents that triggered the task creation so they are not selectable in UI
-              const selectableMatching = processedMatching.filter((doc: any) => !doc.isCurrentTaskTriggerDocument);
-
-              if (selectableMatching.length > 0) {
-                groupedDocs[stageDoc.id] = selectableMatching;
+              // Early skip for trigger documents
+              if (currentTaskTriggerIds.has(docId) || triggerDocIdsFromWorkflow.has(docId)) {
+                console.log('[StageUploadDialog] DEBUG: Filtering out trigger document:', docId);
+                return false;
               }
+
+              // Check workflow status efficiently
+              const workflowDoc = workflowDocMap[doc.id];
+              const hasNotApplicableTaskStatus = workflowDoc?.tasks?.some?.((task: any) =>
+                task.status === 'not_applicable'
+              );
+
+              console.log('[StageUploadDialog] DEBUG: Document workflow status:', {
+                docId,
+                hasWorkflowDoc: !!workflowDoc,
+                hasNotApplicableTaskStatus,
+                workflowOutcome: workflowDoc?.workflowOutcome
+              });
+
+              // THIS IS THE KEY ISSUE: We need to filter by task context
+              // Documents should only be shown if they belong to the current task or are not task-specific
+              // AND they're not already linked to a completed stage in the current task
+              let isDocumentAvailable = !doc.task_id || doc.task_id === task.id;
+
+              // Additional check: Don't show documents that are already linked to completed stages in other tasks
+              if (isDocumentAvailable && otherTasksRes?.data) {
+                console.log('[StageUploadDialog] DEBUG: Checking document against other tasks:', {
+                  docId,
+                  otherTasksCount: otherTasksRes.data.length
+                });
+
+                const isAlreadyLinkedToOtherTask = otherTasksRes.data.some((otherTask: any) => {
+                  console.log('[StageUploadDialog] DEBUG: Checking other task:', {
+                    otherTaskId: otherTask.id,
+                    otherTaskStatus: otherTask.status
+                  });
+
+                  // Check all stages in the other task
+                  return Object.entries(otherTask.stages || {}).some(([stageId, stageData]: [string, any]) => {
+                    // Only check completed stages
+                    if (stageData.status !== 'completed') return false;
+
+                    // Check if this document is linked to this completed stage
+                    const stageDocuments = stageData.documents || {};
+                    const isDocumentLinked = Object.values(stageDocuments).some((stageDoc: any) =>
+                      stageDoc.id === docId || stageDoc.linked_document_id === docId
+                    );
+
+                    if (isDocumentLinked) {
+                      console.log('[StageUploadDialog] DEBUG: Document found in completed stage of other task:', {
+                        docId,
+                        otherTaskId: otherTask.id,
+                        stageId,
+                        stageStatus: stageData.status
+                      });
+                    }
+
+                    return isDocumentLinked;
+                  });
+                });
+
+                if (isAlreadyLinkedToOtherTask) {
+                  isDocumentAvailable = false;
+                  console.log('[StageUploadDialog] DEBUG: Filtering out document already linked to completed stage in other task:', {
+                    docId,
+                    reason: 'Document already linked to completed stage in another task for same individual'
+                  });
+                }
+              }
+
+              console.log('[StageUploadDialog] DEBUG: Document availability check:', {
+                docId,
+                docTaskId: doc.task_id,
+                currentTaskId: task.id,
+                isDocumentAvailable,
+                reason: !doc.task_id ? 'No task_id - globally available' :
+                  doc.task_id === task.id ? 'Belongs to current task' :
+                    'Belongs to different task - should be filtered'
+              });
+
+              return isDocumentAvailable;
+            }).map((doc: any) => {
+              const workflowDoc = workflowDocMap[doc.id];
+              return {
+                ...doc,
+                hasNoTaskOutcome: workflowDoc?.tasks?.some?.((task: any) =>
+                  task.status === 'not_applicable'
+                ) || false,
+                isCurrentTaskTriggerDocument: false,
+                workflowLogId: workflowDoc?.id,
+                workflowOutcome: workflowDoc?.workflowOutcome
+              };
+            });
+
+            console.log('[StageUploadDialog] DEBUG: Filtered documents result:', {
+              stageDocId: stageDoc.id,
+              originalCount: matching.length,
+              filteredCount: selectableMatching.length,
+              filteredDocs: selectableMatching.map(d => ({
+                id: d.id,
+                task_id: d.task_id,
+                file_path: d.file_path
+              }))
+            });
+
+            if (selectableMatching.length > 0) {
+              groupedDocs[stageDoc.id] = selectableMatching;
             }
           });
         }
+
+        console.log('[StageUploadDialog] DEBUG: Final grouped documents:', {
+          groupedDocsCount: Object.keys(groupedDocs).length,
+          groupedDocs: Object.entries(groupedDocs).map(([key, docs]) => ({
+            stageDocId: key,
+            count: docs.length,
+            docs: docs.map(d => ({
+              id: d.id,
+              task_id: d.task_id,
+              file_path: d.file_path
+            }))
+          }))
+        });
 
         if (!isCancelled) {
           setKycDocuments(newKycMap);
@@ -840,9 +1064,12 @@ export function StageUploadDialog({
       }
     };
 
-    fetchData();
+    // Add small delay to prevent flickering for fast loads
+    const loadingTimeout = setTimeout(fetchData, 50);
+
     return () => {
       isCancelled = true;
+      clearTimeout(loadingTimeout);
     };
   }, [open, stage?.documents, task?.individual_id, applicableDocuments, applicableKycIds, refreshTrigger, currentTaskTriggerDocumentIds, task?.id]);
 
@@ -895,14 +1122,6 @@ export function StageUploadDialog({
   // Handle workflow resolution for original documents in write_up stage
   const resolveOriginalDocumentWorkflow = async (newDocumentId: string, documentTypeId: string) => {
     try {
-      console.log('[StageUploadDialog] resolveOriginalDocumentWorkflow called:', {
-        newDocumentId,
-        documentTypeId,
-        individualId: task.individual_id,
-        taskId: task.id,
-        currentStageId: stage?.id,
-      });
-
       // Find existing workflow logs for this individual
       const { data: existingLogs, error: logsError } = await supabase
         .from('document_workflow_logs')
@@ -916,7 +1135,6 @@ export function StageUploadDialog({
       }
 
       if (!existingLogs || existingLogs.length === 0) {
-        console.log('[StageUploadDialog] No existing workflow logs found for individual.');
         return;
       }
 
@@ -930,11 +1148,8 @@ export function StageUploadDialog({
       });
 
       if (logsToResolve.length === 0) {
-        console.log('[StageUploadDialog] No workflow logs match the trigger for this task ID:', task.id);
         return;
       }
-
-      console.log(`[StageUploadDialog] Found ${logsToResolve.length} log(s) to resolve for renewal.`);
 
       // Update each found triggering log
       const updatePromises = logsToResolve.map(async (logToResolve) => {
@@ -988,7 +1203,6 @@ export function StageUploadDialog({
 
       await Promise.all(updatePromises);
 
-      console.log('[StageUploadDialog] Successfully resolved original document workflow for renewal.');
       toast({
         title: 'Documents Renewed',
         description: 'Original document workflows have been updated to reflect renewal',
@@ -1013,15 +1227,6 @@ export function StageUploadDialog({
     setIsSaving(true);
 
     try {
-      console.log('[StageUploadDialog] saveAllDocuments start:', {
-        taskId: task.id,
-        individualId: task.individual_id,
-        stageId: stage.id,
-        stageName: stage.name,
-        linkedDocumentTypeId: task.linked_document_type_id,
-        pendingDocumentKeys: Object.keys(pendingDocuments)
-      });
-
       const currentDate = new Date().toISOString();
       const updatedLinkedDocs = { ...linkedDocuments };
       const updatedSourceDocs = { ...selectedSourceDocs };
@@ -1131,14 +1336,13 @@ export function StageUploadDialog({
             });
           }
 
-          console.log('[StageUploadDialog] Processed pending document:', {
-            docId,
-            baseDocId,
+          updatedLinkedDocs[docId] = {
+            ...insertedDoc,
             stageDocumentName: docConfig.name,
             kycId: docConfig.kycId,
             insertedDocumentId: documentId,
             fromExistingDocument: !file
-          });
+          };
 
           uploadedDocIds.add(docId);
 
@@ -1238,14 +1442,6 @@ export function StageUploadDialog({
 
       if (updateError) throw updateError;
 
-      console.log('[StageUploadDialog] tm_tasks updated:', {
-        taskId: task.id,
-        updateData,
-        uploadedDocumentsForWorkflow,
-        updatedLinkedDocs,
-        updatedSourceDocs
-      });
-
       const successMsg = ('status' in taskStatusUpdate)
         ? `Documents saved & Status updated to ${taskStatusUpdate.status}`
         : `Successfully uploaded ${uploadedDocIds.size} document(s)`;
@@ -1283,14 +1479,6 @@ export function StageUploadDialog({
             null;
           const finalDocId = workflowTargetDocument?.id || null;
 
-          console.log('[StageUploadDialog] Workflow update execution starting:', {
-            stageId: stage.id,
-            isWriteUpStage,
-            finalDocId,
-            workflowTargetDocument,
-            stageName: stage.name
-          });
-
           // Resolve triggering documents logic (Specifically for renewals in Write up stage)
           if (isWriteUpStage && finalDocId) {
             const resolvedDocumentTypeId =
@@ -1298,10 +1486,6 @@ export function StageUploadDialog({
               task.linked_document_type_id;
 
             if (resolvedDocumentTypeId) {
-              console.log('[StageUploadDialog] Calling resolveOriginalDocumentWorkflow with:', {
-                finalDocId,
-                documentTypeId: resolvedDocumentTypeId
-              });
               await resolveOriginalDocumentWorkflow(finalDocId, resolvedDocumentTypeId);
             }
           }

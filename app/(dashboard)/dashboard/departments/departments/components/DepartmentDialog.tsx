@@ -108,6 +108,11 @@ export default function DepartmentDialog({
     open, onOpenChange, onSave, departmentForm, setDepartmentForm, users, officers, editingDepartmentId, isSaving
 }) {
     const [expandedRows, setExpandedRows] = useState({})
+    const officerUsers = officers.map((officer) => ({
+        id: officer.id,
+        name: officer.name || officer.full_name || `${officer.firstName || ''} ${officer.lastName || ''}`.trim(),
+        email: officer.email || '',
+    }))
 
     const toggleRow = (id) => setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }))
 
@@ -136,7 +141,7 @@ export default function DepartmentDialog({
         setDepartmentForm(prev => {
             const newState = JSON.parse(JSON.stringify(prev)) // Deep clone
             let targetArray = newState
-            
+
             // Navigate to the target array
             for (let i = 0; i < path.length - 1; i++) {
                 targetArray = targetArray[path[i]]
@@ -161,7 +166,7 @@ export default function DepartmentDialog({
                 current = current[path[i]]
             }
             current[path[path.length - 1]] = updatedArray
-            
+
             return newState
         })
     }
@@ -206,10 +211,19 @@ export default function DepartmentDialog({
                                 </div>
                             </div>
                             <div className="col-span-1 space-y-2">
+                                <Label className="text-blue-700 font-bold uppercase text-[10px]">Department Officers</Label>
+                                <MultiSelectUser
+                                    users={officerUsers}
+                                    value={getCurrentIds(departmentForm.officers_history)}
+                                    onChange={(ids) => updateFormState(['officers_history'], ids.map(id => ({ id, start_date: new Date().toISOString() })))}
+                                    placeholder="Assign officers..."
+                                />
+                            </div>
+                            <div className="col-span-1 space-y-2">
                                 <Label className="text-blue-700 font-bold uppercase text-[10px]">Global Entity Types</Label>
                                 <MultiSelectSpec value={departmentForm.entity_types} onChange={(val) => updateFormState(['entity_types'], val)} />
                             </div>
-                            <div className="col-span-1 flex items-end">
+                            <div className="col-span-4 flex items-end">
                                 <div className="flex items-center gap-2 p-4 bg-blue-50 rounded-lg w-full border border-blue-100">
                                     <Checkbox checked={departmentForm.default_display} onCheckedChange={(v) => updateFormState(['default_display'], !!v)} />
                                     <span className="text-xs font-bold text-blue-700">Show on Dashboard by Default</span>
@@ -258,26 +272,20 @@ export default function DepartmentDialog({
                                                         </Button>
                                                     </TableCell>
                                                     <TableCell>
-                                                        <Select value={getCurrentId(sub.officer_history) || "none"} onValueChange={(value) => updateFormState(['subdepartments', sIdx, 'officer_history'], value === "none" ? [] : [{ id: value, start_date: new Date().toISOString() }])}>
-                                                            <SelectTrigger className="h-8 text-[11px]">
-                                                                <SelectValue placeholder="Select officer" />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                <SelectItem value="none">None</SelectItem>
-                                                                {officers.map(o => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
-                                                            </SelectContent>
-                                                        </Select>
+                                                        <MultiSelectUser
+                                                            users={officerUsers}
+                                                            value={getCurrentIds(sub.officer_history)}
+                                                            onChange={(ids) => updateFormState(['subdepartments', sIdx, 'officer_history'], ids.map(id => ({ id, start_date: new Date().toISOString() })))}
+                                                            placeholder="All officers"
+                                                        />
                                                     </TableCell>
                                                     <TableCell>
-                                                        <Select value={getCurrentId(sub.manager_history) || "none"} onValueChange={(value) => updateFormState(['subdepartments', sIdx, 'manager_history'], value === "none" ? [] : [{ id: value, start_date: new Date().toISOString() }])}>
-                                                            <SelectTrigger className="h-8 text-[11px]">
-                                                                <SelectValue placeholder="Select manager" />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                <SelectItem value="none">None</SelectItem>
-                                                                {users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
-                                                            </SelectContent>
-                                                        </Select>
+                                                        <MultiSelectUser
+                                                            users={users}
+                                                            value={getCurrentIds(sub.manager_history)}
+                                                            onChange={(ids) => updateFormState(['subdepartments', sIdx, 'manager_history'], ids.map(id => ({ id, start_date: new Date().toISOString() })))}
+                                                            placeholder="All managers"
+                                                        />
                                                     </TableCell>
                                                     <TableCell><MultiSelectUser users={users} value={getCurrentIds(sub.assistant_history)} onChange={(ids) => updateFormState(['subdepartments', sIdx, 'assistant_history'], ids.map(id => ({ id, start_date: new Date().toISOString() })))} placeholder="Add..." /></TableCell>
                                                     <TableCell><MultiSelectSpec value={sub.entity_types} onChange={(v) => updateFormState(['subdepartments', sIdx, 'entity_types'], v)} /></TableCell>

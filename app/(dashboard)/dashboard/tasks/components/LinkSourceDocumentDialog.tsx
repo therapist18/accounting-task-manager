@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { ExtractionPreview } from "@/components/ExtractionPreview";
 
 // --- Interface Definitions ---
@@ -178,7 +179,7 @@ const isDocumentApplicableToTask = (doc: any, task: any, childContext: any = nul
   }
 
   return false;
-}
+};
 
 // Function to get documents linked to other tasks
 const getDocumentsLinkedToOtherTasks = async (
@@ -186,31 +187,81 @@ const getDocumentsLinkedToOtherTasks = async (
   individualId: string
 ): Promise<Set<string>> => {
   try {
-    const { data: tasks, error } = await supabase
+    console.log('[LinkSourceDocumentDialog] DEBUG: Fetching documents linked to other tasks for individual:', individualId, 'Current Task ID:', currentTaskId);
+
+    // Get tasks with source_document_id (linked source documents)
+    const { data: sourceDocTasks, error: sourceDocError } = await supabase
       .from("tm_tasks")
       .select("id, source_document_id")
       .eq("individual_id", individualId)
       .neq("id", currentTaskId)
       .not("source_document_id", "is", null);
 
-    if (error) throw error;
+    if (sourceDocError) throw sourceDocError;
+
+    // Get completed tasks to check stage-linked documents
+    const { data: completedTasks, error: completedError } = await supabase
+      .from("tm_tasks")
+      .select("id, stages")
+      .eq("individual_id", individualId)
+      .neq("id", currentTaskId)
+      .in('status', ['completed', 'write_up_completed']);
+
+    if (completedError) throw completedError;
 
     const linkedDocIds = new Set<string>();
 
-    if (tasks) {
-      tasks.forEach((task: TaskDocumentLink) => {
+    // Check source_document_id links
+    if (sourceDocTasks) {
+      console.log('[LinkSourceDocumentDialog] DEBUG: Checking source document links in', sourceDocTasks.length, 'tasks');
+
+      sourceDocTasks.forEach((task: TaskDocumentLink) => {
         if (task.source_document_id && typeof task.source_document_id === "object") {
           Object.values(task.source_document_id).forEach((docs) => {
             const docArray = Array.isArray(docs) ? docs : [docs];
             docArray.forEach((doc) => {
               if (doc?.id) {
                 linkedDocIds.add(doc.id.toString());
+                console.log('[LinkSourceDocumentDialog] DEBUG: Found source-linked document:', doc.id, 'in task:', task.id);
               }
             });
           });
         }
       });
     }
+
+    // Check documents linked to completed stages
+    if (completedTasks) {
+      console.log('[LinkSourceDocumentDialog] DEBUG: Checking stage document links in', completedTasks.length, 'completed tasks');
+
+      completedTasks.forEach((task: any) => {
+        console.log('[LinkSourceDocumentDialog] DEBUG: Checking completed task:', task.id);
+
+        if (task.stages && typeof task.stages === "object") {
+          Object.entries(task.stages).forEach(([stageId, stageData]: [string, any]) => {
+            // Only check completed stages
+            if (stageData.status === 'completed') {
+              console.log('[LinkSourceDocumentDialog] DEBUG: Checking completed stage:', stageId);
+
+              const stageDocuments = stageData.documents || {};
+              Object.values(stageDocuments).forEach((stageDoc: any) => {
+                if (stageDoc?.id) {
+                  linkedDocIds.add(stageDoc.id.toString());
+                  console.log('[LinkSourceDocumentDialog] DEBUG: Found stage-linked document:', stageDoc.id, 'in stage:', stageId, 'of task:', task.id);
+                }
+                if (stageDoc?.linked_document_id) {
+                  linkedDocIds.add(stageDoc.linked_document_id.toString());
+                  console.log('[LinkSourceDocumentDialog] DEBUG: Found linked document ID:', stageDoc.linked_document_id, 'in stage:', stageId, 'of task:', task.id);
+                }
+              });
+            }
+          });
+        }
+      });
+    }
+
+    console.log('[LinkSourceDocumentDialog] DEBUG: Total linked documents found:', linkedDocIds.size);
+    console.log('[LinkSourceDocumentDialog] DEBUG: Linked document IDs:', Array.from(linkedDocIds));
 
     return linkedDocIds;
   } catch (error) {
@@ -237,6 +288,19 @@ export function LinkSourceDocumentDialog({
   const [documentsLinkedToOtherTasks, setDocumentsLinkedToOtherTasks] = useState<Set<string>>(new Set());
   const [isLoadingLinkedDocs, setIsLoadingLinkedDocs] = useState(false);
   const [workflowDocuments, setWorkflowDocuments] = useState<Record<string, any>>({});
+  const [freshTaskData, setFreshTaskData] = useState<any>(null); // Track fresh task data
+  const [individualTasks, setIndividualTasks] = useState<any[]>([]); // Track all tasks for individual
+
+  // Track documentsLinkedToOtherTasks state changes
+  useEffect(() => {
+    console.log('[LinkSourceDocumentDialog] DEBUG: documentsLinkedToOtherTasks state changed:', {
+      taskId: task?.id,
+      documentsCount: documentsLinkedToOtherTasks.size,
+      documentsLinkedToOtherTasks: Array.from(documentsLinkedToOtherTasks),
+      isLoadingLinkedDocs,
+      dialogOpen: open
+    });
+  }, [documentsLinkedToOtherTasks, isLoadingLinkedDocs, open]);
 
   // NEW: Handle workflow resolution for original documents in write_up stage
   const resolveOriginalDocumentWorkflow = async (newDocumentId: string, documentTypeId: string) => {
@@ -395,6 +459,55 @@ export function LinkSourceDocumentDialog({
               delete stageDocs[docKey];
             }
           });
+
+          // Determine the new stage status based on remaining documents
+          const remainingDocs = Object.keys(stageDocs).length;
+          const currentStage = updatedStages[stageId];
+          const previousStatus = currentStage?.status;
+
+          console.log('[LinkSourceDocumentDialog] Determining new stage status:', {
+            stageId,
+            previousStatus,
+            remainingDocs,
+            currentStage
+          });
+
+          // Revert stage status based on remaining documents and previous status
+          let newStatus = 'in_progress'; // Default fallback
+
+          if (remainingDocs === 0) {
+            // No documents left - revert to in_progress
+            newStatus = 'in_progress';
+          } else if (previousStatus === 'endorsed') {
+            // Was endorsed but now has fewer documents - revert to write_up
+            newStatus = 'write_up';
+          } else if (previousStatus === 'completed' || previousStatus === 'write_up') {
+            // Was completed or write_up - revert to in_progress if documents removed
+            newStatus = 'in_progress';
+          } else {
+            // Keep current status for other cases
+            newStatus = previousStatus || 'in_progress';
+          }
+
+          // Update the stage with new status and metadata
+          updatedStages[stageId] = {
+            ...currentStage,
+            status: newStatus,
+            documentsUploaded: remainingDocs,
+            lastUpdated: new Date().toISOString(),
+            // Clear completion-specific fields if reverting from completed
+            ...(newStatus !== 'completed' && {
+              completedAt: null,
+              date: null
+            })
+          };
+
+          console.log('[LinkSourceDocumentDialog] Updated stage status:', {
+            stageId,
+            oldStatus: previousStatus,
+            newStatus,
+            remainingDocs
+          });
         }
 
         // Update both source_document_id and stages in the database
@@ -417,7 +530,7 @@ export function LinkSourceDocumentDialog({
 
       toast({
         title: 'Document Unlinked',
-        description: 'Document has been removed from the task and stages updated',
+        description: 'Document has been removed from the task and stage status has been updated',
         variant: 'default'
       });
 
@@ -451,73 +564,119 @@ export function LinkSourceDocumentDialog({
     return normalized;
   }, [task?.source_document_id, allDocuments]);
 
-  // Fetch documents linked to other tasks when dialog opens
+  // Enhanced data fetching similar to StageUploadDialog
   useEffect(() => {
-    if (open && task?.individual_id && task?.id) {
-      setIsLoadingLinkedDocs(true);
-      getDocumentsLinkedToOtherTasks(task.id, task.individual_id)
-        .then(setDocumentsLinkedToOtherTasks)
-        .catch((error) => {
-          console.error("Error loading linked documents:", error);
-          toast({
-            title: "Warning",
-            description: "Could not check for documents linked to other tasks.",
-            variant: "destructive"
+    if (!open) {
+      const resetStates = () => {
+        setSelectedDocs({});
+        setDocumentsLinkedToOtherTasks(new Set());
+        setWorkflowDocuments({});
+        setFreshTaskData(null);
+        setIndividualTasks([]);
+        setIsLoadingLinkedDocs(false);
+      };
+      resetStates();
+      return;
+    }
+
+    // Set initial selected docs when opening
+    setSelectedDocs(initialSelectedDocs);
+
+    let isCancelled = false;
+    const fetchData = async () => {
+      try {
+        console.log('[LinkSourceDocumentDialog] Starting data fetch for individual:', task.individual_id);
+
+        // 1. Fetch Fresh Task Data for the current task
+        const { data: freshTaskData, error: taskError } = await supabase
+          .from('tm_tasks')
+          .select('*')
+          .eq('id', task.id)
+          .single();
+
+        if (taskError) console.error('[LinkSourceDocumentDialog] Error fetching fresh task data:', taskError);
+
+        // 2. Fetch all other tasks for the same individual
+        const { data: individualTasksData, error: individualTasksError } = await supabase
+          .from('tm_tasks')
+          .select('*')
+          .eq('individual_id', task.individual_id);
+
+        if (individualTasksError) console.error('[LinkSourceDocumentDialog] Error fetching individual tasks:', individualTasksError);
+
+        // 3. IDENTIFY LINKED DOCS (Same logic as StageUploadDialog)
+        const allLinkedDocIds = new Set<string>();
+        const extractIds = (t: any, excludeCurrentTask: boolean = false) => {
+          if (!t?.stages) return;
+          Object.values(t.stages).forEach((s: any) => {
+            if (s.documents) {
+              Object.values(s.documents).forEach((d: any) => {
+                if (d.id) {
+                  // Only add if we're not excluding the current task, or if this is not the current task
+                  if (!excludeCurrentTask || t.id !== task.id) {
+                    allLinkedDocIds.add(String(d.id));
+                  }
+                }
+              });
+            }
           });
-        })
-        .finally(() => setIsLoadingLinkedDocs(false));
-    }
-  }, [open, task?.id, task?.individual_id]);
+        };
 
-  // Fetch workflow documents when dialog opens
-  useEffect(() => {
-    if (open && task?.individual_id) {
-      getWorkflowLogsForIndividual(task.individual_id)
-        .then((logs) => {
-          const workflowDocMap: Record<string, any> = {};
+        // Extract IDs from all individual tasks (excluding current task's documents)
+        extractIds(freshTaskData || task, true); // Exclude current task's documents
+        (individualTasksData || []).forEach(t => extractIds(t, false)); // Include all other tasks' documents
 
-          // Process workflow logs to understand existing workflow context
-          if (logs) {
-            logs.forEach((log: any) => {
-              // Check if this log represents a completed workflow
-              const isCompleted = log.resolutions && log.resolutions.length > 0;
+        // 4. Fetch workflow documents
+        const workflowLogs = await getWorkflowLogsForIndividual(task.individual_id);
+        if (isCancelled) return;
 
-              // For completed workflows, use resolution outcome
-              if (isCompleted && log.resolutions[0]) {
-                workflowDocMap[log.uploaded_doc_id] = {
-                  ...log,
-                  isWorkflowDocument: true,
-                  workflowAction: log.action_type,
-                  workflowOutcome: log.resolutions[0].outcome,
-                  isCompleted: true
-                };
-              }
-              // Also track the document type for workflow detection
-              if (log.document_type_id) {
-                workflowDocMap[log.document_type_id] = {
-                  ...log,
-                  isWorkflowDocument: true,
-                  workflowAction: log.action_type,
-                  workflowOutcome: isCompleted ? log.resolutions[0].outcome : log.action_type,
-                  isCompleted: isCompleted
-                };
-              }
-            });
-          }
+        const workflowDocMap: Record<string, any> = {};
+        if (workflowLogs) {
+          workflowLogs.forEach((log: any) => {
+            const isCompleted = log.resolutions && log.resolutions.length > 0;
+            if (log.uploaded_doc_id) {
+              workflowDocMap[log.uploaded_doc_id] = {
+                ...log,
+                isWorkflowDocument: true,
+                workflowOutcome: isCompleted ? log.resolutions[0]?.outcome : log.action_type,
+                isCompleted: isCompleted
+              };
+            }
+          });
+        }
 
+        // 5. Final State Update
+        if (!isCancelled) {
+          console.log('[LinkSourceDocumentDialog] DEBUG: Updating states with final data:', {
+            taskId: task?.id,
+            freshTaskData: !!freshTaskData,
+            individualTasksCount: individualTasksData?.length || 0,
+            allLinkedDocIdsCount: allLinkedDocIds.size,
+            allLinkedDocIds: Array.from(allLinkedDocIds),
+            workflowDocMapKeys: Object.keys(workflowDocMap)
+          });
+
+          setFreshTaskData(freshTaskData);
+          setIndividualTasks(individualTasksData || []);
+          setDocumentsLinkedToOtherTasks(allLinkedDocIds);
           setWorkflowDocuments(workflowDocMap);
-        })
-        .catch((error) => {
-          console.error("Error loading workflow documents:", error);
-        });
-    }
-  }, [open, task?.individual_id]);
+          setIsLoadingLinkedDocs(false);
 
-  useEffect(() => {
-    if (open) {
-      setSelectedDocs(initialSelectedDocs);
-    }
-  }, [open, initialSelectedDocs]);
+          console.log('[LinkSourceDocumentDialog] DEBUG: State updates completed');
+        }
+
+      } catch (error) {
+        console.error("[LinkSourceDocumentDialog] Error initializing dialog:", error);
+        if (!isCancelled) {
+          toast({ title: "Error loading data", variant: "destructive" });
+          setIsLoadingLinkedDocs(false);
+        }
+      }
+    };
+
+    fetchData();
+    return () => { isCancelled = true; };
+  }, [open, task?.id, task?.individual_id, initialSelectedDocs]);
 
   const applicableStages = useMemo(() => {
     return stages
@@ -532,12 +691,49 @@ export function LinkSourceDocumentDialog({
   const handleSave = useCallback(async () => {
     setIsLoading(true);
     try {
-      // Update the task with selected documents
+      const currentDate = new Date().toISOString();
+
+      // Build updated stages JSON like StageUploadDialog
+      const updatedStages = {
+        ...task.stages,
+      };
+
+      // Update each stage with linked documents
+      Object.entries(selectedDocs).forEach(([stageId, docs]) => {
+        if (docs.length > 0) {
+          const stageDocuments = { ...(task.stages?.[stageId]?.documents || {}) };
+
+          // Add each document to the stage
+          docs.forEach(doc => {
+            const kycDoc = kycDocuments.get(doc.document_id);
+            stageDocuments[doc.id] = {
+              id: doc.id,
+              document_id: doc.document_id,
+              name: kycDoc?.display_name || kycDoc?.name || 'document',
+              linked_at: currentDate,
+              status: 'linked'
+            };
+          });
+
+          updatedStages[stageId] = {
+            ...task.stages?.[stageId],
+            status: 'completed',
+            date: currentDate.split('T')[0],
+            completedAt: currentDate,
+            documentsUploaded: docs.length,
+            lastUpdated: currentDate,
+            documents: stageDocuments
+          };
+        }
+      });
+
+      // Update the task with selected documents and stages
       const { error } = await supabase
         .from("tm_tasks")
         .update({
           source_document_id: selectedDocs,
-          updated_at: new Date().toISOString(),
+          stages: updatedStages,
+          updated_at: currentDate,
         })
         .eq("id", task.id);
 
@@ -670,8 +866,15 @@ export function LinkSourceDocumentDialog({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-7xl h-[90vh] flex flex-col">
           <DialogHeader>
-            <DialogTitle>Link Source Documents for: {task?.applicant_name}</DialogTitle>
+            <DialogTitle>Link Source Documents for: {task?.applicant_name} (Task ID: {task?.id})</DialogTitle>
             <DialogDescription>Select one or more documents for each stage.</DialogDescription>
+            {documentsLinkedToOtherTasks.size > 0 && (
+              <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded">
+                <p className="text-sm text-amber-800">
+                  <strong>Note:</strong> {documentsLinkedToOtherTasks.size} document(s) are already linked to other tasks for this individual and won't be shown below.
+                </p>
+              </div>
+            )}
           </DialogHeader>
 
           <div className="flex-grow overflow-hidden border-t border-b">
@@ -682,134 +885,194 @@ export function LinkSourceDocumentDialog({
                   <p className="ml-3 text-slate-600">Loading available documents...</p>
                 </div>
               ) : (
-                <div className="space-y-6 py-4">
-                  {applicableStages.map((stage) => {
-                    // Filter stage documents to only those applicable to this task
-                    const applicableDocuments = stage.documents?.filter((doc) =>
-                      isDocumentApplicableToTask(doc, task)
-                    ) || [];
+                <>
+                  {/* Debug section to show all documents with linked indicators */}
+                  <div className="mb-6 p-4 bg-slate-50 border rounded">
+                    <h4 className="font-semibold text-sm text-slate-700 mb-3">All Documents for Individual (Debug View)</h4>
+                    <div className="space-y-1 text-xs">
+                      {allDocuments
+                        .filter(d => d.director_id?.toString() === task.individual_id?.toString())
+                        .slice(0, 10) // Show first 10 to avoid overwhelming
+                        .map(doc => {
+                          const isLinked = documentsLinkedToOtherTasks.has(doc.id.toString());
+                          return (
+                            <div key={doc.id} className={`flex items-center gap-2 p-1 rounded ${isLinked ? 'bg-red-50' : 'bg-green-50'}`}>
+                              <span className={`w-2 h-2 rounded-full ${isLinked ? 'bg-red-500' : 'bg-green-500'}`}></span>
+                              <span className="font-mono">{doc.id.toString().slice(-8)}</span>
+                              <span className="text-slate-600">-</span>
+                              <span className="flex-1">{kycDocuments.get(doc.document_id)?.display_name || 'Unknown'}</span>
+                              {isLinked && <Badge variant="destructive" className="text-xs">Linked to Other Task</Badge>}
+                            </div>
+                          );
+                        })}
+                      {allDocuments.filter(d => d.director_id?.toString() === task.individual_id?.toString()).length > 10 && (
+                        <div className="text-slate-500 italic">... and {allDocuments.filter(d => d.director_id?.toString() === task.individual_id?.toString()).length - 10} more</div>
+                      )}
+                    </div>
+                  </div>
 
-                    // Get KYC IDs only from applicable documents
-                    const stageDocTypes = new Set(applicableDocuments.map((d) => d.kycId));
+                  <div className="space-y-6 py-4">
+                    {applicableStages.map((stage) => {
+                      // Filter stage documents to only those applicable to this task
+                      const applicableDocuments = stage.documents?.filter((doc) =>
+                        isDocumentApplicableToTask(doc, task)
+                      ) || [];
 
-                    const availableDocs = allDocuments
-                      .filter(
-                        (d) =>
-                          d.director_id?.toString() === task.individual_id?.toString() &&
-                          stageDocTypes.has(d.document_id) && // Only fetch documents of applicable types
-                          !documentsLinkedToOtherTasks.has(d.id.toString()) // Filter out docs linked to other tasks
-                      )
-                      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+                      // Get KYC IDs only from applicable documents
+                      const stageDocTypes = new Set(applicableDocuments.map((d) => d.kycId));
 
-                    return (
-                      <div key={stage.id} className="p-4 border rounded-lg">
-                        <h3 className="font-semibold text-lg text-slate-800 mb-3">{stage.name}</h3>
-                        {availableDocs.length > 0 ? (
-                          <div className="space-y-2">
-                            {availableDocs.map((doc) => {
-                              const kycDoc = kycDocuments.get(doc.document_id);
-                              const isSelected = selectedDocs[stage.id]?.some(d => d.id.toString() === doc.id.toString()) || false;
+                      // Only show documents if cross-task data is loaded to prevent appearing/disappearing
+                      if (isLoadingLinkedDocs) {
+                        return (
+                          <div key={stage.id} className="p-4 border rounded-lg">
+                            <h3 className="font-semibold text-lg text-slate-800 mb-3">{stage.name}</h3>
+                            <div className="flex items-center justify-center py-8">
+                              <Loader2 className="h-6 w-6 animate-spin text-slate-400 mr-2" />
+                              <span className="text-slate-600">Checking document availability...</span>
+                            </div>
+                          </div>
+                        );
+                      }
 
-                              return (
-                                <div
-                                  key={doc.id}
-                                  className={`flex items-center gap-4 p-3 border rounded-md transition-colors ${isSelected ? "bg-blue-50 border-blue-300" : "hover:bg-slate-50"}`}
-                                >
-                                  <div className="flex items-center gap-3 flex-1">
-                                    <Checkbox
-                                      id={`${stage.id}-${doc.id}`}
-                                      checked={isSelected}
-                                      onCheckedChange={(checked) => handleDocSelectionChange(stage.id, doc, !!checked)}
-                                    />
-                                    <div className="min-w-0">
-                                      <Label htmlFor={`${stage.id}-${doc.id}`} className="font-medium text-slate-900 block truncate cursor-pointer">
-                                        {kycDoc?.display_name || kycDoc?.name || doc.document_id}
-                                      </Label>
-                                      <p className="text-xs text-slate-500 truncate">{doc.file_path?.split("/").pop() || "document"}</p>
+                      const availableDocs = allDocuments
+                        .filter(
+                          (d) => {
+                            const individualMatch = d.director_id?.toString() === task.individual_id?.toString();
+                            const stageDocTypesMatch = stageDocTypes.has(d.document_id);
+                            const isLinkedToOtherTasks = documentsLinkedToOtherTasks.has(d.id.toString());
+
+                            // Only log documents that actually match the individual to reduce noise
+                            if (individualMatch && !stageDocTypesMatch) {
+                              console.log('[LinkSourceDocumentDialog] DEBUG: Document type not applicable for matching individual:', {
+                                taskId: task?.id,
+                                docId: d.id,
+                                documentId: d.document_id,
+                                stageDocTypes: Array.from(stageDocTypes)
+                              });
+                            }
+
+                            if (individualMatch && stageDocTypesMatch && isLinkedToOtherTasks) {
+                              console.log('[LinkSourceDocumentDialog] DEBUG: Document filtered out due to being linked to other tasks:', {
+                                taskId: task?.id,
+                                docId: d.id,
+                                documentId: d.document_id
+                              });
+                            }
+
+                            const isAvailable = individualMatch &&
+                              stageDocTypesMatch && // Only fetch documents of applicable types
+                              !isLinkedToOtherTasks; // Filter out docs linked to other tasks
+
+                            // Special debug for the problematic document
+                            if (d.id === 'a29d9d5c-25be-4362-9ab0-6b5ef9c99f5c') {
+                              console.log('[LinkSourceDocumentDialog] DEBUG: Special check for document a29d9d5c-25be-4362-9ab0-6b5ef9c99f5c:', {
+                                taskId: task?.id,
+                                docId: d.id,
+                                documentId: d.document_id,
+                                individualMatch,
+                                stageDocTypesMatch,
+                                isLinkedToOtherTasks,
+                                isAvailable,
+                                stageDocTypes: Array.from(stageDocTypes)
+                              });
+                            }
+
+                            return isAvailable;
+                          }
+                        )
+                        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+                      // Only log summary if there are matching documents
+                      if (availableDocs.length > 0 || allDocuments.some(d => d.director_id?.toString() === task.individual_id?.toString())) {
+                        console.log('[LinkSourceDocumentDialog] DEBUG: Final available documents for stage:', {
+                          taskId: task?.id,
+                          stageId: stage.id,
+                          stageName: stage.name,
+                          totalDocuments: allDocuments.length,
+                          matchingIndividualDocuments: allDocuments.filter(d => d.director_id?.toString() === task.individual_id?.toString()).length,
+                          availableDocsCount: availableDocs.length,
+                          availableDocIds: availableDocs.map(d => d.id)
+                        });
+                      }
+
+                      return (
+                        <div key={stage.id} className="p-4 border rounded-lg">
+                          <h3 className="font-semibold text-lg text-slate-800 mb-3">{stage.name}</h3>
+                          {availableDocs.length > 0 ? (
+                            <div className="space-y-2">
+                              {availableDocs.map((doc) => {
+                                const kycDoc = kycDocuments.get(doc.document_id);
+                                const isSelected = selectedDocs[stage.id]?.some(d => d.id.toString() === doc.id.toString()) || false;
+
+                                return (
+                                  <div
+                                    key={doc.id}
+                                    className={`flex items-center gap-4 p-3 border rounded-md transition-colors ${isSelected ? "bg-blue-50 border-blue-300" : "hover:bg-slate-50"}`}
+                                  >
+                                    <div className="flex items-center gap-3 flex-1">
+                                      <Checkbox
+                                        id={`${stage.id}-${doc.id}`}
+                                        checked={isSelected}
+                                        onCheckedChange={(checked) => handleDocSelectionChange(stage.id, doc, !!checked)}
+                                      />
+                                      <div className="min-w-0">
+                                        <Label htmlFor={`${stage.id}-${doc.id}`} className="font-medium text-slate-900 block truncate cursor-pointer">
+                                          {kycDoc?.display_name || kycDoc?.name || doc.document_id}
+                                        </Label>
+                                        <p className="text-xs text-slate-500 truncate">{doc.file_path?.split("/").pop() || "document"}</p>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handlePreviewClick(doc)}
+                                        disabled={loadingPreviewId === doc.id}
+                                        className="h-8 w-8 p-0"
+                                      >
+                                        {loadingPreviewId === doc.id ? (
+                                          <Loader2 className="h-4 w-4 animate-spin" />
+                                        ) : (
+                                          <Eye className="h-4 w-4" />
+                                        )}
+                                      </Button>
                                     </div>
                                   </div>
-                                  <div className="flex items-center gap-2">
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-8 w-8 text-green-600 hover:bg-green-100"
-                                      onClick={() => handlePreviewClick(doc)}
-                                      title="Preview Document"
-                                      disabled={loadingPreviewId !== null}
-                                    >
-                                      {loadingPreviewId === doc.id ? (
-                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                      ) : (
-                                        <Eye className="h-4 w-4" />
-                                      )}
-                                    </Button>
-                                    <div className="text-xs text-slate-500 text-right">
-                                      <p>Uploaded:</p>
-                                      <p>{format(parseISO(doc.created_at), 'dd MMM yyyy')}</p>
-                                      {workflowDocuments[doc.id.toString()] && (
-                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 ml-2">
-                                          {workflowDocuments[doc.id.toString()].workflowOutcome || 'Workflow Document'}
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <div className="text-center py-8 text-slate-500">
-                            <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                            <p className="font-medium">No available documents for this stage</p>
-                            <p className="text-xs mt-1">All documents may be linked to other tasks or not applicable to this task type</p>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-slate-500 italic">No available documents for this stage.</p>
+                          )}
+                        </div>
+                      );
+                    })
+                    }
+                  </div>
+                </>
               )}
             </ScrollArea>
           </div>
-          <DialogFooter className="gap-2 pt-4">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={isLoading || isLoadingLinkedDocs}>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSave} disabled={isLoading}>
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Save Links
+              Link Documents
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
-        <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle>Preview: {previewDocument?.documentName}</DialogTitle>
-          </DialogHeader>
-          <div className="flex-grow overflow-y-auto p-1">
-            {previewDocument ? (
-              <ExtractionPreview
-                key={previewDocument.documentId}
-                documentName={previewDocument.documentName}
-                extractedData={previewDocument.extractedData}
-                fields={previewDocument.fields}
-                fileUrl={previewDocument.fileUrl}
-                fileName={previewDocument.fileName}
-                expanded={true}
-                showSaveButton={false} // View only mode in this context
-                viewMode={true}
-                type={previewDocument.type}
-                file={previewDocument.file}
-              />
-            ) : (
-              <div className="h-full flex items-center justify-center">
-                <Loader2 className="h-8 w-8 animate-spin" />
-                <p className="ml-4">Loading preview...</p>
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+      {previewDocument && (
+        <ExtractionPreview
+          isOpen={isPreviewOpen}
+          onClose={() => setIsPreviewOpen(false)}
+          document={previewDocument}
+        />
+      )}
     </>
   );
 }

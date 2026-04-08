@@ -22,6 +22,8 @@ import { toast } from "@/lib/hooks/use-toast"
 import { format } from "date-fns"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, formatWorkflowRestrictionReason, taskBundleService } from "../utils/workflowBundleHelpers"
+import { getInheritedOfficer } from "../../departments/departments/database"
+import { fetchAuthOfficers, normalizeAuthOfficer } from "../utils/authOfficers"
 
 const CLASS_D_ID = '1750687058159';
 const SPONSOR_SUBDEPT_ID = '26';
@@ -243,6 +245,61 @@ export function EnquiryDialog({
     const officerOptions = useMemo(() => {
         return availableOfficers.map(o => ({ value: o.id.toString(), label: o.full_name || o.name }));
     }, [availableOfficers]);
+
+    // Get inherited officer for the selected subdepartment
+    const getInheritedOfficerForSubdepartment = useCallback(async (subdepartmentId: string) => {
+        if (!subdepartmentId || !formData.department_id) return null;
+
+        try {
+            // Get the parent department (without officers_history since it doesn't exist)
+            const { data: department, error: deptError } = await supabase
+                .from('tm_departments')
+                .select('id, name')
+                .eq('id', formData.department_id)
+                .single();
+
+            if (deptError) throw deptError;
+
+            // Get the subdepartment with its officer history
+            const { data: subdepartment, error: subError } = await supabase
+                .from('tm_subdepartments')
+                .select('id, name, officer_history')
+                .eq('id', subdepartmentId)
+                .single();
+
+            if (subError) throw subError;
+
+            // Fetch real officers from scanner_users
+            const realOfficers = await fetchAuthOfficers();
+
+            // Create a mock department structure for inheritance logic
+            const departmentForInheritance = {
+                ...department,
+                officers_history: [] // Departments don't have officers_history in the current schema
+            };
+
+            // Use the inheritance logic to get officer ID
+            const inheritedOfficer = getInheritedOfficer(
+                subdepartment.officer_history || [],
+                departmentForInheritance
+            );
+
+            // Find the real officer from scanner_users
+            if (inheritedOfficer && realOfficers.length > 0) {
+                const realOfficer = realOfficers.find(officer =>
+                    officer.id === inheritedOfficer.id.toString() ||
+                    officer.id === inheritedOfficer.id
+                );
+
+                if (realOfficer) return normalizeAuthOfficer(realOfficer);
+            }
+
+            return null;
+        } catch (error) {
+            console.error('Error getting inherited officer:', error);
+            return null;
+        }
+    }, [formData.department_id]);
 
     const managerOptions = useMemo(() => {
         return availableManagers.map(m => ({ value: m.id.toString(), label: m.full_name || m.name }));
@@ -568,16 +625,14 @@ export function EnquiryDialog({
         try {
             const [usersResult, officersResult] = await Promise.all([
                 supabase.from('tm_users').select('*').order('name'),
-                supabase.from('tm_users').select('*').eq('role', 'officer').order('name')
+                fetchAuthOfficers()
             ]);
 
             if (usersResult.data) {
                 setAvailableManagers(usersResult.data);
                 setAvailableAssistants(usersResult.data);
             }
-            if (officersResult.data) {
-                setAvailableOfficers(officersResult.data);
-            }
+            setAvailableOfficers(officersResult);
         } catch (err) {
             console.error("Error loading staff:", err);
             toast({ title: "Error", description: "Failed to load staff data", variant: "destructive" });
@@ -589,7 +644,7 @@ export function EnquiryDialog({
     useEffect(() => {
         // If props are explicitly provided and not empty, use them
         if (users.length > 0 || officers.length > 0) {
-            if (officers.length > 0) setAvailableOfficers(officers);
+            if (officers.length > 0) setAvailableOfficers(officers.map(normalizeAuthOfficer));
             if (users.length > 0) {
                 setAvailableManagers(users);
                 setAvailableAssistants(users);
@@ -610,6 +665,24 @@ export function EnquiryDialog({
                 .finally(() => setSearchLoading(false))
         }
     }, [open, applicantType, fetchIndividualsByType])
+
+    // Auto-set inherited officer when subdepartment changes
+    useEffect(() => {
+        const updateInheritedOfficer = async () => {
+            if (formData.subdepartment_id && formData.department_id) {
+                const inheritedOfficer = await getInheritedOfficerForSubdepartment(formData.subdepartment_id);
+                if (inheritedOfficer && !formData.officer_id) {
+                    // Only auto-set if no officer is currently selected
+                    setFormData(prev => ({
+                        ...prev,
+                        officer_id: inheritedOfficer.id.toString()
+                    }));
+                }
+            }
+        };
+
+        updateInheritedOfficer();
+    }, [formData.subdepartment_id, formData.department_id, getInheritedOfficerForSubdepartment, formData.officer_id]);
 
     useEffect(() => {
         if (!open) return;
@@ -1578,18 +1651,26 @@ export function EnquiryDialog({
                                     </CardHeader>
                                     <CardContent className="p-6 space-y-0">
                                         <TableRow label="Assigned Officer">
-                                            <SearchableSelect
-                                                value={formData.officer_id}
-                                                onValueChange={id => setFormData(prev => ({ ...prev, officer_id: id }))}
-                                                options={officerOptions}
-                                                placeholder="Select Officer"
-                                                disabled={officerOptions.length === 0}
-                                                emptyMessage="No officers found."
-                                                searchPlaceholder="Search officer..."
-                                                buttonClassName="h-11 bg-white border-slate-200"
-                                                popoverClassName="w-[--radix-popover-trigger-width]"
-                                                allowClear={true}
-                                            />
+                                            <div className="space-y-2">
+                                                <SearchableSelect
+                                                    value={formData.officer_id}
+                                                    onValueChange={id => setFormData(prev => ({ ...prev, officer_id: id }))}
+                                                    options={officerOptions}
+                                                    placeholder="Select Officer"
+                                                    disabled={officerOptions.length === 0}
+                                                    emptyMessage="No officers found."
+                                                    searchPlaceholder="Search officer..."
+                                                    buttonClassName="h-11 bg-white border-slate-200"
+                                                    popoverClassName="w-[--radix-popover-trigger-width]"
+                                                    allowClear={true}
+                                                />
+                                                {formData.officer_id && formData.subdepartment_id && (
+                                                    <div className="flex items-center gap-2 text-xs text-amber-600">
+                                                        <Shield className="h-3 w-3" />
+                                                        <span>Officer inherited from department hierarchy</span>
+                                                    </div>
+                                                )}
+                                            </div>
                                         </TableRow>
 
                                         <TableRow label="Task Manager">
@@ -1885,16 +1966,16 @@ export function EnquiryDialog({
                                                 {!allCompanies.some(company =>
                                                     company.company_name?.toLowerCase() === companySearchTerm.trim().toLowerCase()
                                                 ) && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleOpenCompanyCreateDialog(companySearchTerm.trim())}
-                                                        className="flex w-full items-center gap-2 bg-blue-50 px-3 py-2 text-left hover:bg-blue-100"
-                                                    >
-                                                        <PlusCircle className="h-4 w-4 text-blue-600" />
-                                                        <span className="text-sm font-medium text-blue-800">Create "{companySearchTerm.trim()}"</span>
-                                                        <Badge variant="default" className="ml-auto bg-blue-600 text-xs">New</Badge>
-                                                    </button>
-                                                )}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleOpenCompanyCreateDialog(companySearchTerm.trim())}
+                                                            className="flex w-full items-center gap-2 bg-blue-50 px-3 py-2 text-left hover:bg-blue-100"
+                                                        >
+                                                            <PlusCircle className="h-4 w-4 text-blue-600" />
+                                                            <span className="text-sm font-medium text-blue-800">Create "{companySearchTerm.trim()}"</span>
+                                                            <Badge variant="default" className="ml-auto bg-blue-600 text-xs">New</Badge>
+                                                        </button>
+                                                    )}
                                             </div>
                                         )}
                                     </div>

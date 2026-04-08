@@ -1,8 +1,9 @@
-import { User } from "../database"
+import { Officer, User } from "../database"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Building, Users, User as UserIcon, Shield, BarChart3, X } from "lucide-react"
+import { getOfficerDisplayName } from "../../../tasks/utils/authOfficers"
 
 interface DepartmentStatsProps {
   department: {
@@ -18,6 +19,7 @@ interface DepartmentStatsProps {
     assistant_history: Array<{ id: string; start_date: string; end_date?: string }>
   }>
   users: User[]
+  officers: Officer[]
 }
 
 function getCurrentAssignments(history: any = []) {
@@ -35,7 +37,7 @@ function getCurrentAssignments(history: any = []) {
   }
 }
 
-export function DepartmentStats({ department, subdepartments, users }: DepartmentStatsProps) {
+export function DepartmentStats({ department, subdepartments, users, officers }: DepartmentStatsProps) {
   // Get department officer
   const deptOfficers = getCurrentAssignments(department.officers_history)
   
@@ -55,6 +57,7 @@ export function DepartmentStats({ department, subdepartments, users }: Departmen
   
   // Get user details
   const getUser = (id: string) => users.find(u => u.id === id)
+  const getOfficer = (id: string) => officers.find(o => o.id === id)
   
   const totalSubdepartments = subdepartments.length
   const totalOfficers = allOfficers.size
@@ -109,11 +112,11 @@ export function DepartmentStats({ department, subdepartments, users }: Departmen
                 </h4>
                 <div className="space-y-1 pl-6">
                   {deptOfficers.map(officerId => {
-                    const user = getUser(officerId)
-                    return user ? (
+                    const officer = getOfficer(officerId)
+                    return officer ? (
                       <div key={officerId} className="flex items-center gap-2 p-2 bg-blue-50 rounded">
                         <UserIcon className="h-4 w-4 text-blue-500" />
-                        <span>{user.name}</span>
+                        <span>{getOfficerDisplayName(officer)}</span>
                         <Badge variant="secondary" className="ml-auto">Department Level</Badge>
                       </div>
                     ) : null
@@ -131,8 +134,8 @@ export function DepartmentStats({ department, subdepartments, users }: Departmen
                 </h4>
                 <div className="space-y-2 pl-6">
                   {Array.from(subdeptOfficers).map(officerId => {
-                    const user = getUser(officerId)
-                    if (!user) return null
+                    const officer = getOfficer(officerId)
+                    if (!officer) return null
                     
                     const assignedSubdepts = subdepartments
                       .filter(subdept => getCurrentAssignments(subdept.officer_history).includes(officerId))
@@ -142,7 +145,7 @@ export function DepartmentStats({ department, subdepartments, users }: Departmen
                       <div key={officerId} className="p-2 bg-purple-50 rounded">
                         <div className="flex items-center gap-2">
                           <UserIcon className="h-4 w-4 text-purple-500" />
-                          <span className="font-medium">{user.name}</span>
+                          <span className="font-medium">{getOfficerDisplayName(officer)}</span>
                           <Badge variant="outline" className="ml-auto">
                             {assignedSubdepts.length} {assignedSubdepts.length === 1 ? 'Subdept' : 'Subdepts'}
                           </Badge>

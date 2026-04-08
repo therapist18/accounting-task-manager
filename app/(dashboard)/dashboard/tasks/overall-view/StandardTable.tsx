@@ -2,6 +2,8 @@
 "use client"
 
 import React, { useState, useEffect, useMemo, useCallback } from "react"
+import { CellContent } from "./types"
+import { getInheritedOfficer } from "../../departments/departments/database"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { FileText, Plus, Minus, Loader2, AlertTriangle, Trash2, ChevronUp, ChevronDown, Edit, Send, DownloadCloud } from "lucide-react"
@@ -51,6 +53,32 @@ interface StandardTableProps {
   toggleDocumentExpansion: (docId: string) => void
   toggleDependantsExpansion: (taskId: string) => void
 }
+
+// Helper function to get inherited officer for a task
+const getInheritedOfficerForTask = (task: any, departments: any[]) => {
+  if (!task || !departments.length) return null;
+
+  const department = departments.find(d =>
+    d.id === task.department_id || d.id === task.department?.id
+  );
+  if (!department) return null;
+
+  const subdepartment = department.tm_subdepartments?.find(s =>
+    s.id === task.subdepartment_id || s.id === task.subdepartment?.id
+  );
+  if (!subdepartment) return null;
+
+  // Create a mock department structure for inheritance logic
+  const departmentForInheritance = {
+    ...department,
+    officers_history: [] // Departments don't have officers_history in the current schema
+  };
+
+  return getInheritedOfficer(
+    subdepartment.officers_history || [],
+    departmentForInheritance
+  );
+};
 
 // --- COMPONENT ---
 export const StandardTable: React.FC<StandardTableProps> = ({

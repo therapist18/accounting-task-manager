@@ -7,10 +7,37 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { FileText, Plus, Minus, Loader2, AlertTriangle, Zap, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileIcon, Eye, EyeOff } from "lucide-react"
 import { DeleteConfirmationDialog } from "../components/DeleteConfirmationDialog"
+import { getInheritedOfficer } from "../../departments/departments/database"
 
 // --- Helper Functions & Constants ---
 
 const DEBUG = process.env.NODE_ENV !== 'production';
+
+// Helper function to get inherited officer for a task
+const getInheritedOfficerForTask = (task: any, departments: any[]) => {
+  if (!task || !departments.length) return null;
+
+  const department = departments.find(d =>
+    d.id === task.department_id || d.id === task.department?.id
+  );
+  if (!department) return null;
+
+  const subdepartment = department.tm_subdepartments?.find(s =>
+    s.id === task.subdepartment_id || s.id === task.subdepartment?.id
+  );
+  if (!subdepartment) return null;
+
+  // Create a mock department structure for inheritance logic
+  const departmentForInheritance = {
+    ...department,
+    officers_history: [] // Departments don't have officers_history in the current schema
+  };
+
+  return getInheritedOfficer(
+    subdepartment.officers_history || [],
+    departmentForInheritance
+  );
+};
 
 const debugLog = (...args: any[]) => {
   if (DEBUG) {
@@ -311,14 +338,19 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
     return tasks.flatMap(task => {
       if (!task) return [];
       const taskId = task.id || Math.random().toString(36).substr(2, 9);
+      // Get inherited officer if no direct officer assignment
+      const inheritedOfficer = getInheritedOfficerForTask(task, departments || []);
+      const officerWithInheritance = task.officer || inheritedOfficer || { id: task.officer_id, name: '' };
+
       const taskWithDetails = {
         ...task,
         department: task.department || { id: task.department_id, name: '' },
         subdepartment: task.subdepartment || { id: task.subdepartment_id, name: '' },
-        officer: task.officer || { id: task.officer_id, name: '' },
+        officer: officerWithInheritance,
         task_manager: task.task_manager || { id: task.task_manager_id, name: '' },
         id: taskId,
-        status: task.status || 'pending'
+        status: task.status || 'pending',
+        isInheritedOfficer: !!inheritedOfficer && !task.officer
       };
 
       const principal = {

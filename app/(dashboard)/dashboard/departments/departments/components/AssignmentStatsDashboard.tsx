@@ -8,13 +8,13 @@ import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { 
-  Shield, 
-  UserIcon, 
-  Users, 
-  Building, 
-  Workflow, 
-  TrendingUp, 
+import {
+  Shield,
+  UserIcon,
+  Users,
+  Building,
+  Workflow,
+  TrendingUp,
   AlertTriangle,
   CheckCircle,
   UserCheck,
@@ -23,11 +23,13 @@ import {
   PieChart,
   Calendar
 } from "lucide-react"
-import { User, Department, OfficerHistory, ManagerHistory, AssistantHistory } from './database'
+import { User, Department, Officer, OfficerHistory, ManagerHistory, AssistantHistory, getCurrentAssignments } from '../database'
+import { getOfficerDisplayName } from '../../../tasks/utils/authOfficers'
 
 interface AssignmentStatsProps {
   departments: Department[]
   users: User[]
+  officers: Officer[]
   isOpen: boolean
   onClose: () => void
 }
@@ -41,7 +43,7 @@ interface AssignmentStatistics {
   totalOfficers: number
   totalManagers: number
   totalAssistants: number
-  unassignedOfficers: User[]
+  unassignedOfficers: Officer[]
   unassignedManagers: User[]
   unassignedAssistants: User[]
   overloadedUsers: Array<{
@@ -57,81 +59,40 @@ interface AssignmentStatistics {
 
 // Utility functions
 function getCurrentOfficer(officers_history: OfficerHistory[] | null | undefined): OfficerHistory | null {
-  try {
-    // Handle null, undefined, or non-array input
-    if (!officers_history || !Array.isArray(officers_history) || officers_history.length === 0) {
-      return null;
-    }
+  return getCurrentAssignments(officers_history)[0] || null
+}
 
-    // Ensure all items in the array are valid
-    const validHistory = officers_history.filter(
-      (officer): officer is OfficerHistory => 
-        officer && 
-        typeof officer === 'object' && 
-        'id' in officer && 
-        'start_date' in officer
-    );
+function getCurrentOfficers(officers_history: OfficerHistory[] | null | undefined): OfficerHistory[] {
+  return getCurrentAssignments(officers_history)
+}
 
-    if (validHistory.length === 0) return null;
-
-    // Find current officer (no end date)
-    const currentOfficer = validHistory.find(officer => !officer.end_date);
-    if (currentOfficer) return currentOfficer;
-
-    // If no current officer, find the most recent one
-    return validHistory.reduce((latest, officer) => {
-      try {
-        const officerDate = new Date(officer.start_date);
-        const latestDate = new Date(latest.start_date);
-        return officerDate > latestDate ? officer : latest;
-      } catch (error) {
-        console.error('Error comparing dates:', error);
-        return latest; // In case of date parsing error, keep the current latest
-      }
-    });
-  } catch (error) {
-    console.error('Error in getCurrentOfficer:', error);
-    return null;
+// Helper function to get officer with inheritance from parent department
+function getInheritedOfficer(
+  entityOfficersHistory: OfficerHistory[] | null | undefined,
+  parentDepartment: any
+): OfficerHistory | null {
+  // First check if this entity has its own officer assignment
+  const ownOfficer = getCurrentOfficer(entityOfficersHistory || [])
+  if (ownOfficer) {
+    return ownOfficer
   }
+
+  // If no own officer, inherit from parent department
+  if (parentDepartment) {
+    const parentOfficer = getCurrentOfficer(parentDepartment.officers_history || [])
+    return parentOfficer
+  }
+
+  // No officer found
+  return null
 }
 
 function getCurrentManager(manager_history: ManagerHistory[] | null | undefined): ManagerHistory | null {
-  try {
-    // Handle null, undefined, or non-array input
-    if (!manager_history || !Array.isArray(manager_history) || manager_history.length === 0) {
-      return null;
-    }
+  return getCurrentAssignments(manager_history)[0] || null
+}
 
-    // Ensure all items in the array are valid
-    const validHistory = manager_history.filter(
-      (manager): manager is ManagerHistory => 
-        manager && 
-        typeof manager === 'object' && 
-        'id' in manager && 
-        'start_date' in manager
-    );
-
-    if (validHistory.length === 0) return null;
-
-    // Find current manager (no end date)
-    const currentManager = validHistory.find(manager => !manager.end_date);
-    if (currentManager) return currentManager;
-
-    // If no current manager, find the most recent one
-    return validHistory.reduce((latest, manager) => {
-      try {
-        const managerDate = new Date(manager.start_date);
-        const latestDate = new Date(latest.start_date);
-        return managerDate > latestDate ? manager : latest;
-      } catch (error) {
-        console.error('Error comparing dates:', error);
-        return latest; // In case of date parsing error, keep the current latest
-      }
-    });
-  } catch (error) {
-    console.error('Error in getCurrentManager:', error);
-    return null;
-  }
+function getCurrentManagers(manager_history: ManagerHistory[] | null | undefined): ManagerHistory[] {
+  return getCurrentAssignments(manager_history)
 }
 
 function getCurrentAssistants(assistant_history: AssistantHistory[] | null | undefined): AssistantHistory[] {
@@ -143,10 +104,10 @@ function getCurrentAssistants(assistant_history: AssistantHistory[] | null | und
 
     // Ensure all items in the array are valid and filter out ended assignments
     return assistant_history.filter(
-      (assistant): assistant is AssistantHistory => 
-        assistant && 
-        typeof assistant === 'object' && 
-        'id' in assistant && 
+      (assistant): assistant is AssistantHistory =>
+        assistant &&
+        typeof assistant === 'object' &&
+        'id' in assistant &&
         'start_date' in assistant &&
         !assistant.end_date
     );
@@ -167,16 +128,15 @@ function getUserWorkload(userId: string, departments: Department[]): {
   let assistantAssignments = 0
 
   departments.forEach(dept => {
-    const currentOfficer = getCurrentOfficer(dept.officers_history || [])
-    if (currentOfficer?.id === userId) {
-      officerAssignments++
-    }
+    const currentOfficers = getCurrentOfficers(dept.officers_history || [])
+    officerAssignments += currentOfficers.filter((officer) => officer.id === userId).length
 
     dept.tm_subdepartments?.forEach(subdept => {
-      const currentManager = getCurrentManager(subdept.manager_history || [])
-      if (currentManager?.id === userId) {
-        managerAssignments++
-      }
+      const currentSubdeptOfficers = getCurrentOfficers(subdept.officer_history || [])
+      officerAssignments += currentSubdeptOfficers.filter((officer) => officer.id === userId).length
+
+      const currentManagers = getCurrentManagers(subdept.manager_history || [])
+      managerAssignments += currentManagers.filter((manager) => manager.id === userId).length
 
       const currentAssistants = getCurrentAssistants(subdept.assistant_history || [])
       if (currentAssistants.some(assistant => assistant.id === userId)) {
@@ -193,8 +153,7 @@ function getUserWorkload(userId: string, departments: Department[]): {
   }
 }
 
-function getAssignmentStatistics(departments: Department[], users: User[]): AssignmentStatistics {
-  const officers = users.filter(u => u.role === 'officer')
+function getAssignmentStatistics(departments: Department[], users: User[], officers: Officer[]): AssignmentStatistics {
   const managers = users.filter(u => u.role === 'task_manager' || u.role === 'admin')
   const assistants = users.filter(u => u.role === 'task_assistant' || u.role === 'admin')
 
@@ -208,19 +167,21 @@ function getAssignmentStatistics(departments: Department[], users: User[]): Assi
   const assignedAssistantIds = new Set<string>()
 
   departments.forEach(dept => {
-    const currentOfficer = getCurrentOfficer(dept.officers_history || [])
-    if (currentOfficer) {
+    const currentOfficers = getCurrentOfficers(dept.officers_history || [])
+    if (currentOfficers.length > 0) {
       departmentsWithOfficers++
-      assignedOfficerIds.add(currentOfficer.id)
+      currentOfficers.forEach((officer) => assignedOfficerIds.add(officer.id))
     }
 
     dept.tm_subdepartments?.forEach(subdept => {
       totalSubdepartments++
 
-      const currentManager = getCurrentManager(subdept.manager_history || [])
-      if (currentManager) {
+      getCurrentOfficers(subdept.officer_history || []).forEach((officer) => assignedOfficerIds.add(officer.id))
+
+      const currentManagers = getCurrentManagers(subdept.manager_history || [])
+      if (currentManagers.length > 0) {
         subdepartmentsWithManagers++
-        assignedManagerIds.add(currentManager.id)
+        currentManagers.forEach((manager) => assignedManagerIds.add(manager.id))
       }
 
       const currentAssistants = getCurrentAssistants(subdept.assistant_history || [])
@@ -256,15 +217,15 @@ function getAssignmentStatistics(departments: Department[], users: User[]): Assi
   }
 }
 
-export default function AssignmentStatsDashboard({ departments, users, isOpen, onClose }: AssignmentStatsProps) {
+export default function AssignmentStatsDashboard({ departments, users, officers, isOpen, onClose }: AssignmentStatsProps) {
   const [stats, setStats] = useState<AssignmentStatistics | null>(null)
 
   useEffect(() => {
     if (isOpen && departments.length > 0 && users.length > 0) {
-      const statistics = getAssignmentStatistics(departments, users)
+      const statistics = getAssignmentStatistics(departments, users, officers)
       setStats(statistics)
     }
-  }, [isOpen, departments, users])
+  }, [isOpen, departments, users, officers])
 
   if (!stats) return null
 
@@ -455,7 +416,7 @@ export default function AssignmentStatsDashboard({ departments, users, isOpen, o
                         stats.unassignedOfficers.map(officer => (
                           <div key={officer.id} className="flex items-center justify-between p-2 border rounded">
                             <div>
-                              <p className="font-medium text-sm">{officer.name}</p>
+                              <p className="font-medium text-sm">{getOfficerDisplayName(officer)}</p>
                               <p className="text-xs text-gray-500">{officer.email}</p>
                             </div>
                             <Badge variant="outline">Available</Badge>
@@ -552,7 +513,7 @@ export default function AssignmentStatsDashboard({ departments, users, isOpen, o
                               <h4 className="font-medium">{user.name}</h4>
                               <p className="text-sm text-gray-500">{user.email}</p>
                             </div>
-                            <Badge 
+                            <Badge
                               variant={workload.totalAssignments > 4 ? "destructive" : "secondary"}
                               className="text-sm"
                             >

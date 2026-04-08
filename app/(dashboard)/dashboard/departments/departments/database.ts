@@ -1,6 +1,7 @@
 // @ts-nocheck
 import supabase from '@/lib/supabase/client'
 import { toast } from "@/lib/hooks/use-toast"
+import { fetchAuthOfficers, getOfficerDisplayName } from '../../tasks/utils/authOfficers'
 
 // Helper function to generate sequential requirement IDs
 const generateRequirementId = (existingRequirements: any[] = []): string => {
@@ -23,6 +24,28 @@ export type User = {
   name: string
   email: string
   role: 'admin' | 'task_manager' | 'task_assistant' | 'officer' | string
+}
+
+export type JobLevel = {
+  level: number;
+  department_id: number | null;
+  subdepartment_id: number | null;
+  class_id: number | null;
+  subclass_id: number | null;
+}
+
+export type Officer = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email?: string;
+  username?: string;
+  isActive: boolean;
+  jobLevels: JobLevel[];
+  createdAt: string;
+  lastLogin?: string;
+  name?: string;
+  full_name?: string;
 }
 
 // History types for tracking assignments
@@ -200,6 +223,7 @@ export type DepartmentForm = {
   default_display: boolean
   subdepartments: SubdepartmentForm[]
   officerId: string
+  officers_history?: OfficerHistory[]
   specification?: string[] // Changed from string to string[]
 }
 
@@ -246,52 +270,105 @@ export async function fetchUsers(): Promise<User[]> {
   }
 }
 
-export async function fetchOfficers(): Promise<User[]> {
+export async function fetchOfficers(): Promise<Officer[]> {
   try {
-    const { data, error } = await supabase
-      .from('tm_users')
-      .select('id, name, email, role')
-      .eq('role', 'officer')
-      .order('name')
-
-    if (error) throw error
-    return data || []
+    const officers = await fetchAuthOfficers()
+    return officers.map((officer) => ({
+      id: officer.id,
+      firstName: officer.firstName || '',
+      lastName: officer.lastName || '',
+      email: officer.email,
+      username: officer.username,
+      isActive: officer.isActive ?? true,
+      jobLevels: Array.isArray(officer.jobLevels) ? officer.jobLevels : [],
+      createdAt: officer.createdAt || new Date().toISOString(),
+      lastLogin: officer.lastLogin,
+      name: getOfficerDisplayName(officer),
+      full_name: getOfficerDisplayName(officer),
+    }))
   } catch (error) {
     console.error('Error fetching officers:', error)
     throw new Error('Failed to fetch officers')
   }
 }
 
+export function getCurrentAssignments<T extends { start_date: string; end_date?: string }>(history: T[] | null | undefined): T[] {
+  const safeHistory = Array.isArray(history) ? history.filter(Boolean) : []
+  if (safeHistory.length === 0) return []
+
+  const dedupeById = (items: T[]) => {
+    const latestById = new Map<string, T>()
+
+    items.forEach((item) => {
+      const key = String((item as any).id ?? '')
+      if (!key) return
+
+      const existing = latestById.get(key)
+      if (!existing || new Date(item.start_date) > new Date(existing.start_date)) {
+        latestById.set(key, item)
+      }
+    })
+
+    return Array.from(latestById.values())
+  }
+
+  const activeAssignments = dedupeById(safeHistory.filter((item) => !item.end_date))
+  if (activeAssignments.length > 0) return activeAssignments
+
+  return dedupeById(safeHistory)
+}
+
 // Helper function to get current officer from officers_history
 export function getCurrentOfficer(officers_history: OfficerHistory[]): OfficerHistory | null {
-  if (!officers_history || officers_history.length === 0) return null
+  return getCurrentAssignments(officers_history)[0] || null
+}
 
-  // Find officer without end_date (current) or with the latest start_date
-  const currentOfficer = officers_history.find(officer => !officer.end_date)
-  if (currentOfficer) return currentOfficer
+export function getCurrentOfficers(officers_history: OfficerHistory[] | null | undefined): OfficerHistory[] {
+  return getCurrentAssignments(officers_history)
+}
 
-  // If no current officer, return the one with latest start_date
-  return officers_history.reduce((latest, officer) =>
-    new Date(officer.start_date) > new Date(latest.start_date) ? officer : latest
-  )
+// Helper function to get officer with inheritance from parent department
+export function getInheritedOfficer(
+  entityOfficersHistory: OfficerHistory[] | null | undefined,
+  parentDepartment: Department | null | undefined
+): OfficerHistory | null {
+  // First check if this entity has its own officer assignment
+  const ownOfficer = getCurrentOfficer(entityOfficersHistory || [])
+  if (ownOfficer) {
+    return ownOfficer
+  }
+
+  // If no own officer, inherit from parent department
+  if (parentDepartment) {
+    const parentOfficer = getCurrentOfficer(parentDepartment.officers_history || [])
+    return parentOfficer
+  }
+
+  // No officer found
+  return null
+}
+
+export function getInheritedOfficers(
+  entityOfficersHistory: OfficerHistory[] | null | undefined,
+  parentDepartment: Department | null | undefined
+): OfficerHistory[] {
+  const ownOfficers = getCurrentOfficers(entityOfficersHistory)
+  if (ownOfficers.length > 0) return ownOfficers
+
+  if (parentDepartment) {
+    return getCurrentOfficers(parentDepartment.officers_history || [])
+  }
+
+  return []
 }
 
 // Helper function to get current manager from manager_history
 export function getCurrentManager(manager_history: ManagerHistory[] | undefined | null): ManagerHistory | null {
-  // Ensure manager_history is an array
-  const history = Array.isArray(manager_history) ? manager_history : [];
+  return getCurrentAssignments(manager_history)[0] || null
+}
 
-  if (history.length === 0) return null;
-
-  const currentManager = history.find(manager => manager && !manager.end_date);
-  if (currentManager) return currentManager;
-
-  // Safely handle the case where start_date might be missing or invalid
-  return history.reduce((latest, manager) => {
-    if (!manager || !manager.start_date) return latest || null;
-    if (!latest) return manager;
-    return new Date(manager.start_date) > new Date(latest.start_date) ? manager : latest;
-  }, null as ManagerHistory | null);
+export function getCurrentManagers(manager_history: ManagerHistory[] | null | undefined): ManagerHistory[] {
+  return getCurrentAssignments(manager_history)
 }
 
 // Helper function to get current assistants from assistant_history
@@ -446,10 +523,12 @@ export async function createDepartment(departmentData: any): Promise<Department>
     const nextOrder = (maxOrderData?.[0]?.order || 0) + 1
 
     // Prepare officers_history if officer is assigned
-    const officers_history = departmentData.officerId ? [{
-      id: departmentData.officerId,
-      start_date: new Date().toISOString()
-    }] : []
+    const officers_history = Array.isArray(departmentData.officers_history)
+      ? departmentData.officers_history
+      : departmentData.officerId ? [{
+        id: departmentData.officerId,
+        start_date: new Date().toISOString()
+      }] : []
 
     const { data: department, error: deptError } = await supabase
       .from('tm_departments')
@@ -491,17 +570,21 @@ export async function createDepartment(departmentData: any): Promise<Department>
       }))
 
       // Prepare manager_history and assistant_history
-      const manager_history = subdept.taskManagerId ? [{
-        id: subdept.taskManagerId,
-        start_date: new Date().toISOString()
-      }] : []
-
-      const assistant_history = subdept.taskAssistantIds
-        .filter(id => id)
-        .map(id => ({
-          id,
+      const manager_history = Array.isArray(subdept.manager_history)
+        ? subdept.manager_history
+        : subdept.taskManagerId ? [{
+          id: subdept.taskManagerId,
           start_date: new Date().toISOString()
-        }))
+        }] : []
+
+      const assistant_history = Array.isArray(subdept.assistant_history)
+        ? subdept.assistant_history
+        : (subdept.taskAssistantIds || [])
+          .filter(id => id)
+          .map(id => ({
+            id,
+            start_date: new Date().toISOString()
+          }))
 
 
       const subdeptData = {
@@ -511,8 +594,11 @@ export async function createDepartment(departmentData: any): Promise<Department>
         order: index + 1,
         default_display: subdept.default_display || true,
         classes: classesForStorage,
-        task_manager: subdept.taskManagerId,
-        task_assistant: subdept.taskAssistantIds.filter(id => id),
+        officer_history: subdept.officer_history || [],
+        manager_history,
+        assistant_history,
+        task_manager: manager_history.map((manager) => manager.id),
+        task_assistant: assistant_history.map((assistant) => assistant.id),
         specification: subdept.specification || [] // Added
       }
 
