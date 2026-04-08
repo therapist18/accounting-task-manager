@@ -1,6 +1,6 @@
 // @ts-nocheck
 "use client"
-import React, { useState, useEffect, useMemo } from "react"
+import React, { useState, useEffect } from "react"
 import {
   fetchUsers,
   fetchOfficers,
@@ -15,9 +15,8 @@ import {
   assignAssistantsToSubdepartment,
   getCurrentAssignments,
   getCurrentOfficer,
-  getCurrentOfficers,
-  getInheritedOfficer,
-  getInheritedOfficers,
+  getDepartmentOfficerIds,
+  getSubdepartmentOfficerIds,
   getCurrentManager,
   getCurrentManagers,
   getCurrentAssistants,
@@ -942,7 +941,7 @@ export default function Departments() {
       description: sub.description || '',
       default_display: sub.default_display ?? true,
       entity_types: sub.entity_types || [],
-      officer_history: sub.officer_history || [],
+      officer_history: getOfficerHistoryFromIds(getSubdepartmentAssociatedOfficerIds(dept, sub)),
       manager_history: sub.manager_history || [],
       assistant_history: sub.assistant_history || [],
       classes: (sub.classes || []).map(cls => ({
@@ -972,7 +971,7 @@ export default function Departments() {
       default_display: dept.default_display ?? true,
       entity_types: dept.entity_types || [],
       subdepartments: mappedSubdepartments,
-      officers_history: associatedOfficerIds.map((id) => ({ id, start_date: new Date().toISOString() })),
+      officers_history: getOfficerHistoryFromIds(associatedOfficerIds),
       officerId: ''
     });
 
@@ -1022,11 +1021,11 @@ export default function Departments() {
         officerId: '',
         taskManagerId: '',
         taskAssistantIds: [],
-        officer_history: fullSubdept.officer_history || [],
+        officer_history: getOfficerHistoryFromIds(getSubdepartmentAssociatedOfficerIds(department, fullSubdept)),
         manager_history: fullSubdept.manager_history || [],
         assistant_history: fullSubdept.assistant_history || [],
       }],
-      officers_history: department.officers_history || [],
+      officers_history: getOfficerHistoryFromIds(getDepartmentAssociatedOfficerIds(department)),
       officerId: ''
     });
 
@@ -1050,39 +1049,9 @@ export default function Departments() {
     }
   }, [isAddDepartmentOpen]);
 
-  const allOfficers = useMemo(() => {
-    const merged = new Map<string, Officer>()
-
-    officers.forEach((officer) => {
-      merged.set(officer.id, officer)
-    })
-
-    users
-      .filter((user) => user.role === 'officer')
-      .forEach((user) => {
-        if (!merged.has(user.id)) {
-          merged.set(user.id, {
-            id: user.id,
-            firstName: user.name || '',
-            lastName: '',
-            email: user.email,
-            username: undefined,
-            isActive: true,
-            jobLevels: [],
-            createdAt: new Date().toISOString(),
-            lastLogin: undefined,
-            name: user.name,
-            full_name: user.name,
-          })
-        }
-      })
-
-    return Array.from(merged.values())
-  }, [officers, users]);
-
   const getUserName = (userId: string) => users.find(u => u.id === userId)?.name || 'Unassigned';
   const getOfficerName = (officerId: string) => {
-    const officer = allOfficers.find(o => o.id === officerId);
+    const officer = officers.find(o => o.id === officerId);
     return officer ? getOfficerDisplayName(officer) : 'Unassigned';
   };
   const renderOfficerAssignments = (assignmentIds: string[], emptyLabel = 'Unassigned') => {
@@ -1090,7 +1059,7 @@ export default function Departments() {
     return (
       <div className="flex flex-wrap gap-1">
         {assignmentIds.map((officerId) => (
-          <UserDetailsPopover key={officerId} userId={officerId} users={users} officers={allOfficers} role="officer">
+          <UserDetailsPopover key={officerId} userId={officerId} users={users} officers={officers} role="officer">
             <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
               {getOfficerName(officerId)}
             </Badge>
@@ -1104,7 +1073,7 @@ export default function Departments() {
     return (
       <div className="flex flex-wrap gap-1">
         {managerIds.map((managerId) => (
-          <UserDetailsPopover key={managerId} userId={managerId} users={users} officers={allOfficers} role="manager">
+          <UserDetailsPopover key={managerId} userId={managerId} users={users} officers={officers} role="manager">
             <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
               {getUserName(managerId)}
             </Badge>
@@ -1113,16 +1082,13 @@ export default function Departments() {
       </div>
     );
   };
-  const getDepartmentAssociatedOfficerIds = (dept: any) => {
-    const directOfficerIds = getCurrentOfficers(dept.officers_history || []).map((officer) => officer.id);
-    if (directOfficerIds.length > 0) return Array.from(new Set(directOfficerIds));
+  const getDepartmentAssociatedOfficerIds = (dept: any) => getDepartmentOfficerIds(officers, dept.id);
 
-    const inheritedOfficerIds = (dept.tm_subdepartments || []).flatMap((subdept: any) =>
-      getCurrentOfficers(subdept.officer_history || []).map((officer) => officer.id)
-    );
+  const getSubdepartmentAssociatedOfficerIds = (dept: any, subdept: any) =>
+    getSubdepartmentOfficerIds(officers, dept.id, subdept.id);
 
-    return Array.from(new Set(inheritedOfficerIds));
-  };
+  const getOfficerHistoryFromIds = (ids: string[]) =>
+    ids.map((id) => ({ id, start_date: new Date().toISOString() }));
   // Change this condition
   if (loading && departments.length === 0) {
     return (
@@ -1180,14 +1146,14 @@ export default function Departments() {
         deptRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF6FF' } };
 
         (dept.tm_subdepartments || []).forEach((sub, sIdx) => {
-          const currentSubOfficers = getInheritedOfficers(sub.officer_history || [], dept);
+          const currentSubOfficerIds = getSubdepartmentAssociatedOfficerIds(dept, sub);
           const currentManagers = getCurrentManagers(sub.manager_history || []);
           const currentAssistants = getCurrentAssistants(sub.assistant_history || []);
           const subRow = sheet.addRow({
             index: `${dIdx + 1}.${sIdx + 1}`,
             name: `    ${sub.name}`,
             description: sub.description || '',
-            officer: currentSubOfficers.length ? currentSubOfficers.map((officer) => getOfficerName(officer.id)).join(', ') : '-',
+            officer: currentSubOfficerIds.length ? currentSubOfficerIds.map((officerId) => getOfficerName(officerId)).join(', ') : '-',
             manager: currentManagers.length ? currentManagers.map((manager) => getName(manager.id)).join(', ') : '-',
             assistants: currentAssistants.map(a => getName(a.id)).join(', '),
             display: getBoolean(sub.default_display),
@@ -1341,7 +1307,7 @@ export default function Departments() {
                       </TableCell>
                       <TableCell className="text-right border-r">
                         <div className="flex items-center justify-end gap-2">
-                          <DepartmentStats department={dept} subdepartments={dept.tm_subdepartments || []} users={users} officers={allOfficers} />
+                          <DepartmentStats department={dept} subdepartments={dept.tm_subdepartments || []} users={users} officers={officers} />
                           <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); handleEditDepartment(dept); }} className="h-6 w-6 text-gray-500 hover:text-blue-600">
                             <Edit className="h-3.5 w-3.5" />
                           </Button>
@@ -1374,8 +1340,7 @@ export default function Departments() {
                         const isExpanded = expanded[subdeptKey];
                         const currentManagers = getCurrentManagers(subdept.manager_history || []);
                         const currentAssistants = getCurrentAssistants(subdept.assistant_history || []);
-                        const currentOfficerSub = getInheritedOfficers(subdept.officer_history || [], dept);
-                        const ownOfficerIds = getCurrentOfficers(subdept.officer_history || []).map((officer) => officer.id);
+                        const currentOfficerSub = getSubdepartmentAssociatedOfficerIds(dept, subdept);
 
                         return (
                           <React.Fragment key={subdept.id}>
@@ -1395,16 +1360,11 @@ export default function Departments() {
                                 <div className="flex items-center gap-2">
                                   {currentOfficerSub.length > 0 ? (
                                     <div className="flex flex-wrap gap-1">
-                                      {currentOfficerSub.map((officer) => (
-                                        <UserDetailsPopover key={officer.id} userId={officer.id} users={users} officers={allOfficers} role="officer">
+                                      {currentOfficerSub.map((officerId) => (
+                                        <UserDetailsPopover key={officerId} userId={officerId} users={users} officers={officers} role="officer">
                                           <div className="flex items-center gap-2">
                                             <Shield className="h-4 w-4 text-blue-600" />
-                                            <span>{getOfficerName(officer.id)}</span>
-                                            {!ownOfficerIds.includes(officer.id) && (
-                                              <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200">
-                                                Inherited
-                                              </Badge>
-                                            )}
+                                            <span>{getOfficerName(officerId)}</span>
                                           </div>
                                         </UserDetailsPopover>
                                       ))}
@@ -1561,7 +1521,7 @@ export default function Departments() {
         departmentForm={departmentForm}
         setDepartmentForm={setDepartmentForm}
         users={users}
-        officers={allOfficers}
+        officers={officers}
         editingDepartmentId={editingDepartmentId}
         editingSubdepartmentId={editingSubdepartmentId}
         isSaving={saving}
@@ -1570,7 +1530,7 @@ export default function Departments() {
       <AssignmentStatsDashboard
         departments={departments}
         users={users}
-        officers={allOfficers}
+        officers={officers}
         isOpen={isStatsOpen}
         onClose={() => setIsStatsOpen(false)}
       />

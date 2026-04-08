@@ -781,20 +781,8 @@ export function StageUploadDialog({
         // Create optimized document lookup with Map for O(1) access
         const documentsByTypeId = new Map<string, any[]>();
         if (userDocsRes.data) {
-          console.log('[StageUploadDialog] DEBUG: Processing user documents for individual:', task.individual_id);
-          console.log('[StageUploadDialog] DEBUG: Total user documents found:', userDocsRes.data.length);
-
           userDocsRes.data.forEach((doc: any) => {
             const key = String(doc.document_id);
-            console.log('[StageUploadDialog] DEBUG: Processing document:', {
-              id: doc.id,
-              document_id: doc.document_id,
-              file_path: doc.file_path,
-              task_id: doc.task_id,
-              stage_id: doc.stage_id,
-              stage_doc_id: doc.stage_doc_id
-            });
-
             if (!documentsByTypeId.has(key)) {
               documentsByTypeId.set(key, []);
             }
@@ -870,41 +858,16 @@ export function StageUploadDialog({
         const groupedDocs: Record<string, any[]> = {};
         const currentTaskTriggerIds = currentTaskTriggerDocumentIds;
 
-        console.log('[StageUploadDialog] DEBUG: Starting document filtering for current task:', {
-          currentTaskId: task.id,
-          currentStageId: stage.id,
-          currentTaskTriggerIds: Array.from(currentTaskTriggerIds),
-          applicableDocumentsCount: applicableDocuments.length
-        });
-
         if (userDocsRes.data) {
           // Process applicable documents in batch
           applicableDocuments.forEach((stageDoc: any) => {
-            console.log('[StageUploadDialog] DEBUG: Processing stage document:', {
-              stageDocId: stageDoc.id,
-              stageDocName: stageDoc.name,
-              stageDocKycId: stageDoc.kycId
-            });
-
             if (!stageDoc.kycId) {
-              console.log('[StageUploadDialog] DEBUG: Skipping stage document - no KYC ID');
               return;
             }
 
             const matching = documentsByTypeId.get(String(stageDoc.kycId)) || [];
-            console.log('[StageUploadDialog] DEBUG: Found matching documents for KYC ID:', {
-              kycId: stageDoc.kycId,
-              matchingCount: matching.length,
-              matchingDocs: matching.map(d => ({
-                id: d.id,
-                task_id: d.task_id,
-                stage_id: d.stage_id,
-                file_path: d.file_path
-              }))
-            });
 
             if (matching.length === 0) {
-              console.log('[StageUploadDialog] DEBUG: No matching documents found for KYC ID:', stageDoc.kycId);
               return;
             }
 
@@ -912,18 +875,8 @@ export function StageUploadDialog({
             const selectableMatching = matching.filter((doc: any) => {
               const docId = String(doc.id);
 
-              console.log('[StageUploadDialog] DEBUG: Filtering document:', {
-                docId,
-                taskId: doc.task_id,
-                stageId: doc.stage_id,
-                currentTaskId: task.id,
-                isFromCurrentTask: doc.task_id === task.id,
-                isFromCurrentStage: doc.stage_id === stage.id
-              });
-
               // Early skip for trigger documents
               if (currentTaskTriggerIds.has(docId) || triggerDocIdsFromWorkflow.has(docId)) {
-                console.log('[StageUploadDialog] DEBUG: Filtering out trigger document:', docId);
                 return false;
               }
 
@@ -933,13 +886,6 @@ export function StageUploadDialog({
                 task.status === 'not_applicable'
               );
 
-              console.log('[StageUploadDialog] DEBUG: Document workflow status:', {
-                docId,
-                hasWorkflowDoc: !!workflowDoc,
-                hasNotApplicableTaskStatus,
-                workflowOutcome: workflowDoc?.workflowOutcome
-              });
-
               // THIS IS THE KEY ISSUE: We need to filter by task context
               // Documents should only be shown if they belong to the current task or are not task-specific
               // AND they're not already linked to a completed stage in the current task
@@ -947,17 +893,7 @@ export function StageUploadDialog({
 
               // Additional check: Don't show documents that are already linked to completed stages in other tasks
               if (isDocumentAvailable && otherTasksRes?.data) {
-                console.log('[StageUploadDialog] DEBUG: Checking document against other tasks:', {
-                  docId,
-                  otherTasksCount: otherTasksRes.data.length
-                });
-
                 const isAlreadyLinkedToOtherTask = otherTasksRes.data.some((otherTask: any) => {
-                  console.log('[StageUploadDialog] DEBUG: Checking other task:', {
-                    otherTaskId: otherTask.id,
-                    otherTaskStatus: otherTask.status
-                  });
-
                   // Check all stages in the other task
                   return Object.entries(otherTask.stages || {}).some(([stageId, stageData]: [string, any]) => {
                     // Only check completed stages
@@ -969,37 +905,14 @@ export function StageUploadDialog({
                       stageDoc.id === docId || stageDoc.linked_document_id === docId
                     );
 
-                    if (isDocumentLinked) {
-                      console.log('[StageUploadDialog] DEBUG: Document found in completed stage of other task:', {
-                        docId,
-                        otherTaskId: otherTask.id,
-                        stageId,
-                        stageStatus: stageData.status
-                      });
-                    }
-
                     return isDocumentLinked;
                   });
                 });
 
                 if (isAlreadyLinkedToOtherTask) {
                   isDocumentAvailable = false;
-                  console.log('[StageUploadDialog] DEBUG: Filtering out document already linked to completed stage in other task:', {
-                    docId,
-                    reason: 'Document already linked to completed stage in another task for same individual'
-                  });
                 }
               }
-
-              console.log('[StageUploadDialog] DEBUG: Document availability check:', {
-                docId,
-                docTaskId: doc.task_id,
-                currentTaskId: task.id,
-                isDocumentAvailable,
-                reason: !doc.task_id ? 'No task_id - globally available' :
-                  doc.task_id === task.id ? 'Belongs to current task' :
-                    'Belongs to different task - should be filtered'
-              });
 
               return isDocumentAvailable;
             }).map((doc: any) => {
@@ -1015,35 +928,11 @@ export function StageUploadDialog({
               };
             });
 
-            console.log('[StageUploadDialog] DEBUG: Filtered documents result:', {
-              stageDocId: stageDoc.id,
-              originalCount: matching.length,
-              filteredCount: selectableMatching.length,
-              filteredDocs: selectableMatching.map(d => ({
-                id: d.id,
-                task_id: d.task_id,
-                file_path: d.file_path
-              }))
-            });
-
             if (selectableMatching.length > 0) {
               groupedDocs[stageDoc.id] = selectableMatching;
             }
           });
         }
-
-        console.log('[StageUploadDialog] DEBUG: Final grouped documents:', {
-          groupedDocsCount: Object.keys(groupedDocs).length,
-          groupedDocs: Object.entries(groupedDocs).map(([key, docs]) => ({
-            stageDocId: key,
-            count: docs.length,
-            docs: docs.map(d => ({
-              id: d.id,
-              task_id: d.task_id,
-              file_path: d.file_path
-            }))
-          }))
-        });
 
         if (!isCancelled) {
           setKycDocuments(newKycMap);
@@ -1266,7 +1155,20 @@ export function StageUploadDialog({
           let documentId = docData.id || '';
 
           if (file) {
-            filePath = `individual-documents/${task.individual_id}/${docConfig.kycId}/${file.name}`;
+            // Create a safe filename that preserves the original name while being valid for Supabase storage
+            // Replace only problematic characters, keep spaces and other valid characters
+            const sanitizedName = file.name
+              .replace(/[~`!@#$%^&*()+=\[\]{};':"\\|,<>\/?]/g, '_') // Remove problematic special chars
+              .replace(/_{2,}/g, '_') // Replace multiple underscores with single
+              .replace(/^_+|_+$/g, ''); // Remove leading/trailing underscores
+
+            // Add timestamp to prevent conflicts if filename is too long or has issues
+            const timestamp = Date.now();
+            const finalName = sanitizedName.length > 100
+              ? `${sanitizedName.substring(0, 80)}_${timestamp}.pdf`
+              : sanitizedName;
+
+            filePath = `individual-documents/${task.individual_id}/${docConfig.kycId}/${finalName}`;
 
             const { error: uploadError } = await supabase.storage
               .from('kyc-documents')

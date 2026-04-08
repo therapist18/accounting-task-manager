@@ -22,6 +22,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { getInheritedOfficer } from "../../departments/departments/database"
 import { fetchAuthOfficers, normalizeAuthOfficer } from "../utils/authOfficers"
+import { fetchUserAssignmentData, hasJobLevelAccess } from "../utils/userAssignmentService"
 
 // Photo document IDs
 const COMPANY_LOGO_ID = 'f7a75607-bff9-4995-8bde-0256e86da435';
@@ -178,15 +179,29 @@ export function NewCompanyInquiryDialog({
         ...localOfficers.map(o => ({ value: o.id.toString(), label: o.name }))
     ], [localOfficers]);
 
-    const managerOptions = useMemo(() => [
-        { value: 'none', label: 'No Manager' },
-        ...localUsers.map(m => ({ value: m.id.toString(), label: m.name }))
-    ], [localUsers]);
+    const managerOptions = useMemo(() => {
+        // Filter managers by job level access and role_type 'manager'
+        const filteredManagers = localUsers.filter(user =>
+            hasJobLevelAccess(user, formData.department_id, formData.subdepartment_id, formData.class_id) &&
+            user.jobLevels && user.jobLevels.some((jobLevel: any) => jobLevel.role_type === 'manager')
+        );
+        return [
+            { value: 'none', label: 'No Manager' },
+            ...filteredManagers.map(m => ({ value: m.id.toString(), label: m.name }))
+        ];
+    }, [localUsers, formData.department_id, formData.subdepartment_id, formData.class_id]);
 
-    const assistantOptions = useMemo(() => [
-        { value: 'none', label: 'No Assistant' },
-        ...localUsers.map(a => ({ value: a.id.toString(), label: a.name }))
-    ], [localUsers]);
+    const assistantOptions = useMemo(() => {
+        // Filter assistants by job level access and role_type 'assistant'
+        const filteredAssistants = localUsers.filter(user =>
+            hasJobLevelAccess(user, formData.department_id, formData.subdepartment_id, formData.class_id) &&
+            user.jobLevels && user.jobLevels.some((jobLevel: any) => jobLevel.role_type === 'assistant')
+        );
+        return [
+            { value: 'none', label: 'No Assistant' },
+            ...filteredAssistants.map(a => ({ value: a.id.toString(), label: a.name }))
+        ];
+    }, [localUsers, formData.department_id, formData.subdepartment_id, formData.class_id]);
 
     // Get inherited officer for the selected subdepartment
     const getInheritedOfficerForSubdepartment = useCallback(async (subdepartmentId: string) => {
@@ -615,11 +630,11 @@ export function NewCompanyInquiryDialog({
     const loadStaffData = useCallback(async () => {
         setLoadingStaff(true);
         try {
-            const [usersResult, officersResult] = await Promise.all([
-                supabase.from('tm_users').select('*').order('name'),
+            const [userAssignmentData, officersResult] = await Promise.all([
+                fetchUserAssignmentData({ payrollAccess: true }),
                 fetchAuthOfficers()
             ]);
-            setLocalUsers(usersResult.data || []);
+            setLocalUsers(userAssignmentData.allUsers || []);
             setLocalOfficers(officersResult);
         } finally {
             setLoadingStaff(false);

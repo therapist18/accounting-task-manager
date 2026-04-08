@@ -13,7 +13,6 @@ import { EnquiryDialog } from "./components/EnquiryDialog"
 import { format } from 'date-fns';
 import { toast } from "@/lib/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
-import { EditTaskDialog } from "./components/EditTaskDialog"
 import { fetchDepartments } from "../departments/departments/database"
 import { DepartmentTasksManagerProps } from "./components/types"
 import { StageUploadDialog } from "./components/StageUploadDialog"
@@ -42,6 +41,7 @@ import { determineCurrentStage, getStageProgress } from './utils/stageUtils'
 import { calculateStageDate } from './utils/dateUtils'
 import { getInheritedOfficer } from '../departments/departments/database'
 import { fetchAuthOfficers, getOfficerDisplayName } from "./utils/authOfficers"
+import { fetchUserAssignmentData, hasJobLevelAccess } from "./utils/userAssignmentService"
 
 export default function DepartmentTasksManager({
   error,
@@ -371,20 +371,22 @@ export default function DepartmentTasksManager({
     return { officers, managers, assistants };
   }, [departments, activeDepartmentTab, tmUsers, realOfficers]);
 
-  const fetchTmUsers = useCallback(async () => {
+  const loadUserAssignmentData = useCallback(async () => {
     try {
-      const { data, error } = await supabase.from('tm_users').select('*')
-      if (error) throw error
+      // Use unified user assignment service
+      const userAssignmentData = await fetchUserAssignmentData({ payrollAccess: true });
 
+      // Create a map of all users for backward compatibility
       const usersMap = new Map()
-      data?.forEach(user => {
-        usersMap.set(user.id, user)
+      userAssignmentData.allUsers.forEach(user => {
+        usersMap.set(parseInt(user.id), user)
       })
+
       setTmUsers(usersMap)
-      return usersMap
+      return { usersMap, userAssignmentData }
     } catch (error) {
-      console.error('Error fetching tm_users:', error)
-      return new Map()
+      console.error('Error fetching user assignment data:', error)
+      return { usersMap: new Map(), userAssignmentData: null }
     }
   }, [])
 
@@ -454,14 +456,14 @@ export default function DepartmentTasksManager({
       const [
         documentsData,
         { fieldsMap, kycDocsMap },
-        usersData,
+        { usersMap: usersData },
         tasksData = null,
         tasksDuplicateData,
         documentWorkflowLogsData
       ] = await Promise.all([
         fetchAllDocuments(),
         fetchAllKycFields(),
-        fetchTmUsers(),
+        loadUserAssignmentData(),
         activeDepartmentTab ? loadTasksData(activeDepartmentTab, activeSubdepartmentTab) : Promise.resolve(null),
         fetchTasksDuplicate(),
         fetchDocumentWorkflowLogs()
@@ -496,7 +498,7 @@ export default function DepartmentTasksManager({
         variant: "destructive"
       });
     }
-  }, [activeDepartmentTab, activeSubdepartmentTab, loadTasksData, fetchTmUsers])
+  }, [activeDepartmentTab, activeSubdepartmentTab, loadTasksData, loadUserAssignmentData])
 
   const isTaskRelevantToActiveView = useCallback((task: any) => {
     if (!task || !activeDepartmentTab) return false;
@@ -2584,12 +2586,12 @@ export default function DepartmentTasksManager({
   useEffect(() => {
     const performInitialLoad = async () => {
       try {
-        const [departmentsData, companiesData, documentsData, kycFieldsData, usersData] = await Promise.all([
+        const [departmentsData, companiesData, documentsData, kycFieldsData, { usersMap: usersData }] = await Promise.all([
           fetchDepartments(),
           fetchCompanies(),
           fetchAllDocuments(),
           fetchAllKycFields(),
-          fetchTmUsers()
+          loadUserAssignmentData()
         ]);
 
         setCompanies(companiesData);
@@ -3259,15 +3261,14 @@ export default function DepartmentTasksManager({
           officers={Array.from(tmUsers.values()).filter(u => u.role === 'officer')}
         />
       )}
-      <EditTaskDialog
+      <EnquiryDialog
         open={editDialogOpen}
         onOpenChange={setEditDialogOpen}
-        task={editingTask}
+        taskToEdit={editingTask}
         departments={departments}
         users={Array.from(tmUsers.values())}
         officers={Array.from(tmUsers.values()).filter(u => u.role === 'officer')}
-        allDocuments={allDocuments}
-        onTaskUpdate={handleTaskUpdate}
+        onEnquiryCreated={handleTaskUpdate}
       />
       {companyInquiryDialogOpen && editingTask && (
         <NewCompanyInquiryDialog

@@ -5,8 +5,9 @@ import React, { useCallback, useMemo, useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { FileText, Plus, Minus, Loader2, AlertTriangle, Zap, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileIcon, Eye, EyeOff } from "lucide-react"
+import { FileText, Plus, Minus, Loader2, AlertTriangle, Zap, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileIcon, Eye, EyeOff, Pencil } from "lucide-react"
 import { DeleteConfirmationDialog } from "../components/DeleteConfirmationDialog"
+import { EnquiryDialog } from "../components/EnquiryDialog"
 import { getInheritedOfficer } from "../../departments/departments/database"
 
 // --- Helper Functions & Constants ---
@@ -221,10 +222,19 @@ const MemoizedTableRow = React.memo(({
         <div className="flex items-center gap-2 justify-between">
           <div style={{ paddingLeft: row.isSubSubRow ? '32px' : row.isSubRow ? '16px' : '0px' }} className="flex items-center gap-2">
             <span className={row.type === 'stage' ? 'font-semibold' : ''}>{safeRender(row.label)}</span>
-            {row.type === 'principal' && onDeleteTask && row.task?.id && (
-              <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-400 hover:text-destructive hover:bg-destructive/10" onClick={(e) => { e.stopPropagation(); setTaskToDelete(row.task); }}>
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+            {row.type === 'principal' && row.task?.id && (
+              <div className="flex items-center gap-1">
+                {(onEditTask || true) && (
+                  <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-400 hover:text-blue-600 hover:bg-blue-50" onClick={(e) => { e.stopPropagation(); setEditingTask(row.task); setEditDialogOpen(true); }}>
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+                {onDeleteTask && (
+                  <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-400 hover:text-destructive hover:bg-destructive/10" onClick={(e) => { e.stopPropagation(); setTaskToDelete(row.task); }}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
             )}
           </div>
           {row.type === 'stage' && row.stage?.documents?.length > 0 && (
@@ -282,6 +292,9 @@ interface EnhancedTableProps {
   toggleStageExpansion: (taskId: string, stageId: string) => void;
   toggleDocumentExpansion: (taskId: string, documentId: string) => void;
   onDeleteTask?: (task: any) => void;
+  onEditTask?: (task: any) => void;
+  users?: any[];
+  officers?: any[];
   initialColumnsPerPage?: number;
   allDocuments?: any[];
   kycDocuments?: Map<string, any>;
@@ -306,6 +319,9 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   toggleStageExpansion,
   toggleDocumentExpansion,
   onDeleteTask,
+  onEditTask,
+  users = [],
+  officers = [],
   initialColumnsPerPage = 10,  // Set default render to 10
   allDocuments = [],
   kycDocuments = new Map(),
@@ -322,6 +338,8 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [columnsPerPage, setColumnsPerPage] = useState(initialColumnsPerPage);
   const [taskToDelete, setTaskToDelete] = useState<any>(null);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<any>(null);
   const [showNAStages, setShowNAStages] = useState(false);
 
   // Memoized derived data
@@ -585,6 +603,29 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
           </TableBody>
         </Table>
       </div>
+
+      {/* EnquiryDialog for editing tasks */}
+      <EnquiryDialog
+        open={editDialogOpen}
+        onOpenChange={(open) => {
+          setEditDialogOpen(open);
+          if (!open) {
+            setEditingTask(null);
+          }
+        }}
+        taskToEdit={editingTask}
+        departments={departments}
+        users={users}
+        officers={officers}
+        onEnquiryCreated={(updatedTask) => {
+          // Handle task update - parent component should handle this
+          if (onEditTask) {
+            onEditTask(updatedTask);
+          }
+          setEditDialogOpen(false);
+          setEditingTask(null);
+        }}
+      />
     </div>
   )
 }

@@ -56,7 +56,8 @@ import {
   fetchAllDocuments,
   fetchAllKycFields,
 } from "../tasks/utils/taskManagerData";
-import { fetchDepartments } from "../departments/departments/database";
+import { fetchAuthOfficers, getOfficerDisplayName } from "../tasks/utils/authOfficers";
+import { fetchDepartments, getDepartmentOfficerIds, getSubdepartmentOfficerIds } from "../departments/departments/database";
 import { MemorizedReportDialog } from "./MemorizedReportDialog";
 import { calculateStageDate, findDateInObject } from "../tasks/utils/dateUtils";
 
@@ -180,8 +181,9 @@ export default function ReportsPage() {
   const [searchQuery, setSearchQuery] = useState<string>("");
 
   const [selectedOfficers, setSelectedOfficers] = useState<string[]>([]);
-  const [allOfficers, setAllOfficers] = useState<{ id: string; name: string; email: string }[]>([]);
-  const [availableOfficers, setAvailableOfficers] = useState<{ id: string; name: string; email: string }[]>([]);
+  const [activeOfficerTab, setActiveOfficerTab] = useState<string>("all");
+  const [allOfficers, setAllOfficers] = useState<any[]>([]);
+  const [availableOfficers, setAvailableOfficers] = useState<any[]>([]);
   const [isOfficerDropdownOpen, setIsOfficerDropdownOpen] = useState(false);
 
   // ── Sort / view state ──────────────────────────────────────────────────────
@@ -249,18 +251,24 @@ export default function ReportsPage() {
         setAvailableReports(reports || []);
         if (reports?.length > 0) setActiveReport(reports[0]);
 
-        const { data: users } = await supabase.from('tm_users').select('*');
+        // Use unified API to fetch users
+        const [usersResponse, authOfficers] = await Promise.all([
+          fetch('/api/auth/users/unified?payrollAccess=true').then(res => res.json()),
+          fetchAuthOfficers()
+        ]);
+
+        const users = usersResponse.data || [];
         const usersMap = new Map();
         users?.forEach(u => usersMap.set(u.id, u));
         setTmUsers(usersMap);
-
-        const officerUsers = users?.filter(u => u.role === 'officer') || [];
-        setAllOfficers(officerUsers.map(o => ({
-          id: o.id.toString(),
-          name: o.name || o.email.split('@')[0],
-          email: o.email,
-          rawDepartmentId: o.department_id
-        })));
+        setAllOfficers(
+          (authOfficers || []).map((officer: any) => ({
+            ...officer,
+            id: officer.id.toString(),
+            name: getOfficerDisplayName(officer),
+            email: officer.email || ""
+          }))
+        );
       } catch (err) {
         console.error("Failed to fetch reports:", err);
         toast({ title: "Error", description: "Could not load saved reports.", variant: "destructive" });
@@ -357,29 +365,30 @@ export default function ReportsPage() {
 
   // Update available officers when dept/subdept changes
   useEffect(() => {
-    if (!activeDeptId) { setAvailableOfficers([]); setSelectedOfficers([]); return; }
-
-    const allowedIds = new Set<string>();
-    const collectFromHistory = (subDept: any) => {
-      subDept?.officer_history?.forEach((h: any) => {
-        if (h.id && !h.end_date) allowedIds.add(h.id.toString());
-      });
-    };
-
-    if (activeSubDeptId && activeSubDeptId !== 'all') {
-      const sub = activeSubDepartments.find(s => s.id.toString() === activeSubDeptId);
-      collectFromHistory(sub);
-    } else {
-      activeSubDepartments.forEach(collectFromHistory);
-      allOfficers.forEach(o => {
-        if (o.rawDepartmentId?.toString() === activeDeptId) allowedIds.add(o.id);
-      });
+    if (!activeDeptId) {
+      setAvailableOfficers([]);
+      setSelectedOfficers([]);
+      setActiveOfficerTab('all');
+      return;
     }
+
+    const allowedIds = new Set(
+      activeSubDeptId && activeSubDeptId !== 'all'
+        ? getSubdepartmentOfficerIds(allOfficers, activeDeptId, activeSubDeptId)
+        : getDepartmentOfficerIds(allOfficers, activeDeptId)
+    );
 
     const final = allOfficers.filter(o => allowedIds.has(o.id));
     setAvailableOfficers(final);
     setSelectedOfficers(prev => prev.filter(id => final.some(o => o.id === id)));
+    setActiveOfficerTab(prev => (prev === 'all' || final.some(o => o.id === prev) ? prev : 'all'));
   }, [activeDeptId, activeSubDeptId, allOfficers, activeSubDepartments]);
+
+  const effectiveOfficerIds = useMemo(() => {
+    const ids = new Set(selectedOfficers);
+    if (activeOfficerTab !== 'all') ids.add(activeOfficerTab);
+    return Array.from(ids);
+  }, [activeOfficerTab, selectedOfficers]);
 
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
@@ -388,10 +397,10 @@ export default function ReportsPage() {
       if (activeClassId !== 'all' && task.class_id?.toString() !== activeClassId) return false;
       if (activeSubClassId !== 'all' && task.subclass_id?.toString() !== activeSubClassId) return false;
 
-      if (selectedOfficers.length > 0) {
+      if (effectiveOfficerIds.length > 0) {
         const oid = task.officer_id?.toString();
         const aid = task.assigned_to?.toString();
-        if (!(oid && selectedOfficers.includes(oid)) && !(aid && selectedOfficers.includes(aid))) return false;
+        if (!(oid && effectiveOfficerIds.includes(oid)) && !(aid && effectiveOfficerIds.includes(aid))) return false;
       }
 
       const isWriteUp = task.status === 'write_up_completed';
@@ -403,7 +412,7 @@ export default function ReportsPage() {
       if (activeStatus === 'endorsed' && !isEndorsed) return false;
       return true;
     });
-  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, activeStatus, selectedOfficers]);
+  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, activeStatus, effectiveOfficerIds]);
 
   const searchedTasks = useMemo(() => {
     if (!searchQuery) return filteredTasks;
@@ -1347,7 +1356,7 @@ export default function ReportsPage() {
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" disabled={!activeDeptId} className="flex items-center gap-2">
                 <User className="h-4 w-4" />
-                {selectedOfficers.length > 0 ? `${selectedOfficers.length} officer${selectedOfficers.length > 1 ? 's' : ''}` : "Filter Officers"}
+                {selectedOfficers.length > 0 ? `${selectedOfficers.length} extra officer${selectedOfficers.length > 1 ? 's' : ''}` : "More Officers"}
                 <ChevronDown className="h-4 w-4 opacity-50" />
               </Button>
             </DropdownMenuTrigger>
@@ -1359,13 +1368,16 @@ export default function ReportsPage() {
                   {availableOfficers.map(o => (
                     <div key={o.id} className="flex items-center space-x-2 p-1.5 hover:bg-gray-100 rounded">
                       <input type="checkbox" id={`o-${o.id}`} checked={selectedOfficers.includes(o.id)}
-                        onChange={e => setSelectedOfficers(prev => e.target.checked ? [...prev, o.id] : prev.filter(id => id !== o.id))}
+                        onChange={e => {
+                          setCurrentPage(1);
+                          setSelectedOfficers(prev => e.target.checked ? [...prev, o.id] : prev.filter(id => id !== o.id));
+                        }}
                         className="h-4 w-4 rounded border-gray-300 text-blue-600" />
                       <label htmlFor={`o-${o.id}`} className="text-sm text-gray-700">{o.name}</label>
                     </div>
                   ))}
                   <div className="border-t mt-2 pt-2">
-                    <Button variant="ghost" size="sm" className="w-full justify-start text-sm" onClick={() => setSelectedOfficers([])} disabled={selectedOfficers.length === 0}>
+                    <Button variant="ghost" size="sm" className="w-full justify-start text-sm" onClick={() => { setSelectedOfficers([]); setCurrentPage(1); }} disabled={selectedOfficers.length === 0}>
                       Clear selection
                     </Button>
                   </div>
@@ -1440,6 +1452,19 @@ export default function ReportsPage() {
                 {activeSubDepartments.map(sub => (
                   <TabsTrigger key={sub.id} value={sub.id.toString()} className="text-sm font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
                     {sub.name}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+
+            <Tabs value={activeOfficerTab} onValueChange={v => { setActiveOfficerTab(v); setCurrentPage(1); }}>
+              <TabsList className="w-full justify-start h-10 bg-slate-50 border p-1 gap-1 overflow-x-auto">
+                <TabsTrigger value="all" className="text-sm font-semibold text-slate-600 data-[state=active]:bg-emerald-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
+                  All Officers
+                </TabsTrigger>
+                {availableOfficers.map(officer => (
+                  <TabsTrigger key={officer.id} value={officer.id} className="text-sm font-semibold text-slate-600 data-[state=active]:bg-emerald-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
+                    {officer.name}
                   </TabsTrigger>
                 ))}
               </TabsList>

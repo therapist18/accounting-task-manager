@@ -232,27 +232,28 @@ export default function OfficersPage() {
       // Ensure we work with an array even if undefined
       const subDeptIdsArray = Array.isArray(subdepartment_ids) ? subdepartment_ids : [];
 
-      // --- STEP 1: Update 'tm_users' Table ---
+      // --- STEP 1: Use Unified API for Officer Management ---
       const officerData = {
-        name: coreUserData.name,
+        username: coreUserData.name.toLowerCase().replace(/\s+/g, '.'),
         email: coreUserData.email || null,
-        ...(coreUserData.password ? { password: coreUserData.password } : {}),
-
-        status_history: [{
-          status: 'active',
-          start_date: start_date || new Date().toISOString(),
-          end_date: end_date || null
+        firstName: coreUserData.name.split(' ')[0] || '',
+        lastName: coreUserData.name.split(' ').slice(1).join(' ') || '',
+        isActive: true,
+        payrollAccessEnabled: true,
+        jobLevels: subDeptIdsArray.length > 0 ? subDeptIdsArray.map(subDeptId => ({
+          level: 2, // Subdepartment level
+          department_id: parseInt(department_id),
+          subdepartment_id: parseInt(subDeptId),
+          class_id: null,
+          subclass_id: null
+        })) : [{
+          level: 1, // Department level
+          department_id: parseInt(department_id),
+          subdepartment_id: null,
+          class_id: null,
+          subclass_id: null
         }],
-
-        // This updates the tm_users JSONB column
-        department_history: [{
-          department_id: department_id,
-          subdepartment_ids: subDeptIdsArray,
-          subdepartment_id: subDeptIdsArray.length > 0 ? subDeptIdsArray[0] : null,
-          start_date: department_start_date || new Date().toISOString(),
-          end_date: department_end_date || null
-        }],
-        updated_at: new Date().toISOString(),
+        ...(coreUserData.password ? { password: coreUserData.password } : {})
       };
 
       let savedOfficerId;

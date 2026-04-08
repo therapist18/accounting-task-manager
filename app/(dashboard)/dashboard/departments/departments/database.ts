@@ -257,13 +257,21 @@ export async function fetchAllDepartmentData() {
 
 export async function fetchUsers(): Promise<User[]> {
   try {
-    const { data, error } = await supabase
-      .from('tm_users')
-      .select('id, name, email, role')
-      .order('name')
+    // Use unified API to fetch all users
+    const response = await fetch('/api/auth/users/unified?payrollAccess=true');
+    const json = await response.json();
 
-    if (error) throw error
-    return data || []
+    if (!response.ok) {
+      throw new Error(json.error ?? "Failed to fetch users");
+    }
+
+    // Transform data to match expected User type
+    return (json.data || []).map(user => ({
+      id: user.id,
+      name: user.displayName || `${user.first_name || ''} ${user.last_name || ''}`.trim(),
+      email: user.email,
+      role: user.role
+    }));
   } catch (error) {
     console.error('Error fetching users:', error)
     throw new Error('Failed to fetch users')
@@ -325,6 +333,87 @@ export function getCurrentOfficer(officers_history: OfficerHistory[]): OfficerHi
 
 export function getCurrentOfficers(officers_history: OfficerHistory[] | null | undefined): OfficerHistory[] {
   return getCurrentAssignments(officers_history)
+}
+
+const normalizeEntityId = (value: string | number | null | undefined) => {
+  if (value === null || value === undefined) return null
+  return String(value)
+}
+
+const dedupeOfficerIds = (ids: string[]) => Array.from(new Set(ids.filter(Boolean)))
+
+export function getDepartmentOfficerIds(
+  officers: Officer[] | null | undefined,
+  departmentId: string | number | null | undefined
+): string[] {
+  const normalizedDepartmentId = normalizeEntityId(departmentId)
+  if (!normalizedDepartmentId) return []
+
+  return dedupeOfficerIds(
+    (officers || [])
+      .filter((officer) =>
+        Array.isArray(officer.jobLevels) &&
+        officer.jobLevels.some(
+          (jobLevel) => normalizeEntityId(jobLevel.department_id) === normalizedDepartmentId
+        )
+      )
+      .map((officer) => officer.id)
+  )
+}
+
+export function getDepartmentOfficers(
+  officers: Officer[] | null | undefined,
+  departmentId: string | number | null | undefined
+): Officer[] {
+  const officerIds = new Set(getDepartmentOfficerIds(officers, departmentId))
+  return (officers || []).filter((officer) => officerIds.has(officer.id))
+}
+
+export function getSubdepartmentOfficerIds(
+  officers: Officer[] | null | undefined,
+  departmentId: string | number | null | undefined,
+  subdepartmentId: string | number | null | undefined
+): string[] {
+  const normalizedDepartmentId = normalizeEntityId(departmentId)
+  const normalizedSubdepartmentId = normalizeEntityId(subdepartmentId)
+
+  if (!normalizedSubdepartmentId) return []
+
+  const directOfficerIds = dedupeOfficerIds(
+    (officers || [])
+      .filter((officer) =>
+        Array.isArray(officer.jobLevels) &&
+        officer.jobLevels.some(
+          (jobLevel) => normalizeEntityId(jobLevel.subdepartment_id) === normalizedSubdepartmentId
+        )
+      )
+      .map((officer) => officer.id)
+  )
+
+  if (directOfficerIds.length > 0) return directOfficerIds
+  if (!normalizedDepartmentId) return []
+
+  return dedupeOfficerIds(
+    (officers || [])
+      .filter((officer) =>
+        Array.isArray(officer.jobLevels) &&
+        officer.jobLevels.some(
+          (jobLevel) =>
+            normalizeEntityId(jobLevel.department_id) === normalizedDepartmentId &&
+            normalizeEntityId(jobLevel.subdepartment_id) === null
+        )
+      )
+      .map((officer) => officer.id)
+  )
+}
+
+export function getSubdepartmentOfficers(
+  officers: Officer[] | null | undefined,
+  departmentId: string | number | null | undefined,
+  subdepartmentId: string | number | null | undefined
+): Officer[] {
+  const officerIds = new Set(getSubdepartmentOfficerIds(officers, departmentId, subdepartmentId))
+  return (officers || []).filter((officer) => officerIds.has(officer.id))
 }
 
 // Helper function to get officer with inheritance from parent department

@@ -187,7 +187,6 @@ const getDocumentsLinkedToOtherTasks = async (
   individualId: string
 ): Promise<Set<string>> => {
   try {
-    console.log('[LinkSourceDocumentDialog] DEBUG: Fetching documents linked to other tasks for individual:', individualId, 'Current Task ID:', currentTaskId);
 
     // Get tasks with source_document_id (linked source documents)
     const { data: sourceDocTasks, error: sourceDocError } = await supabase
@@ -213,7 +212,6 @@ const getDocumentsLinkedToOtherTasks = async (
 
     // Check source_document_id links
     if (sourceDocTasks) {
-      console.log('[LinkSourceDocumentDialog] DEBUG: Checking source document links in', sourceDocTasks.length, 'tasks');
 
       sourceDocTasks.forEach((task: TaskDocumentLink) => {
         if (task.source_document_id && typeof task.source_document_id === "object") {
@@ -222,7 +220,6 @@ const getDocumentsLinkedToOtherTasks = async (
             docArray.forEach((doc) => {
               if (doc?.id) {
                 linkedDocIds.add(doc.id.toString());
-                console.log('[LinkSourceDocumentDialog] DEBUG: Found source-linked document:', doc.id, 'in task:', task.id);
               }
             });
           });
@@ -232,26 +229,21 @@ const getDocumentsLinkedToOtherTasks = async (
 
     // Check documents linked to completed stages
     if (completedTasks) {
-      console.log('[LinkSourceDocumentDialog] DEBUG: Checking stage document links in', completedTasks.length, 'completed tasks');
 
       completedTasks.forEach((task: any) => {
-        console.log('[LinkSourceDocumentDialog] DEBUG: Checking completed task:', task.id);
 
         if (task.stages && typeof task.stages === "object") {
           Object.entries(task.stages).forEach(([stageId, stageData]: [string, any]) => {
             // Only check completed stages
             if (stageData.status === 'completed') {
-              console.log('[LinkSourceDocumentDialog] DEBUG: Checking completed stage:', stageId);
 
               const stageDocuments = stageData.documents || {};
               Object.values(stageDocuments).forEach((stageDoc: any) => {
                 if (stageDoc?.id) {
                   linkedDocIds.add(stageDoc.id.toString());
-                  console.log('[LinkSourceDocumentDialog] DEBUG: Found stage-linked document:', stageDoc.id, 'in stage:', stageId, 'of task:', task.id);
                 }
                 if (stageDoc?.linked_document_id) {
                   linkedDocIds.add(stageDoc.linked_document_id.toString());
-                  console.log('[LinkSourceDocumentDialog] DEBUG: Found linked document ID:', stageDoc.linked_document_id, 'in stage:', stageId, 'of task:', task.id);
                 }
               });
             }
@@ -260,8 +252,6 @@ const getDocumentsLinkedToOtherTasks = async (
       });
     }
 
-    console.log('[LinkSourceDocumentDialog] DEBUG: Total linked documents found:', linkedDocIds.size);
-    console.log('[LinkSourceDocumentDialog] DEBUG: Linked document IDs:', Array.from(linkedDocIds));
 
     return linkedDocIds;
   } catch (error) {
@@ -293,23 +283,11 @@ export function LinkSourceDocumentDialog({
 
   // Track documentsLinkedToOtherTasks state changes
   useEffect(() => {
-    console.log('[LinkSourceDocumentDialog] DEBUG: documentsLinkedToOtherTasks state changed:', {
-      taskId: task?.id,
-      documentsCount: documentsLinkedToOtherTasks.size,
-      documentsLinkedToOtherTasks: Array.from(documentsLinkedToOtherTasks),
-      isLoadingLinkedDocs,
-      dialogOpen: open
-    });
   }, [documentsLinkedToOtherTasks, isLoadingLinkedDocs, open]);
 
   // NEW: Handle workflow resolution for original documents in write_up stage
   const resolveOriginalDocumentWorkflow = async (newDocumentId: string, documentTypeId: string) => {
     try {
-      console.log('[LinkSourceDocumentDialog] resolveOriginalDocumentWorkflow called:', {
-        newDocumentId,
-        documentTypeId,
-        individualId: task.individual_id
-      });
 
       // Find existing workflow logs for this document type that have not_applicable status
       const { data: existingLogs, error: logsError } = await supabase
@@ -320,17 +298,12 @@ export function LinkSourceDocumentDialog({
         .order('created_at', { ascending: false });
 
       if (logsError) {
-        console.error('[LinkSourceDocumentDialog] Error fetching existing logs:', logsError);
+        console.error('Error fetching existing logs:', logsError);
         throw logsError;
       }
 
-      console.log('[LinkSourceDocumentDialog] Found existing logs:', {
-        count: existingLogs?.length || 0,
-        logs: existingLogs
-      });
 
       if (!existingLogs || existingLogs.length === 0) {
-        console.log('[LinkSourceDocumentDialog] No existing workflow logs found for document type:', documentTypeId);
         return;
       }
 
@@ -338,20 +311,13 @@ export function LinkSourceDocumentDialog({
       const logToResolve = existingLogs.find(log => {
         const tasks = Array.isArray(log.tasks) ? log.tasks : [];
         const hasNotApplicable = tasks.some((task: any) => task.status === 'not_applicable');
-        console.log('[LinkSourceDocumentDialog] Checking log:', {
-          logId: log.id,
-          tasks: log.tasks,
-          hasNotApplicable
-        });
         return hasNotApplicable;
       });
 
       if (!logToResolve) {
-        console.log('[LinkSourceDocumentDialog] No logs with not_applicable status found');
         return;
       }
 
-      console.log('[LinkSourceDocumentDialog] Found log to resolve:', logToResolve.id);
 
       // Create a new resolution that marks the document as renewed
       const newResolution = {
@@ -376,12 +342,6 @@ export function LinkSourceDocumentDialog({
         )
         : [];
 
-      console.log('[LinkSourceDocumentDialog] Updating workflow log:', {
-        logId: logToResolve.id,
-        newResolution,
-        updatedResolutionsCount: updatedResolutions.length,
-        updatedTasksCount: updatedTasks.length
-      });
 
       const { error: updateError } = await supabase
         .from('document_workflow_logs')
@@ -394,15 +354,10 @@ export function LinkSourceDocumentDialog({
         .eq('id', logToResolve.id);
 
       if (updateError) {
-        console.error('[LinkSourceDocumentDialog] Error updating workflow log:', updateError);
+        console.error('Error updating workflow log:', updateError);
         throw updateError;
       }
 
-      console.log('[LinkSourceDocumentDialog] Successfully resolved original document workflow:', {
-        logId: logToResolve.id,
-        newResolution,
-        updatedTasksCount: updatedTasks.length
-      });
 
       toast({
         title: 'Document Renewed',
@@ -411,7 +366,7 @@ export function LinkSourceDocumentDialog({
       });
 
     } catch (error) {
-      console.error('[LinkSourceDocumentDialog] Error resolving original document workflow:', error);
+      console.error('Error resolving original document workflow:', error);
       toast({
         title: 'Workflow Resolution Error',
         description: 'Failed to update original document workflow',
@@ -425,7 +380,6 @@ export function LinkSourceDocumentDialog({
     try {
       setIsLoading(true);
 
-      console.log('[LinkSourceDocumentDialog] Unlinking document:', { stageId, docId });
 
       // Remove the document from the selected docs in local state
       setSelectedDocs(prev => {
@@ -465,12 +419,6 @@ export function LinkSourceDocumentDialog({
           const currentStage = updatedStages[stageId];
           const previousStatus = currentStage?.status;
 
-          console.log('[LinkSourceDocumentDialog] Determining new stage status:', {
-            stageId,
-            previousStatus,
-            remainingDocs,
-            currentStage
-          });
 
           // Revert stage status based on remaining documents and previous status
           let newStatus = 'in_progress'; // Default fallback
@@ -502,12 +450,6 @@ export function LinkSourceDocumentDialog({
             })
           };
 
-          console.log('[LinkSourceDocumentDialog] Updated stage status:', {
-            stageId,
-            oldStatus: previousStatus,
-            newStatus,
-            remainingDocs
-          });
         }
 
         // Update both source_document_id and stages in the database
@@ -525,7 +467,6 @@ export function LinkSourceDocumentDialog({
           throw updateError;
         }
 
-        console.log('[LinkSourceDocumentDialog] Successfully unlinked document and updated stages');
       }
 
       toast({
@@ -585,7 +526,6 @@ export function LinkSourceDocumentDialog({
     let isCancelled = false;
     const fetchData = async () => {
       try {
-        console.log('[LinkSourceDocumentDialog] Starting data fetch for individual:', task.individual_id);
 
         // 1. Fetch Fresh Task Data for the current task
         const { data: freshTaskData, error: taskError } = await supabase
@@ -594,37 +534,38 @@ export function LinkSourceDocumentDialog({
           .eq('id', task.id)
           .single();
 
-        if (taskError) console.error('[LinkSourceDocumentDialog] Error fetching fresh task data:', taskError);
+        if (taskError) console.error('Error fetching fresh task data:', taskError);
 
-        // 2. Fetch all other tasks for the same individual
+        // 2. Fetch all tasks for the same individual
         const { data: individualTasksData, error: individualTasksError } = await supabase
           .from('tm_tasks')
           .select('*')
           .eq('individual_id', task.individual_id);
 
-        if (individualTasksError) console.error('[LinkSourceDocumentDialog] Error fetching individual tasks:', individualTasksError);
+        if (individualTasksError) console.error('Error fetching individual tasks:', individualTasksError);
 
-        // 3. IDENTIFY LINKED DOCS (Same logic as StageUploadDialog)
+        // 3. IDENTIFY LINKED DOCS (Corrected Logic)
+        // We only want to block documents that are linked to OTHER tasks.
         const allLinkedDocIds = new Set<string>();
-        const extractIds = (t: any, excludeCurrentTask: boolean = false) => {
-          if (!t?.stages) return;
-          Object.values(t.stages).forEach((s: any) => {
-            if (s.documents) {
-              Object.values(s.documents).forEach((d: any) => {
-                if (d.id) {
-                  // Only add if we're not excluding the current task, or if this is not the current task
-                  if (!excludeCurrentTask || t.id !== task.id) {
+
+        const tasksToProcess = individualTasksData || [];
+
+        tasksToProcess.forEach((t) => {
+          // SKIP the current task. We only care about what OTHER tasks have "consumed"
+          if (String(t.id) === String(task.id)) return;
+
+          if (t.stages) {
+            Object.values(t.stages).forEach((s: any) => {
+              if (s.documents) {
+                Object.values(s.documents).forEach((d: any) => {
+                  if (d.id) {
                     allLinkedDocIds.add(String(d.id));
                   }
-                }
-              });
-            }
-          });
-        };
-
-        // Extract IDs from all individual tasks (excluding current task's documents)
-        extractIds(freshTaskData || task, true); // Exclude current task's documents
-        (individualTasksData || []).forEach(t => extractIds(t, false)); // Include all other tasks' documents
+                });
+              }
+            });
+          }
+        });
 
         // 4. Fetch workflow documents
         const workflowLogs = await getWorkflowLogsForIndividual(task.individual_id);
@@ -647,26 +588,16 @@ export function LinkSourceDocumentDialog({
 
         // 5. Final State Update
         if (!isCancelled) {
-          console.log('[LinkSourceDocumentDialog] DEBUG: Updating states with final data:', {
-            taskId: task?.id,
-            freshTaskData: !!freshTaskData,
-            individualTasksCount: individualTasksData?.length || 0,
-            allLinkedDocIdsCount: allLinkedDocIds.size,
-            allLinkedDocIds: Array.from(allLinkedDocIds),
-            workflowDocMapKeys: Object.keys(workflowDocMap)
-          });
 
           setFreshTaskData(freshTaskData);
           setIndividualTasks(individualTasksData || []);
-          setDocumentsLinkedToOtherTasks(allLinkedDocIds);
+          setDocumentsLinkedToOtherTasks(allLinkedDocIds); // This now strictly contains IDs from other tasks
           setWorkflowDocuments(workflowDocMap);
           setIsLoadingLinkedDocs(false);
-
-          console.log('[LinkSourceDocumentDialog] DEBUG: State updates completed');
         }
 
       } catch (error) {
-        console.error("[LinkSourceDocumentDialog] Error initializing dialog:", error);
+        console.error("Error initializing dialog:", error);
         if (!isCancelled) {
           toast({ title: "Error loading data", variant: "destructive" });
           setIsLoadingLinkedDocs(false);
@@ -744,18 +675,10 @@ export function LinkSourceDocumentDialog({
       const writeUpDocs = selectedDocs[writeUpStageId] || [];
 
       if (writeUpDocs.length > 0) {
-        console.log('[LinkSourceDocumentDialog] Write-up stage detected, attempting workflow resolution:', {
-          stageId: writeUpStageId,
-          docsCount: writeUpDocs.length
-        });
 
         // Process each document in write_up stage
         for (const doc of writeUpDocs) {
           const uploadedDocInfo = doc; // Already has id and document_id
-          console.log('[LinkSourceDocumentDialog] Calling resolveOriginalDocumentWorkflow with:', {
-            newDocumentId: uploadedDocInfo.id,
-            documentTypeId: uploadedDocInfo.document_id
-          });
           await resolveOriginalDocumentWorkflow(uploadedDocInfo.id, uploadedDocInfo.document_id);
         }
       }
@@ -868,13 +791,6 @@ export function LinkSourceDocumentDialog({
           <DialogHeader>
             <DialogTitle>Link Source Documents for: {task?.applicant_name} (Task ID: {task?.id})</DialogTitle>
             <DialogDescription>Select one or more documents for each stage.</DialogDescription>
-            {documentsLinkedToOtherTasks.size > 0 && (
-              <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded">
-                <p className="text-sm text-amber-800">
-                  <strong>Note:</strong> {documentsLinkedToOtherTasks.size} document(s) are already linked to other tasks for this individual and won't be shown below.
-                </p>
-              </div>
-            )}
           </DialogHeader>
 
           <div className="flex-grow overflow-hidden border-t border-b">
@@ -886,31 +802,6 @@ export function LinkSourceDocumentDialog({
                 </div>
               ) : (
                 <>
-                  {/* Debug section to show all documents with linked indicators */}
-                  <div className="mb-6 p-4 bg-slate-50 border rounded">
-                    <h4 className="font-semibold text-sm text-slate-700 mb-3">All Documents for Individual (Debug View)</h4>
-                    <div className="space-y-1 text-xs">
-                      {allDocuments
-                        .filter(d => d.director_id?.toString() === task.individual_id?.toString())
-                        .slice(0, 10) // Show first 10 to avoid overwhelming
-                        .map(doc => {
-                          const isLinked = documentsLinkedToOtherTasks.has(doc.id.toString());
-                          return (
-                            <div key={doc.id} className={`flex items-center gap-2 p-1 rounded ${isLinked ? 'bg-red-50' : 'bg-green-50'}`}>
-                              <span className={`w-2 h-2 rounded-full ${isLinked ? 'bg-red-500' : 'bg-green-500'}`}></span>
-                              <span className="font-mono">{doc.id.toString().slice(-8)}</span>
-                              <span className="text-slate-600">-</span>
-                              <span className="flex-1">{kycDocuments.get(doc.document_id)?.display_name || 'Unknown'}</span>
-                              {isLinked && <Badge variant="destructive" className="text-xs">Linked to Other Task</Badge>}
-                            </div>
-                          );
-                        })}
-                      {allDocuments.filter(d => d.director_id?.toString() === task.individual_id?.toString()).length > 10 && (
-                        <div className="text-slate-500 italic">... and {allDocuments.filter(d => d.director_id?.toString() === task.individual_id?.toString()).length - 10} more</div>
-                      )}
-                    </div>
-                  </div>
-
                   <div className="space-y-6 py-4">
                     {applicableStages.map((stage) => {
                       // Filter stage documents to only those applicable to this task
@@ -942,58 +833,18 @@ export function LinkSourceDocumentDialog({
                             const isLinkedToOtherTasks = documentsLinkedToOtherTasks.has(d.id.toString());
 
                             // Only log documents that actually match the individual to reduce noise
-                            if (individualMatch && !stageDocTypesMatch) {
-                              console.log('[LinkSourceDocumentDialog] DEBUG: Document type not applicable for matching individual:', {
-                                taskId: task?.id,
-                                docId: d.id,
-                                documentId: d.document_id,
-                                stageDocTypes: Array.from(stageDocTypes)
-                              });
-                            }
 
-                            if (individualMatch && stageDocTypesMatch && isLinkedToOtherTasks) {
-                              console.log('[LinkSourceDocumentDialog] DEBUG: Document filtered out due to being linked to other tasks:', {
-                                taskId: task?.id,
-                                docId: d.id,
-                                documentId: d.document_id
-                              });
-                            }
 
                             const isAvailable = individualMatch &&
                               stageDocTypesMatch && // Only fetch documents of applicable types
                               !isLinkedToOtherTasks; // Filter out docs linked to other tasks
 
-                            // Special debug for the problematic document
-                            if (d.id === 'a29d9d5c-25be-4362-9ab0-6b5ef9c99f5c') {
-                              console.log('[LinkSourceDocumentDialog] DEBUG: Special check for document a29d9d5c-25be-4362-9ab0-6b5ef9c99f5c:', {
-                                taskId: task?.id,
-                                docId: d.id,
-                                documentId: d.document_id,
-                                individualMatch,
-                                stageDocTypesMatch,
-                                isLinkedToOtherTasks,
-                                isAvailable,
-                                stageDocTypes: Array.from(stageDocTypes)
-                              });
-                            }
 
                             return isAvailable;
                           }
                         )
                         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-                      // Only log summary if there are matching documents
-                      if (availableDocs.length > 0 || allDocuments.some(d => d.director_id?.toString() === task.individual_id?.toString())) {
-                        console.log('[LinkSourceDocumentDialog] DEBUG: Final available documents for stage:', {
-                          taskId: task?.id,
-                          stageId: stage.id,
-                          stageName: stage.name,
-                          totalDocuments: allDocuments.length,
-                          matchingIndividualDocuments: allDocuments.filter(d => d.director_id?.toString() === task.individual_id?.toString()).length,
-                          availableDocsCount: availableDocs.length,
-                          availableDocIds: availableDocs.map(d => d.id)
-                        });
-                      }
 
                       return (
                         <div key={stage.id} className="p-4 border rounded-lg">

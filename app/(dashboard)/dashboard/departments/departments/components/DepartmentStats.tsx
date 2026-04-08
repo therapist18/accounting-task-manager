@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Building, Users, User as UserIcon, Shield, BarChart3, X } from "lucide-react"
 import { getOfficerDisplayName } from "../../../tasks/utils/authOfficers"
+import { getDepartmentOfficerIds, getSubdepartmentOfficerIds } from "../database"
 
 interface DepartmentStatsProps {
   department: {
@@ -38,8 +39,7 @@ function getCurrentAssignments(history: any = []) {
 }
 
 export function DepartmentStats({ department, subdepartments, users, officers }: DepartmentStatsProps) {
-  // Get department officer
-  const deptOfficers = getCurrentAssignments(department.officers_history)
+  const deptOfficers = getDepartmentOfficerIds(officers, department.id)
   
   // Get all subdepartment assignments
   const subdeptOfficers = new Set<string>()
@@ -47,7 +47,7 @@ export function DepartmentStats({ department, subdepartments, users, officers }:
   const assistants = new Set<string>()
   
   subdepartments.forEach(subdept => {
-    getCurrentAssignments(subdept.officer_history).forEach(id => subdeptOfficers.add(id))
+    getSubdepartmentOfficerIds(officers, department.id, subdept.id).forEach(id => subdeptOfficers.add(id))
     getCurrentAssignments(subdept.manager_history).forEach(id => managers.add(id))
     getCurrentAssignments(subdept.assistant_history).forEach(id => assistants.add(id))
   })
@@ -138,7 +138,7 @@ export function DepartmentStats({ department, subdepartments, users, officers }:
                     if (!officer) return null
                     
                     const assignedSubdepts = subdepartments
-                      .filter(subdept => getCurrentAssignments(subdept.officer_history).includes(officerId))
+                      .filter(subdept => getSubdepartmentOfficerIds(officers, department.id, subdept.id).includes(officerId))
                       .map(subdept => subdept.name)
                     
                     return (

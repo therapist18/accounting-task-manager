@@ -22,8 +22,9 @@ import { toast } from "@/lib/hooks/use-toast"
 import { format } from "date-fns"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, formatWorkflowRestrictionReason, taskBundleService } from "../utils/workflowBundleHelpers"
-import { getInheritedOfficer } from "../../departments/departments/database"
+import { getInheritedOfficer, getDepartmentOfficerIds, getSubdepartmentOfficerIds } from "../../departments/departments/database"
 import { fetchAuthOfficers, normalizeAuthOfficer } from "../utils/authOfficers"
+import { fetchOfficers, fetchTaskManagers, fetchTaskAssistants, fetchUsersForDialog, hasJobLevelAccess } from "../utils/userAssignmentService"
 
 const CLASS_D_ID = '1750687058159';
 const SPONSOR_SUBDEPT_ID = '26';
@@ -71,6 +72,14 @@ const createInitialCompanyCategories = () =>
         };
         return acc;
     }, {} as Record<string, { isActive: boolean; wef: string; to: string }>);
+
+const buildSelectOptions = (items: any[] = [], labelKey = "name") =>
+    items.map((item: any) => ({
+        value: String(item.id),
+        label: item.full_name || item[labelKey] || item.name ||
+            (item.firstName && item.lastName ? `${item.firstName} ${item.lastName}`.trim() :
+                item.firstName || item.lastName || item.displayName || 'Unknown')
+    }));
 
 const normalizeEnquiryDateForStorage = (dateValue?: string) => {
     if (!dateValue) {
@@ -184,10 +193,11 @@ export function EnquiryDialog({
         }
     });
 
-    // State for available staff
+    // State for available staff (matching regisry structure)
+    const [allOfficers, setAllOfficers] = useState<any[]>([]);
     const [availableOfficers, setAvailableOfficers] = useState<any[]>([]);
-    const [availableManagers, setAvailableManagers] = useState<any[]>([]);
-    const [availableAssistants, setAvailableAssistants] = useState<any[]>([]);
+    const [managersData, setManagersData] = useState<any[]>([]);
+    const [assistantsData, setAssistantsData] = useState<any[]>([]);
     const [isIndividualPopoverOpen, setIsIndividualPopoverOpen] = useState(false);
     const [isSponsorPopoverOpen, setIsSponsorPopoverOpen] = useState(false);
     const [showCompanyAssociationDialog, setShowCompanyAssociationDialog] = useState(false);
@@ -243,8 +253,32 @@ export function EnquiryDialog({
     }, [availableClasses]);
 
     const officerOptions = useMemo(() => {
-        return availableOfficers.map(o => ({ value: o.id.toString(), label: o.full_name || o.name }));
-    }, [availableOfficers]);
+        if (availableOfficers.length === 0) {
+            return [];
+        }
+        // Filter officers by job level access
+        const filteredOfficers = availableOfficers.filter(officer =>
+            hasJobLevelAccess(officer, formData.department_id, formData.subdepartment_id, formData.class_id)
+        );
+        return filteredOfficers.map(o => ({ value: o.id.toString(), label: o.full_name || o.name }));
+    }, [availableOfficers, formData.department_id, formData.subdepartment_id, formData.class_id]);
+
+    const officerPlaceholder = useMemo(() => {
+        if (!formData.department_id) {
+            return "Select job level first";
+        }
+        if (availableOfficers.length === 0) {
+            return "No officers available";
+        }
+        // Check if any officers have job level access
+        const filteredOfficers = availableOfficers.filter(officer =>
+            hasJobLevelAccess(officer, formData.department_id, formData.subdepartment_id, formData.class_id)
+        );
+        if (filteredOfficers.length === 0) {
+            return "No officers with access to this job level";
+        }
+        return "Select Officer";
+    }, [formData.department_id, availableOfficers.length, formData.subdepartment_id, formData.class_id]);
 
     // Get inherited officer for the selected subdepartment
     const getInheritedOfficerForSubdepartment = useCallback(async (subdepartmentId: string) => {
@@ -301,13 +335,28 @@ export function EnquiryDialog({
         }
     }, [formData.department_id]);
 
-    const managerOptions = useMemo(() => {
-        return availableManagers.map(m => ({ value: m.id.toString(), label: m.full_name || m.name }));
-    }, [availableManagers]);
+    // Use fetched managers and assistants data for dropdown options (matching regisry)
+    const managerOpts = useMemo(() => {
+        console.log('🔧 EnquiryDialog: Building manager options from managersData:', managersData);
+        // Filter managers by job level access and role_type 'manager'
+        const filteredManagers = managersData.filter(manager =>
+            hasJobLevelAccess(manager, formData.department_id, formData.subdepartment_id, formData.class_id) &&
+            manager.jobLevels && manager.jobLevels.some((jobLevel: any) => jobLevel.role_type === 'manager')
+        );
+        console.log('🔧 EnquiryDialog: Filtered managers:', filteredManagers);
+        return buildSelectOptions(filteredManagers, 'name');
+    }, [managersData, formData.department_id, formData.subdepartment_id, formData.class_id]);
 
-    const assistantOptions = useMemo(() => {
-        return availableAssistants.map(a => ({ value: a.id.toString(), label: a.full_name || a.name }));
-    }, [availableAssistants]);
+    const assistantOpts = useMemo(() => {
+        console.log('🔧 EnquiryDialog: Building assistant options from assistantsData:', assistantsData);
+        // Filter assistants by job level access and role_type 'assistant'
+        const filteredAssistants = assistantsData.filter(assistant =>
+            hasJobLevelAccess(assistant, formData.department_id, formData.subdepartment_id, formData.class_id) &&
+            assistant.jobLevels && assistant.jobLevels.some((jobLevel: any) => jobLevel.role_type === 'assistant')
+        );
+        console.log('🔧 EnquiryDialog: Filtered assistants:', filteredAssistants);
+        return buildSelectOptions(filteredAssistants, 'name');
+    }, [assistantsData, formData.department_id, formData.subdepartment_id, formData.class_id]);
 
     // Helper function to construct Supabase storage URL
     const getSupabaseImageUrl = useCallback((filePath: string | null): string | null => {
@@ -433,6 +482,39 @@ export function EnquiryDialog({
     useEffect(() => {
         if (open && taskToEdit) {
             console.log("🔹 [EnquiryDialog] Populating Edit Mode for Task:", taskToEdit.id);
+
+            // 0. Ensure existing participants are available in the dropdowns
+            if (taskToEdit.participants_details) {
+                const existingOfficers = [...availableOfficers];
+                const existingManagers = [...availableManagers];
+                const existingAssistants = [...availableAssistants];
+
+                taskToEdit.participants_details.forEach(participant => {
+                    const normalizedParticipant = {
+                        id: participant.id,
+                        full_name: participant.name,
+                        name: participant.name
+                    };
+
+                    if (participant.role?.includes('officer')) {
+                        if (!existingOfficers.find(o => o.id.toString() === participant.id.toString())) {
+                            existingOfficers.push(normalizedParticipant);
+                        }
+                    } else if (participant.role?.includes('task_manager')) {
+                        if (!existingManagers.find(m => m.id.toString() === participant.id.toString())) {
+                            existingManagers.push(normalizedParticipant);
+                        }
+                    } else if (participant.role?.includes('task_assistant')) {
+                        if (!existingAssistants.find(a => a.id.toString() === participant.id.toString())) {
+                            existingAssistants.push(normalizedParticipant);
+                        }
+                    }
+                });
+
+                setAvailableOfficers(existingOfficers);
+                setAvailableManagers(existingManagers);
+                setAvailableAssistants(existingAssistants);
+            }
 
             // 1. Basic Form Data
             setFormData({
@@ -623,16 +705,17 @@ export function EnquiryDialog({
     const loadStaffData = useCallback(async () => {
         setLoadingStaff(true);
         try {
-            const [usersResult, officersResult] = await Promise.all([
-                supabase.from('tm_users').select('*').order('name'),
-                fetchAuthOfficers()
+            // Use unified API to fetch officers, managers, and assistants
+            const [officersResult, managersResult, assistantsResult] = await Promise.all([
+                fetchOfficers({ payrollAccess: true }),
+                fetchTaskManagers({ payrollAccess: true }),
+                fetchTaskAssistants({ payrollAccess: true })
             ]);
 
-            if (usersResult.data) {
-                setAvailableManagers(usersResult.data);
-                setAvailableAssistants(usersResult.data);
-            }
+            setAllOfficers(officersResult);
             setAvailableOfficers(officersResult);
+            setManagersData(managersResult);
+            setAssistantsData(assistantsResult);
         } catch (err) {
             console.error("Error loading staff:", err);
             toast({ title: "Error", description: "Failed to load staff data", variant: "destructive" });
@@ -644,10 +727,12 @@ export function EnquiryDialog({
     useEffect(() => {
         // If props are explicitly provided and not empty, use them
         if (users.length > 0 || officers.length > 0) {
-            if (officers.length > 0) setAvailableOfficers(officers.map(normalizeAuthOfficer));
+            const normalizedOfficers = officers.map(normalizeAuthOfficer);
+            setAllOfficers(normalizedOfficers);
+            setAvailableOfficers(normalizedOfficers);
             if (users.length > 0) {
-                setAvailableManagers(users);
-                setAvailableAssistants(users);
+                setManagersData(users);
+                setAssistantsData(users);
             }
         }
         // Otherwise, if dialog is open and we haven't loaded data yet, fetch internally
@@ -656,7 +741,7 @@ export function EnquiryDialog({
                 loadStaffData();
             }
         }
-    }, [open, users, officers, loadStaffData, availableManagers.length, availableOfficers.length]);
+    }, [open, users, officers, loadStaffData, managersData.length, availableOfficers.length]);
 
     useEffect(() => {
         if (open) {
@@ -682,7 +767,79 @@ export function EnquiryDialog({
         };
 
         updateInheritedOfficer();
-    }, [formData.subdepartment_id, formData.department_id, getInheritedOfficerForSubdepartment, formData.officer_id]);
+    }, [formData.subdepartment_id, formData.department_id, formData.officer_id]);
+
+    // Filter officers based on department and subdepartment selection with inheritance
+    useEffect(() => {
+        if (allOfficers.length === 0) return;
+
+        console.log('🔍 [EnquiryDialog] Officer Filtering - Department:', formData.department_id, 'Subdepartment:', formData.subdepartment_id);
+        console.log('🔍 [EnquiryDialog] Total Officers Available:', allOfficers.length);
+        console.log('🔍 [EnquiryDialog] All Officers with jobLevels:', allOfficers.map(o => ({
+            id: o.id,
+            name: o.full_name || o.name,
+            jobLevels: o.jobLevels
+        })));
+
+        let filteredOfficers = [];
+        let inheritanceUsed = false;
+
+        if (formData.subdepartment_id) {
+            // Get officers assigned to this specific subdepartment
+            const subdeptOfficerIds = getSubdepartmentOfficerIds(allOfficers, formData.department_id, formData.subdepartment_id);
+            const subdeptOfficers = allOfficers.filter(officer => subdeptOfficerIds.includes(officer.id));
+
+            console.log('🔍 [EnquiryDialog] Subdepartment Officer IDs:', subdeptOfficerIds);
+            console.log('🔍 [EnquiryDialog] Subdepartment Officers Found:', subdeptOfficers.length);
+
+            if (subdeptOfficers.length > 0) {
+                // Subdepartment has its own officers
+                filteredOfficers = subdeptOfficers;
+                console.log('✅ [EnquiryDialog] Using subdepartment officers:', filteredOfficers.map(o => o.full_name || o.name));
+            } else {
+                // Subdepartment has no officers, inherit from parent department
+                const deptOfficerIds = getDepartmentOfficerIds(allOfficers, formData.department_id);
+                filteredOfficers = allOfficers.filter(officer => deptOfficerIds.includes(officer.id));
+                inheritanceUsed = true;
+                console.log('🔍 [EnquiryDialog] Department Officer IDs (Inherited):', deptOfficerIds);
+                console.log('🔄 [EnquiryDialog] Using inherited department officers:', filteredOfficers.map(o => o.full_name || o.name));
+            }
+        } else if (formData.department_id) {
+            // Get officers assigned to this department
+            console.log('🔍 [EnquiryDialog] Looking for department:', formData.department_id, 'type:', typeof formData.department_id);
+
+            // Manual check to see what's happening
+            const manualDeptOfficers = allOfficers.filter(officer => {
+                const hasMatchingDept = Array.isArray(officer.jobLevels) &&
+                    officer.jobLevels.some((jobLevel) => {
+                        const matches = String(jobLevel.department_id) === String(formData.department_id);
+                        console.log('🔍 [EnquiryDialog] Officer', officer.full_name || officer.name, 'jobLevel dept:', jobLevel.department_id, 'matches:', matches);
+                        return matches;
+                    });
+                return hasMatchingDept;
+            });
+
+            console.log('🔍 [EnquiryDialog] Manual department officers found:', manualDeptOfficers.length);
+
+            const deptOfficerIds = getDepartmentOfficerIds(allOfficers, formData.department_id);
+            filteredOfficers = allOfficers.filter(officer => deptOfficerIds.includes(officer.id));
+            console.log('🔍 [EnquiryDialog] Department Officer IDs:', deptOfficerIds);
+            console.log('✅ [EnquiryDialog] Using department officers:', filteredOfficers.map(o => o.full_name || o.name));
+        } else {
+            // No department selected, show no officers
+            filteredOfficers = [];
+            console.log('⚠️ [EnquiryDialog] No department selected - no officers available');
+        }
+
+        console.log('📊 [EnquiryDialog] Final Filtered Officers:', filteredOfficers.length, 'Inheritance Used:', inheritanceUsed);
+        setAvailableOfficers(filteredOfficers);
+
+        // If current officer selection is not in filtered list, clear it
+        if (formData.officer_id && !filteredOfficers.find(o => o.id.toString() === formData.officer_id)) {
+            console.log('🧹 [EnquiryDialog] Clearing invalid officer selection:', formData.officer_id);
+            setFormData(prev => ({ ...prev, officer_id: '' }));
+        }
+    }, [formData.department_id, formData.subdepartment_id, allOfficers, formData.officer_id]);
 
     useEffect(() => {
         if (!open) return;
@@ -1312,7 +1469,7 @@ export function EnquiryDialog({
                                                             <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
                                                         </div>
                                                     ) : applicantPhoto ? (
-                                                        isApplicantPhotoPdf ? (
+                                                        (applicantPhoto.toLowerCase().includes('.pdf') || applicantPhoto.includes('application/pdf')) ? (
                                                             <iframe
                                                                 src={`${applicantPhoto}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
                                                                 className="w-16 h-16 rounded-lg object-cover border-2 border-blue-100 overflow-hidden bg-white"
@@ -1656,7 +1813,7 @@ export function EnquiryDialog({
                                                     value={formData.officer_id}
                                                     onValueChange={id => setFormData(prev => ({ ...prev, officer_id: id }))}
                                                     options={officerOptions}
-                                                    placeholder="Select Officer"
+                                                    placeholder={officerPlaceholder}
                                                     disabled={officerOptions.length === 0}
                                                     emptyMessage="No officers found."
                                                     searchPlaceholder="Search officer..."
@@ -1677,14 +1834,25 @@ export function EnquiryDialog({
                                             <SearchableSelect
                                                 value={formData.task_manager_id}
                                                 onValueChange={id => setFormData(prev => ({ ...prev, task_manager_id: id }))}
-                                                options={managerOptions}
+                                                options={managerOpts}
                                                 placeholder="Select Manager"
-                                                disabled={managerOptions.length === 0}
+                                                disabled={managerOpts.length === 0}
                                                 emptyMessage="No managers found."
                                                 searchPlaceholder="Search manager..."
                                                 buttonClassName="h-11 bg-white border-slate-200"
-                                                popoverClassName="w-[--radix-popover-trigger-width]"
-                                                allowClear={true}
+                                            />
+                                        </TableRow>
+
+                                        <TableRow label="Task Assistant">
+                                            <SearchableSelect
+                                                value={formData.task_assistant_id}
+                                                onValueChange={id => setFormData(prev => ({ ...prev, task_assistant_id: id }))}
+                                                options={assistantOpts}
+                                                placeholder="Select Assistant"
+                                                disabled={assistantOpts.length === 0}
+                                                emptyMessage="No assistants found."
+                                                searchPlaceholder="Search assistant..."
+                                                buttonClassName="h-11 bg-white border-slate-200"
                                             />
                                         </TableRow>
 
