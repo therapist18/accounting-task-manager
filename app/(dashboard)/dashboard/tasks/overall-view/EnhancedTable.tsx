@@ -8,14 +8,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { FileText, Plus, Minus, Loader2, AlertTriangle, Zap, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileIcon, Eye, EyeOff, Pencil } from "lucide-react"
 import { DeleteConfirmationDialog } from "../components/DeleteConfirmationDialog"
 import { EnquiryDialog } from "../components/EnquiryDialog"
-import { getInheritedOfficer } from "../../departments/departments/database"
+import { userService, getOfficerDisplayName } from "@/lib/shared-user-assignment-service"
 
 // --- Helper Functions & Constants ---
 
 const DEBUG = process.env.NODE_ENV !== 'production';
 
-// Helper function to get inherited officer for a task
-const getInheritedOfficerForTask = (task: any, departments: any[]) => {
+// Helper function to get inherited officer for a task using userService
+const getInheritedOfficerForTask = (task: any, departments: any[], officers: any[] = []) => {
   if (!task || !departments.length) return null;
 
   const department = departments.find(d =>
@@ -28,16 +28,25 @@ const getInheritedOfficerForTask = (task: any, departments: any[]) => {
   );
   if (!subdepartment) return null;
 
-  // Create a mock department structure for inheritance logic
-  const departmentForInheritance = {
-    ...department,
-    officers_history: [] // Departments don't have officers_history in the current schema
-  };
-
-  return getInheritedOfficer(
-    subdepartment.officers_history || [],
-    departmentForInheritance
+  // Use new userService for staff assignments
+  const subdepartmentUsers = userService.getSubdepartmentUsers(
+    officers.map(o => ({
+      id: o.id,
+      displayName: getOfficerDisplayName(o),
+      email: o.email,
+      role: 'officer',
+      firstName: o.firstName,
+      lastName: o.lastName,
+      isActive: o.isActive,
+      assignments: o.assignments || [],
+      username: o.username || null,
+      createdAt: o.createdAt || new Date().toISOString()
+    })),
+    department.id.toString(),
+    subdepartment.id.toString()
   );
+
+  return subdepartmentUsers.officers.length > 0 ? subdepartmentUsers.officers[0] : null;
 };
 
 const debugLog = (...args: any[]) => {
@@ -357,7 +366,7 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
       if (!task) return [];
       const taskId = task.id || Math.random().toString(36).substr(2, 9);
       // Get inherited officer if no direct officer assignment
-      const inheritedOfficer = getInheritedOfficerForTask(task, departments || []);
+      const inheritedOfficer = getInheritedOfficerForTask(task, departments || [], officers || []);
       const officerWithInheritance = task.officer || inheritedOfficer || { id: task.officer_id, name: '' };
 
       const taskWithDetails = {

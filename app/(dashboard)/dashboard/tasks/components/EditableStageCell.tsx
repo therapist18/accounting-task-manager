@@ -22,7 +22,6 @@ import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { formatDuration, getTimeStatus, isDocumentApplicable, parseDate } from "../overall-view/tableUtils"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { calculateStageDate } from "../utils/dateUtils"
-import { getInheritedOfficer } from "../../departments/departments/database"
 
 interface EditableStageCellProps {
   stage: any

@@ -22,7 +22,7 @@ import {
   ChevronDown, ChevronsRight, ChevronsDown, FileText,
   ChevronLeft, ChevronRight, RefreshCw, AlertTriangle,
   Clock, ArrowUpDown, Search, Timer, AlertCircle,
-  CheckCircle2, Clock3, User, EyeOff, Eye
+  CheckCircle2, Clock3, User, EyeOff, Eye, Filter
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -57,9 +57,12 @@ import {
   fetchAllKycFields,
 } from "../tasks/utils/taskManagerData";
 import { getOfficerDisplayName } from "@/lib/shared-user-assignment-service";
-import { fetchDepartments, getDepartmentOfficerIds, getSubdepartmentOfficerIds } from "../departments/departments/database";
+import { fetchDepartments } from "../departments/departments/database";
+import { userService } from "@/lib/shared-user-assignment-service";
 import { MemorizedReportDialog } from "./MemorizedReportDialog";
 import { calculateStageDate, findDateInObject } from "../tasks/utils/dateUtils";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -71,7 +74,7 @@ const SPECIAL_STAGE_IDS = [
 ];
 
 const COLUMN_WIDTH_CLASS = "w-[180px] min-w-[180px] max-w-[180px]";
-const INDEX_WIDTH_CLASS = "w-[60px] min-w-[60px] max-w-[60px]";
+const INDEX_WIDTH_CLASS = "w-[50px] min-w-[50px] max-w-[50px]";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -101,7 +104,7 @@ const getElapsedMinutes = (from: Date | null, to: Date = new Date()): number | n
 const safeRender = (content: any) => {
   if (React.isValidElement(content)) return content;
   if (typeof content === 'string' || typeof content === 'number') return content;
-  if (content === null || content === undefined) return <span className="text-slate-300">-</span>;
+  if (content === null || content === undefined) return <span className="text-[11px] font-bold text-slate-300 uppercase tracking-widest">—</span>;
   if (Array.isArray(content)) return content.map((c, i) => <React.Fragment key={i}>{safeRender(c)}</React.Fragment>);
   if (typeof content === 'object') {
     if ('status' in content) {
@@ -111,12 +114,11 @@ const safeRender = (content: any) => {
       if (!s) return null;
       return JSON.stringify(s);
     }
-    return <span className="text-xs text-gray-500 truncate max-w-[100px] inline-block" title={JSON.stringify(content)}>{JSON.stringify(content)}</span>;
+    return <span className="text-sm text-slate-500 truncate max-w-[100px] inline-block" title={JSON.stringify(content)}>{JSON.stringify(content)}</span>;
   }
   return String(content);
 };
 
-// Add/Verify this helper in both ReportsPage.tsx and MemorizedReportDialog.tsx
 const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boolean => {
   if (!task || !stage || !departments?.length) return true;
   try {
@@ -128,7 +130,6 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boo
     );
     if (!subdept) return true;
 
-    // 1. Subclass Level (Highest Priority)
     if (task.subclass_id) {
       const cls = subdept.classes?.find((c: any) => c.id.toString() === task.class_id?.toString());
       const subCls = cls?.subClasses?.find((sc: any) => sc.id.toString() === task.subclass_id?.toString());
@@ -136,22 +137,21 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boo
       if (subClassStage && typeof subClassStage.applicable === 'boolean') return subClassStage.applicable;
     }
 
-    // 2. Class Level
     if (task.class_id) {
       const cls = subdept.classes?.find((c: any) => c.id.toString() === task.class_id?.toString());
       const classStage = cls?.stages?.find((s: any) => s.stage_id === stage.id);
       if (classStage && typeof classStage.applicable === 'boolean') return classStage.applicable;
     }
 
-    // 3. Sub-Department Level
     const subdeptStage = subdept.stages?.find((s: any) => s.stage_id === stage.id);
     if (subdeptStage && typeof subdeptStage.applicable === 'boolean') return subdeptStage.applicable;
 
-    return true; // Default
+    return true;
   } catch (error) {
     return true;
   }
 };
+
 export default function ReportsPage() {
   // ── Report state ───────────────────────────────────────────────────────────
   const [activeReport, setActiveReport] = useState<any | null>(null);
@@ -200,7 +200,7 @@ export default function ReportsPage() {
   const [expandedStageColumns, setExpandedStageColumns] = useState<Set<string>>(new Set());
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Helpers
+  // Initialization & Fetching
   // ─────────────────────────────────────────────────────────────────────────
 
   const getStaffName = useCallback((userId: any) => {
@@ -235,10 +235,6 @@ export default function ReportsPage() {
     });
   }, []);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Initialization
-  // ─────────────────────────────────────────────────────────────────────────
-
   useEffect(() => {
     const init = async () => {
       setReportLoading(true);
@@ -251,7 +247,6 @@ export default function ReportsPage() {
         setAvailableReports(reports || []);
         if (reports?.length > 0) setActiveReport(reports[0]);
 
-        // Use unified API to fetch users
         const [usersResponse, authOfficers] = await Promise.all([
           fetch('/api/auth/users/unified?payrollAccess=true').then(res => res.json()),
           fetchAuthOfficers()
@@ -279,7 +274,6 @@ export default function ReportsPage() {
     init();
   }, []);
 
-  // Sync session fields when active report changes
   useEffect(() => {
     if (activeReport && !activeReport.sessionIncludedFields) {
       setActiveReport((prev: any) => ({
@@ -288,10 +282,6 @@ export default function ReportsPage() {
       }));
     }
   }, [activeReport?.id]);
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Data fetching
-  // ─────────────────────────────────────────────────────────────────────────
 
   const refreshData = useCallback(async () => {
     if (!activeReport) return;
@@ -352,7 +342,7 @@ export default function ReportsPage() {
   useEffect(() => { refreshData(); }, [activeReport]);
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Filtering
+  // Filtering & Computed Maps
   // ─────────────────────────────────────────────────────────────────────────
 
   const activeDepartment = useMemo(() =>
@@ -363,7 +353,6 @@ export default function ReportsPage() {
     activeDepartment?.tm_subdepartments || [],
     [activeDepartment]);
 
-  // Update available officers when dept/subdept changes
   useEffect(() => {
     if (!activeDeptId) {
       setAvailableOfficers([]);
@@ -372,11 +361,21 @@ export default function ReportsPage() {
       return;
     }
 
-    const allowedIds = new Set(
-      activeSubDeptId && activeSubDeptId !== 'all'
-        ? getSubdepartmentOfficerIds(allOfficers, activeDeptId, activeSubDeptId)
-        : getDepartmentOfficerIds(allOfficers, activeDeptId)
+    const departmentUsers = userService.getDepartmentUsers(
+      allOfficers.map(o => ({
+        id: o.id,
+        displayName: getOfficerDisplayName(o),
+        email: o.email,
+        role: 'officer',
+        firstName: o.firstName,
+        lastName: o.lastName,
+        isActive: o.isActive
+      })),
+      activeDeptId,
+      activeSubDeptId === 'all' ? undefined : activeSubDeptId
     );
+
+    const allowedIds = new Set(departmentUsers.officers.map(o => o.id));
 
     const final = allOfficers.filter(o => allowedIds.has(o.id));
     setAvailableOfficers(final);
@@ -424,10 +423,6 @@ export default function ReportsPage() {
       (companies.get(t.company_id)?.toLowerCase().includes(q))
     );
   }, [filteredTasks, searchQuery, companies]);
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Document helpers
-  // ─────────────────────────────────────────────────────────────────────────
 
   const getDocumentForTaskStage = useCallback((task: any, stage: any) => {
     let linked = task.source_document_id?.[stage.id];
@@ -505,101 +500,57 @@ export default function ReportsPage() {
     });
 
     return latest;
-  }, [stages, checkStageApplicableForTask, getStageHandledDate]);
+  }, [stages, getStageHandledDate]);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Applicability helpers
-  // ─────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Per-task check — used when rendering individual cells.
-   * This is the primary applicability gate, consistent with EditableStageCell.
-   */
   function checkStageApplicableForTask(stage: any, task: any): boolean {
     return isStageApplicableToTask(stage, task, departments);
   }
 
-  /**
-   * Column-level check — determines whether to show a stage column in the
-   * table header at all. We still show the column (so different tasks can have
-   * different values) but we use this to visually indicate on the header if
-   * the active filter makes the stage globally inapplicable.
-   */
   const isStageApplicableToCurrentFilter = useCallback((stageId: string): boolean => {
-    if (!activeDeptId || activeDeptId === 'all') {
-      return true;
-    }
+    if (!activeDeptId || activeDeptId === 'all') return true;
 
     const dept = departments.find(d => d.id.toString() === activeDeptId);
-    if (!dept) {
-      return true;
-    }
+    if (!dept) return true;
 
     const subdept = activeSubDeptId && activeSubDeptId !== 'all'
       ? dept.tm_subdepartments?.find((s: any) => s.id.toString() === activeSubDeptId)
       : null;
 
-    // If no specific subdept selected, check if any subdept makes it applicable
     if (!subdept) {
       return dept.tm_subdepartments?.some((s: any) => {
         const subdeptStage = s.stages?.find((st: any) => st.stage_id === stageId);
-        if (subdeptStage && typeof subdeptStage.applicable === 'boolean') {
-          return subdeptStage.applicable;
-        }
-
-        // Check class-level if class is selected
+        if (subdeptStage && typeof subdeptStage.applicable === 'boolean') return subdeptStage.applicable;
         if (activeClassId && activeClassId !== 'all') {
           const cls = s.classes?.find((c: any) => c.id.toString() === activeClassId);
           if (cls) {
             const classStage = cls.stages?.find((st: any) => st.stage_id === stageId);
-            if (classStage && typeof classStage.applicable === 'boolean') {
-              return classStage.applicable;
-            }
+            if (classStage && typeof classStage.applicable === 'boolean') return classStage.applicable;
           }
         }
-
-        return true; // No override found
+        return true;
       }) ?? true;
     }
 
-    if (!subdept) {
-      return true;
-    }
-
-    // Check class-level if class is selected
     if (activeClassId && activeClassId !== 'all') {
       const cls = subdept.classes?.find((c: any) => c.id.toString() === activeClassId);
       if (cls) {
         const classStage = cls.stages?.find((s: any) => s.stage_id === stageId);
-        if (classStage && typeof classStage.applicable === 'boolean') {
-          return classStage.applicable;
-        }
-
-        // Check subclass-level if subclass is selected
+        if (classStage && typeof classStage.applicable === 'boolean') return classStage.applicable;
         if (activeSubClassId && activeSubClassId !== 'all') {
           const subCls = cls.subClasses?.find((sc: any) => sc.id.toString() === activeSubClassId);
           if (subCls) {
             const subClassStage = subCls.stages?.find((s: any) => s.stage_id === stageId);
-            if (subClassStage && typeof subClassStage.applicable === 'boolean') {
-              return subClassStage.applicable;
-            }
+            if (subClassStage && typeof subClassStage.applicable === 'boolean') return subClassStage.applicable;
           }
         }
       }
     }
 
-    // Subdepartment-level fallback
     const subdeptStage = subdept.stages?.find((s: any) => s.stage_id === stageId);
-    if (subdeptStage && typeof subdeptStage.applicable === 'boolean') {
-      return subdeptStage.applicable;
-    }
+    if (subdeptStage && typeof subdeptStage.applicable === 'boolean') return subdeptStage.applicable;
 
-    return true; // Default to applicable
+    return true;
   }, [activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, departments]);
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Sort
-  // ─────────────────────────────────────────────────────────────────────────
 
   const getSortableValue = useCallback((task: any, col: any) => {
     if (!col) return '';
@@ -646,10 +597,6 @@ export default function ReportsPage() {
     });
   };
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Column definition
-  // ─────────────────────────────────────────────────────────────────────────
-
   const columns = useMemo(() => {
     if (!activeReport || !stages.length) return [];
 
@@ -684,10 +631,7 @@ export default function ReportsPage() {
     const activeStageIds = Object.keys(activeReport.configuration?.stages || {});
     stages
       .filter(s => activeStageIds.includes(s.id))
-      .filter(stage => {
-        const isApplicable = isStageApplicableToCurrentFilter(stage.id);
-        return isApplicable;
-      })
+      .filter(stage => isStageApplicableToCurrentFilter(stage.id))
       .forEach(stage => {
         const config = activeReport.configuration.stages[stage.id];
         const isSpecialStage = SPECIAL_STAGE_IDS.includes(stage.id);
@@ -704,7 +648,6 @@ export default function ReportsPage() {
               stageId: stage.id,
               stageName: stage.name,
               hasSubColumns: hasDocuments,
-              // pre-compute filter-level applicability for header styling
               filterApplicable: isStageApplicableToCurrentFilter(stage.id)
             });
           }
@@ -781,32 +724,26 @@ export default function ReportsPage() {
     columns.filter(c => visibleColumnIds.includes(c.id)),
     [columns, visibleColumnIds]);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Cell rendering
-  // ─────────────────────────────────────────────────────────────────────────
-
   const renderCellValue = useCallback((task: any, col: any) => {
     if (col.type === 'current_stage_age') {
       const tracking = getCurrentStageTracking(task);
       const elapsedMinutes = getElapsedMinutes(tracking?.handledAt || null);
 
-      if (!tracking || elapsedMinutes == null) {
-        return <span className="text-slate-300">-</span>;
-      }
+      if (!tracking || elapsedMinutes == null) return <span className="text-sm text-slate-400">—</span>;
 
       return (
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="flex items-center gap-1.5 text-xs font-medium text-blue-700">
-              <Clock3 className="h-3.5 w-3.5" />
+            <div className="flex items-center gap-1.5 text-sm font-medium text-blue-700">
+              <Clock3 className="h-4 w-4" />
               <span>{formatDuration(elapsedMinutes)}</span>
             </div>
           </TooltipTrigger>
-          <TooltipContent className="border border-blue-200 bg-blue-50 text-slate-900 shadow-md">
-            <div className="space-y-1 text-xs">
-              <div><span className="font-semibold">Stage:</span> {tracking.stage?.name || '-'}</div>
-              <div><span className="font-semibold">Handled:</span> {formatDateTimeForDisplay(tracking.handledAt)}</div>
-              <div><span className="font-semibold">Elapsed:</span> {formatDuration(elapsedMinutes)}</div>
+          <TooltipContent className="border-slate-200 shadow-xl text-sm bg-white text-slate-700">
+            <div className="space-y-1">
+              <div><span className="font-semibold text-slate-500">Stage:</span> {tracking.stage?.name || '-'}</div>
+              <div><span className="font-semibold text-slate-500">Handled:</span> {formatDateTimeForDisplay(tracking.handledAt)}</div>
+              <div><span className="font-semibold text-slate-500">Elapsed:</span> <span className="text-blue-600">{formatDuration(elapsedMinutes)}</span></div>
             </div>
           </TooltipContent>
         </Tooltip>
@@ -817,46 +754,37 @@ export default function ReportsPage() {
       const initiatedAt = getTaskInitiatedDate(task);
       const elapsedMinutes = getElapsedMinutes(initiatedAt);
 
-      if (!initiatedAt || elapsedMinutes == null) {
-        return <span className="text-slate-300">-</span>;
-      }
+      if (!initiatedAt || elapsedMinutes == null) return <span className="text-sm text-slate-400">—</span>;
 
       return (
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="flex items-center gap-1.5 text-xs font-medium text-violet-700">
-              <Timer className="h-3.5 w-3.5" />
+            <div className="flex items-center gap-1.5 text-sm font-medium text-violet-700">
+              <Timer className="h-4 w-4" />
               <span>{formatDuration(elapsedMinutes)}</span>
             </div>
           </TooltipTrigger>
-          <TooltipContent className="border border-violet-200 bg-violet-50 text-slate-900 shadow-md">
-            <div className="space-y-1 text-xs">
-              <div><span className="font-semibold">Initiated:</span> {formatDateTimeForDisplay(initiatedAt)}</div>
-              <div><span className="font-semibold">Elapsed:</span> {formatDuration(elapsedMinutes)}</div>
+          <TooltipContent className="border-slate-200 shadow-xl text-sm bg-white text-slate-700">
+            <div className="space-y-1">
+              <div><span className="font-semibold text-slate-500">Initiated:</span> {formatDateTimeForDisplay(initiatedAt)}</div>
+              <div><span className="font-semibold text-slate-500">Elapsed:</span> <span className="text-violet-600">{formatDuration(elapsedMinutes)}</span></div>
             </div>
           </TooltipContent>
         </Tooltip>
       );
     }
-    // ── Stage date column ────────────────────────────────────────────────
+
     if (col.type === 'stage_date') {
       const stage = stages.find(s => s.id === col.stageId);
-      if (!stage) return <span className="text-slate-300">-</span>;
+      if (!stage) return <span className="text-sm text-slate-400">—</span>;
 
-      // Around line 512 in your provided file
       if (!checkStageApplicableForTask(stage, task)) {
-        return (
-          <div className="flex items-center justify-center w-full">
-            <span className="text-[10px] font-medium text-slate-400 italic bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
-              N/A
-            </span>
-          </div>
-        );
+        return <span className="text-sm text-slate-400">N/A</span>;
       }
+
       const stageData = task.stages?.[col.stageId];
       const estimatedMinutes = stage.estimated_time;
 
-      // Effective start time (mirrors EditableStageCell.effectiveStartTime)
       let effectiveStartTime: Date | null = task.date_initiated ? parseDate(task.date_initiated) : null;
       if (!effectiveStartTime && task.created_at) effectiveStartTime = parseDate(task.created_at);
 
@@ -880,28 +808,26 @@ export default function ReportsPage() {
         }
       }
 
-      // Skipped
       if (stageData?.status === 'skipped') {
         const reason = stageData?.reason || 'No reason provided';
         const skippedAt = stageData?.skippedAt ? parseDate(stageData.skippedAt) : null;
         return (
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="flex items-center gap-1.5 text-xs text-amber-600 font-medium cursor-help">
-                <AlertCircle className="h-3.5 w-3.5" /> Skipped
+              <span className="flex items-center gap-1 text-sm text-amber-600 font-medium cursor-help">
+                <AlertCircle className="h-4 w-4" /> Skipped
               </span>
             </TooltipTrigger>
-            <TooltipContent className="bg-amber-50 text-amber-900 border-amber-200">
-              <div className="text-xs space-y-1">
-                <p><span className="font-semibold">Reason:</span> {reason}</p>
-                {skippedAt && <p><span className="font-semibold">Date:</span> {formatDateTimeForDisplay(skippedAt)}</p>}
+            <TooltipContent className="bg-white text-slate-700 border-slate-200 shadow-xl p-2">
+              <div className="text-sm space-y-1">
+                <p><span className="font-semibold text-slate-500">Reason:</span> {reason}</p>
+                {skippedAt && <p><span className="font-semibold text-slate-500">Date:</span> {formatDateTimeForDisplay(skippedAt)}</p>}
               </div>
             </TooltipContent>
           </Tooltip>
         );
       }
 
-      // Calculate completion date (mirrors EditableStageCell.stageDate via calculateStageDate)
       let linkedDocs: any[] = [];
       if (stage.documents?.length > 0) {
         linkedDocs = stage.documents.flatMap((docConfig: any) => {
@@ -928,15 +854,13 @@ export default function ReportsPage() {
         }
 
         const textColor = isCompletedOverdue ? "text-amber-600" : "text-emerald-600";
-        const icon = isCompletedOverdue ? <Clock className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />;
-        const borderColor = isCompletedOverdue ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-100";
+        const icon = isCompletedOverdue ? <Clock className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />;
         const statusText = isCompletedOverdue ? "Completed (Overdue)" : "Completed On Time";
 
         if (!showTimeStatuses) {
           return (
-            <div className={`flex items-center gap-1.5 font-semibold text-xs ${textColor}`}>
-              {icon}
-              <span>{formatDateForDisplay(completionDate)}</span>
+            <div className={`flex items-center gap-1.5 font-medium text-sm ${textColor}`}>
+              {icon}<span>{formatDateForDisplay(completionDate)}</span>
             </div>
           );
         }
@@ -944,17 +868,17 @@ export default function ReportsPage() {
         return (
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className={`flex items-center gap-1.5 font-semibold text-xs ${textColor} cursor-default`}>
+              <div className={`flex items-center gap-1.5 font-medium text-sm ${textColor} cursor-default`}>
                 {icon}<span>{formatDateForDisplay(completionDate)}</span>
               </div>
             </TooltipTrigger>
-            <TooltipContent className={`${borderColor} text-slate-900 border shadow-md`}>
+            <TooltipContent className={`bg-white text-slate-700 border-slate-200 shadow-xl p-2`}>
               <div className="space-y-2 p-1">
-                <div className={`font-bold ${textColor} border-b pb-1`}>{statusText}</div>
-                <div className="text-xs space-y-1">
-                  <div className="flex justify-between gap-4"><span className="text-slate-500">Completed:</span><span>{formatDateTimeForDisplay(completionDate)}</span></div>
-                  <div className="flex justify-between gap-4"><span className="text-slate-500">Duration:</span><span>{durationTakenText}</span></div>
-                  {estimatedMinutes > 0 && <div className="flex justify-between gap-4"><span className="text-slate-500">Allowed:</span><span>{formatDuration(estimatedMinutes)}</span></div>}
+                <div className={`font-semibold text-sm ${textColor} border-b border-slate-100 pb-1.5`}>{statusText}</div>
+                <div className="text-sm space-y-1">
+                  <div className="flex justify-between gap-4"><span className="text-slate-500 font-semibold">Completed:</span><span className="text-slate-700">{formatDateTimeForDisplay(completionDate)}</span></div>
+                  <div className="flex justify-between gap-4"><span className="text-slate-500 font-semibold">Duration:</span><span className="text-slate-700">{durationTakenText}</span></div>
+                  {estimatedMinutes > 0 && <div className="flex justify-between gap-4"><span className="text-slate-500 font-semibold">Allowed:</span><span className="text-slate-700">{formatDuration(estimatedMinutes)}</span></div>}
                 </div>
               </div>
             </TooltipContent>
@@ -962,39 +886,36 @@ export default function ReportsPage() {
         );
       }
 
-      // In progress — show time status
-      if (!effectiveStartTime) return <span className="text-slate-300">-</span>;
-      if (!showTimeStatuses) return <span className="text-slate-300">-</span>;
+      if (!effectiveStartTime || !showTimeStatuses) return <span className="text-sm text-slate-400">—</span>;
 
       const timeStatus = getTimeStatus(effectiveStartTime, estimatedMinutes);
       const isOverdue = timeStatus?.isOverdue || false;
       const textColor = isOverdue ? "text-red-600" : "text-blue-600";
-      const icon = isOverdue ? <AlertTriangle className="h-3.5 w-3.5" /> : <Timer className="h-3.5 w-3.5" />;
-      const borderColor = isOverdue ? "border-red-200 bg-red-50" : "border-blue-200 bg-blue-50";
+      const icon = isOverdue ? <AlertTriangle className="h-4 w-4" /> : <Timer className="h-4 w-4" />;
 
       return (
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className={`flex items-center gap-1.5 font-medium text-xs ${textColor} cursor-default`}>
+            <div className={`flex items-center gap-1.5 font-medium text-sm ${textColor} cursor-default`}>
               {icon}<span>{timeStatus?.formattedElapsed}</span>
             </div>
           </TooltipTrigger>
-          <TooltipContent className={`${borderColor} text-slate-900 border shadow-md`}>
+          <TooltipContent className={`bg-white text-slate-700 border-slate-200 shadow-xl p-2`}>
             <div className="space-y-2 p-1">
-              <div className={`font-bold ${textColor} border-b pb-1`}>
+              <div className={`font-semibold text-sm ${textColor} border-b border-slate-100 pb-1.5`}>
                 {isOverdue ? "In Progress (Overdue)" : "In Progress (On Track)"}
               </div>
-              <div className="text-xs space-y-1">
-                <div className="flex justify-between gap-4"><span className="text-slate-500">Started:</span><span>{formatDateTimeForDisplay(effectiveStartTime)}</span></div>
+              <div className="text-sm space-y-1">
+                <div className="flex justify-between gap-4"><span className="text-slate-500 font-semibold">Started:</span><span className="text-slate-700">{formatDateTimeForDisplay(effectiveStartTime)}</span></div>
                 {estimatedMinutes > 0 && (
                   <>
                     <div className="flex justify-between gap-4">
-                      <span className="text-slate-500">Remaining:</span>
-                      <span className={isOverdue ? 'font-bold text-red-600' : 'text-green-600'}>
+                      <span className="text-slate-500 font-semibold">Remaining:</span>
+                      <span className={isOverdue ? 'font-semibold text-red-600' : 'text-emerald-600'}>
                         {isOverdue ? `Overdue by ${timeStatus?.formattedOverdue}` : timeStatus?.formattedRemaining}
                       </span>
                     </div>
-                    <div className="flex justify-between gap-4"><span className="text-slate-500">Estimate:</span><span>{formatDuration(estimatedMinutes)}</span></div>
+                    <div className="flex justify-between gap-4"><span className="text-slate-500 font-semibold">Estimate:</span><span className="text-slate-700">{formatDuration(estimatedMinutes)}</span></div>
                   </>
                 )}
               </div>
@@ -1004,21 +925,12 @@ export default function ReportsPage() {
       );
     }
 
-    // ── Extracted field column ────────────────────────────────────────────
     if (col.type === 'extracted_field') {
       const stage = stages.find(s => s.id === col.stageId);
-      if (!stage) return <span className="text-slate-300">-</span>;
+      if (!stage) return <span className="text-sm text-slate-400">—</span>;
 
-      // PER-TASK applicability
-      // Around line 512 in your provided file
       if (!checkStageApplicableForTask(stage, task)) {
-        return (
-          <div className="flex items-center justify-center w-full">
-            <span className="text-[10px] font-medium text-slate-400 italic bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
-              N/A
-            </span>
-          </div>
-        );
+        return <span className="text-sm text-slate-400">N/A</span>;
       }
 
       if (col.isAutoAdded) {
@@ -1032,19 +944,19 @@ export default function ReportsPage() {
             : linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
           if (foundValue) { foundDoc = linked; break; }
         }
-        if (!foundDoc) return <span className="text-red-500 text-xs font-bold">Missing</span>;
+        if (!foundDoc) return <span className="text-sm text-red-500">Missing</span>;
         const display = (col.fieldType === 'Date' || col.fieldType === 'date') ? formatDateForDisplay(foundValue) : foundValue;
         const isOld = foundDoc.created_at && task.created_at && new Date(foundDoc.created_at) < new Date(task.created_at);
-        return <span className={`text-xs ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || '-'}</span>;
+        return <span className={`text-sm ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || <span className="text-slate-400">—</span>}</span>;
       }
 
       const stageDocInfo = stage?.documents?.find((d: any) => d.kycId === col.kycId);
-      if (!stageDocInfo) return <span className="text-slate-300">-</span>;
-      if (!isDocumentApplicable(stageDocInfo, task)) return <span className="text-sm text-gray-400 italic">N/A</span>;
+      if (!stageDocInfo) return <span className="text-sm text-slate-400">—</span>;
+      if (!isDocumentApplicable(stageDocInfo, task)) return <span className="text-sm text-slate-400">N/A</span>;
 
       const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
-      if (!linked) return <span className="text-red-500 text-xs font-bold">Missing</span>;
-      if (linked.indicator) return <span className="inline-flex items-center rounded-md bg-red-50 text-red-600 border border-red-200 text-[10px] px-1.5 py-0.5">Indicator</span>;
+      if (!linked) return <span className="text-sm text-red-500">Missing</span>;
+      if (linked.indicator) return <span className="inline-flex items-center rounded-sm bg-red-50 text-red-600 border border-red-200 text-xs font-medium px-2 py-1">Indicator</span>;
 
       let val = (col.fieldType === 'date' || col.fieldType === 'Date')
         ? findDateInObject(linked.extracted_details || {}, [col.fieldName, col.fieldId])
@@ -1052,10 +964,9 @@ export default function ReportsPage() {
 
       const isOld = linked.created_at && task.created_at && new Date(linked.created_at) < new Date(task.created_at);
       const display = (col.fieldType === 'Date' || col.fieldType === 'date') ? formatDateForDisplay(val) : val;
-      return <span className={`text-xs ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || '-'}</span>;
+      return <span className={`text-sm ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || <span className="text-slate-400">—</span>}</span>;
     }
 
-    // ── Task field column ─────────────────────────────────────────────────
     if (col.type === 'task') {
       return getCellContent(
         departments, task, col.field, enhancedTasksData, taskDependants,
@@ -1067,7 +978,7 @@ export default function ReportsPage() {
       );
     }
 
-    return <span className="text-slate-300">-</span>;
+    return <span className="text-sm text-slate-400">—</span>;
   }, [
     stages, departments, kycDocuments, allDocuments, companies,
     enhancedTasksData, taskDependants, showTimeStatuses,
@@ -1075,10 +986,6 @@ export default function ReportsPage() {
     getStaffName, getTaskHierarchy, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper,
     getCurrentStageTracking, getTaskInitiatedDate
   ]);
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Export
-  // ─────────────────────────────────────────────────────────────────────────
 
   const getExportCellValue = useCallback((task: any, col: any): string => {
     if (col.type === 'task') {
@@ -1196,10 +1103,6 @@ export default function ReportsPage() {
     link.click();
   };
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Sorting + pagination
-  // ─────────────────────────────────────────────────────────────────────────
-
   const sortedTasks = useMemo(() => {
     if (!sortConfig || !filteredColumns.length) return searchedTasks;
     const sorted = [...searchedTasks];
@@ -1239,10 +1142,6 @@ export default function ReportsPage() {
   const handlePreviousPage = () => setCurrentPage(p => Math.max(p - 1, 1));
   const handleItemsPerPageChange = (val: string) => { setItemsPerPage(Number(val)); setCurrentPage(1); };
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Column groups (for standard view header)
-  // ─────────────────────────────────────────────────────────────────────────
-
   const columnGroups = useMemo(() => {
     if (!filteredColumns.length) return [];
     const groups: any[] = [];
@@ -1266,10 +1165,6 @@ export default function ReportsPage() {
     stageMap.forEach(g => groups.push({ id: g.id, label: g.label, span: g.count, applicable: g.applicable }));
     return groups;
   }, [filteredColumns, stages, isStageApplicableToCurrentFilter]);
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Transposed rows
-  // ─────────────────────────────────────────────────────────────────────────
 
   const toggleSection = (id: string) => setExpandedSections(p => {
     const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n;
@@ -1310,21 +1205,27 @@ export default function ReportsPage() {
     return rows;
   }, [activeReport, filteredColumns, expandedSections, stages, isStageApplicableToCurrentFilter]);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Render
-  // ─────────────────────────────────────────────────────────────────────────
-
   if (reportLoading) {
-    return <div className="h-screen flex items-center justify-center bg-slate-50"><Loader2 className="h-10 w-10 animate-spin text-blue-600" /></div>;
+    return <div className="h-screen flex flex-col items-center justify-center bg-slate-50"><Loader2 className="h-8 w-8 animate-spin text-blue-600 mb-3" /><p className="text-sm text-slate-500">Loading Reports...</p></div>;
   }
 
   return (
     <div className="flex flex-col h-screen bg-slate-50/50">
       {/* ── TOP HEADER ── */}
-      <header className="bg-white border-b px-6 py-3 flex items-center justify-between shadow-sm sticky top-0 z-50">
-        <div className="flex items-center gap-4">
-          <Button variant="outline" size="sm" onClick={() => setIsReportDialogOpen(true)} className="flex items-center gap-2">
-            <FileText className="h-4 w-4" />
+      <header className="bg-white border-b border-slate-200 px-6 py-4 flex flex-col md:flex-row items-start md:items-center justify-between shadow-sm sticky top-0 z-50 gap-4">
+        <div className="flex flex-col">
+          <h3 className="text-2xl font-bold tracking-tight text-slate-900 leading-tight flex items-center gap-2.5">
+            <FileText className="h-6 w-6 text-blue-600" strokeWidth={2.5} />
+            {activeReport ? activeReport.name : "Report Viewer"}
+          </h3>
+          <p className="text-base text-slate-500 mt-1">
+            {activeReport ? (activeReport.description || "Generated Data Report View") : "Select a report template to begin analysis"}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" size="sm" onClick={() => setIsReportDialogOpen(true)} className="h-8 text-sm font-semibold text-slate-700 bg-white border-slate-200 shadow-sm hover:bg-slate-50">
+            <Filter className="mr-1.5 h-4 w-4 text-blue-500" />
             {activeReport ? "Change Report" : "Select Report"}
           </Button>
 
@@ -1342,213 +1243,177 @@ export default function ReportsPage() {
             classes={departments.flatMap(d => (d.tm_subdepartments || []).flatMap((s: any) => s.classes || []))}
           />
 
-          <div className="h-8 w-px bg-slate-200" />
-
-          <div>
-            <h1 className="text-lg font-bold text-slate-800">{activeReport ? activeReport.name : "Select a Report"}</h1>
-            {activeReport && <p className="text-xs text-slate-500 hidden md:block">{activeReport.description || "Generated Report View"}</p>}
-          </div>
-        </div>
-
-        <div className="flex items-center space-x-3 flex-wrap gap-2">
-          {/* Officer filter */}
-          <DropdownMenu open={isOfficerDropdownOpen} onOpenChange={setIsOfficerDropdownOpen}>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" disabled={!activeDeptId} className="flex items-center gap-2">
-                <User className="h-4 w-4" />
-                {selectedOfficers.length > 0 ? `${selectedOfficers.length} extra officer${selectedOfficers.length > 1 ? 's' : ''}` : "More Officers"}
-                <ChevronDown className="h-4 w-4 opacity-50" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-64 p-2 max-h-80 overflow-y-auto">
-              {availableOfficers.length === 0 ? (
-                <div className="px-2 py-1.5 text-sm text-gray-500">No officers found</div>
-              ) : (
-                <>
-                  {availableOfficers.map(o => (
-                    <div key={o.id} className="flex items-center space-x-2 p-1.5 hover:bg-gray-100 rounded">
-                      <input type="checkbox" id={`o-${o.id}`} checked={selectedOfficers.includes(o.id)}
-                        onChange={e => {
-                          setCurrentPage(1);
-                          setSelectedOfficers(prev => e.target.checked ? [...prev, o.id] : prev.filter(id => id !== o.id));
-                        }}
-                        className="h-4 w-4 rounded border-gray-300 text-blue-600" />
-                      <label htmlFor={`o-${o.id}`} className="text-sm text-gray-700">{o.name}</label>
-                    </div>
-                  ))}
-                  <div className="border-t mt-2 pt-2">
-                    <Button variant="ghost" size="sm" className="w-full justify-start text-sm" onClick={() => { setSelectedOfficers([]); setCurrentPage(1); }} disabled={selectedOfficers.length === 0}>
-                      Clear selection
-                    </Button>
-                  </div>
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {/* Search */}
-          <div className="relative w-56 hidden md:block">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-            <Input placeholder="Search name, ID, company..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-9 h-9 text-xs bg-white border-slate-200" />
-          </div>
+          <div className="h-5 w-[1px] bg-slate-300 mx-1" />
 
           {activeReport && (
             <Tabs value={view} onValueChange={(v: any) => setView(v)} className="hidden md:block">
-              <TabsList className="grid w-[160px] grid-cols-2 h-9 bg-slate-100">
-                <TabsTrigger value="standard" className="gap-1 text-xs"><Rows className="h-3 w-3" /> Rows</TabsTrigger>
-                <TabsTrigger value="transposed" className="gap-1 text-xs"><LayoutGrid className="h-3 w-3" /> Cols</TabsTrigger>
+              <TabsList className="h-8 bg-slate-100/80 p-0.5 border border-slate-200">
+                <TabsTrigger value="standard" className="text-[11px] h-6 px-3 data-[state=active]:bg-white data-[state=active]:shadow-sm"><Rows className="h-3 w-3 mr-1.5 text-blue-600" /> Rows</TabsTrigger>
+                <TabsTrigger value="transposed" className="text-[11px] h-6 px-3 data-[state=active]:bg-white data-[state=active]:shadow-sm"><LayoutGrid className="h-3 w-3 mr-1.5 text-blue-600" /> Cols</TabsTrigger>
               </TabsList>
             </Tabs>
           )}
 
-          <Button variant="outline" size="sm" onClick={() => refreshData()} disabled={loading} className="h-9 w-9 p-0">
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          </Button>
-
-          <Button variant="outline" size="sm" onClick={() => setShowTimeStatuses(p => !p)} className="h-9 hidden sm:flex items-center gap-1 text-xs">
-            <Clock3 className="h-3.5 w-3.5" />
-            {showTimeStatuses ? 'Hide Times' : 'Show Times'}
-          </Button>
-
-          <Button variant="outline" size="sm" onClick={() => setShowNARows(p => !p)} className={`h-9 hidden sm:flex items-center gap-1 text-xs ${!showNARows ? 'bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100' : ''}`}>
-            {showNARows ? 'Hide N/A Rows' : 'Show N/A Rows'}
+          <Button variant="outline" size="sm" onClick={() => refreshData()} disabled={loading} className="h-8 text-xs bg-white border-slate-200 shadow-sm px-2.5">
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin text-blue-600' : 'text-slate-600'}`} />
           </Button>
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button className="gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-sm h-9 text-xs">
-                <FileDown className="h-3 w-3" /> Export
+              <Button className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white shadow-sm font-semibold px-3">
+                <FileDown className="h-3.5 w-3.5 mr-1.5" /> Export Data
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => handleExport('excel')}>Excel (.xlsx)</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => toast({ title: "Coming Soon", description: "PDF export is being upgraded." })}>PDF (.pdf)</DropdownMenuItem>
+            <DropdownMenuContent align="end" className="w-48 text-xs font-medium">
+              <DropdownMenuItem onClick={() => handleExport('excel')} className="py-2 cursor-pointer">Excel (.xlsx)</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => toast({ title: "Coming Soon", description: "PDF export is being upgraded." })} className="py-2 cursor-pointer">PDF (.pdf)</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </header>
 
       {/* ── MAIN CONTENT ── */}
-      <main className="flex-1 overflow-hidden p-4 flex flex-col gap-4">
-        {/* Department tabs */}
-        {departments.length > 0 && (
-          <Tabs value={activeDeptId} onValueChange={val => { setActiveDeptId(val); setActiveSubDeptId('all'); setCurrentPage(1); }}>
-            <TabsList className="w-full justify-start h-12 bg-white border shadow-sm p-1 gap-2 overflow-x-auto">
-              {departments.map(dept => (
-                <TabsTrigger key={dept.id} value={dept.id.toString()} className="text-sm font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
-                  {dept.name}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
-        )}
+      <main className="flex-1 overflow-hidden p-4 flex flex-col gap-3">
+        {/* Unified Filter Bar Block */}
+        {activeReport && departments.length > 0 && (
+          <div className="flex flex-col gap-2">
 
-        {/* Sub-dept, status, pagination */}
-        {activeReport && (
-          <div className="flex flex-col gap-3 bg-white p-3 rounded-lg border shadow-sm">
+            {/* Row 1: Dept & Subdept Routing */}
+            <Tabs value={activeDeptId} onValueChange={val => { setActiveDeptId(val); setActiveSubDeptId('all'); setCurrentPage(1); }}>
+              <TabsList className="h-8 bg-transparent p-0 gap-1">
+                {departments.map(dept => (
+                  <TabsTrigger key={dept.id} value={dept.id.toString()} className="text-[11px] font-bold uppercase tracking-wider text-slate-500 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded px-3 py-1.5">
+                    {dept.name}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
             <Tabs value={activeSubDeptId} onValueChange={v => { setActiveSubDeptId(v); setCurrentPage(1); }}>
-              <TabsList className="w-full justify-start h-10 bg-slate-50 border p-1 gap-1 overflow-x-auto">
-                <TabsTrigger value="all" className="text-sm font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">All Sub-departments</TabsTrigger>
+              <TabsList className="h-8 bg-transparent p-0 gap-1">
+                <TabsTrigger value="all" className="text-[11px] font-bold uppercase tracking-wider text-slate-500 data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded px-3 py-1.5">
+                  All Sub-Depts
+                </TabsTrigger>
                 {activeSubDepartments.map(sub => (
-                  <TabsTrigger key={sub.id} value={sub.id.toString()} className="text-sm font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
+                  <TabsTrigger key={sub.id} value={sub.id.toString()} className="text-[11px] font-bold uppercase tracking-wider text-slate-500 data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded px-3 py-1.5">
                     {sub.name}
                   </TabsTrigger>
                 ))}
               </TabsList>
             </Tabs>
+            {/* Row 2: Secondary Filters & Settings */}
+            <div className="flex items-center justify-between gap-3 bg-slate-50 p-1.5 rounded-lg border border-slate-200/60 shadow-sm">
+              <div className="flex items-center gap-2 flex-1 overflow-x-auto scrollbar-thin">
+                <div className="relative w-full max-w-[250px] shrink-0">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                  <Input placeholder="Search tasks..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full bg-white pl-8 h-8 text-xs font-medium border-slate-200 focus-visible:ring-1 focus-visible:ring-blue-500" />
+                </div>
 
-            <Tabs value={activeOfficerTab} onValueChange={v => { setActiveOfficerTab(v); setCurrentPage(1); }}>
-              <TabsList className="w-full justify-start h-10 bg-slate-50 border p-1 gap-1 overflow-x-auto">
-                <TabsTrigger value="all" className="text-sm font-semibold text-slate-600 data-[state=active]:bg-emerald-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
-                  All Officers
-                </TabsTrigger>
-                {availableOfficers.map(officer => (
-                  <TabsTrigger key={officer.id} value={officer.id} className="text-sm font-semibold text-slate-600 data-[state=active]:bg-emerald-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
-                    {officer.name}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
+                <div className="h-4 w-[1px] bg-slate-300 mx-1 shrink-0" />
 
-            {/* Class and subclass filters */}
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-500 font-medium">Class:</span>
                 <Select value={activeClassId} onValueChange={v => { setActiveClassId(v); setActiveSubClassId('all'); setCurrentPage(1); }}>
-                  <SelectTrigger className="w-[120px] h-8 text-xs bg-white border-slate-200">
+                  <SelectTrigger className="w-[140px] h-8 text-[11px] font-bold uppercase tracking-wide bg-white border-slate-200 text-slate-600 shrink-0">
                     <SelectValue placeholder="All Classes" />
                   </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Classes</SelectItem>
-                    {activeSubDepartments
-                      .find(s => s.id.toString() === (activeSubDeptId === 'all' ? activeSubDepartments[0]?.id.toString() : activeSubDeptId))
-                      ?.classes?.map((cls: any) => (
-                        <SelectItem key={cls.id} value={cls.id.toString()}>
-                          {cls.name}
-                        </SelectItem>
-                      )) || []}
+                  <SelectContent className="z-[100]">
+                    <SelectItem value="all" className="text-xs font-medium">All Classes</SelectItem>
+                    {activeSubDepartments.find(s => s.id.toString() === (activeSubDeptId === 'all' ? activeSubDepartments[0]?.id.toString() : activeSubDeptId))?.classes?.map((cls: any) => (
+                      <SelectItem key={cls.id} value={cls.id.toString()} className="text-xs font-medium">{cls.name}</SelectItem>
+                    )) || []}
                   </SelectContent>
                 </Select>
-              </div>
 
-              {activeClassId && activeClassId !== 'all' && (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-500 font-medium">Subclass:</span>
+                {activeClassId && activeClassId !== 'all' && (
                   <Select value={activeSubClassId} onValueChange={v => { setActiveSubClassId(v); setCurrentPage(1); }}>
-                    <SelectTrigger className="w-[120px] h-8 text-xs bg-white border-slate-200">
+                    <SelectTrigger className="w-[140px] h-8 text-[11px] font-bold uppercase tracking-wide bg-white border-slate-200 text-slate-600 shrink-0">
                       <SelectValue placeholder="All Subclasses" />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Subclasses</SelectItem>
-                      {activeSubDepartments
-                        .find(s => s.id.toString() === (activeSubDeptId === 'all' ? activeSubDepartments[0]?.id.toString() : activeSubDeptId))
-                        ?.classes?.find((c: any) => c.id.toString() === activeClassId)
-                        ?.subClasses?.map((subCls: any) => (
-                          <SelectItem key={subCls.id} value={subCls.id.toString()}>
-                            {subCls.name}
-                          </SelectItem>
-                        )) || []}
+                    <SelectContent className="z-[100]">
+                      <SelectItem value="all" className="text-xs font-medium">All Subclasses</SelectItem>
+                      {activeSubDepartments.find(s => s.id.toString() === (activeSubDeptId === 'all' ? activeSubDepartments[0]?.id.toString() : activeSubDeptId))?.classes?.find((c: any) => c.id.toString() === activeClassId)?.subClasses?.map((subCls: any) => (
+                        <SelectItem key={subCls.id} value={subCls.id.toString()} className="text-xs font-medium">{subCls.name}</SelectItem>
+                      )) || []}
                     </SelectContent>
                   </Select>
-                </div>
-              )}
-            </div>
+                )}
 
-            <div className="flex items-center justify-between gap-4 flex-wrap">
-              <Tabs value={activeStatus} onValueChange={v => { setActiveStatus(v); setCurrentPage(1); }}>
-                <TabsList className="h-9 bg-slate-100">
-                  <TabsTrigger value="all" className="text-xs px-3">All Tasks</TabsTrigger>
-                  <TabsTrigger value="wip" className="text-xs px-3">WIP</TabsTrigger>
-                  <TabsTrigger value="write_up_completed" className="text-xs px-3">Write Up</TabsTrigger>
-                  <TabsTrigger value="endorsed" className="text-xs px-3">Endorsed</TabsTrigger>
-                </TabsList>
-              </Tabs>
+                <div className="h-4 w-[1px] bg-slate-300 mx-1 shrink-0" />
 
-              <div className="flex items-center gap-3">
-                <div className="text-xs text-slate-500 hidden md:block">
-                  Showing <strong>{totalItems > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0}</strong>–<strong>{Math.min(currentPage * itemsPerPage, totalItems)}</strong> of <strong>{totalItems}</strong>
+                {/* Status Toggles */}
+                <Tabs value={activeStatus} onValueChange={v => { setActiveStatus(v); setCurrentPage(1); }} className="shrink-0">
+                  <TabsList className="h-8 bg-white border border-slate-200 p-0.5">
+                    <TabsTrigger value="all" className="text-[11px] font-bold uppercase tracking-widest px-2.5 data-[state=active]:bg-slate-700 data-[state=active]:text-white">All</TabsTrigger>
+                    <TabsTrigger value="wip" className="text-[11px] font-bold uppercase tracking-widest px-2.5 data-[state=active]:bg-blue-600 data-[state=active]:text-white">WIP</TabsTrigger>
+                    <TabsTrigger value="write_up_completed" className="text-[11px] font-bold uppercase tracking-widest px-2.5 data-[state=active]:bg-emerald-600 data-[state=active]:text-white">Write Up</TabsTrigger>
+                    <TabsTrigger value="endorsed" className="text-[11px] font-bold uppercase tracking-widest px-2.5 data-[state=active]:bg-purple-600 data-[state=active]:text-white">Endorsed</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+
+                <div className="h-4 w-[1px] bg-slate-300 mx-1 shrink-0" />
+
+                <DropdownMenu open={isOfficerDropdownOpen} onOpenChange={setIsOfficerDropdownOpen}>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" disabled={!activeDeptId} className={cn("h-8 text-[11px] font-bold uppercase tracking-wide shrink-0", selectedOfficers.length > 0 ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-white text-slate-600 border-slate-200")}>
+                      <User className="mr-1.5 h-3.5 w-3.5" />
+                      {selectedOfficers.length > 0 ? `${selectedOfficers.length} Selected` : "Officers"}
+                      <ChevronDown className="ml-1.5 h-3.5 w-3.5 opacity-50" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="w-64 p-2 z-[100] border-slate-200 shadow-xl max-h-80 overflow-y-auto">
+                    {availableOfficers.length === 0 ? (
+                      <div className="p-3 text-[11px] font-medium text-slate-500 text-center italic">No officers assigned to view</div>
+                    ) : (
+                      <>
+                        <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2 px-1">Filter by Officer</div>
+                        <div className="space-y-1">
+                          {availableOfficers.map(o => (
+                            <div key={o.id} className="flex items-center space-x-2.5 p-1.5 hover:bg-slate-50 rounded-md transition-colors cursor-pointer" onClick={() => { setCurrentPage(1); setSelectedOfficers(prev => prev.includes(o.id) ? prev.filter(id => id !== o.id) : [...prev, o.id]); }}>
+                              <Checkbox checked={selectedOfficers.includes(o.id)} className="h-4 w-4 border-slate-300 data-[state=checked]:bg-blue-600 pointer-events-none" />
+                              <label className="text-[11px] font-semibold text-slate-700 cursor-pointer select-none">{o.name}</label>
+                            </div>
+                          ))}
+                        </div>
+                        {selectedOfficers.length > 0 && (
+                          <div className="border-t border-slate-100 mt-2 pt-2">
+                            <Button variant="ghost" size="sm" className="w-full h-7 text-[11px] font-bold uppercase tracking-widest text-slate-500 hover:text-slate-800 bg-slate-100" onClick={() => { setSelectedOfficers([]); setCurrentPage(1); }}>Clear Selection</Button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {/* View Toggles */}
+                <div className="flex items-center gap-1 shrink-0 ml-auto">
+                  <Button variant="outline" size="sm" onClick={() => setShowTimeStatuses(p => !p)} className={cn("h-8 text-[11px] font-bold uppercase tracking-wide px-2.5 transition-colors", showTimeStatuses ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-100")}>
+                    <Clock3 className="mr-1.5 h-3.5 w-3.5" /> {showTimeStatuses ? 'Hide Time' : 'Show Time'}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setShowNARows(p => !p)} className={cn("h-8 text-[11px] font-bold uppercase tracking-wide px-2.5 transition-colors", !showNARows ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-100")}>
+                    {showNARows ? <EyeOff className="mr-1.5 h-3.5 w-3.5 text-slate-400" /> : <Eye className="mr-1.5 h-3.5 w-3.5 text-amber-600" />}
+                    {showNARows ? 'Hide N/A Rows' : 'Show N/A Rows'}
+                  </Button>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-500">Rows:</span>
-                  <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
-                    <SelectTrigger className="w-[70px] h-8 text-xs bg-white border-slate-200"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {[100, 200, 500].map(n => <SelectItem key={n} value={n.toString()}>{n}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={currentPage === 1} onClick={handlePreviousPage}><ChevronLeft className="h-4 w-4" /></Button>
-                  <span className="text-xs font-medium min-w-[70px] text-center text-slate-600">Page {currentPage} of {totalPages || 1}</span>
-                  <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={currentPage >= totalPages} onClick={handleNextPage}><ChevronRight className="h-4 w-4" /></Button>
+              </div>
+
+              {/* Pagination Controls */}
+              <div className="flex items-center gap-2 pl-2 border-l border-slate-200 shrink-0">
+                <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
+                  <SelectTrigger className="w-[70px] h-8 text-[11px] font-bold bg-white border-slate-200"><SelectValue /></SelectTrigger>
+                  <SelectContent className="z-[100]">
+                    {[100, 200, 500].map(n => <SelectItem key={n} value={n.toString()} className="text-[11px] font-semibold">{n}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-md p-0.5 shadow-sm">
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-500 rounded-sm hover:bg-slate-100" disabled={currentPage === 1} onClick={handlePreviousPage}><ChevronLeft className="h-4 w-4" /></Button>
+                  <span className="text-[11px] font-bold text-slate-600 min-w-[50px] text-center uppercase tracking-widest">{currentPage} / {totalPages || 1}</span>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-500 rounded-sm hover:bg-slate-100" disabled={currentPage >= totalPages} onClick={handleNextPage}><ChevronRight className="h-4 w-4" /></Button>
                 </div>
                 {view === 'transposed' && (
-                  <div className="flex gap-1 border-l border-slate-200 pl-3">
-                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => setExpandedSections(new Set(transposedRows.map(r => r.id)))}>
-                      <ChevronsDown className="h-3 w-3 text-slate-500" />
+                  <div className="flex gap-1 ml-1 bg-white border border-slate-200 rounded-md p-0.5 shadow-sm">
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-500 rounded-sm hover:bg-slate-100" onClick={() => setExpandedSections(new Set(transposedRows.map(r => r.id)))} title="Expand All">
+                      <ChevronsDown className="h-3 w-3" />
                     </Button>
-                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => setExpandedSections(new Set())}>
-                      <ChevronsRight className="h-3 w-3 text-slate-500" />
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-500 rounded-sm hover:bg-slate-100" onClick={() => setExpandedSections(new Set())} title="Collapse All">
+                      <ChevronsRight className="h-3 w-3" />
                     </Button>
                   </div>
                 )}
@@ -1558,80 +1423,80 @@ export default function ReportsPage() {
         )}
 
         {/* ── TABLE ── */}
-        <div className="flex-1 bg-white border-2 border-slate-300 rounded-lg shadow-sm overflow-auto relative">
+        <div className="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm overflow-auto relative scrollbar-thin">
           {!activeReport ? (
-            <div className="flex flex-col items-center justify-center h-full text-slate-400">
-              <FileText className="h-16 w-16 mb-4 opacity-20" />
-              <p className="text-lg font-medium">No Report Selected</p>
-              <p className="text-sm">Please select a report from the menu to view data.</p>
+            <div className="flex flex-col items-center justify-center h-full text-slate-400 bg-slate-50/50">
+              <FileText className="h-16 w-16 mb-4 opacity-20 text-blue-600" />
+              <p className="text-lg font-bold text-slate-600 tracking-tight">No Report Selected</p>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mt-2">Open the report menu to generate a view</p>
             </div>
           ) : loading ? (
-            <div className="flex flex-col items-center justify-center h-full">
-              <Loader2 className="h-10 w-10 animate-spin text-blue-600 mb-2" />
-              <p className="text-sm font-medium text-slate-600">Fetching Report Data...</p>
+            <div className="flex flex-col items-center justify-center h-full bg-slate-50/50">
+              <Loader2 className="h-10 w-10 animate-spin text-blue-600 mb-3" />
+              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Processing Report Data...</p>
             </div>
           ) : view === 'standard' ? (
             // ── STANDARD VIEW ───────────────────────────────────────────────
-            <Table className="border-separate border-spacing-0 w-full">
-              <TableHeader className="sticky top-0 z-30 bg-slate-100/80 backdrop-blur-sm">
+            <Table className="border-separate border-spacing-0 w-full min-w-max">
+              <TableHeader className="sticky top-0 z-30 shadow-md">
                 {/* Group header */}
-                <TableRow className="bg-blue-600 hover:bg-blue-600">
-                  <TableHead className={`${INDEX_WIDTH_CLASS} border-b border-r bg-blue-700 text-white sticky left-0 z-40 text-center font-bold`}>#</TableHead>
+                <TableRow className="bg-blue-700 hover:bg-blue-700">
+                  <TableHead className={`${INDEX_WIDTH_CLASS} border-b border-white/20 border-r bg-blue-800 text-white sticky left-0 z-40 text-center font-bold text-[11px] uppercase tracking-widest shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>IDX</TableHead>
                   {columnGroups.map((group, i) => (
                     <TableHead key={i} colSpan={group.span}
-                      className={`text-center font-bold text-white border-b border-r last:border-r-0 py-3 text-sm ${!group.applicable ? 'bg-blue-400/70' : 'bg-blue-600'}`}>
+                      className={`text-center font-bold text-white border-b border-white/20 border-r last:border-r-0 py-2.5 text-[11px] uppercase tracking-widest ${!group.applicable ? 'bg-blue-800/80' : 'bg-blue-700'}`}>
                       <div className="flex items-center justify-center gap-2">
                         {group.label}
-                        {!group.applicable && <span className="text-[10px] bg-amber-400/80 text-white px-1.5 py-0.5 rounded">Filter N/A</span>}
+                        {!group.applicable && <span className="text-[11px] bg-amber-500 text-white px-1.5 py-0.5 rounded font-bold shadow-sm">FILTER N/A</span>}
                       </div>
                     </TableHead>
                   ))}
                 </TableRow>
                 {/* Column header */}
-                <TableRow className="bg-blue-500 hover:bg-blue-500">
-                  <TableHead className={`${INDEX_WIDTH_CLASS} border-b border-r bg-blue-600 text-white sticky left-0 z-40 text-center font-semibold text-xs`}>#</TableHead>
+                <TableRow className="bg-blue-600 hover:bg-blue-600">
+                  <TableHead className={`${INDEX_WIDTH_CLASS} border-b border-slate-200 border-r bg-blue-700 text-white sticky left-0 z-40 text-center font-bold text-[11px] uppercase tracking-widest shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>#</TableHead>
                   {filteredColumns.map(col => {
                     const isColFilterNA = col.stageId ? !isStageApplicableToCurrentFilter(col.stageId) : false;
                     return (
                       <TableHead key={col.id} onClick={() => handleSort(col.id)}
-                        className={`${COLUMN_WIDTH_CLASS} whitespace-nowrap px-4 py-3 font-semibold text-white border-b border-r text-xs cursor-pointer hover:bg-blue-600 transition-colors group ${isColFilterNA ? 'bg-blue-400/60' : 'bg-blue-500'}`}>
+                        className={`${COLUMN_WIDTH_CLASS} whitespace-nowrap px-3 py-2.5 font-bold text-white border-b border-slate-200 border-r text-[11px] uppercase tracking-widest cursor-pointer hover:bg-blue-500 transition-colors group ${isColFilterNA ? 'bg-blue-700/80' : 'bg-blue-600'}`}>
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 truncate">
-                            <span>{col.label}</span>
-                            {isColFilterNA && <span className="text-[10px] bg-amber-400/80 text-white px-1 py-0.5 rounded shrink-0">N/A</span>}
+                            <span className="truncate">{col.label}</span>
+                            {isColFilterNA && <span className="text-[11px] bg-amber-500 text-white px-1 py-0.5 rounded shrink-0 font-bold shadow-sm">N/A</span>}
                             {col.hasSubColumns && (
                               <button onClick={e => { e.stopPropagation(); toggleStageColumns(col.stageId); }}
-                                className="p-0.5 hover:bg-blue-400 rounded text-white shrink-0">
-                                {expandedStageColumns.has(col.stageId) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+                                className="p-0.5 hover:bg-white/20 rounded text-white shrink-0 transition-colors">
+                                {expandedStageColumns.has(col.stageId) ? <Minus className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
                               </button>
                             )}
                           </div>
-                          <ArrowUpDown className={`h-3 w-3 shrink-0 ${sortConfig?.key === col.id ? 'text-white' : 'text-blue-200'}`} />
+                          <ArrowUpDown className={`h-3 w-3 shrink-0 transition-colors ${sortConfig?.key === col.id ? 'text-white opacity-100' : 'text-white/40 opacity-0 group-hover:opacity-100'}`} />
                         </div>
                       </TableHead>
                     );
                   })}
                 </TableRow>
               </TableHeader>
-              <TableBody className="divide-y divide-slate-200">
+              <TableBody className="divide-y divide-slate-100 bg-white">
                 {paginatedTasks.length > 0 ? paginatedTasks.map((task, idx) => (
-                  <TableRow key={task.id} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-blue-50'} hover:bg-blue-100 transition-colors group`}>
-                    <TableCell className={`${INDEX_WIDTH_CLASS} sticky left-0 z-20 ${idx % 2 === 0 ? 'bg-white' : 'bg-blue-50'} group-hover:bg-blue-100 border-r border-b border-gray-100 font-medium text-xs text-center text-slate-700`}>
+                  <TableRow key={task.id} className="odd:bg-white even:bg-slate-50/50 hover:bg-blue-50/50 transition-colors group">
+                    <TableCell className={`${INDEX_WIDTH_CLASS} sticky left-0 z-20 odd:bg-white even:bg-slate-50/50 group-hover:bg-blue-50/80 border-r border-slate-200 font-bold text-[11px] text-center text-slate-500 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.03)]`}>
                       {(currentPage - 1) * itemsPerPage + idx + 1}
                     </TableCell>
                     {filteredColumns.map(col => (
-                      <TableCell key={col.id} className={`${COLUMN_WIDTH_CLASS} border-b border-r border-gray-100 p-3 text-xs align-middle`}>
+                      <TableCell key={col.id} className={`${COLUMN_WIDTH_CLASS} border-r border-slate-100 p-2.5 text-[11px] font-medium text-slate-700 align-middle`}>
                         <div className="truncate w-full">{safeRender(renderCellValue(task, col))}</div>
                       </TableCell>
                     ))}
                   </TableRow>
                 )) : (
                   <TableRow>
-                    <TableCell colSpan={filteredColumns.length + 1} className="h-48 text-center bg-white">
+                    <TableCell colSpan={filteredColumns.length + 1} className="h-48 text-center bg-slate-50/50">
                       <div className="flex flex-col items-center justify-center text-slate-400">
-                        <Briefcase className="h-10 w-10 mb-2 opacity-20" />
-                        <p className="text-sm font-medium">No matching tasks found</p>
-                        <p className="text-xs">Adjust your search or filters.</p>
+                        <Briefcase className="h-10 w-10 mb-3 opacity-20 text-blue-500" />
+                        <p className="text-[13px] font-bold text-slate-600 tracking-tight">No matching tasks found</p>
+                        <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mt-1">Adjust your search or active filters</p>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -1640,39 +1505,39 @@ export default function ReportsPage() {
             </Table>
           ) : (
             // ── TRANSPOSED VIEW ─────────────────────────────────────────────
-            <Table className="border-separate border-spacing-0 w-full">
+            <Table className="border-separate border-spacing-0 w-full min-w-max">
               <TableHeader className="sticky top-0 z-30 shadow-md">
                 <TableRow className="bg-blue-700 hover:bg-blue-700">
-                  <TableHead className="sticky left-0 z-40 w-[280px] min-w-[280px] bg-blue-800 text-white border-r border-blue-600 font-bold text-sm p-4">
+                  <TableHead className="sticky left-0 z-40 w-[280px] min-w-[280px] bg-blue-800 text-white border-r border-blue-600 font-bold text-[11px] uppercase tracking-widest p-4 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
                     Fields / Tasks →
                   </TableHead>
                   {paginatedTasks.map(task => (
-                    <TableHead key={task.id} className={`${COLUMN_WIDTH_CLASS} text-center bg-blue-700 text-white border-r border-blue-600 font-semibold text-xs py-3 px-2`}>
-                      <div className="flex flex-col gap-1 w-full">
-                        <span className="font-bold opacity-80">#{(currentPage - 1) * itemsPerPage + paginatedTasks.indexOf(task) + 1}</span>
-                        <span className="truncate text-sm" title={task.applicant_name}>{task.applicant_name}</span>
-                        <span className="inline-flex items-center justify-center rounded-md bg-blue-600 text-blue-100 text-[10px] px-1.5 py-0.5 mx-auto">ID: {task.id}</span>
+                    <TableHead key={task.id} className={`${COLUMN_WIDTH_CLASS} text-center bg-blue-700 text-white border-r border-blue-600 font-bold text-[11px] py-2.5 px-2`}>
+                      <div className="flex flex-col gap-1 w-full items-center justify-center">
+                        <span className="font-bold opacity-60 text-[11px] uppercase tracking-widest">IDX #{(currentPage - 1) * itemsPerPage + paginatedTasks.indexOf(task) + 1}</span>
+                        <span className="truncate w-full font-bold" title={task.applicant_name}>{task.applicant_name}</span>
+                        <Badge variant="outline" className="bg-blue-600 text-blue-100 border-blue-500 text-[11px] px-1.5 py-0">ID: {task.id}</Badge>
                       </div>
                     </TableHead>
                   ))}
                 </TableRow>
               </TableHeader>
-              <TableBody className="divide-y divide-slate-200">
+              <TableBody className="divide-y divide-slate-100 bg-white">
                 {paginatedTasks.length > 0 ? transposedRows.map((row, rIdx) => {
                   if (row.type === 'section_header') {
                     const Icon = row.icon;
                     const isFilterNA = row.filterApplicable === false;
                     return (
-                      <TableRow key={row.id} className={`border-y-2 border-slate-400 hover:bg-slate-200 cursor-pointer ${isFilterNA ? 'bg-amber-50' : 'bg-slate-200'}`}
+                      <TableRow key={row.id} className={`border-y-2 border-slate-300 hover:bg-slate-200 cursor-pointer transition-colors ${isFilterNA ? 'bg-amber-50/80' : 'bg-slate-100'}`}
                         onClick={() => toggleSection(row.id)}>
-                        <TableCell className={`sticky left-0 z-20 border-r border-slate-400 p-0 ${isFilterNA ? 'bg-amber-50' : 'bg-slate-200'}`} colSpan={paginatedTasks.length + 1}>
-                          <div className="flex items-center justify-between px-4 py-2">
+                        <TableCell className={`sticky left-0 z-20 border-r border-slate-300 p-0 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] ${isFilterNA ? 'bg-amber-50/80' : 'bg-slate-100'}`} colSpan={paginatedTasks.length + 1}>
+                          <div className="flex items-center justify-between px-4 py-2.5">
                             <div className="flex items-center gap-3">
-                              <Icon className="h-5 w-5 text-slate-600" />
-                              <span className="font-bold text-slate-700 text-base">{row.label}</span>
-                              {isFilterNA && <span className="text-[10px] bg-amber-400/80 text-white px-1.5 py-0.5 rounded">N/A for filter</span>}
+                              <Icon className={cn("h-4 w-4", isFilterNA ? "text-amber-500" : "text-blue-600")} />
+                              <span className="font-bold text-slate-800 text-xs uppercase tracking-wider">{row.label}</span>
+                              {isFilterNA && <span className="text-[11px] bg-amber-500 text-white px-1.5 py-0.5 rounded font-bold shadow-sm">FILTER N/A</span>}
                             </div>
-                            <div className="text-slate-600">
+                            <div className="text-slate-400">
                               {expandedSections.has(row.id) ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
                             </div>
                           </div>
@@ -1682,14 +1547,14 @@ export default function ReportsPage() {
                   }
 
                   return (
-                    <TableRow key={rIdx} className="hover:bg-slate-50 group border-b border-slate-200">
-                      <TableCell className="sticky left-0 z-20 bg-white group-hover:bg-slate-50 border-r border-slate-200 py-2 px-3 text-xs font-medium text-slate-600">
+                    <TableRow key={rIdx} className="odd:bg-white even:bg-slate-50/50 hover:bg-blue-50/50 group border-b border-slate-100 transition-colors">
+                      <TableCell className="sticky left-0 z-20 odd:bg-white even:bg-slate-50/50 group-hover:bg-blue-50/80 border-r border-slate-200 py-2.5 px-3 text-[11px] font-bold text-slate-600 uppercase tracking-widest shadow-[2px_0_5px_-2px_rgba(0,0,0,0.03)]">
                         <div style={{ paddingLeft: row.isSubRow ? '24px' : '0' }} className="flex items-center truncate" title={row.label}>
                           {safeRender(row.label)}
                         </div>
                       </TableCell>
                       {paginatedTasks.map(task => (
-                        <TableCell key={task.id} className={`${COLUMN_WIDTH_CLASS} text-center border-r border-slate-100 p-3 align-middle`}>
+                        <TableCell key={task.id} className={`${COLUMN_WIDTH_CLASS} text-center border-r border-slate-100 p-2.5 align-middle`}>
                           <div className="truncate w-full mx-auto">
                             {safeRender(renderCellValue(task, row))}
                           </div>
@@ -1699,7 +1564,9 @@ export default function ReportsPage() {
                   );
                 }) : (
                   <TableRow>
-                    <TableCell colSpan={2} className="h-32 text-center text-slate-400">No data</TableCell>
+                    <TableCell colSpan={2} className="h-32 text-center text-slate-400 bg-slate-50/50">
+                      <div className="text-[11px] font-bold uppercase tracking-widest">No data available</div>
+                    </TableCell>
                   </TableRow>
                 )}
               </TableBody>

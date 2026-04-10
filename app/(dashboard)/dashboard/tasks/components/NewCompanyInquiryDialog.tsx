@@ -20,8 +20,7 @@ import { toast } from "@/lib/hooks/use-toast"
 import { format } from "date-fns"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { getInheritedOfficer } from "../../departments/departments/database"
-import { fetchUserAssignmentData, fetchOfficers, hasJobLevelAccess, getOfficerDisplayName, FilteredUserData } from "@/lib/shared-user-assignment-service"
+import { fetchUserAssignmentData, fetchOfficers, hasJobLevelAccess, getOfficerDisplayName, FilteredUserData, userService } from "@/lib/shared-user-assignment-service"
 
 // Photo document IDs
 const COMPANY_LOGO_ID = 'f7a75607-bff9-4995-8bde-0256e86da435';
@@ -66,14 +65,6 @@ export function NewCompanyInquiryDialog({
     initialData = null
 }: NewCompanyInquiryDialogProps) {
     const isEditMode = !!initialData;
-
-    // DEBUG: Log initial data reception
-    useEffect(() => {
-        console.log(' NewCompanyInquiryDialog - initialData:', initialData);
-        console.log(' NewCompanyInquiryDialog - isEditMode:', isEditMode);
-        console.log(' NewCompanyInquiryDialog - open:', open);
-    }, [initialData, isEditMode, open]);
-
     const [companies, setCompanies] = useState<Company[]>([])
     const [selectedCompany, setSelectedCompany] = useState<Company | null>(null)
     const [officials, setOfficials] = useState<Official[]>([])
@@ -183,26 +174,16 @@ export function NewCompanyInquiryDialog({
     }, [formData.department_id, formData.subdepartment_id, formData.class_id, localOfficers]);
 
     const isManagerDisabled = useMemo(() => {
-        if (!userData || !userData.managers || userData.managers.length === 0) return true;
         if (!formData.department_id) return true;
-
-        const filteredManagers = userData.managers.filter(manager =>
-            hasJobLevelAccess(manager, formData.department_id, formData.subdepartment_id, formData.class_id) &&
-            manager.assignments && manager.assignments.some((assignment: any) => assignment.role === 'manager')
-        );
-        return filteredManagers.length === 0;
-    }, [userData, formData.department_id, formData.subdepartment_id, formData.class_id]);
+        // Never disable when we have the "No Manager" option available
+        return false;
+    }, [formData.department_id]);
 
     const isAssistantDisabled = useMemo(() => {
-        if (!userData || !userData.assistants || userData.assistants.length === 0) return true;
         if (!formData.department_id) return true;
-
-        const filteredAssistants = userData.assistants.filter(assistant =>
-            hasJobLevelAccess(assistant, formData.department_id, formData.subdepartment_id, formData.class_id) &&
-            assistant.assignments && assistant.assignments.some((assignment: any) => assignment.role === 'assistant')
-        );
-        return filteredAssistants.length === 0;
-    }, [userData, formData.department_id, formData.subdepartment_id, formData.class_id]);
+        // Never disable when we have the "No Assistant" option available
+        return false;
+    }, [formData.department_id]);
 
     const officerOptions = useMemo(() => [
         { value: 'none', label: 'No Officer' },
@@ -273,11 +254,24 @@ export function NewCompanyInquiryDialog({
                 officers_history: [] // Departments don't have officers_history in the current schema
             };
 
-            // Use the inheritance logic to get officer ID
-            const inheritedOfficer = getInheritedOfficer(
-                subdepartment.officer_history || [],
-                departmentForInheritance
+            // Use new userService for staff assignments
+            const subdepartmentUsers = userService.getSubdepartmentUsers(
+                localOfficers.map(o => ({
+                    id: o.id,
+                    displayName: getOfficerDisplayName(o),
+                    email: o.email,
+                    role: 'officer',
+                    firstName: o.firstName,
+                    lastName: o.lastName,
+                    isActive: o.isActive,
+                    assignments: o.assignments || [],
+                    username: o.username || null,
+                    createdAt: o.createdAt || new Date().toISOString()
+                })),
+                department.id.toString(),
+                subdepartment.id.toString()
             );
+            const inheritedOfficer = subdepartmentUsers.officers.length > 0 ? subdepartmentUsers.officers[0] : null;
 
             // Find the real officer from scanner_users
             if (inheritedOfficer && realOfficers.length > 0) {
@@ -335,13 +329,8 @@ export function NewCompanyInquiryDialog({
         }
     }, [getSupabaseImageUrl]);
 
-    // Populate form on Edit Mode
     useEffect(() => {
-        console.log('🔍 Form population useEffect triggered:', { open, hasInitialData: !!initialData });
-
         if (open && initialData) {
-            console.log('🔍 Populating form with initialData:', initialData);
-
             setFormData({
                 job_description: initialData.job_description || '',
                 department_id: initialData.department_id?.toString() || '',
@@ -369,34 +358,21 @@ export function NewCompanyInquiryDialog({
                     id: companyInfo.id,
                     company_name: companyInfo.name
                 });
-                console.log('🔍 Set selected company from applicant_details:', { id: companyInfo.id, name: companyInfo.name });
-            } else {
-                console.warn('🔍 No company info found in applicant_details or company_details');
             }
-
-            // FIX: Look for directors in participants_details instead of directors_details
             const participants = initialData.participants_details || [];
-            console.log('🔍 Processing participants_details:', participants);
-
             const directors = participants.filter((p: any) =>
                 p.type === 'individual' &&
                 (p.role.includes('Director') || p.role.includes('director'))
             );
 
             if (directors.length > 0) {
-                console.log('🔍 Found directors in participants:', directors);
                 const directorIds = directors.map((d: any) => d.id);
                 setSelectedOfficialIds(new Set(directorIds));
                 const primary = directors.find((d: any) => d.is_primary);
                 if (primary) {
-                    console.log('🔍 Set primary director:', primary);
                     setPrimaryDirectorId(primary.id);
                 }
-            } else {
-                console.log('🔍 No directors found in participants_details');
             }
-
-            // FIX: Process other participants and set form fields
             const officer = participants.find((p: any) =>
                 p.type === 'individual' && p.role.includes('officer')
             );
@@ -408,36 +384,28 @@ export function NewCompanyInquiryDialog({
             );
 
             if (officer) {
-                console.log('🔍 Found officer:', officer);
                 setFormData(prev => ({ ...prev, officer_id: officer.id.toString() }));
             }
             if (taskManager) {
-                console.log('🔍 Found task manager:', taskManager);
                 setFormData(prev => ({ ...prev, task_manager_id: taskManager.id.toString() }));
             }
             if (taskAssistant) {
-                console.log('🔍 Found task assistant:', taskAssistant);
                 setFormData(prev => ({ ...prev, task_assistant_id: taskAssistant.id.toString() }));
             }
 
-            // FIX: Populate job specific answers from initial data
             if (initialData.job_specific_answers) {
-                console.log('🔍 Populating job specific answers:', initialData.job_specific_answers);
                 setJobAnswers(initialData.job_specific_answers);
             }
         } else if (open && !initialData) {
-            console.log('🔍 Resetting form (new mode)');
             resetForm();
         }
     }, [open, initialData]);
 
-    // Auto-set inherited officer when subdepartment changes
     useEffect(() => {
         const updateInheritedOfficer = async () => {
             if (formData.subdepartment_id && formData.department_id) {
                 const inheritedOfficer = await getInheritedOfficerForSubdepartment(formData.subdepartment_id);
                 if (inheritedOfficer && !formData.officer_id) {
-                    // Only auto-set if no officer is currently selected
                     setFormData(prev => ({
                         ...prev,
                         officer_id: inheritedOfficer.id.toString()
@@ -462,10 +430,8 @@ export function NewCompanyInquiryDialog({
         }
     }, []);
 
-    // Fetch official photo
     const fetchOfficialPhoto = useCallback(async (individualId: number): Promise<string | null> => {
         try {
-            // Try passport photo first
             let { data: photoDoc } = await supabase
                 .from('acc_portal_directors_documents')
                 .select('file_path')
@@ -473,7 +439,6 @@ export function NewCompanyInquiryDialog({
                 .eq('document_id', PASSPORT_PHOTO_ID)
                 .maybeSingle();
 
-            // Fallback to clear photo
             if (!photoDoc) {
                 const result = await supabase
                     .from('acc_portal_directors_documents')
@@ -496,11 +461,7 @@ export function NewCompanyInquiryDialog({
     const fetchOfficials = useCallback(async (companyId: number) => {
         setLoadingOfficials(true);
         try {
-            console.log('🔍 fetchOfficials called with companyId:', companyId);
-
-            // Skip fetching if companyId is null or undefined
             if (!companyId) {
-                console.warn('🔍 fetchOfficials: No companyId provided, skipping fetch');
                 setOfficials([]);
                 return;
             }
@@ -536,9 +497,6 @@ export function NewCompanyInquiryDialog({
             });
 
             const uniqueOfficials = Array.from(associatedMap.values());
-            console.log('🔍 fetchOfficials found officials:', uniqueOfficials);
-
-            // Fetch photos for each official
             const officialsWithPhotos = await Promise.all(
                 uniqueOfficials.map(async (official) => {
                     const photoUrl = await fetchOfficialPhoto(official.id);
@@ -565,7 +523,6 @@ export function NewCompanyInquiryDialog({
         }
     }, [isEditMode, fetchOfficialPhoto]);
 
-    // Fetch job questions
     const fetchJobQuestions = useCallback(async (levelObj: any) => {
         setLoadingQuestions(true)
         try {
@@ -581,7 +538,6 @@ export function NewCompanyInquiryDialog({
                 const initial: any = {}
                 data.job_specific_questions.forEach((q: any) => {
                     if (q.default_value) {
-                        // For multiselect, ensure default value is an array
                         if (q.type === 'multiselect') {
                             initial[q.id] = Array.isArray(q.default_value) ? q.default_value : [q.default_value]
                         } else {
@@ -598,7 +554,6 @@ export function NewCompanyInquiryDialog({
         }
     }, [])
 
-    // Fetch job questions when classification changes
     useEffect(() => {
         if (!formData.department_id) return
         const levelObj = {
@@ -610,7 +565,6 @@ export function NewCompanyInquiryDialog({
         fetchJobQuestions(levelObj)
     }, [formData.department_id, formData.subdepartment_id, formData.class_id, fetchJobQuestions])
 
-    // Check question visibility
     const checkVisibility = useCallback((q: any) => {
         if (!q.depends_on || !q.depends_on.id) return true;
 
@@ -621,7 +575,6 @@ export function NewCompanyInquiryDialog({
             case 'equals':
                 return String(parentVal) === String(targetVal);
             case 'not_equals':
-                // Only show if parent value exists and is not equal to target
                 if (parentVal === undefined || parentVal === null || parentVal === '') return false;
                 return String(parentVal) !== String(targetVal);
             case 'is_not_empty':
@@ -635,7 +588,6 @@ export function NewCompanyInquiryDialog({
         }
     }, [jobAnswers]);
 
-    // Group questions by category
     const groupedQuestions = useMemo(() => {
         const visible = jobQuestions.filter(q => checkVisibility(q));
         return visible.reduce((acc, q) => {
@@ -1212,7 +1164,7 @@ export function NewCompanyInquiryDialog({
                                             value={formData.officer_id}
                                             onValueChange={(v) => setFormData(p => ({ ...p, officer_id: v }))}
                                             options={officerOptions}
-                                            placeholder={isOfficerDisabled ? "Select job level first" : "Select Officer"}
+                                            placeholder={!formData.department_id ? "Select job level first" : "Select Officer"}
                                             disabled={isOfficerDisabled}
                                             emptyMessage="No officers found."
                                             searchPlaceholder="Search officer..."
@@ -1227,7 +1179,7 @@ export function NewCompanyInquiryDialog({
                                             value={formData.task_manager_id}
                                             onValueChange={(v) => setFormData(p => ({ ...p, task_manager_id: v }))}
                                             options={managerOptions}
-                                            placeholder={isManagerDisabled ? "Select job level first" : "Select Manager"}
+                                            placeholder={!formData.department_id ? "Select job level first" : "Select Manager"}
                                             disabled={isManagerDisabled}
                                             emptyMessage="No managers found."
                                             searchPlaceholder="Search manager..."
@@ -1242,7 +1194,7 @@ export function NewCompanyInquiryDialog({
                                             value={formData.task_assistant_id}
                                             onValueChange={(v) => setFormData(p => ({ ...p, task_assistant_id: v }))}
                                             options={assistantOptions}
-                                            placeholder={isAssistantDisabled ? "Select job level first" : "Select Assistant"}
+                                            placeholder={!formData.department_id ? "Select job level first" : "Select Assistant"}
                                             disabled={isAssistantDisabled}
                                             emptyMessage="No assistants found."
                                             searchPlaceholder="Search assistant..."

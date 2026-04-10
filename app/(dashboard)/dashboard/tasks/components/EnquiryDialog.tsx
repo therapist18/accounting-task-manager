@@ -252,13 +252,16 @@ export function EnquiryDialog({
 
     const officerOptions = useMemo(() => {
         if (availableOfficers.length === 0) {
-            return [];
+            return [{ value: 'none', label: 'No Officer' }];
         }
         // Filter officers by job level access
         const filteredOfficers = availableOfficers.filter(officer =>
             hasJobLevelAccess(officer, formData.department_id, formData.subdepartment_id, formData.class_id)
         );
-        return filteredOfficers.map(o => ({ value: o.id.toString(), label: o.displayName || o.full_name || o.name || 'Unknown' }));
+        return [
+            { value: 'none', label: 'No Officer' },
+            ...filteredOfficers.map(o => ({ value: o.id.toString(), label: o.displayName || o.full_name || o.name || 'Unknown' }))
+        ];
     }, [availableOfficers, formData.department_id, formData.subdepartment_id, formData.class_id]);
 
     // Computed values for disabled states based on job level selection
@@ -274,25 +277,15 @@ export function EnquiryDialog({
 
     const isManagerDisabled = useMemo(() => {
         if (!formData.department_id) return true;
-        if (!managersData || managersData.length === 0) return true;
-
-        const filteredManagers = managersData.filter(manager =>
-            hasJobLevelAccess(manager, formData.department_id, formData.subdepartment_id, formData.class_id) &&
-            manager.assignments && manager.assignments.some((assignment: any) => assignment.role === 'manager')
-        );
-        return filteredManagers.length === 0;
-    }, [formData.department_id, formData.subdepartment_id, formData.class_id, managersData]);
+        // Never disable when we have the "No Manager" option available
+        return false;
+    }, [formData.department_id]);
 
     const isAssistantDisabled = useMemo(() => {
         if (!formData.department_id) return true;
-        if (!assistantsData || assistantsData.length === 0) return true;
-
-        const filteredAssistants = assistantsData.filter(assistant =>
-            hasJobLevelAccess(assistant, formData.department_id, formData.subdepartment_id, formData.class_id) &&
-            assistant.assignments && assistant.assignments.some((assignment: any) => assignment.role === 'assistant')
-        );
-        return filteredAssistants.length === 0;
-    }, [formData.department_id, formData.subdepartment_id, formData.class_id, assistantsData]);
+        // Never disable when we have the "No Assistant" option available
+        return false;
+    }, [formData.department_id]);
 
     const officerPlaceholder = useMemo(() => {
         if (!formData.department_id) {
@@ -301,18 +294,18 @@ export function EnquiryDialog({
         if (availableOfficers.length === 0) {
             return "No officers available";
         }
-        if (isOfficerDisabled) {
+        const filteredOfficers = availableOfficers.filter(officer =>
+            hasJobLevelAccess(officer, formData.department_id, formData.subdepartment_id, formData.class_id)
+        );
+        if (filteredOfficers.length === 0) {
             return "No officers with access to this job level";
         }
         return "Select Officer";
-    }, [formData.department_id, availableOfficers.length, isOfficerDisabled]);
+    }, [formData.department_id, formData.subdepartment_id, formData.class_id, availableOfficers]);
 
-    // Get inherited officer for the selected subdepartment
     const getInheritedOfficerForSubdepartment = useCallback(async (subdepartmentId: string) => {
         if (!subdepartmentId || !formData.department_id) return null;
-
         try {
-            // Get the parent department (without officers_history since it doesn't exist)
             const { data: department, error: deptError } = await supabase
                 .from('tm_departments')
                 .select('id, name')
@@ -320,8 +313,6 @@ export function EnquiryDialog({
                 .single();
 
             if (deptError) throw deptError;
-
-            // Get the subdepartment with its officer history
             const { data: subdepartment, error: subError } = await supabase
                 .from('tm_subdepartments')
                 .select('id, name, officer_history')
@@ -329,23 +320,15 @@ export function EnquiryDialog({
                 .single();
 
             if (subError) throw subError;
-
-            // Fetch real officers from scanner_users
             const realOfficers = await fetchOfficers();
-
-            // Create a mock department structure for inheritance logic
             const departmentForInheritance = {
                 ...department,
-                officers_history: [] // Departments don't have officers_history in the current schema
+                officers_history: []
             };
-
-            // Use the inheritance logic to get officer ID
             const inheritedOfficer = getInheritedOfficer(
                 subdepartment.officer_history || [],
                 departmentForInheritance
             );
-
-            // Find the real officer from scanner_users
             if (inheritedOfficer && realOfficers.length > 0) {
                 const realOfficer = realOfficers.find(officer =>
                     officer.id === inheritedOfficer.id.toString() ||
@@ -362,47 +345,38 @@ export function EnquiryDialog({
         }
     }, [formData.department_id]);
 
-    // Use fetched managers and assistants data for dropdown options (matching regisry)
     const managerOpts = useMemo(() => {
-        console.log('EnquiryDialog: Building manager options from managersData:', managersData);
-        // Add null check to prevent runtime errors
         if (!managersData || !Array.isArray(managersData)) {
-            console.log('EnquiryDialog: managersData is not available, returning empty options');
-            return [];
+            return [{ value: 'none', label: 'No Manager' }];
         }
-        // Filter managers by job level access and assignments with 'manager' role
         const filteredManagers = managersData.filter(manager =>
             hasJobLevelAccess(manager, formData.department_id, formData.subdepartment_id, formData.class_id) &&
             manager.assignments && manager.assignments.some((assignment: any) => assignment.role === 'manager')
         );
-        console.log('EnquiryDialog: Filtered managers:', filteredManagers);
-        return buildSelectOptions(filteredManagers, "displayName");
+        return [
+            { value: 'none', label: 'No Manager' },
+            ...buildSelectOptions(filteredManagers, "displayName")
+        ];
     }, [managersData, formData.department_id, formData.subdepartment_id, formData.class_id]);
 
     const assistantOpts = useMemo(() => {
-        console.log('EnquiryDialog: Building assistant options from assistantsData:', assistantsData);
         // Add null check to prevent runtime errors
         if (!assistantsData || !Array.isArray(assistantsData)) {
-            console.log('EnquiryDialog: assistantsData is not available, returning empty options');
-            return [];
+            return [{ value: 'none', label: 'No Assistant' }];
         }
-        // Filter assistants by job level access and assignments with 'assistant' role
         const filteredAssistants = assistantsData.filter(assistant =>
             hasJobLevelAccess(assistant, formData.department_id, formData.subdepartment_id, formData.class_id) &&
             assistant.assignments && assistant.assignments.some((assignment: any) => assignment.role === 'assistant')
         );
-        console.log('EnquiryDialog: Filtered assistants:', filteredAssistants);
-        return buildSelectOptions(filteredAssistants, 'name');
+        return [
+            { value: 'none', label: 'No Assistant' },
+            ...buildSelectOptions(filteredAssistants, 'displayName')
+        ];
     }, [assistantsData, formData.department_id, formData.subdepartment_id, formData.class_id]);
 
-    // Helper function to construct Supabase storage URL
     const getSupabaseImageUrl = useCallback((filePath: string | null): string | null => {
         if (!filePath) return null;
-
-        // If it's already a full URL, return as is
         if (filePath.startsWith('http')) return filePath;
-
-        // Otherwise, construct the Supabase storage URL
         const bucketName = 'kyc-documents';
         const fullPath = filePath.startsWith(bucketName) ? filePath : `${bucketName}/${filePath}`;
         return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${fullPath}`;
@@ -479,7 +453,6 @@ export function EnquiryDialog({
         }
     }, [getSupabaseImageUrl]);
 
-    // --- Form Reset Logic ---
     const resetForm = useCallback(() => {
         setFormData({
             job_description: '',
@@ -518,9 +491,6 @@ export function EnquiryDialog({
 
     useEffect(() => {
         if (open && taskToEdit) {
-            console.log("🔹 [EnquiryDialog] Populating Edit Mode for Task:", taskToEdit.id);
-
-            // 0. Ensure existing participants are available in the dropdowns
             if (taskToEdit.participants_details) {
                 const existingOfficers = [...availableOfficers];
                 const existingManagers = [...managersData];
@@ -738,21 +708,10 @@ export function EnquiryDialog({
         }
     }, [formData.subdepartment_id])
 
-    // --- Staff Data Loading Logic ---
     const loadStaffData = useCallback(async () => {
         setLoadingStaff(true);
         try {
-            // Use unified service to fetch all user data at once (same as departments page)
-            console.log('EnquiryDialog: Fetching unified user data...');
             const unifiedUserData = await userService.getAllUserData({ payrollAccess: true }, departments);
-
-            console.log('EnquiryDialog: Received unified userData:', {
-                allUsersCount: unifiedUserData.allUsers?.length || 0,
-                officersCount: unifiedUserData.officers?.length || 0,
-                managersCount: unifiedUserData.managers?.length || 0,
-                assistantsCount: unifiedUserData.assistants?.length || 0
-            });
-
             setManagersData(unifiedUserData.managers || []);
             setAssistantsData(unifiedUserData.assistants || []);
 
@@ -773,28 +732,13 @@ export function EnquiryDialog({
     }, [departments]);
 
     useEffect(() => {
-        console.log('EnquiryDialog: Staff data useEffect triggered - open:', open, 'userData exists:', !!userData, 'userData.allUsers length:', userData?.allUsers?.length || 0);
-
-        // If userData is provided, use it
         if (userData && userData.allUsers && userData.allUsers.length > 0) {
-            console.log('EnquiryDialog: Using provided userData');
-            console.log('EnquiryDialog: userData structure:', {
-                allUsers: userData.allUsers?.length || 0,
-                officers: userData.officers?.length || 0,
-                managers: userData.managers?.length || 0,
-                assistants: userData.assistants?.length || 0,
-                managersSample: userData.managers?.slice(0, 2) || [],
-                assistantsSample: userData.assistants?.slice(0, 2) || []
-            });
-
             setAllOfficers(userData.officers || []);
             setAvailableOfficers(userData.officers || []);
             setManagersData(userData.managers || []);
             setAssistantsData(userData.assistants || []);
         }
-        // Otherwise, if dialog is open, always fetch managers/assistants internally
         else if (open) {
-            console.log('EnquiryDialog: Dialog open without userData, calling loadStaffData');
             loadStaffData();
         }
     }, [open, userData, loadStaffData]);
@@ -807,13 +751,11 @@ export function EnquiryDialog({
         }
     }, [open, applicantType, fetchIndividualsByType])
 
-    // Auto-set inherited officer when subdepartment changes
     useEffect(() => {
         const updateInheritedOfficer = async () => {
             if (formData.subdepartment_id && formData.department_id) {
                 const inheritedOfficer = await getInheritedOfficerForSubdepartment(formData.subdepartment_id);
                 if (inheritedOfficer && !formData.officer_id) {
-                    // Only auto-set if no officer is currently selected
                     setFormData(prev => ({
                         ...prev,
                         officer_id: inheritedOfficer.id.toString()
@@ -825,27 +767,15 @@ export function EnquiryDialog({
         updateInheritedOfficer();
     }, [formData.subdepartment_id, formData.department_id, formData.officer_id]);
 
-    // Filter officers based on department and subdepartment selection with inheritance
     useEffect(() => {
         if (!allOfficers || !Array.isArray(allOfficers) || allOfficers.length === 0) {
-            console.log('🔍 [EnquiryDialog] No officers available for filtering');
             setAvailableOfficers([]);
             return;
         }
-
-        console.log('🔍 [EnquiryDialog] Officer Filtering - Department:', formData.department_id, 'Subdepartment:', formData.subdepartment_id);
-        console.log('🔍 [EnquiryDialog] Total Officers Available:', allOfficers.length);
-        console.log('🔍 [EnquiryDialog] All Officers with assignments:', allOfficers.map(o => ({
-            id: o.id,
-            name: o.full_name || o.name,
-            assignments: o.assignments
-        })));
-
         let filteredOfficers = [];
         let inheritanceUsed = false;
 
         if (formData.subdepartment_id) {
-            // Get officers assigned to this specific subdepartment using unified service
             const subdeptOfficers = allOfficers.filter(officer => {
                 if (!officer.assignments || !Array.isArray(officer.assignments)) return false;
                 return officer.assignments.some(assignment =>
@@ -855,15 +785,9 @@ export function EnquiryDialog({
                     !assignment.end_date
                 );
             });
-
-            console.log('🔍 [EnquiryDialog] Subdepartment Officers Found:', subdeptOfficers.length);
-
             if (subdeptOfficers.length > 0) {
-                // Subdepartment has its own officers
                 filteredOfficers = subdeptOfficers;
-                console.log('✅ [EnquiryDialog] Using subdepartment officers:', filteredOfficers.map(o => o.full_name || o.name));
             } else {
-                // Subdepartment has no officers, inherit from parent department
                 filteredOfficers = allOfficers.filter(officer => {
                     if (!officer.assignments || !Array.isArray(officer.assignments)) return false;
                     return officer.assignments.some(assignment =>
@@ -874,12 +798,8 @@ export function EnquiryDialog({
                     );
                 });
                 inheritanceUsed = true;
-                console.log('🔄 [EnquiryDialog] Using inherited department officers:', filteredOfficers.map(o => o.full_name || o.name));
             }
         } else if (formData.department_id) {
-            // Get officers assigned to this department using unified service
-            console.log('🔍 [EnquiryDialog] Looking for department:', formData.department_id, 'type:', typeof formData.department_id);
-
             filteredOfficers = allOfficers.filter(officer => {
                 if (!officer.assignments || !Array.isArray(officer.assignments)) return false;
                 return officer.assignments.some(assignment =>
@@ -888,21 +808,11 @@ export function EnquiryDialog({
                     !assignment.end_date
                 );
             });
-
-            console.log('🔍 [EnquiryDialog] Department officers found:', filteredOfficers.length);
-            console.log('✅ [EnquiryDialog] Using department officers:', filteredOfficers.map(o => o.full_name || o.name));
         } else {
-            // No department selected, show no officers
             filteredOfficers = [];
-            console.log('⚠️ [EnquiryDialog] No department selected - no officers available');
         }
-
-        console.log('📊 [EnquiryDialog] Final Filtered Officers:', filteredOfficers.length, 'Inheritance Used:', inheritanceUsed);
         setAvailableOfficers(filteredOfficers);
-
-        // If current officer selection is not in filtered list, clear it
         if (formData.officer_id && !filteredOfficers.find(o => o.id.toString() === formData.officer_id)) {
-            console.log('🧹 [EnquiryDialog] Clearing invalid officer selection:', formData.officer_id);
             setFormData(prev => ({ ...prev, officer_id: '' }));
         }
     }, [formData.department_id, formData.subdepartment_id, allOfficers, formData.officer_id]);
@@ -915,7 +825,6 @@ export function EnquiryDialog({
         });
     }, [open, fetchAllCompanies])
 
-    // Reset primary applicant field when applicant type changes
     useEffect(() => {
         if (open) {
             setSelectedIndividual(null)
@@ -943,8 +852,6 @@ export function EnquiryDialog({
         setAvailableDependants([]); setSelectedDependants([]); setIncludeDependants(false)
         setAvailableReferences([]); setSelectedReferences([]); setIncludeReferences(false)
         setPrincipalForDependant(null)
-
-        // Fetch photo
         fetchApplicantPhoto(ind.id);
 
         const promises = []

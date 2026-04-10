@@ -39,7 +39,6 @@ import { ClassSelectionDialog } from "./components/ClassSelectionDialog"
 import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, formatWorkflowRestrictionReason, taskBundleService } from "./utils/workflowBundleHelpers"
 import { determineCurrentStage, getStageProgress } from './utils/stageUtils'
 import { calculateStageDate } from './utils/dateUtils'
-import { getInheritedOfficer } from '../departments/departments/database'
 import { fetchUserAssignmentData, hasJobLevelAccess, getOfficerDisplayName, userService } from "@/lib/shared-user-assignment-service"
 
 export default function DepartmentTasksManager({
@@ -317,15 +316,28 @@ export default function DepartmentTasksManager({
       officers_history: [] // Departments don't have officers_history in the current schema
     };
 
-    // Use inheritance logic for officers
-    const inheritedOfficer = getInheritedOfficer(
-      subdepartment.officer_history || [],
-      departmentForInheritance
+    // Use new userService for staff assignments
+    const subdepartmentUsers = userService.getSubdepartmentUsers(
+      realOfficers.map(o => ({
+        id: o.id,
+        displayName: getOfficerDisplayName(o),
+        email: o.email,
+        role: 'officer',
+        firstName: o.firstName,
+        lastName: o.lastName,
+        isActive: o.isActive,
+        assignments: o.assignments || [],
+        username: o.username || null,
+        createdAt: o.createdAt || new Date().toISOString()
+      })),
+      department.id.toString(),
+      subdepartment.id.toString()
     );
 
     // Find the real officer from cached scanner_users
     let activeOfficers = [];
-    if (inheritedOfficer && realOfficers && realOfficers.length > 0) {
+    if (subdepartmentUsers.officers.length > 0 && realOfficers && realOfficers.length > 0) {
+      const inheritedOfficer = subdepartmentUsers.officers[0];
       const realOfficer = realOfficers.find(officer =>
         officer.id === inheritedOfficer.id.toString() ||
         officer.id === inheritedOfficer.id
@@ -3307,7 +3319,7 @@ export default function DepartmentTasksManager({
       />
 
       {linkingTask && (
-        <LinkSourceDocumentDialog
+          <LinkSourceDocumentDialog
           open={isLinkDialogOpen}
           onOpenChange={setIsLinkDialogOpen}
           task={linkingTask}

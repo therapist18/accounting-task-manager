@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from "react"
 import { CellContent } from "./types"
-import { getInheritedOfficer } from "../../departments/departments/database"
+import { userService, getOfficerDisplayName } from "@/lib/shared-user-assignment-service"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { FileText, Plus, Minus, Loader2, AlertTriangle, Trash2, ChevronUp, ChevronDown, Edit, Send, DownloadCloud } from "lucide-react"
@@ -52,10 +52,11 @@ interface StandardTableProps {
   toggleStageExpansion: (stageId: string) => void
   toggleDocumentExpansion: (docId: string) => void
   toggleDependantsExpansion: (taskId: string) => void
+  officers?: any[]
 }
 
-// Helper function to get inherited officer for a task
-const getInheritedOfficerForTask = (task: any, departments: any[]) => {
+// Helper function to get inherited officer for a task using userService
+const getInheritedOfficerForTask = (task: any, departments: any[], officers: any[] = []) => {
   if (!task || !departments.length) return null;
 
   const department = departments.find(d =>
@@ -68,16 +69,25 @@ const getInheritedOfficerForTask = (task: any, departments: any[]) => {
   );
   if (!subdepartment) return null;
 
-  // Create a mock department structure for inheritance logic
-  const departmentForInheritance = {
-    ...department,
-    officers_history: [] // Departments don't have officers_history in the current schema
-  };
-
-  return getInheritedOfficer(
-    subdepartment.officers_history || [],
-    departmentForInheritance
+  // Use new userService for staff assignments
+  const subdepartmentUsers = userService.getSubdepartmentUsers(
+    officers.map(o => ({
+      id: o.id,
+      displayName: getOfficerDisplayName(o),
+      email: o.email,
+      role: 'officer',
+      firstName: o.firstName,
+      lastName: o.lastName,
+      isActive: o.isActive,
+      assignments: o.assignments || [],
+      username: o.username || null,
+      createdAt: o.createdAt || new Date().toISOString()
+    })),
+    department.id.toString(),
+    subdepartment.id.toString()
   );
+
+  return subdepartmentUsers.officers.length > 0 ? subdepartmentUsers.officers[0] : null;
 };
 
 // --- COMPONENT ---

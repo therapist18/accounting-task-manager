@@ -102,17 +102,12 @@ async function fetchUsers(params: {
 
 // Fetch officers (filter by role since officers don't have roleAssignments)
 export async function fetchOfficers(options: UserAssignmentOptions = {}): Promise<AuthOfficer[]> {
-  console.log('=== fetchOfficers START ===');
-  console.log('Options:', options);
-
   const allUsers = await fetchUsers({
     payrollAccess: options.payrollAccess ?? true
   });
-  console.log('All users received for officers:', allUsers.length);
 
   // Filter for officers (user.role === 'officer')
   const officers = allUsers.filter((user: any) => user.role === 'officer');
-  console.log('Filtered officers count:', officers.length);
 
   return officers.map((officer: any) => ({
     id: officer.id,
@@ -131,14 +126,9 @@ export async function fetchOfficers(options: UserAssignmentOptions = {}): Promis
 
 // Fetch task managers (filter by roleAssignments containing 'manager')
 export async function fetchTaskManagers(options: UserAssignmentOptions = {}): Promise<TaskManager[]> {
-  console.log('=== fetchTaskManagers START ===');
-  console.log('Options:', options);
-
   const allUsers = await fetchUsers({
     payrollAccess: options.payrollAccess ?? true
   });
-
-  console.log('All users received for managers:', allUsers.length);
 
   // Filter for users with roleAssignments containing 'manager'
   const managers = allUsers.filter((user: any) => {
@@ -150,7 +140,6 @@ export async function fetchTaskManagers(options: UserAssignmentOptions = {}): Pr
     return hasManagerRole;
   });
 
-  console.log('fetchTaskManagers: Filtered managers count:', managers.length);
 
   // Transform to TaskManager format
   const result = managers.map((user: any) => ({
@@ -167,20 +156,14 @@ export async function fetchTaskManagers(options: UserAssignmentOptions = {}): Pr
     primaryCompanyId: user.primaryCompanyId,
   }));
 
-  console.log('fetchTaskManagers: Returning result count:', result.length);
   return result;
 }
 
 // Fetch task assistants (filter by roleAssignments containing 'assistant')
 export async function fetchTaskAssistants(options: UserAssignmentOptions = {}): Promise<TaskAssistant[]> {
-  console.log('=== fetchTaskAssistants START ===');
-  console.log('Options:', options);
-
   const allUsers = await fetchUsers({
     payrollAccess: options.payrollAccess ?? true
   });
-
-  console.log('All users received for assistants:', allUsers.length);
 
   // Filter for users with roleAssignments containing 'assistant'
   const assistants = allUsers.filter((user: any) => {
@@ -188,7 +171,6 @@ export async function fetchTaskAssistants(options: UserAssignmentOptions = {}): 
     return hasAssistantRole;
   });
 
-  console.log('fetchTaskAssistants: Filtered assistants count:', assistants.length);
 
   const result = assistants.map((assistant: any) => ({
     id: assistant.id,
@@ -204,7 +186,6 @@ export async function fetchTaskAssistants(options: UserAssignmentOptions = {}): 
     primaryCompanyId: assistant.primaryCompanyId,
   }));
 
-  console.log('fetchTaskAssistants: Returning result count:', result.length);
   return result;
 }
 
@@ -288,13 +269,6 @@ class UnifiedUserService {
    * Transform raw user data to display format with role assignments
    */
   private transformUserToDisplayFormat(user: any, departments: any[] = []): DisplayUser {
-    console.log('Transforming user to display format:', {
-      id: user.id,
-      displayName: user.displayName,
-      role: user.role,
-      roleAssignmentsCount: user.roleAssignments?.length || 0,
-      jobLevelsCount: user.jobLevels?.length || 0
-    });
 
     // Transform roleAssignments to RoleAssignment format
     const assignments: RoleAssignment[] = (user.roleAssignments || user.jobLevels || []).map((assignment: any) => ({
@@ -365,42 +339,24 @@ class UnifiedUserService {
    * Get all users with their assignments, categorized by role
    */
   async getAllUserData(options: UserAssignmentOptions = {}, departments?: any[]): Promise<FilteredUserData> {
-    console.log('=== UnifiedUserService.getAllUserData START ===');
-    console.log('Options:', options);
-    console.log('Departments provided:', departments?.length || 0);
-
     const cacheKey = `allUserData_${JSON.stringify(options)}_${departments ? 'with-departments' : 'no-departments'}`;
-    console.log('Cache key:', cacheKey);
 
     if (this.isCacheValid(cacheKey)) {
-      console.log('Returning CACHED data');
       return this.cache.get(cacheKey);
     }
-
-    console.log('Fetching FRESH data...');
     // Use existing fetchUserAssignmentData to get raw data
     const rawData = await fetchUserAssignmentData(options);
-    console.log('Raw data received:', {
-      officersCount: rawData.officers?.length || 0,
-      taskManagersCount: rawData.taskManagers?.length || 0,
-      taskAssistantsCount: rawData.taskAssistants?.length || 0,
-      allUsersCount: rawData.allUsers?.length || 0
-    });
 
     // Transform all users to display format
-    console.log('Transforming users to display format...');
     const allDisplayUsers = [
       ...rawData.officers.map(user => this.transformUserToDisplayFormat(user, departments || [])),
       ...rawData.taskManagers.map(user => this.transformUserToDisplayFormat(user, departments || [])),
       ...rawData.taskAssistants.map(user => this.transformUserToDisplayFormat(user, departments || []))
     ];
-    console.log('Total display users before deduplication:', allDisplayUsers.length);
 
-    // Remove duplicates (users might appear in multiple categories)
     const uniqueUsers = Array.from(
       new Map(allDisplayUsers.map(user => [user.id, user])).values()
     );
-    console.log('Unique users after deduplication:', uniqueUsers.length);
 
     const result: FilteredUserData = {
       officers: uniqueUsers.filter(user => user.assignments.some(a => a.role === 'officer')),
@@ -409,41 +365,7 @@ class UnifiedUserService {
       allUsers: uniqueUsers
     };
 
-    console.log('Final categorized result:', {
-      officersCount: result.officers.length,
-      managersCount: result.managers.length,
-      assistantsCount: result.assistants.length,
-      allUsersCount: result.allUsers.length
-    });
-
-    // Log sample data for each category
-    if (result.officers.length > 0) {
-      console.log('Sample officer:', {
-        id: result.officers[0].id,
-        displayName: result.officers[0].displayName,
-        role: result.officers[0].role,
-        assignmentsCount: result.officers[0].assignments.length
-      });
-    }
-    if (result.managers.length > 0) {
-      console.log('Sample manager:', {
-        id: result.managers[0].id,
-        displayName: result.managers[0].displayName,
-        role: result.managers[0].role,
-        assignmentsCount: result.managers[0].assignments.length
-      });
-    }
-    if (result.assistants.length > 0) {
-      console.log('Sample assistant:', {
-        id: result.assistants[0].id,
-        displayName: result.assistants[0].displayName,
-        role: result.assistants[0].role,
-        assignmentsCount: result.assistants[0].assignments.length
-      });
-    }
-
     this.setCache(cacheKey, result);
-    console.log('=== UnifiedUserService.getAllUserData END ===');
     return result;
   }
 
@@ -456,6 +378,7 @@ class UnifiedUserService {
     assistants: DisplayUser[];
   } {
     const filterUser = (user: DisplayUser, role: string): boolean => {
+      if (!user.assignments || !Array.isArray(user.assignments)) return false;
       return user.assignments.some(assignment => {
         if (assignment.role !== role) return false;
 
