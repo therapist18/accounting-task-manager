@@ -173,7 +173,7 @@ export function StandardReportView({
 
             {/* --- COLUMN HEADER ROW --- */}
             <TableRow className="bg-blue-600 text-white">
-              <TableHead className={`${INDEX_WIDTH_CLASS} sticky left-0 z-40 bg-blue-600 border-r border-blue-500 text-center font-semibold text-xs`}>
+              <TableHead className={`${INDEX_WIDTH_CLASS} sticky left-0 z-40 bg-blue-600 border-r border-blue-500 text-center text-white font-semibold text-xs`}>
                 IDX
               </TableHead>
               {filteredColumns.map(col => {
