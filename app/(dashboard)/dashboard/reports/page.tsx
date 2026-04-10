@@ -56,7 +56,7 @@ import {
   fetchAllDocuments,
   fetchAllKycFields,
 } from "../tasks/utils/taskManagerData";
-import { fetchAuthOfficers, getOfficerDisplayName } from "../tasks/utils/authOfficers";
+import { getOfficerDisplayName } from "@/lib/shared-user-assignment-service";
 import { fetchDepartments, getDepartmentOfficerIds, getSubdepartmentOfficerIds } from "../departments/departments/database";
 import { MemorizedReportDialog } from "./MemorizedReportDialog";
 import { calculateStageDate, findDateInObject } from "../tasks/utils/dateUtils";

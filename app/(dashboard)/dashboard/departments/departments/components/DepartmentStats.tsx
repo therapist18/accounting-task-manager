@@ -1,10 +1,10 @@
 import { Officer, User } from "../database"
+import { FilteredUserData } from "@/lib/shared-user-assignment-service"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Building, Users, User as UserIcon, Shield, BarChart3, X } from "lucide-react"
-import { getOfficerDisplayName } from "../../../tasks/utils/authOfficers"
-import { getDepartmentOfficerIds, getSubdepartmentOfficerIds } from "../database"
+import { getOfficerDisplayName, getDepartmentUsers } from "@/lib/shared-user-assignment-service"
 
 interface DepartmentStatsProps {
   department: {
@@ -19,15 +19,14 @@ interface DepartmentStatsProps {
     manager_history: Array<{ id: string; start_date: string; end_date?: string }>
     assistant_history: Array<{ id: string; start_date: string; end_date?: string }>
   }>
-  users: User[]
-  officers: Officer[]
+  userData: FilteredUserData
 }
 
 function getCurrentAssignments(history: any = []) {
   try {
     // If history is null, undefined, or not an array, return empty array
     if (!history || !Array.isArray(history)) return [];
-    
+
     // Safely filter and map the array
     return history
       .filter((item: any) => item && typeof item === 'object' && 'id' in item && !item.end_date)
@@ -38,32 +37,77 @@ function getCurrentAssignments(history: any = []) {
   }
 }
 
-export function DepartmentStats({ department, subdepartments, users, officers }: DepartmentStatsProps) {
-  const deptOfficers = getDepartmentOfficerIds(officers, department.id)
-  
+export function DepartmentStats({ department, subdepartments, userData }: DepartmentStatsProps) {
+  const deptOfficerUsers = getDepartmentUsers(userData.allUsers, department.id)
+  const deptOfficers = deptOfficerUsers.officers.map(officer => officer.id)
+
+  // Helper functions for roleAssignments-based assignments
+  const getDepartmentManagers = (deptId: string) => {
+    return userData.managers
+      .filter(manager =>
+        manager.assignments?.some((assignment: any) =>
+          assignment.role === 'manager' &&
+          assignment.department_id === parseInt(deptId) &&
+          assignment.subdepartment_id === null &&
+          !assignment.end_date
+        )
+      )
+      .map(manager => manager.id);
+  };
+
+  const getSubdepartmentManagers = (deptId: string, subdeptId: string) => {
+    return userData.managers
+      .filter(manager =>
+        manager.assignments?.some((assignment: any) =>
+          assignment.role === 'manager' &&
+          assignment.department_id === parseInt(deptId) &&
+          (assignment.subdepartment_id === parseInt(subdeptId) || assignment.subdepartment_id === null) &&
+          !assignment.end_date
+        )
+      )
+      .map(manager => manager.id);
+  };
+
+  const getSubdepartmentAssistants = (deptId: string, subdeptId: string) => {
+    return userData.assistants
+      .filter(assistant =>
+        assistant.assignments?.some((assignment: any) =>
+          assignment.role === 'assistant' &&
+          assignment.department_id === parseInt(deptId) &&
+          (assignment.subdepartment_id === parseInt(subdeptId) || assignment.subdepartment_id === null) &&
+          !assignment.end_date
+        )
+      )
+      .map(assistant => assistant.id);
+  };
+
   // Get all subdepartment assignments
   const subdeptOfficers = new Set<string>()
   const managers = new Set<string>()
   const assistants = new Set<string>()
-  
+
   subdepartments.forEach(subdept => {
-    getSubdepartmentOfficerIds(officers, department.id, subdept.id).forEach(id => subdeptOfficers.add(id))
-    getCurrentAssignments(subdept.manager_history).forEach(id => managers.add(id))
-    getCurrentAssignments(subdept.assistant_history).forEach(id => assistants.add(id))
+    const subdeptUsers = getDepartmentUsers(userData.allUsers, department.id)
+    subdeptUsers.officers.forEach(officer => subdeptOfficers.add(officer.id))
+    getSubdepartmentManagers(department.id, subdept.id).forEach(id => managers.add(id))
+    getSubdepartmentAssistants(department.id, subdept.id).forEach(id => assistants.add(id))
   })
-  
+
+  // Also include department-level managers
+  getDepartmentManagers(department.id).forEach(id => managers.add(id))
+
   // Combine department and subdepartment officers
   const allOfficers = new Set([...deptOfficers, ...Array.from(subdeptOfficers)])
-  
+
   // Get user details
-  const getUser = (id: string) => users.find(u => u.id === id)
-  const getOfficer = (id: string) => officers.find(o => o.id === id)
-  
+  const getUser = (id: string) => userData.allUsers.find(u => u.id === id)
+  const getOfficer = (id: string) => userData.officers.find(o => o.id === id)
+
   const totalSubdepartments = subdepartments.length
   const totalOfficers = allOfficers.size
   const totalManagers = managers.size
   const totalAssistants = assistants.size
-  
+
   return (
     <Dialog>
       <DialogTrigger asChild>
@@ -79,7 +123,7 @@ export function DepartmentStats({ department, subdepartments, users, officers }:
             {department.name} - Department Statistics
           </DialogTitle>
         </DialogHeader>
-        
+
         <div className="grid gap-6">
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -100,7 +144,7 @@ export function DepartmentStats({ department, subdepartments, users, officers }:
               <div className="text-2xl font-bold">{totalAssistants}</div>
             </div>
           </div>
-          
+
           {/* Detailed Breakdown */}
           <div className="space-y-6">
             {/* Department Officer */}
@@ -124,7 +168,7 @@ export function DepartmentStats({ department, subdepartments, users, officers }:
                 </div>
               </div>
             )}
-            
+
             {/* Subdepartment Officers */}
             {subdeptOfficers.size > 0 && (
               <div className="space-y-2">
@@ -136,11 +180,14 @@ export function DepartmentStats({ department, subdepartments, users, officers }:
                   {Array.from(subdeptOfficers).map(officerId => {
                     const officer = getOfficer(officerId)
                     if (!officer) return null
-                    
+
                     const assignedSubdepts = subdepartments
-                      .filter(subdept => getSubdepartmentOfficerIds(officers, department.id, subdept.id).includes(officerId))
+                      .filter(subdept => {
+                        const subdeptUsers = getDepartmentUsers(userData.allUsers, department.id)
+                        return subdeptUsers.officers.some(officer => officer.id === officerId)
+                      })
                       .map(subdept => subdept.name)
-                    
+
                     return (
                       <div key={officerId} className="p-2 bg-purple-50 rounded">
                         <div className="flex items-center gap-2">
@@ -161,7 +208,7 @@ export function DepartmentStats({ department, subdepartments, users, officers }:
                 </div>
               </div>
             )}
-            
+
             {/* Managers */}
             {managers.size > 0 && (
               <div className="space-y-2">
@@ -173,16 +220,16 @@ export function DepartmentStats({ department, subdepartments, users, officers }:
                   {Array.from(managers).map(managerId => {
                     const user = getUser(managerId)
                     if (!user) return null
-                    
+
                     const assignedSubdepts = subdepartments
                       .filter(subdept => getCurrentAssignments(subdept.manager_history).includes(managerId))
                       .map(subdept => subdept.name)
-                    
+
                     return (
                       <div key={managerId} className="p-2 bg-green-50 rounded">
                         <div className="flex items-center gap-2">
                           <UserIcon className="h-4 w-4 text-green-500" />
-                          <span className="font-medium">{user.name}</span>
+                          <span className="font-medium">{user.displayName}</span>
                           <Badge variant="outline" className="ml-auto">
                             {assignedSubdepts.length} {assignedSubdepts.length === 1 ? 'Subdept' : 'Subdepts'}
                           </Badge>
@@ -198,7 +245,7 @@ export function DepartmentStats({ department, subdepartments, users, officers }:
                 </div>
               </div>
             )}
-            
+
             {/* Assistants */}
             {assistants.size > 0 && (
               <div className="space-y-2">
@@ -210,16 +257,16 @@ export function DepartmentStats({ department, subdepartments, users, officers }:
                   {Array.from(assistants).map(assistantId => {
                     const user = getUser(assistantId)
                     if (!user) return null
-                    
+
                     const assignedSubdepts = subdepartments
                       .filter(subdept => getCurrentAssignments(subdept.assistant_history).includes(assistantId))
                       .map(subdept => subdept.name)
-                    
+
                     return (
                       <div key={assistantId} className="p-2 bg-amber-50 rounded">
                         <div className="flex items-center gap-2">
                           <Users className="h-4 w-4 text-amber-500" />
-                          <span className="font-medium">{user.name}</span>
+                          <span className="font-medium">{user.displayName}</span>
                           <Badge variant="outline" className="ml-auto">
                             {assignedSubdepts.length} {assignedSubdepts.length === 1 ? 'Subdept' : 'Subdepts'}
                           </Badge>

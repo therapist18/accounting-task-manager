@@ -24,12 +24,11 @@ import {
   Calendar
 } from "lucide-react"
 import { User, Department, Officer, OfficerHistory, ManagerHistory, AssistantHistory, getCurrentAssignments } from '../database'
-import { getOfficerDisplayName } from '../../../tasks/utils/authOfficers'
+import { getOfficerDisplayName, FilteredUserData } from "@/lib/shared-user-assignment-service"
 
 interface AssignmentStatsProps {
   departments: Department[]
-  users: User[]
-  officers: Officer[]
+  userData: FilteredUserData
   isOpen: boolean
   onClose: () => void
 }
@@ -153,10 +152,7 @@ function getUserWorkload(userId: string, departments: Department[]): {
   }
 }
 
-function getAssignmentStatistics(departments: Department[], users: User[], officers: Officer[]): AssignmentStatistics {
-  const managers = users.filter(u => u.role === 'task_manager' || u.role === 'admin')
-  const assistants = users.filter(u => u.role === 'task_assistant' || u.role === 'admin')
-
+function getAssignmentStatistics(departments: Department[], userData: FilteredUserData): AssignmentStatistics {
   let departmentsWithOfficers = 0
   let totalSubdepartments = 0
   let subdepartmentsWithManagers = 0
@@ -178,22 +174,40 @@ function getAssignmentStatistics(departments: Department[], users: User[], offic
 
       getCurrentOfficers(subdept.officer_history || []).forEach((officer) => assignedOfficerIds.add(officer.id))
 
-      const currentManagers = getCurrentManagers(subdept.manager_history || [])
-      if (currentManagers.length > 0) {
+      // Check for managers assigned via roleAssignments
+      const assignedManagers = userData.managers.filter(manager =>
+        manager.assignments?.some((assignment: any) =>
+          assignment.role === 'manager' &&
+          assignment.department_id === parseInt(dept.id) &&
+          (assignment.subdepartment_id === parseInt(subdept.id) || assignment.subdepartment_id === null) &&
+          !assignment.end_date
+        )
+      )
+
+      if (assignedManagers.length > 0) {
         subdepartmentsWithManagers++
-        currentManagers.forEach((manager) => assignedManagerIds.add(manager.id))
+        assignedManagers.forEach((manager) => assignedManagerIds.add(manager.id))
       }
 
-      const currentAssistants = getCurrentAssistants(subdept.assistant_history || [])
-      if (currentAssistants.length > 0) {
+      // Check for assistants assigned via roleAssignments
+      const assignedAssistants = userData.assistants.filter(assistant =>
+        assistant.assignments?.some((assignment: any) =>
+          assignment.role === 'assistant' &&
+          assignment.department_id === parseInt(dept.id) &&
+          (assignment.subdepartment_id === parseInt(subdept.id) || assignment.subdepartment_id === null) &&
+          !assignment.end_date
+        )
+      )
+
+      if (assignedAssistants.length > 0) {
         subdepartmentsWithAssistants++
-        currentAssistants.forEach(assistant => assignedAssistantIds.add(assistant.id))
+        assignedAssistants.forEach(assistant => assignedAssistantIds.add(assistant.id))
       }
     })
   })
 
   // Find overloaded users (users with more than 2 assignments)
-  const overloadedUsers = users
+  const overloadedUsers = userData.allUsers
     .map(user => ({
       user,
       workload: getUserWorkload(user.id, departments)
@@ -207,25 +221,31 @@ function getAssignmentStatistics(departments: Department[], users: User[], offic
     totalSubdepartments,
     subdepartmentsWithManagers,
     subdepartmentsWithAssistants,
-    totalOfficers: officers.length,
-    totalManagers: managers.length,
-    totalAssistants: assistants.length,
-    unassignedOfficers: officers.filter(o => !assignedOfficerIds.has(o.id)),
-    unassignedManagers: managers.filter(m => !assignedManagerIds.has(m.id)),
-    unassignedAssistants: assistants.filter(a => !assignedAssistantIds.has(a.id)),
-    overloadedUsers
+    totalOfficers: userData.officers.length,
+    totalManagers: userData.managers.length,
+    totalAssistants: userData.assistants.length,
+    unassignedOfficers: userData.officers.filter(officer => !assignedOfficerIds.has(officer.id)),
+    unassignedManagers: userData.managers.filter(manager => !assignedManagerIds.has(manager.id)),
+    unassignedAssistants: userData.assistants.filter(assistant => !assignedAssistantIds.has(assistant.id)),
+    overloadedUsers,
+    assignmentDistribution: {
+      officerAssignments: assignedOfficerIds.size,
+      managerAssignments: assignedManagerIds.size,
+      assistantAssignments: assignedAssistantIds.size,
+      totalAssignments: assignedOfficerIds.size + assignedManagerIds.size + assignedAssistantIds.size
+    }
   }
 }
 
-export default function AssignmentStatsDashboard({ departments, users, officers, isOpen, onClose }: AssignmentStatsProps) {
+export default function AssignmentStatsDashboard({ departments, userData, isOpen, onClose }: AssignmentStatsProps) {
   const [stats, setStats] = useState<AssignmentStatistics | null>(null)
 
   useEffect(() => {
-    if (isOpen && departments.length > 0 && users.length > 0) {
-      const statistics = getAssignmentStatistics(departments, users, officers)
+    if (isOpen && departments.length > 0 && userData.allUsers.length > 0) {
+      const statistics = getAssignmentStatistics(departments, userData)
       setStats(statistics)
     }
-  }, [isOpen, departments, users, officers])
+  }, [isOpen, departments, userData])
 
   if (!stats) return null
 

@@ -23,8 +23,7 @@ import { format } from "date-fns"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, formatWorkflowRestrictionReason, taskBundleService } from "../utils/workflowBundleHelpers"
 import { getInheritedOfficer, getDepartmentOfficerIds, getSubdepartmentOfficerIds } from "../../departments/departments/database"
-import { fetchAuthOfficers, normalizeAuthOfficer } from "../utils/authOfficers"
-import { fetchOfficers, fetchTaskManagers, fetchTaskAssistants, fetchUsersForDialog, hasJobLevelAccess } from "../utils/userAssignmentService"
+import { fetchOfficers, fetchTaskManagers, fetchTaskAssistants, fetchAllUsers, hasJobLevelAccess, buildSelectOptions, FilteredUserData, userService, DisplayUser } from "@/lib/shared-user-assignment-service"
 
 const CLASS_D_ID = '1750687058159';
 const SPONSOR_SUBDEPT_ID = '26';
@@ -133,8 +132,7 @@ export function EnquiryDialog({
     onOpenChange,
     onEnquiryCreated,
     departments = [],
-    users = [],
-    officers = [],
+    userData,
     taskToEdit = null
 }: any) {
     const [loading, setLoading] = useState(false)
@@ -260,8 +258,41 @@ export function EnquiryDialog({
         const filteredOfficers = availableOfficers.filter(officer =>
             hasJobLevelAccess(officer, formData.department_id, formData.subdepartment_id, formData.class_id)
         );
-        return filteredOfficers.map(o => ({ value: o.id.toString(), label: o.full_name || o.name }));
+        return filteredOfficers.map(o => ({ value: o.id.toString(), label: o.displayName || o.full_name || o.name || 'Unknown' }));
     }, [availableOfficers, formData.department_id, formData.subdepartment_id, formData.class_id]);
+
+    // Computed values for disabled states based on job level selection
+    const isOfficerDisabled = useMemo(() => {
+        if (!formData.department_id) return true;
+        if (availableOfficers.length === 0) return true;
+
+        const filteredOfficers = availableOfficers.filter(officer =>
+            hasJobLevelAccess(officer, formData.department_id, formData.subdepartment_id, formData.class_id)
+        );
+        return filteredOfficers.length === 0;
+    }, [formData.department_id, formData.subdepartment_id, formData.class_id, availableOfficers]);
+
+    const isManagerDisabled = useMemo(() => {
+        if (!formData.department_id) return true;
+        if (!managersData || managersData.length === 0) return true;
+
+        const filteredManagers = managersData.filter(manager =>
+            hasJobLevelAccess(manager, formData.department_id, formData.subdepartment_id, formData.class_id) &&
+            manager.assignments && manager.assignments.some((assignment: any) => assignment.role === 'manager')
+        );
+        return filteredManagers.length === 0;
+    }, [formData.department_id, formData.subdepartment_id, formData.class_id, managersData]);
+
+    const isAssistantDisabled = useMemo(() => {
+        if (!formData.department_id) return true;
+        if (!assistantsData || assistantsData.length === 0) return true;
+
+        const filteredAssistants = assistantsData.filter(assistant =>
+            hasJobLevelAccess(assistant, formData.department_id, formData.subdepartment_id, formData.class_id) &&
+            assistant.assignments && assistant.assignments.some((assignment: any) => assignment.role === 'assistant')
+        );
+        return filteredAssistants.length === 0;
+    }, [formData.department_id, formData.subdepartment_id, formData.class_id, assistantsData]);
 
     const officerPlaceholder = useMemo(() => {
         if (!formData.department_id) {
@@ -270,15 +301,11 @@ export function EnquiryDialog({
         if (availableOfficers.length === 0) {
             return "No officers available";
         }
-        // Check if any officers have job level access
-        const filteredOfficers = availableOfficers.filter(officer =>
-            hasJobLevelAccess(officer, formData.department_id, formData.subdepartment_id, formData.class_id)
-        );
-        if (filteredOfficers.length === 0) {
+        if (isOfficerDisabled) {
             return "No officers with access to this job level";
         }
         return "Select Officer";
-    }, [formData.department_id, availableOfficers.length, formData.subdepartment_id, formData.class_id]);
+    }, [formData.department_id, availableOfficers.length, isOfficerDisabled]);
 
     // Get inherited officer for the selected subdepartment
     const getInheritedOfficerForSubdepartment = useCallback(async (subdepartmentId: string) => {
@@ -304,7 +331,7 @@ export function EnquiryDialog({
             if (subError) throw subError;
 
             // Fetch real officers from scanner_users
-            const realOfficers = await fetchAuthOfficers();
+            const realOfficers = await fetchOfficers();
 
             // Create a mock department structure for inheritance logic
             const departmentForInheritance = {
@@ -325,7 +352,7 @@ export function EnquiryDialog({
                     officer.id === inheritedOfficer.id
                 );
 
-                if (realOfficer) return normalizeAuthOfficer(realOfficer);
+                if (realOfficer) return realOfficer;
             }
 
             return null;
@@ -337,24 +364,34 @@ export function EnquiryDialog({
 
     // Use fetched managers and assistants data for dropdown options (matching regisry)
     const managerOpts = useMemo(() => {
-        console.log('🔧 EnquiryDialog: Building manager options from managersData:', managersData);
-        // Filter managers by job level access and role_type 'manager'
+        console.log('EnquiryDialog: Building manager options from managersData:', managersData);
+        // Add null check to prevent runtime errors
+        if (!managersData || !Array.isArray(managersData)) {
+            console.log('EnquiryDialog: managersData is not available, returning empty options');
+            return [];
+        }
+        // Filter managers by job level access and assignments with 'manager' role
         const filteredManagers = managersData.filter(manager =>
             hasJobLevelAccess(manager, formData.department_id, formData.subdepartment_id, formData.class_id) &&
-            manager.jobLevels && manager.jobLevels.some((jobLevel: any) => jobLevel.role_type === 'manager')
+            manager.assignments && manager.assignments.some((assignment: any) => assignment.role === 'manager')
         );
-        console.log('🔧 EnquiryDialog: Filtered managers:', filteredManagers);
-        return buildSelectOptions(filteredManagers, 'name');
+        console.log('EnquiryDialog: Filtered managers:', filteredManagers);
+        return buildSelectOptions(filteredManagers, "displayName");
     }, [managersData, formData.department_id, formData.subdepartment_id, formData.class_id]);
 
     const assistantOpts = useMemo(() => {
-        console.log('🔧 EnquiryDialog: Building assistant options from assistantsData:', assistantsData);
-        // Filter assistants by job level access and role_type 'assistant'
+        console.log('EnquiryDialog: Building assistant options from assistantsData:', assistantsData);
+        // Add null check to prevent runtime errors
+        if (!assistantsData || !Array.isArray(assistantsData)) {
+            console.log('EnquiryDialog: assistantsData is not available, returning empty options');
+            return [];
+        }
+        // Filter assistants by job level access and assignments with 'assistant' role
         const filteredAssistants = assistantsData.filter(assistant =>
             hasJobLevelAccess(assistant, formData.department_id, formData.subdepartment_id, formData.class_id) &&
-            assistant.jobLevels && assistant.jobLevels.some((jobLevel: any) => jobLevel.role_type === 'assistant')
+            assistant.assignments && assistant.assignments.some((assignment: any) => assignment.role === 'assistant')
         );
-        console.log('🔧 EnquiryDialog: Filtered assistants:', filteredAssistants);
+        console.log('EnquiryDialog: Filtered assistants:', filteredAssistants);
         return buildSelectOptions(filteredAssistants, 'name');
     }, [assistantsData, formData.department_id, formData.subdepartment_id, formData.class_id]);
 
@@ -486,8 +523,8 @@ export function EnquiryDialog({
             // 0. Ensure existing participants are available in the dropdowns
             if (taskToEdit.participants_details) {
                 const existingOfficers = [...availableOfficers];
-                const existingManagers = [...availableManagers];
-                const existingAssistants = [...availableAssistants];
+                const existingManagers = [...managersData];
+                const existingAssistants = [...assistantsData];
 
                 taskToEdit.participants_details.forEach(participant => {
                     const normalizedParticipant = {
@@ -512,8 +549,8 @@ export function EnquiryDialog({
                 });
 
                 setAvailableOfficers(existingOfficers);
-                setAvailableManagers(existingManagers);
-                setAvailableAssistants(existingAssistants);
+                setManagersData(existingManagers);
+                setAssistantsData(existingAssistants);
             }
 
             // 1. Basic Form Data
@@ -705,43 +742,62 @@ export function EnquiryDialog({
     const loadStaffData = useCallback(async () => {
         setLoadingStaff(true);
         try {
-            // Use unified API to fetch officers, managers, and assistants
-            const [officersResult, managersResult, assistantsResult] = await Promise.all([
-                fetchOfficers({ payrollAccess: true }),
-                fetchTaskManagers({ payrollAccess: true }),
-                fetchTaskAssistants({ payrollAccess: true })
-            ]);
+            // Use unified service to fetch all user data at once (same as departments page)
+            console.log('EnquiryDialog: Fetching unified user data...');
+            const unifiedUserData = await userService.getAllUserData({ payrollAccess: true }, departments);
 
-            setAllOfficers(officersResult);
-            setAvailableOfficers(officersResult);
-            setManagersData(managersResult);
-            setAssistantsData(assistantsResult);
-        } catch (err) {
-            console.error("Error loading staff:", err);
-            toast({ title: "Error", description: "Failed to load staff data", variant: "destructive" });
+            console.log('EnquiryDialog: Received unified userData:', {
+                allUsersCount: unifiedUserData.allUsers?.length || 0,
+                officersCount: unifiedUserData.officers?.length || 0,
+                managersCount: unifiedUserData.managers?.length || 0,
+                assistantsCount: unifiedUserData.assistants?.length || 0
+            });
+
+            setManagersData(unifiedUserData.managers || []);
+            setAssistantsData(unifiedUserData.assistants || []);
+
+            if (unifiedUserData.officers && unifiedUserData.officers.length > 0) {
+                setAvailableOfficers(unifiedUserData.officers);
+                setAllOfficers(unifiedUserData.officers);
+            }
+        } catch (error) {
+            console.error('EnquiryDialog: Failed to load staff data:', error);
+            toast({
+                title: "Error",
+                description: "Failed to load staff data",
+                variant: "destructive"
+            });
         } finally {
             setLoadingStaff(false);
         }
-    }, []);
+    }, [departments]);
 
     useEffect(() => {
-        // If props are explicitly provided and not empty, use them
-        if (users.length > 0 || officers.length > 0) {
-            const normalizedOfficers = officers.map(normalizeAuthOfficer);
-            setAllOfficers(normalizedOfficers);
-            setAvailableOfficers(normalizedOfficers);
-            if (users.length > 0) {
-                setManagersData(users);
-                setAssistantsData(users);
-            }
+        console.log('EnquiryDialog: Staff data useEffect triggered - open:', open, 'userData exists:', !!userData, 'userData.allUsers length:', userData?.allUsers?.length || 0);
+
+        // If userData is provided, use it
+        if (userData && userData.allUsers && userData.allUsers.length > 0) {
+            console.log('EnquiryDialog: Using provided userData');
+            console.log('EnquiryDialog: userData structure:', {
+                allUsers: userData.allUsers?.length || 0,
+                officers: userData.officers?.length || 0,
+                managers: userData.managers?.length || 0,
+                assistants: userData.assistants?.length || 0,
+                managersSample: userData.managers?.slice(0, 2) || [],
+                assistantsSample: userData.assistants?.slice(0, 2) || []
+            });
+
+            setAllOfficers(userData.officers || []);
+            setAvailableOfficers(userData.officers || []);
+            setManagersData(userData.managers || []);
+            setAssistantsData(userData.assistants || []);
         }
-        // Otherwise, if dialog is open and we haven't loaded data yet, fetch internally
+        // Otherwise, if dialog is open, always fetch managers/assistants internally
         else if (open) {
-            if (availableManagers.length === 0 && availableOfficers.length === 0) {
-                loadStaffData();
-            }
+            console.log('EnquiryDialog: Dialog open without userData, calling loadStaffData');
+            loadStaffData();
         }
-    }, [open, users, officers, loadStaffData, managersData.length, availableOfficers.length]);
+    }, [open, userData, loadStaffData]);
 
     useEffect(() => {
         if (open) {
@@ -771,25 +827,35 @@ export function EnquiryDialog({
 
     // Filter officers based on department and subdepartment selection with inheritance
     useEffect(() => {
-        if (allOfficers.length === 0) return;
+        if (!allOfficers || !Array.isArray(allOfficers) || allOfficers.length === 0) {
+            console.log('🔍 [EnquiryDialog] No officers available for filtering');
+            setAvailableOfficers([]);
+            return;
+        }
 
         console.log('🔍 [EnquiryDialog] Officer Filtering - Department:', formData.department_id, 'Subdepartment:', formData.subdepartment_id);
         console.log('🔍 [EnquiryDialog] Total Officers Available:', allOfficers.length);
-        console.log('🔍 [EnquiryDialog] All Officers with jobLevels:', allOfficers.map(o => ({
+        console.log('🔍 [EnquiryDialog] All Officers with assignments:', allOfficers.map(o => ({
             id: o.id,
             name: o.full_name || o.name,
-            jobLevels: o.jobLevels
+            assignments: o.assignments
         })));
 
         let filteredOfficers = [];
         let inheritanceUsed = false;
 
         if (formData.subdepartment_id) {
-            // Get officers assigned to this specific subdepartment
-            const subdeptOfficerIds = getSubdepartmentOfficerIds(allOfficers, formData.department_id, formData.subdepartment_id);
-            const subdeptOfficers = allOfficers.filter(officer => subdeptOfficerIds.includes(officer.id));
+            // Get officers assigned to this specific subdepartment using unified service
+            const subdeptOfficers = allOfficers.filter(officer => {
+                if (!officer.assignments || !Array.isArray(officer.assignments)) return false;
+                return officer.assignments.some(assignment =>
+                    assignment.role === 'officer' &&
+                    assignment.department_id === parseInt(formData.department_id) &&
+                    assignment.subdepartment_id === parseInt(formData.subdepartment_id) &&
+                    !assignment.end_date
+                );
+            });
 
-            console.log('🔍 [EnquiryDialog] Subdepartment Officer IDs:', subdeptOfficerIds);
             console.log('🔍 [EnquiryDialog] Subdepartment Officers Found:', subdeptOfficers.length);
 
             if (subdeptOfficers.length > 0) {
@@ -798,32 +864,32 @@ export function EnquiryDialog({
                 console.log('✅ [EnquiryDialog] Using subdepartment officers:', filteredOfficers.map(o => o.full_name || o.name));
             } else {
                 // Subdepartment has no officers, inherit from parent department
-                const deptOfficerIds = getDepartmentOfficerIds(allOfficers, formData.department_id);
-                filteredOfficers = allOfficers.filter(officer => deptOfficerIds.includes(officer.id));
+                filteredOfficers = allOfficers.filter(officer => {
+                    if (!officer.assignments || !Array.isArray(officer.assignments)) return false;
+                    return officer.assignments.some(assignment =>
+                        assignment.role === 'officer' &&
+                        assignment.department_id === parseInt(formData.department_id) &&
+                        !assignment.subdepartment_id &&
+                        !assignment.end_date
+                    );
+                });
                 inheritanceUsed = true;
-                console.log('🔍 [EnquiryDialog] Department Officer IDs (Inherited):', deptOfficerIds);
                 console.log('🔄 [EnquiryDialog] Using inherited department officers:', filteredOfficers.map(o => o.full_name || o.name));
             }
         } else if (formData.department_id) {
-            // Get officers assigned to this department
+            // Get officers assigned to this department using unified service
             console.log('🔍 [EnquiryDialog] Looking for department:', formData.department_id, 'type:', typeof formData.department_id);
 
-            // Manual check to see what's happening
-            const manualDeptOfficers = allOfficers.filter(officer => {
-                const hasMatchingDept = Array.isArray(officer.jobLevels) &&
-                    officer.jobLevels.some((jobLevel) => {
-                        const matches = String(jobLevel.department_id) === String(formData.department_id);
-                        console.log('🔍 [EnquiryDialog] Officer', officer.full_name || officer.name, 'jobLevel dept:', jobLevel.department_id, 'matches:', matches);
-                        return matches;
-                    });
-                return hasMatchingDept;
+            filteredOfficers = allOfficers.filter(officer => {
+                if (!officer.assignments || !Array.isArray(officer.assignments)) return false;
+                return officer.assignments.some(assignment =>
+                    assignment.role === 'officer' &&
+                    assignment.department_id === parseInt(formData.department_id) &&
+                    !assignment.end_date
+                );
             });
 
-            console.log('🔍 [EnquiryDialog] Manual department officers found:', manualDeptOfficers.length);
-
-            const deptOfficerIds = getDepartmentOfficerIds(allOfficers, formData.department_id);
-            filteredOfficers = allOfficers.filter(officer => deptOfficerIds.includes(officer.id));
-            console.log('🔍 [EnquiryDialog] Department Officer IDs:', deptOfficerIds);
+            console.log('🔍 [EnquiryDialog] Department officers found:', filteredOfficers.length);
             console.log('✅ [EnquiryDialog] Using department officers:', filteredOfficers.map(o => o.full_name || o.name));
         } else {
             // No department selected, show no officers
@@ -1322,7 +1388,7 @@ export function EnquiryDialog({
                 if (officer) participants.push({ id: officer.id, name: officer.full_name || officer.name, role: ['officer'], type: "individual" });
             }
             if (formData.task_manager_id) {
-                const manager = availableManagers.find(m => m.id.toString() === formData.task_manager_id);
+                const manager = managersData.find(m => m.id.toString() === formData.task_manager_id);
                 if (manager) participants.push({ id: manager.id, name: manager.full_name || manager.name, role: ['task_manager'], type: "individual" });
             }
             if (formData.subdepartment_id === SPONSOR_SUBDEPT_ID && selectedSponsor) {
@@ -1814,7 +1880,7 @@ export function EnquiryDialog({
                                                     onValueChange={id => setFormData(prev => ({ ...prev, officer_id: id }))}
                                                     options={officerOptions}
                                                     placeholder={officerPlaceholder}
-                                                    disabled={officerOptions.length === 0}
+                                                    disabled={isOfficerDisabled}
                                                     emptyMessage="No officers found."
                                                     searchPlaceholder="Search officer..."
                                                     buttonClassName="h-11 bg-white border-slate-200"
@@ -1836,7 +1902,7 @@ export function EnquiryDialog({
                                                 onValueChange={id => setFormData(prev => ({ ...prev, task_manager_id: id }))}
                                                 options={managerOpts}
                                                 placeholder="Select Manager"
-                                                disabled={managerOpts.length === 0}
+                                                disabled={isManagerDisabled}
                                                 emptyMessage="No managers found."
                                                 searchPlaceholder="Search manager..."
                                                 buttonClassName="h-11 bg-white border-slate-200"
@@ -1849,7 +1915,7 @@ export function EnquiryDialog({
                                                 onValueChange={id => setFormData(prev => ({ ...prev, task_assistant_id: id }))}
                                                 options={assistantOpts}
                                                 placeholder="Select Assistant"
-                                                disabled={assistantOpts.length === 0}
+                                                disabled={isAssistantDisabled}
                                                 emptyMessage="No assistants found."
                                                 searchPlaceholder="Search assistant..."
                                                 buttonClassName="h-11 bg-white border-slate-200"

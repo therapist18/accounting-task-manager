@@ -21,8 +21,7 @@ import { format } from "date-fns"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { getInheritedOfficer } from "../../departments/departments/database"
-import { fetchAuthOfficers, normalizeAuthOfficer } from "../utils/authOfficers"
-import { fetchUserAssignmentData, hasJobLevelAccess } from "../utils/userAssignmentService"
+import { fetchUserAssignmentData, fetchOfficers, hasJobLevelAccess, getOfficerDisplayName, FilteredUserData } from "@/lib/shared-user-assignment-service"
 
 // Photo document IDs
 const COMPANY_LOGO_ID = 'f7a75607-bff9-4995-8bde-0256e86da435';
@@ -51,8 +50,7 @@ interface NewCompanyInquiryDialogProps {
     selectedDepartmentId?: string
     selectedSubdepartmentId?: string
     selectedClassId?: string
-    users: any[]
-    officers: any[]
+    userData: FilteredUserData
     initialData?: any
 }
 
@@ -64,8 +62,7 @@ export function NewCompanyInquiryDialog({
     selectedDepartmentId = '',
     selectedSubdepartmentId = '',
     selectedClassId = '',
-    users = [],
-    officers = [],
+    userData,
     initialData = null
 }: NewCompanyInquiryDialogProps) {
     const isEditMode = !!initialData;
@@ -93,8 +90,8 @@ export function NewCompanyInquiryDialog({
     const [isCompanyPopoverOpen, setIsCompanyPopoverOpen] = useState(false)
 
     const [departments, setDepartments] = useState<any[]>(propDepartments || [])
-    const [localUsers, setLocalUsers] = useState<any[]>(users || [])
-    const [localOfficers, setLocalOfficers] = useState<any[]>(() => (officers || []).map(normalizeAuthOfficer))
+    const [localUsers, setLocalUsers] = useState<any[]>(userData?.allUsers || [])
+    const [localOfficers, setLocalOfficers] = useState<any[]>(() => (userData?.officers || []))
     const [taskType, setTaskType] = useState<'new' | 'renewal'>('new')
     const [availableOfficers, setAvailableOfficers] = useState([])
     const [availableManagers, setAvailableManagers] = useState([])
@@ -174,34 +171,75 @@ export function NewCompanyInquiryDialog({
         [availableSubclasses]
     );
 
+    // Computed values for disabled states based on job level selection
+    const isOfficerDisabled = useMemo(() => {
+        if (!formData.department_id) return true;
+        if (localOfficers.length === 0) return true;
+
+        const filteredOfficers = localOfficers.filter(officer =>
+            hasJobLevelAccess(officer, formData.department_id, formData.subdepartment_id, formData.class_id)
+        );
+        return filteredOfficers.length === 0;
+    }, [formData.department_id, formData.subdepartment_id, formData.class_id, localOfficers]);
+
+    const isManagerDisabled = useMemo(() => {
+        if (!userData || !userData.managers || userData.managers.length === 0) return true;
+        if (!formData.department_id) return true;
+
+        const filteredManagers = userData.managers.filter(manager =>
+            hasJobLevelAccess(manager, formData.department_id, formData.subdepartment_id, formData.class_id) &&
+            manager.assignments && manager.assignments.some((assignment: any) => assignment.role === 'manager')
+        );
+        return filteredManagers.length === 0;
+    }, [userData, formData.department_id, formData.subdepartment_id, formData.class_id]);
+
+    const isAssistantDisabled = useMemo(() => {
+        if (!userData || !userData.assistants || userData.assistants.length === 0) return true;
+        if (!formData.department_id) return true;
+
+        const filteredAssistants = userData.assistants.filter(assistant =>
+            hasJobLevelAccess(assistant, formData.department_id, formData.subdepartment_id, formData.class_id) &&
+            assistant.assignments && assistant.assignments.some((assignment: any) => assignment.role === 'assistant')
+        );
+        return filteredAssistants.length === 0;
+    }, [userData, formData.department_id, formData.subdepartment_id, formData.class_id]);
+
     const officerOptions = useMemo(() => [
         { value: 'none', label: 'No Officer' },
-        ...localOfficers.map(o => ({ value: o.id.toString(), label: o.name }))
+        ...localOfficers.map(o => ({ value: o.id.toString(), label: o.displayName || o.name || o.full_name || 'Unknown' }))
     ], [localOfficers]);
 
     const managerOptions = useMemo(() => {
-        // Filter managers by job level access and role_type 'manager'
-        const filteredManagers = localUsers.filter(user =>
+        if (!userData || !userData.managers || userData.managers.length === 0) {
+            return [{ value: 'none', label: 'No Manager' }];
+        }
+
+        // Filter managers by job level access and assignments with 'manager' role
+        const filteredManagers = userData.managers.filter(user =>
             hasJobLevelAccess(user, formData.department_id, formData.subdepartment_id, formData.class_id) &&
-            user.jobLevels && user.jobLevels.some((jobLevel: any) => jobLevel.role_type === 'manager')
+            user.assignments && user.assignments.some((assignment: any) => assignment.role === 'manager')
         );
         return [
             { value: 'none', label: 'No Manager' },
-            ...filteredManagers.map(m => ({ value: m.id.toString(), label: m.name }))
+            ...filteredManagers.map(m => ({ value: m.id.toString(), label: m.displayName || m.name || 'Unknown' }))
         ];
-    }, [localUsers, formData.department_id, formData.subdepartment_id, formData.class_id]);
+    }, [userData, formData.department_id, formData.subdepartment_id, formData.class_id]);
 
     const assistantOptions = useMemo(() => {
-        // Filter assistants by job level access and role_type 'assistant'
-        const filteredAssistants = localUsers.filter(user =>
+        if (!userData || !userData.assistants || userData.assistants.length === 0) {
+            return [{ value: 'none', label: 'No Assistant' }];
+        }
+
+        // Filter assistants by job level access and assignments with 'assistant' role
+        const filteredAssistants = userData.assistants.filter(user =>
             hasJobLevelAccess(user, formData.department_id, formData.subdepartment_id, formData.class_id) &&
-            user.jobLevels && user.jobLevels.some((jobLevel: any) => jobLevel.role_type === 'assistant')
+            user.assignments && user.assignments.some((assignment: any) => assignment.role === 'assistant')
         );
         return [
             { value: 'none', label: 'No Assistant' },
-            ...filteredAssistants.map(a => ({ value: a.id.toString(), label: a.name }))
+            ...filteredAssistants.map(a => ({ value: a.id.toString(), label: a.displayName || a.name || 'Unknown' }))
         ];
-    }, [localUsers, formData.department_id, formData.subdepartment_id, formData.class_id]);
+    }, [userData, formData.department_id, formData.subdepartment_id, formData.class_id]);
 
     // Get inherited officer for the selected subdepartment
     const getInheritedOfficerForSubdepartment = useCallback(async (subdepartmentId: string) => {
@@ -227,7 +265,7 @@ export function NewCompanyInquiryDialog({
             if (subError) throw subError;
 
             // Fetch real officers from scanner_users
-            const realOfficers = await fetchAuthOfficers();
+            const realOfficers = await fetchOfficers();
 
             // Create a mock department structure for inheritance logic
             const departmentForInheritance = {
@@ -248,7 +286,7 @@ export function NewCompanyInquiryDialog({
                     officer.id === inheritedOfficer.id
                 );
 
-                if (realOfficer) return normalizeAuthOfficer(realOfficer);
+                if (realOfficer) return realOfficer;
             }
 
             return null;
@@ -632,7 +670,7 @@ export function NewCompanyInquiryDialog({
         try {
             const [userAssignmentData, officersResult] = await Promise.all([
                 fetchUserAssignmentData({ payrollAccess: true }),
-                fetchAuthOfficers()
+                fetchOfficers()
             ]);
             setLocalUsers(userAssignmentData.allUsers || []);
             setLocalOfficers(officersResult);
@@ -642,13 +680,18 @@ export function NewCompanyInquiryDialog({
     }, []);
 
     useEffect(() => {
-        if (users.length > 0) setLocalUsers(users);
-        if (officers.length > 0) setLocalOfficers(officers.map(normalizeAuthOfficer));
+        // If userData is provided, use it
+        if (userData && userData.allUsers && userData.allUsers.length > 0) {
+            setLocalUsers(userData.allUsers);
+        }
+        if (userData && userData.officers && userData.officers.length > 0) {
+            setLocalOfficers(userData.officers);
+        }
 
         if (open && (localUsers.length === 0 || localOfficers.length === 0)) {
             loadStaffData();
         }
-    }, [open, users, officers, localUsers.length, localOfficers.length, loadStaffData]);
+    }, [open, userData, localUsers.length, localOfficers.length, loadStaffData]);
 
 
     const handleOfficialSelection = (officialId: number) => {
@@ -1169,8 +1212,8 @@ export function NewCompanyInquiryDialog({
                                             value={formData.officer_id}
                                             onValueChange={(v) => setFormData(p => ({ ...p, officer_id: v }))}
                                             options={officerOptions}
-                                            placeholder="Select Officer"
-                                            disabled={officerOptions.length === 0}
+                                            placeholder={isOfficerDisabled ? "Select job level first" : "Select Officer"}
+                                            disabled={isOfficerDisabled}
                                             emptyMessage="No officers found."
                                             searchPlaceholder="Search officer..."
                                             buttonClassName="h-11 bg-white border-slate-200"
@@ -1184,8 +1227,8 @@ export function NewCompanyInquiryDialog({
                                             value={formData.task_manager_id}
                                             onValueChange={(v) => setFormData(p => ({ ...p, task_manager_id: v }))}
                                             options={managerOptions}
-                                            placeholder="Select Manager"
-                                            disabled={managerOptions.length === 0}
+                                            placeholder={isManagerDisabled ? "Select job level first" : "Select Manager"}
+                                            disabled={isManagerDisabled}
                                             emptyMessage="No managers found."
                                             searchPlaceholder="Search manager..."
                                             buttonClassName="h-11 bg-white border-slate-200"
@@ -1199,8 +1242,8 @@ export function NewCompanyInquiryDialog({
                                             value={formData.task_assistant_id}
                                             onValueChange={(v) => setFormData(p => ({ ...p, task_assistant_id: v }))}
                                             options={assistantOptions}
-                                            placeholder="Select Assistant"
-                                            disabled={assistantOptions.length === 0}
+                                            placeholder={isAssistantDisabled ? "Select job level first" : "Select Assistant"}
+                                            disabled={isAssistantDisabled}
                                             emptyMessage="No assistants found."
                                             searchPlaceholder="Search assistant..."
                                             buttonClassName="h-11 bg-white border-slate-200"

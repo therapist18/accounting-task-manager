@@ -2,8 +2,6 @@
 "use client"
 import React, { useState, useEffect } from "react"
 import {
-  fetchUsers,
-  fetchOfficers,
   fetchDepartments,
   createDepartment as createDepartmentDb,
   saveOrderAndDefaultDisplay,
@@ -20,6 +18,8 @@ import {
   getCurrentManager,
   getCurrentManagers,
   getCurrentAssistants,
+  groupAssignmentsByHierarchy,
+  formatJobLevel,
   Department,
   Subdepartment,
   Class,
@@ -56,9 +56,66 @@ import { Badge } from "@/components/ui/badge"
 import ExcelJS from 'exceljs'
 import { saveAs } from 'file-saver'
 import { ENTITY_TYPES } from "@/lib/constants/entity-types"
-import { getOfficerDisplayName } from "../../tasks/utils/authOfficers"
+import { userService, DisplayUser, getOfficerDisplayName } from "@/lib/shared-user-assignment-service"
 // Helper function for deep cloning
 const deepClone = (obj: any) => JSON.parse(JSON.stringify(obj))
+
+// Role Assignments Display Component
+function RoleAssignmentsDisplay({ officer, departments }: { officer: Officer; departments: Department[] }) {
+  if (!officer.roleAssignments || officer.roleAssignments.length === 0) {
+    return (
+      <div className="text-xs text-gray-500 italic">
+        No specific assignments
+      </div>
+    )
+  }
+
+  const grouped = groupAssignmentsByHierarchy(officer.roleAssignments)
+  const hasAssignments = Object.values(grouped).some(list => list.length > 0)
+
+  if (!hasAssignments) {
+    return (
+      <div className="text-xs text-gray-500 italic">
+        No specific assignments
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-1">
+      {grouped.departments.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {grouped.departments.map((assignment, idx) => (
+            <Badge key={idx} variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+              <Building className="h-3 w-3 mr-1" />
+              {formatJobLevel(assignment, departments)}
+            </Badge>
+          ))}
+        </div>
+      )}
+      {grouped.subDepartments.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {grouped.subDepartments.map((assignment, idx) => (
+            <Badge key={idx} variant="outline" className="text-xs bg-indigo-50 text-indigo-700 border-indigo-200">
+              <Briefcase className="h-3 w-3 mr-1" />
+              {formatJobLevel(assignment, departments)}
+            </Badge>
+          ))}
+        </div>
+      )}
+      {grouped.classes.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {grouped.classes.map((assignment, idx) => (
+            <Badge key={idx} variant="outline" className="text-xs bg-violet-50 text-violet-700 border-violet-200">
+              <Layers className="h-3 w-3 mr-1" />
+              {formatJobLevel(assignment, departments)}
+            </Badge>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 // Helper function for updating nested state
 export const updateNestedState = (state: any, path: (string | number)[], value: any) => {
@@ -420,10 +477,11 @@ function AssistantHistoryPopover({ assistant_history, users, children }: {
 }
 
 // User Details Popover Component
-function UserDetailsPopover({ userId, users, officers = [], role, children }: {
+function UserDetailsPopover({ userId, users, officers = [], role, children, departments = [] }: {
   userId: string,
   users: User[],
   officers?: Officer[],
+  departments?: Department[],
   role: 'manager' | 'assistant' | 'officer',
   children: React.ReactNode
 }) {
@@ -451,16 +509,26 @@ function UserDetailsPopover({ userId, users, officers = [], role, children }: {
       <PopoverTrigger asChild>
         <span className="cursor-pointer hover:underline text-blue-600 font-medium">{children}</span>
       </PopoverTrigger>
-      <PopoverContent className="w-72">
-        <div className="flex items-center space-x-4">
-          <div className={`flex h-12 w-12 items-center justify-center rounded-full ${roleColors[role]}`}>
-            {roleIcons[role]}
+      <PopoverContent className="w-80">
+        <div className="space-y-4">
+          <div className="flex items-center space-x-4">
+            <div className={`flex h-12 w-12 items-center justify-center rounded-full ${roleColors[role]}`}>
+              {roleIcons[role]}
+            </div>
+            <div className="flex-1">
+              <p className="font-semibold text-gray-900">{user.name || 'No name'}</p>
+              <p className="text-sm text-gray-500">{user.email}</p>
+              <Badge variant="outline" className="mt-1 capitalize">{role}</Badge>
+            </div>
           </div>
-          <div>
-            <p className="font-semibold text-gray-900">{user.name || 'No name'}</p>
-            <p className="text-sm text-gray-500">{user.email}</p>
-            <Badge variant="outline" className="mt-1 capitalize">{role}</Badge>
-          </div>
+
+          {/* Show role assignments for officers */}
+          {role === 'officer' && officer && (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider">Role Assignments</p>
+              <RoleAssignmentsDisplay officer={officer} departments={departments} />
+            </div>
+          )}
         </div>
       </PopoverContent>
     </Popover>
@@ -474,15 +542,25 @@ export default function Departments() {
   const [editingSubdepartmentId, setEditingSubdepartmentId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [searchTerm, setSearchTerm] = useState("")
-  const [users, setUsers] = useState<User[]>([])
-  const [officers, setOfficers] = useState<User[]>([])
-  const [departments, setDepartments] = useState<Department[]>([])
+  const [userAssignmentData, setUserAssignmentData] = useState(null)
+  const [departments, setDepartments] = useState([])
+  const [userData, setUserData] = useState<{
+    officers: DisplayUser[];
+    managers: DisplayUser[];
+    assistants: DisplayUser[];
+    allUsers: DisplayUser[];
+  }>({
+    officers: [],
+    managers: [],
+    assistants: [],
+    allUsers: []
+  })
   const [expanded, setExpanded] = useState<{ [key: string]: boolean }>({});
   const [expandedClasses, setExpandedClasses] = useState<{ [key: string]: boolean }>({});
   const [expandedSubClasses, setExpandedSubClasses] = useState<{ [key: string]: boolean }>({});
   const [isOrderChanged, setIsOrderChanged] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   // Initial Form State
   const [departmentForm, setDepartmentForm] = useState<DepartmentForm>({
@@ -538,13 +616,20 @@ export default function Departments() {
       // First load is NOT silent
       await fetchData(false);
       try {
-        const [usersData, officersData] = await Promise.all([
-          fetchUsers(),
-          fetchOfficers()
-        ]);
-        setUsers(usersData);
-        setOfficers(officersData);
+        console.log('Departments: Fetching unified user data...');
+        const unifiedUserData = await userService.getAllUserData({ payrollAccess: true }, departments);
+        console.log('Departments: Received unified userData:', {
+          allUsersCount: unifiedUserData.allUsers?.length || 0,
+          officersCount: unifiedUserData.officers?.length || 0,
+          managersCount: unifiedUserData.managers?.length || 0,
+          assistantsCount: unifiedUserData.assistants?.length || 0
+        });
+
+        setUserData(unifiedUserData);
+
+        console.log('Departments: Set unified userData with', unifiedUserData.managers?.length || 0, 'managers');
       } catch (error) {
+        console.error('Departments: Failed to load users:', error);
         toast.error('Failed to load users');
       }
     }
@@ -1048,18 +1133,22 @@ export default function Departments() {
       setEditingSubdepartmentId(null);
     }
   }, [isAddDepartmentOpen]);
-
-  const getUserName = (userId: string) => users.find(u => u.id === userId)?.name || 'Unassigned';
   const getOfficerName = (officerId: string) => {
-    const officer = officers.find(o => o.id === officerId);
+    const officer = userData.officers.find(o => o.id === officerId);
     return officer ? getOfficerDisplayName(officer) : 'Unassigned';
   };
+  const getUserName = (userId: string) => {
+    // Check in all users (managers, assistants, officers)
+    const user = userData.allUsers.find(u => u.id === userId);
+    return user ? user.displayName : 'Unassigned';
+  };
+
   const renderOfficerAssignments = (assignmentIds: string[], emptyLabel = 'Unassigned') => {
     if (!assignmentIds.length) return <span className="text-gray-400">{emptyLabel}</span>;
     return (
       <div className="flex flex-wrap gap-1">
         {assignmentIds.map((officerId) => (
-          <UserDetailsPopover key={officerId} userId={officerId} users={users} officers={officers} role="officer">
+          <UserDetailsPopover key={officerId} userId={officerId} users={userData.allUsers} officers={userData.officers} departments={departments} role="officer">
             <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
               {getOfficerName(officerId)}
             </Badge>
@@ -1073,7 +1162,7 @@ export default function Departments() {
     return (
       <div className="flex flex-wrap gap-1">
         {managerIds.map((managerId) => (
-          <UserDetailsPopover key={managerId} userId={managerId} users={users} officers={officers} role="manager">
+          <UserDetailsPopover key={managerId} userId={managerId} users={userData.allUsers} officers={userData.officers} departments={departments} role="manager">
             <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
               {getUserName(managerId)}
             </Badge>
@@ -1082,10 +1171,45 @@ export default function Departments() {
       </div>
     );
   };
-  const getDepartmentAssociatedOfficerIds = (dept: any) => getDepartmentOfficerIds(officers, dept.id);
 
-  const getSubdepartmentAssociatedOfficerIds = (dept: any, subdept: any) =>
-    getSubdepartmentOfficerIds(officers, dept.id, subdept.id);
+  const renderAssistantAssignments = (assistantIds: string[], emptyLabel = 'None') => {
+    if (!assistantIds.length) return <span className="text-gray-400">{emptyLabel}</span>;
+    return (
+      <div className="flex flex-wrap gap-1">
+        {assistantIds.map((assistantId) => (
+          <UserDetailsPopover key={assistantId} userId={assistantId} users={userData.allUsers} officers={userData.officers} departments={departments} role="assistant">
+            <Badge variant="outline" className="text-xs bg-purple-50 text-purple-700 border-purple-200">
+              {getUserName(assistantId)}
+            </Badge>
+          </UserDetailsPopover>
+        ))}
+      </div>
+    );
+  };
+  const getDepartmentAssociatedOfficerIds = (dept: any) => {
+    const deptUsers = userService.getDepartmentUsers(userData.allUsers, dept.id.toString());
+    return deptUsers.officers.map(officer => officer.id);
+  };
+
+  const getDepartmentAssociatedManagerIds = (dept: any) => {
+    const deptUsers = userService.getDepartmentUsers(userData.allUsers, dept.id.toString());
+    return deptUsers.managers.map(manager => manager.id);
+  };
+
+  const getSubdepartmentAssociatedOfficerIds = (dept: any, subdept: any) => {
+    const subdeptUsers = userService.getSubdepartmentUsers(userData.allUsers, dept.id.toString(), subdept.id.toString());
+    return subdeptUsers.officers.map(officer => officer.id);
+  };
+
+  const getSubdepartmentAssociatedManagerIds = (dept: any, subdept: any) => {
+    const subdeptUsers = userService.getSubdepartmentUsers(userData.allUsers, dept.id.toString(), subdept.id.toString());
+    return subdeptUsers.managers.map(manager => manager.id);
+  };
+
+  const getSubdepartmentAssociatedAssistantIds = (dept: any, subdept: any) => {
+    const subdeptUsers = userService.getSubdepartmentUsers(userData.allUsers, dept.id.toString(), subdept.id.toString());
+    return subdeptUsers.assistants.map(assistant => assistant.id);
+  };
 
   const getOfficerHistoryFromIds = (ids: string[]) =>
     ids.map((id) => ({ id, start_date: new Date().toISOString() }));
@@ -1154,8 +1278,8 @@ export default function Departments() {
             name: `    ${sub.name}`,
             description: sub.description || '',
             officer: currentSubOfficerIds.length ? currentSubOfficerIds.map((officerId) => getOfficerName(officerId)).join(', ') : '-',
-            manager: currentManagers.length ? currentManagers.map((manager) => getName(manager.id)).join(', ') : '-',
-            assistants: currentAssistants.map(a => getName(a.id)).join(', '),
+            manager: currentManagers.length ? currentManagers.map((manager) => getUserName(manager.id)).join(', ') : '-',
+            assistants: currentAssistants.map(a => getUserName(a.id)).join(', '),
             display: getBoolean(sub.default_display),
             type: 'Subdepartment'
           });
@@ -1272,6 +1396,7 @@ export default function Departments() {
             ) : (
               filteredDepartments.map((dept, deptIndex) => {
                 const currentDepartmentOfficers = getDepartmentAssociatedOfficerIds(dept);
+                const currentDepartmentManagers = getDepartmentAssociatedManagerIds(dept);
                 return (
                   <React.Fragment key={dept.id}>
                     <TableRow className="bg-blue-50 font-semibold border-b-2 border-gray-200">
@@ -1283,7 +1408,7 @@ export default function Departments() {
                         </Button>
                       </TableCell>
                       <TableCell className="border-r">{renderOfficerAssignments(currentDepartmentOfficers)}</TableCell>
-                      <TableCell className="border-r"><div className="text-gray-400 text-sm">View in stats</div></TableCell>
+                      <TableCell className="border-r">{renderManagerAssignments(currentDepartmentManagers)}</TableCell>
                       <TableCell className="border-r"><div className="text-gray-400 text-sm">View in stats</div></TableCell>
                       <TableCell className="text-base text-gray-800 border-r">
                         {dept.entity_types && dept.entity_types.length > 0 ? (
@@ -1307,7 +1432,7 @@ export default function Departments() {
                       </TableCell>
                       <TableCell className="text-right border-r">
                         <div className="flex items-center justify-end gap-2">
-                          <DepartmentStats department={dept} subdepartments={dept.tm_subdepartments || []} users={users} officers={officers} />
+                          <DepartmentStats department={dept} subdepartments={dept.tm_subdepartments || []} userData={userData} />
                           <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); handleEditDepartment(dept); }} className="h-6 w-6 text-gray-500 hover:text-blue-600">
                             <Edit className="h-3.5 w-3.5" />
                           </Button>
@@ -1338,8 +1463,8 @@ export default function Departments() {
                         const hasClasses = subdept.classes && subdept.classes.length > 0;
                         const subdeptKey = `subdept-${subdept.id}`;
                         const isExpanded = expanded[subdeptKey];
-                        const currentManagers = getCurrentManagers(subdept.manager_history || []);
-                        const currentAssistants = getCurrentAssistants(subdept.assistant_history || []);
+                        const currentManagers = getSubdepartmentAssociatedManagerIds(dept, subdept);
+                        const currentAssistants = getSubdepartmentAssociatedAssistantIds(dept, subdept);
                         const currentOfficerSub = getSubdepartmentAssociatedOfficerIds(dept, subdept);
 
                         return (
@@ -1361,7 +1486,7 @@ export default function Departments() {
                                   {currentOfficerSub.length > 0 ? (
                                     <div className="flex flex-wrap gap-1">
                                       {currentOfficerSub.map((officerId) => (
-                                        <UserDetailsPopover key={officerId} userId={officerId} users={users} officers={officers} role="officer">
+                                        <UserDetailsPopover key={officerId} userId={officerId} users={userData.allUsers} officers={userData.officers} departments={departments} role="officer">
                                           <div className="flex items-center gap-2">
                                             <Shield className="h-4 w-4 text-blue-600" />
                                             <span>{getOfficerName(officerId)}</span>
@@ -1373,22 +1498,10 @@ export default function Departments() {
                                 </div>
                               </TableCell>
                               <TableCell className="border-r">
-                                {renderManagerAssignments(currentManagers.map((manager) => manager.id))}
+                                {renderManagerAssignments(currentManagers)}
                               </TableCell>
                               <TableCell className="border-r">
-                                <div className="flex items-center gap-2">
-                                  {currentAssistants.length > 0 ? (
-                                    <div className="flex flex-col space-y-1">
-                                      {currentAssistants.map((assistant, i) => (
-                                        <div key={i} className="flex items-center gap-2">
-                                          <UserDetailsPopover userId={assistant.id} users={users} role="assistant">
-                                            <div className="flex items-center gap-2"><Users className="h-4 w-4 text-purple-600" /><span>{getUserName(assistant.id)}</span></div>
-                                          </UserDetailsPopover>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ) : <span className="text-gray-400">None</span>}
-                                </div>
+                                {renderAssistantAssignments(currentAssistants, 'None')}
                               </TableCell>
                               <TableCell className="text-base text-gray-800 border-r">
                                 {subdept.entity_types && subdept.entity_types.length > 0 ? (
@@ -1520,8 +1633,7 @@ export default function Departments() {
         onSave={handleSaveDepartment}
         departmentForm={departmentForm}
         setDepartmentForm={setDepartmentForm}
-        users={users}
-        officers={officers}
+        userData={userData}
         editingDepartmentId={editingDepartmentId}
         editingSubdepartmentId={editingSubdepartmentId}
         isSaving={saving}
@@ -1529,8 +1641,7 @@ export default function Departments() {
 
       <AssignmentStatsDashboard
         departments={departments}
-        users={users}
-        officers={officers}
+        userData={userData}
         isOpen={isStatsOpen}
         onClose={() => setIsStatsOpen(false)}
       />

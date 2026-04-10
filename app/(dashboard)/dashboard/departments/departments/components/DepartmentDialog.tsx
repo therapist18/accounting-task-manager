@@ -105,13 +105,25 @@ const MultiSelectSpec = memo(({ value, onChange }) => {
 // ─── Main Dialog ──────────────────────────────────────────────────────────────
 
 export default function DepartmentDialog({
-    open, onOpenChange, onSave, departmentForm, setDepartmentForm, users, officers, editingDepartmentId, isSaving
+    open, onOpenChange, onSave, departmentForm, setDepartmentForm, userData, editingDepartmentId, isSaving
 }) {
     const [expandedRows, setExpandedRows] = useState({})
-    const officerUsers = officers.map((officer) => ({
+
+    // Transform unified userData to the format expected by the component
+    const officerUsers = userData.officers.map((officer) => ({
         id: officer.id,
-        name: officer.name || officer.full_name || `${officer.firstName || ''} ${officer.lastName || ''}`.trim(),
+        name: officer.displayName,
         email: officer.email || '',
+    }))
+    const managerUsers = userData.managers.map((manager) => ({
+        id: manager.id,
+        name: manager.displayName,
+        email: manager.email || '',
+    }))
+    const assistantUsers = userData.assistants.map((assistant) => ({
+        id: assistant.id,
+        name: assistant.displayName,
+        email: assistant.email || '',
     }))
 
     const toggleRow = (id) => setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }))
@@ -132,6 +144,26 @@ export default function DepartmentDialog({
             if (lastKey === 'entity_types') {
                 if (current.classes) current.classes = current.classes.map(c => ({ ...c, entity_types: value }))
                 if (current.subClasses) current.subClasses = current.subClasses.map(s => ({ ...s, entity_types: value }))
+            }
+
+            // Manager inheritance: Propagate department-level managers to subdepartments
+            if (lastKey === 'manager_history' && path.length === 1) {
+                // Only apply inheritance at department level (path length 1)
+                if (newState.subdepartments) {
+                    newState.subdepartments = newState.subdepartments.map(subdept => {
+                        // Only inherit if subdepartment doesn't have its own managers
+                        const currentManagers = subdept.manager_history || []
+                        const hasActiveManagers = currentManagers.some(manager => !manager.end_date)
+
+                        if (!hasActiveManagers) {
+                            return {
+                                ...subdept,
+                                manager_history: value // Inherit department managers
+                            }
+                        }
+                        return subdept
+                    })
+                }
             }
             return newState
         })
@@ -180,6 +212,62 @@ export default function DepartmentDialog({
 
     const getCurrentId = (history = []) => (history || []).find(h => !h.end_date || new Date(h.end_date) > new Date())?.id || ''
     const getCurrentIds = (history = []) => (history || []).filter(h => !h.end_date || new Date(h.end_date) > new Date()).map(h => h.id)
+
+    // Helper functions to get current assignments based on roleAssignments
+    const getCurrentManagerIds = (subdepartmentIndex = null) => {
+        if (subdepartmentIndex !== null) {
+            // For subdepartment, check both subdepartment-level and department-level assignments
+            const subdept = departmentForm.subdepartments?.[subdepartmentIndex]
+            if (!subdept) return []
+
+            const subdeptManagers = userData.managers
+                .filter(manager =>
+                    manager.assignments?.some((assignment: any) =>
+                        assignment.role === 'manager' &&
+                        assignment.department_id === parseInt(editingDepartmentId || '0') &&
+                        (assignment.subdepartment_id === parseInt(subdept.id || '0') || assignment.subdepartment_id === null) &&
+                        !assignment.end_date
+                    )
+                )
+                .map(manager => manager.id)
+
+            return subdeptManagers
+        } else {
+            // For department level
+            return userData.managers
+                .filter(manager =>
+                    manager.assignments?.some((assignment: any) =>
+                        assignment.role === 'manager' &&
+                        assignment.department_id === parseInt(editingDepartmentId || '0') &&
+                        assignment.subdepartment_id === null &&
+                        !assignment.end_date
+                    )
+                )
+                .map(manager => manager.id)
+        }
+    }
+
+    const getCurrentAssistantIds = (subdepartmentIndex = null) => {
+        if (subdepartmentIndex !== null) {
+            // For subdepartment
+            const subdept = departmentForm.subdepartments?.[subdepartmentIndex]
+            if (!subdept) return []
+
+            return userData.assistants
+                .filter(assistant =>
+                    assistant.assignments?.some((assignment: any) =>
+                        assignment.role === 'assistant' &&
+                        assignment.department_id === parseInt(editingDepartmentId || '0') &&
+                        (assignment.subdepartment_id === parseInt(subdept.id || '0') || assignment.subdepartment_id === null) &&
+                        !assignment.end_date
+                    )
+                )
+                .map(assistant => assistant.id)
+        } else {
+            // For department level (assistants are typically only at subdepartment level)
+            return []
+        }
+    }
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -281,13 +369,20 @@ export default function DepartmentDialog({
                                                     </TableCell>
                                                     <TableCell>
                                                         <MultiSelectUser
-                                                            users={users}
-                                                            value={getCurrentIds(sub.manager_history)}
+                                                            users={managerUsers}
+                                                            value={getCurrentManagerIds(sIdx)}
                                                             onChange={(ids) => updateFormState(['subdepartments', sIdx, 'manager_history'], ids.map(id => ({ id, start_date: new Date().toISOString() })))}
                                                             placeholder="All managers"
                                                         />
                                                     </TableCell>
-                                                    <TableCell><MultiSelectUser users={users} value={getCurrentIds(sub.assistant_history)} onChange={(ids) => updateFormState(['subdepartments', sIdx, 'assistant_history'], ids.map(id => ({ id, start_date: new Date().toISOString() })))} placeholder="Add..." /></TableCell>
+                                                    <TableCell>
+                                                        <MultiSelectUser
+                                                            users={assistantUsers}
+                                                            value={getCurrentAssistantIds(sIdx)}
+                                                            onChange={(ids) => updateFormState(['subdepartments', sIdx, 'assistant_history'], ids.map(id => ({ id, start_date: new Date().toISOString() })))}
+                                                            placeholder="Add..."
+                                                        />
+                                                    </TableCell>
                                                     <TableCell><MultiSelectSpec value={sub.entity_types} onChange={(v) => updateFormState(['subdepartments', sIdx, 'entity_types'], v)} /></TableCell>
                                                     <TableCell><Checkbox checked={sub.default_display} onCheckedChange={(v) => updateFormState(['subdepartments', sIdx, 'default_display'], !!v)} /></TableCell>
                                                     <TableCell className="text-right">

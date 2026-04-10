@@ -1,7 +1,7 @@
 // @ts-nocheck
 import supabase from '@/lib/supabase/client'
 import { toast } from "@/lib/hooks/use-toast"
-import { fetchAuthOfficers, getOfficerDisplayName } from '../../tasks/utils/authOfficers'
+import { fetchUserAssignmentData } from "@/lib/shared-user-assignment-service";
 
 // Helper function to generate sequential requirement IDs
 const generateRequirementId = (existingRequirements: any[] = []): string => {
@@ -27,12 +27,16 @@ export type User = {
 }
 
 export type JobLevel = {
-  level: number;
+  id?: number; // assignment record ID
+  role: "officer" | "manager" | "assistant";
+  user_id: string;
   department_id: number | null;
   subdepartment_id: number | null;
   class_id: number | null;
   subclass_id: number | null;
-}
+  created_at?: string;
+  level?: number; // Keep for backward compatibility
+};
 
 export type Officer = {
   id: string;
@@ -41,12 +45,12 @@ export type Officer = {
   email?: string;
   username?: string;
   isActive: boolean;
-  jobLevels: JobLevel[];
+  roleAssignments: JobLevel[];
   createdAt: string;
   lastLogin?: string;
   name?: string;
   full_name?: string;
-}
+};
 
 // History types for tracking assignments
 export type OfficerHistory = {
@@ -257,18 +261,13 @@ export async function fetchAllDepartmentData() {
 
 export async function fetchUsers(): Promise<User[]> {
   try {
-    // Use unified API to fetch all users
-    const response = await fetch('/api/auth/users/unified?payrollAccess=true');
-    const json = await response.json();
-
-    if (!response.ok) {
-      throw new Error(json.error ?? "Failed to fetch users");
-    }
+    // Use unified user assignment service
+    const userAssignmentData = await fetchUserAssignmentData({ payrollAccess: true });
 
     // Transform data to match expected User type
-    return (json.data || []).map(user => ({
+    return userAssignmentData.allUsers.map(user => ({
       id: user.id,
-      name: user.displayName || `${user.first_name || ''} ${user.last_name || ''}`.trim(),
+      name: user.displayName || user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim(),
       email: user.email,
       role: user.role
     }));
@@ -278,22 +277,51 @@ export async function fetchUsers(): Promise<User[]> {
   }
 }
 
+export async function fetchUserRoleAssignments(userId: string): Promise<JobLevel[]> {
+  try {
+    const response = await fetch(`/api/auth/role-assignments?userId=${userId}`);
+    const result = await response.json();
+
+    if (!result.success) {
+      console.error('Error fetching role assignments:', result.error);
+      return [];
+    }
+
+    return result.data.map((assignment: any) => ({
+      id: assignment.id,
+      role: assignment.role as "officer" | "manager" | "assistant",
+      user_id: assignment.user_id,
+      department_id: assignment.department_id,
+      subdepartment_id: assignment.subdepartment_id,
+      class_id: assignment.class_id,
+      subclass_id: assignment.subclass_id,
+      created_at: assignment.created_at
+    }));
+  } catch (error) {
+    console.error('Error fetching role assignments:', error);
+    return [];
+  }
+}
+
 export async function fetchOfficers(): Promise<Officer[]> {
   try {
-    const officers = await fetchAuthOfficers()
-    return officers.map((officer) => ({
+    // Use unified user assignment service
+    const userAssignmentData = await fetchUserAssignmentData({ payrollAccess: true });
+
+    // Transform officers data to match expected Officer type
+    return userAssignmentData.officers.map(officer => ({
       id: officer.id,
       firstName: officer.firstName || '',
       lastName: officer.lastName || '',
       email: officer.email,
       username: officer.username,
       isActive: officer.isActive ?? true,
-      jobLevels: Array.isArray(officer.jobLevels) ? officer.jobLevels : [],
+      roleAssignments: officer.jobLevels || [], // Map jobLevels to roleAssignments
       createdAt: officer.createdAt || new Date().toISOString(),
       lastLogin: officer.lastLogin,
-      name: getOfficerDisplayName(officer),
-      full_name: getOfficerDisplayName(officer),
-    }))
+      name: `${officer.firstName} ${officer.lastName}`.trim(),
+      full_name: `${officer.firstName} ${officer.lastName}`.trim(),
+    }));
   } catch (error) {
     console.error('Error fetching officers:', error)
     throw new Error('Failed to fetch officers')
@@ -352,9 +380,9 @@ export function getDepartmentOfficerIds(
   return dedupeOfficerIds(
     (officers || [])
       .filter((officer) =>
-        Array.isArray(officer.jobLevels) &&
-        officer.jobLevels.some(
-          (jobLevel) => normalizeEntityId(jobLevel.department_id) === normalizedDepartmentId
+        Array.isArray(officer.roleAssignments) &&
+        officer.roleAssignments.some(
+          (assignment) => normalizeEntityId(assignment.department_id) === normalizedDepartmentId
         )
       )
       .map((officer) => officer.id)
@@ -382,9 +410,9 @@ export function getSubdepartmentOfficerIds(
   const directOfficerIds = dedupeOfficerIds(
     (officers || [])
       .filter((officer) =>
-        Array.isArray(officer.jobLevels) &&
-        officer.jobLevels.some(
-          (jobLevel) => normalizeEntityId(jobLevel.subdepartment_id) === normalizedSubdepartmentId
+        Array.isArray(officer.roleAssignments) &&
+        officer.roleAssignments.some(
+          (assignment) => normalizeEntityId(assignment.subdepartment_id) === normalizedSubdepartmentId
         )
       )
       .map((officer) => officer.id)
@@ -396,11 +424,11 @@ export function getSubdepartmentOfficerIds(
   return dedupeOfficerIds(
     (officers || [])
       .filter((officer) =>
-        Array.isArray(officer.jobLevels) &&
-        officer.jobLevels.some(
-          (jobLevel) =>
-            normalizeEntityId(jobLevel.department_id) === normalizedDepartmentId &&
-            normalizeEntityId(jobLevel.subdepartment_id) === null
+        Array.isArray(officer.roleAssignments) &&
+        officer.roleAssignments.some(
+          (assignment) =>
+            normalizeEntityId(assignment.department_id) === normalizedDepartmentId &&
+            normalizeEntityId(assignment.subdepartment_id) === null
         )
       )
       .map((officer) => officer.id)
@@ -414,6 +442,53 @@ export function getSubdepartmentOfficers(
 ): Officer[] {
   const officerIds = new Set(getSubdepartmentOfficerIds(officers, departmentId, subdepartmentId))
   return (officers || []).filter((officer) => officerIds.has(officer.id))
+}
+
+// Role assignment utility functions (from regisry system)
+export function groupAssignmentsByHierarchy(roleAssignments: JobLevel[]) {
+  return {
+    departments: roleAssignments.filter(a => a.department_id && !a.subdepartment_id),
+    subDepartments: roleAssignments.filter(a => a.subdepartment_id && !a.class_id),
+    classes: roleAssignments.filter(a => a.class_id)
+  };
+}
+
+export function getJobLevelFromHierarchy(jobLevel: JobLevel): number {
+  if (jobLevel.class_id) return 3;
+  if (jobLevel.subdepartment_id) return 2;
+  if (jobLevel.department_id) return 1;
+  return 0;
+}
+
+export function formatJobLevel(jobLevel: JobLevel, departments: any[]): string {
+  let foundDept, foundSub, foundCls;
+
+  // Search through hierarchy to find matching entities
+  for (const d of departments) {
+    if (jobLevel.department_id && d.id === jobLevel.department_id) foundDept = d;
+
+    for (const s of d.tm_subdepartments || []) {
+      if (jobLevel.subdepartment_id && s.id === jobLevel.subdepartment_id) {
+        foundSub = s;
+        if (!foundDept) foundDept = d; // Back-fill parent if missing
+      }
+
+      for (const c of s.classes || []) {
+        if (jobLevel.class_id && c.id === jobLevel.class_id) {
+          foundCls = c;
+          if (!foundSub) foundSub = s; // Back-fill parent
+          if (!foundDept) foundDept = d; // Back-fill grandparent
+        }
+      }
+    }
+  }
+
+  const parts = [];
+  if (foundDept) parts.push(foundDept.name);
+  if (foundSub) parts.push(foundSub.name);
+  if (foundCls) parts.push(foundCls.name);
+
+  return parts.length > 0 ? parts.join(" > ") : "Unassigned";
 }
 
 // Helper function to get officer with inheritance from parent department
@@ -469,41 +544,98 @@ export function getCurrentAssistants(assistant_history: AssistantHistory[] = [],
   );
 }
 
-// Helper function to assign officer to department
+// Role assignment management functions
+export async function createRoleAssignment(assignment: Omit<JobLevel, 'id' | 'created_at'>): Promise<JobLevel> {
+  try {
+    const response = await fetch('/api/auth/role-assignments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(assignment)
+    });
+
+    const result = await response.json();
+
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to create role assignment');
+    }
+
+    return {
+      id: result.data.id,
+      role: result.data.role,
+      user_id: result.data.user_id,
+      department_id: result.data.department_id,
+      subdepartment_id: result.data.subdepartment_id,
+      class_id: result.data.class_id,
+      subclass_id: result.data.subclass_id,
+      created_at: result.data.created_at
+    };
+  } catch (error) {
+    console.error('Error creating role assignment:', error);
+    throw error;
+  }
+}
+
+export async function updateRoleAssignment(id: string, assignment: Partial<JobLevel>): Promise<JobLevel> {
+  try {
+    const response = await fetch(`/api/auth/role-assignments?id=${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(assignment)
+    });
+
+    const result = await response.json();
+
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to update role assignment');
+    }
+
+    return {
+      id: result.data.id,
+      role: result.data.role,
+      user_id: result.data.user_id,
+      department_id: result.data.department_id,
+      subdepartment_id: result.data.subdepartment_id,
+      class_id: result.data.class_id,
+      subclass_id: result.data.subclass_id,
+      created_at: result.data.created_at
+    };
+  } catch (error) {
+    console.error('Error updating role assignment:', error);
+    throw error;
+  }
+}
+
+export async function deleteRoleAssignment(id: string): Promise<void> {
+  try {
+    const response = await fetch(`/api/auth/role-assignments?id=${id}`, {
+      method: 'DELETE'
+    });
+
+    const result = await response.json();
+
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to delete role assignment');
+    }
+  } catch (error) {
+    console.error('Error deleting role assignment:', error);
+    throw error;
+  }
+}
+
 export async function assignOfficerToDepartment(departmentId: string, officerId: string): Promise<void> {
   try {
-    // Get current officers_history
-    const { data: dept, error: fetchError } = await supabase
-      .from('tm_departments')
-      .select('officers_history')
-      .eq('id', departmentId)
-      .single()
-
-    if (fetchError) throw fetchError
-
-    const officers_history = dept?.officers_history || []
-
-    // End current officer assignments
-    const updatedHistory = officers_history.map(officer =>
-      !officer.end_date ? { ...officer, end_date: new Date().toISOString() } : officer
-    )
-
-    // Add new officer
-    updatedHistory.push({
-      id: officerId,
-      start_date: new Date().toISOString()
-    })
-
-    // Update department
-    const { error: updateError } = await supabase
-      .from('tm_departments')
-      .update({ officers_history: updatedHistory })
-      .eq('id', departmentId)
-
-    if (updateError) throw updateError
+    // Create new role assignment using the tm_role_assignments table
+    await createRoleAssignment({
+      role: 'officer',
+      user_id: officerId,
+      department_id: parseInt(departmentId),
+      subdepartment_id: null,
+      class_id: null,
+      subclass_id: null
+    });
   } catch (error) {
     console.error('Error assigning officer to department:', error)
-    throw error
+    throw new Error('Failed to assign officer to department')
   }
 }
 

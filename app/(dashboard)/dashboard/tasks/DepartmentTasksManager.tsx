@@ -40,8 +40,7 @@ import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, ev
 import { determineCurrentStage, getStageProgress } from './utils/stageUtils'
 import { calculateStageDate } from './utils/dateUtils'
 import { getInheritedOfficer } from '../departments/departments/database'
-import { fetchAuthOfficers, getOfficerDisplayName } from "./utils/authOfficers"
-import { fetchUserAssignmentData, hasJobLevelAccess } from "./utils/userAssignmentService"
+import { fetchUserAssignmentData, hasJobLevelAccess, getOfficerDisplayName, userService } from "@/lib/shared-user-assignment-service"
 
 export default function DepartmentTasksManager({
   error,
@@ -134,6 +133,7 @@ export default function DepartmentTasksManager({
   const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(new Map());
   const [companyInquiryDialogOpen, setCompanyInquiryDialogOpen] = useState(false);
   const [realOfficers, setRealOfficers] = useState<any[]>([]);
+  const [userData, setUserData] = useState<any>(null);
 
   useEffect(() => {
     const loadDepartments = async () => {
@@ -271,25 +271,37 @@ export default function DepartmentTasksManager({
     return linkedDocs;
   }, [allDocuments]);
 
-  // Helper function to fetch officers from scanner_users API
+  // Helper function to fetch officers using unified user assignment service
   const fetchOfficersFromApi = useCallback(async () => {
     try {
-      const officerArray = await fetchAuthOfficers();
+      console.log('DepartmentTasksManager: Fetching unified user data...');
+      const unifiedUserData = await userService.getAllUserData({ payrollAccess: true }, departments);
+
+      console.log('DepartmentTasksManager: Received unified userData:', {
+        allUsersCount: unifiedUserData.allUsers?.length || 0,
+        officersCount: unifiedUserData.officers?.length || 0,
+        managersCount: unifiedUserData.managers?.length || 0,
+        assistantsCount: unifiedUserData.assistants?.length || 0
+      });
+
+      const officerArray = unifiedUserData.officers;
       setRealOfficers(officerArray);
+      setUserData(unifiedUserData); // Store complete userData for dialogs
       return officerArray;
     } catch (error) {
       console.error('Error fetching officers from API:', error);
       setRealOfficers([]);
+      setUserData(null);
       return [];
     }
-  }, []);
+  }, [departments]);
 
   useEffect(() => {
     fetchOfficersFromApi();
   }, [fetchOfficersFromApi]);
 
   const getActiveStaffFromSubdepartment = useCallback((subdepartmentId: string) => {
-    if (!subdepartmentId || !departments.length) {
+    if (!subdepartmentId || !departments.length || !realOfficers) {
       return { officers: [], managers: [], assistants: [] };
     }
 
@@ -313,7 +325,7 @@ export default function DepartmentTasksManager({
 
     // Find the real officer from cached scanner_users
     let activeOfficers = [];
-    if (inheritedOfficer && realOfficers.length > 0) {
+    if (inheritedOfficer && realOfficers && realOfficers.length > 0) {
       const realOfficer = realOfficers.find(officer =>
         officer.id === inheritedOfficer.id.toString() ||
         officer.id === inheritedOfficer.id
@@ -373,17 +385,17 @@ export default function DepartmentTasksManager({
 
   const loadUserAssignmentData = useCallback(async () => {
     try {
-      // Use unified user assignment service
-      const userAssignmentData = await fetchUserAssignmentData({ payrollAccess: true });
+      // Use unified user assignment service (same as departments page)
+      const unifiedUserData = await userService.getAllUserData({ payrollAccess: true }, departments);
 
       // Create a map of all users for backward compatibility
       const usersMap = new Map()
-      userAssignmentData.allUsers.forEach(user => {
+      unifiedUserData.allUsers.forEach(user => {
         usersMap.set(parseInt(user.id), user)
       })
 
       setTmUsers(usersMap)
-      return { usersMap, userAssignmentData }
+      return { usersMap, userAssignmentData: unifiedUserData }
     } catch (error) {
       console.error('Error fetching user assignment data:', error)
       return { usersMap: new Map(), userAssignmentData: null }
@@ -1916,9 +1928,9 @@ export default function DepartmentTasksManager({
       d.id === task.department_id ||
       d.id.toString() === task.department_id?.toString()
     );
-    const specification = department?.specification || 'individual';
+    const entityTypes = department?.entity_types || [];
     setEditingTask(task);
-    if (specification === 'company') {
+    if (entityTypes.includes('company')) {
       setCompanyInquiryDialogOpen(true);
     } else {
       setEditDialogOpen(true);
@@ -2528,10 +2540,14 @@ export default function DepartmentTasksManager({
   };
 
   const handleNewEnquiryClick = () => {
-    if (activeDepartmentTab === '1') {
-      setIsEnquiryDialogOpen(true)
+    // Determine which dialog to open based on department entity types
+    const currentDept = departments.find(d => String(d.id) === activeDepartmentTab);
+    const entityTypes = currentDept?.entity_types || [];
+
+    if (entityTypes.includes('company')) {
+      setIsOtherDialogOpen(true);  // Company departments use NewCompanyInquiryDialog
     } else {
-      setIsOtherDialogOpen(true)
+      setIsEnquiryDialogOpen(true); // Individual departments use EnquiryDialog
     }
   }
 
@@ -3242,32 +3258,26 @@ export default function DepartmentTasksManager({
           </TabsContent>
         )}
       </Tabs>
-      {activeDepartmentTab === '1' ? (
-        <EnquiryDialog
-          open={isEnquiryDialogOpen}
-          onOpenChange={setIsEnquiryDialogOpen}
-          onEnquiryCreated={handleEnquiryCreated}
-          departments={departments}
-          users={Array.from(tmUsers.values())}
-          officers={realOfficers}
-        />
-      ) : (
-        <OtherDialog
-          open={isOtherDialogOpen}
-          onOpenChange={setIsOtherDialogOpen}
-          onEnquiryCreated={handleEnquiryCreated}
-          departments={departments}
-          users={Array.from(tmUsers.values())}
-          officers={Array.from(tmUsers.values()).filter(u => u.role === 'officer')}
-        />
-      )}
+      <EnquiryDialog
+        open={isEnquiryDialogOpen}
+        onOpenChange={setIsEnquiryDialogOpen}
+        onEnquiryCreated={handleEnquiryCreated}
+        departments={departments}
+        userData={userData}
+      />
+      <NewCompanyInquiryDialog
+        open={isOtherDialogOpen}
+        onOpenChange={setIsOtherDialogOpen}
+        onEnquiryCreated={handleEnquiryCreated}
+        departments={departments}
+        userData={userData}
+      />
       <EnquiryDialog
         open={editDialogOpen}
         onOpenChange={setEditDialogOpen}
         taskToEdit={editingTask}
         departments={departments}
-        users={Array.from(tmUsers.values())}
-        officers={Array.from(tmUsers.values()).filter(u => u.role === 'officer')}
+        userData={userData}
         onEnquiryCreated={handleTaskUpdate}
       />
       {companyInquiryDialogOpen && editingTask && (
@@ -3276,8 +3286,7 @@ export default function DepartmentTasksManager({
           onOpenChange={setCompanyInquiryDialogOpen}
           initialData={editingTask}  // Pass the task data as initialData
           departments={departments}
-          users={Array.from(tmUsers.values())}
-          officers={realOfficers}
+          userData={userData}
           onEnquiryCreated={(updatedTask) => {
             handleTaskUpdate(updatedTask);
             setCompanyInquiryDialogOpen(false);

@@ -34,6 +34,7 @@ import { RequirementsTable } from "./RequirementsTable"
 import { EnquiryTable } from "../tasks/components/EnquiryTable"
 import { StageUploadDialog } from "../tasks/components/StageUploadDialog"
 import { fetchDepartments } from "../departments/departments/database"
+import { fetchUserAssignmentData } from "@/lib/shared-user-assignment-service"
 import { Badge } from "@/components/ui/badge"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { cn } from "@/lib/utils"
@@ -62,6 +63,7 @@ export default function TasksPage() {
   const [isDocumentsDialogOpen, setIsDocumentsDialogOpen] = useState(false);
   const [companyInquiryDialogOpen, setCompanyInquiryDialogOpen] = useState(false);
   const [internalStaff, setInternalStaff] = useState({ users: [], officers: [] });
+  const [userData, setUserData] = useState<any>(null);
   const [taskToEdit, setTaskToEdit] = useState<UtilTask | null>(null);
   // --- Data Fetching Callbacks ---
 
@@ -117,30 +119,31 @@ export default function TasksPage() {
     const fetchStaff = async () => {
       console.group('🔹 [Parent Component] Fetching Staff Data');
       try {
-        console.log('🔹 [Parent] Attempting to fetch from registry_users table...');
-        const { data: staff, error } = await supabase.from('registry_users').select('id, full_name').order('full_name');
+        console.log('🔹 [Parent] Using unified service to fetch user assignment data...');
+        const userAssignmentData = await fetchUserAssignmentData({ payrollAccess: true });
 
-        console.log('🔹 [Parent] Staff fetch result:', {
-          data: staff,
-          error,
-          dataLength: staff?.length || 0
+        console.log('🔹 [Parent] Unified service fetch result:', {
+          officersCount: userAssignmentData.officers?.length || 0,
+          managersCount: userAssignmentData.managers?.length || 0,
+          assistantsCount: userAssignmentData.assistants?.length || 0,
+          allUsersCount: userAssignmentData.allUsers?.length || 0
         });
 
-        if (error) {
-          console.error('🔹 [Parent] Error fetching staff:', error);
-        }
+        // Store complete userData for dialogs
+        setUserData(userAssignmentData);
 
-        // If your schema differentiates officers, filter here or fetch separately
+        // Also set internalStaff for backward compatibility
         const staffData = {
-          users: staff || [],
-          officers: staff || [] // Assuming same table for this example
+          users: userAssignmentData.allUsers || [],
+          officers: userAssignmentData.officers || []
         };
 
         console.log('🔹 [Parent] Setting internal staff state:', staffData);
         setInternalStaff(staffData);
       } catch (err) {
-        console.error('🔹 [Parent] Unexpected error fetching staff:', err);
+        console.error('🔹 [Parent] Error fetching staff from unified service:', err);
         setInternalStaff({ users: [], officers: [] });
+        setUserData(null);
       }
       console.groupEnd();
     };
@@ -598,14 +601,10 @@ export default function TasksPage() {
           }
         }}
         onEnquiryCreated={(enquiries) => {
-          handleEnquiryCreated(enquiries, !!taskToEdit);
+          handleEnquiryCreated(enquiries);
         }}
         departments={departments}
-        selectedDepartmentId={selectedDepartment}
-        selectedSubdepartmentId={selectedSubdepartment}
-        selectedClassId={selectedClass}
-        users={[]}
-        officers={[]}
+        userData={userData}
         initialData={taskToEdit} // PASS THE EDIT DATA HERE
         key={`company-dialog-${selectedDepartment}-${selectedSubdepartment}-${selectedClass}-${taskToEdit?.id}`} // Include task ID in key
       />
@@ -618,8 +617,7 @@ export default function TasksPage() {
           handleEnquiryCreated(updatedTask, !!taskToEdit);
         }}
         departments={departments}
-        users={internalStaff.users}       // Pass real data
-        officers={internalStaff.officers} // Pass real data
+        userData={userData}
         selectedDepartment={selectedDepartment}
         selectedSubdepartment={selectedSubdepartment}
         selectedClass={selectedClass}
