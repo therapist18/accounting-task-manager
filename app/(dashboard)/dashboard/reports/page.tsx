@@ -1,28 +1,19 @@
 // @ts-nocheck
 "use client";
 
-/**
- * ReportsPage — updated to mirror the DepartmentTasksManager / EnhancedTable /
- * EditableStageCell stage-applicability system.
- *
- * KEY CHANGE: stage applicability is now evaluated **per task** using the same
- * dept → subdept → class walk as the rest of the TM system.  A stage that is
- * N/A for one task's class may be applicable for another task's class, so we
- * never hide columns globally — we render "N/A" in the individual cell instead,
- * exactly like EditableStageCell does.
- */
-
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Loader2, LayoutGrid, Rows, Plus, Minus, Briefcase, FileDown,
   ChevronDown, ChevronsRight, ChevronsDown, FileText,
   ChevronLeft, ChevronRight, RefreshCw, AlertTriangle,
   Clock, ArrowUpDown, Search, Timer, AlertCircle,
-  CheckCircle2, Clock3, User, EyeOff, Eye, Filter
+  CheckCircle2, Clock3, User, EyeOff, Eye, Filter,
+  PanelLeftClose, PanelLeftOpen, RotateCcw, X, TableProperties, Download
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -30,7 +21,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { format, parse, isValid } from "date-fns";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/lib/hooks/use-toast";
@@ -61,8 +54,9 @@ import { fetchDepartments } from "../departments/departments/database";
 import { userService } from "@/lib/shared-user-assignment-service";
 import { MemorizedReportDialog } from "./MemorizedReportDialog";
 import { calculateStageDate, findDateInObject } from "../tasks/utils/dateUtils";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { StandardReportView } from "./components/StandardReportView";
+import { TransposedReportView } from "./components/TransposedReportView";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -119,6 +113,7 @@ const safeRender = (content: any) => {
   return String(content);
 };
 
+// ... [Keep existing helper functions intact: isStageApplicableToTask] ...
 const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boolean => {
   if (!task || !stage || !departments?.length) return true;
   try {
@@ -153,6 +148,9 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boo
 };
 
 export default function ReportsPage() {
+  // ── UI Visibility State ────────────────────────────────────────────────────
+  const [areTabsVisible, setAreTabsVisible] = useState(true);
+
   // ── Report state ───────────────────────────────────────────────────────────
   const [activeReport, setActiveReport] = useState<any | null>(null);
   const [availableReports, setAvailableReports] = useState<any[]>([]);
@@ -189,8 +187,6 @@ export default function ReportsPage() {
   // ── Sort / view state ──────────────────────────────────────────────────────
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [view, setView] = useState<'standard' | 'transposed'>('standard');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(100);
   const [expandedSections, setExpandedSections] = useState(() => new Set(['task_details', 'time_tracking']));
   const [showTimeStatuses, setShowTimeStatuses] = useState(false);
   const [showNARows, setShowNARows] = useState(true);
@@ -199,10 +195,7 @@ export default function ReportsPage() {
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>([]);
   const [expandedStageColumns, setExpandedStageColumns] = useState<Set<string>>(new Set());
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Initialization & Fetching
-  // ─────────────────────────────────────────────────────────────────────────
-
+  // ... [Keep exact initializations and hooks intact] ...
   const getStaffName = useCallback((userId: any) => {
     if (!userId) return '';
     const user = tmUsers.get(parseInt(userId.toString()));
@@ -254,7 +247,7 @@ export default function ReportsPage() {
 
         const users = usersResponse.data || [];
         const usersMap = new Map();
-        users?.forEach(u => usersMap.set(u.id, u));
+        users?.forEach((u: any) => usersMap.set(u.id, u));
         setTmUsers(usersMap);
         setAllOfficers(
           (authOfficers || []).map((officer: any) => ({
@@ -273,6 +266,17 @@ export default function ReportsPage() {
     };
     init();
   }, []);
+
+  const fetchAuthOfficers = async () => {
+    try {
+      const response = await fetch('/api/auth/users/unified?payrollAccess=true');
+      const data = await response.json();
+      return data.data || [];
+    } catch (error) {
+      console.error('Failed to fetch auth officers:', error);
+      return [];
+    }
+  };
 
   useEffect(() => {
     if (activeReport && !activeReport.sessionIncludedFields) {
@@ -303,7 +307,7 @@ export default function ReportsPage() {
       const safeTasks = Array.isArray(tasksData) ? tasksData : [];
 
       const uniqueJobLevels = new Map();
-      safeTasks.forEach(task => {
+      safeTasks.forEach((task: any) => {
         if (task.job_level) {
           const key = JSON.stringify(task.job_level);
           if (!uniqueJobLevels.has(key)) uniqueJobLevels.set(key, task.job_level);
@@ -330,7 +334,6 @@ export default function ReportsPage() {
           setActiveDeptId(depts[0].id.toString());
         }
       }
-      setCurrentPage(1);
     } catch (error) {
       console.error("Error loading report data", error);
       toast({ title: "Error", description: "Failed to load report data.", variant: "destructive" });
@@ -340,10 +343,6 @@ export default function ReportsPage() {
   }, [activeReport, activeDeptId]);
 
   useEffect(() => { refreshData(); }, [activeReport]);
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Filtering & Computed Maps
-  // ─────────────────────────────────────────────────────────────────────────
 
   const activeDepartment = useMemo(() =>
     departments.find(d => d.id.toString() === activeDeptId),
@@ -406,6 +405,7 @@ export default function ReportsPage() {
       const isEndorsed = task.status === 'endorsed';
       const isCompleted = isWriteUp || isEndorsed || ['completed', 'archived'].includes(task.status);
 
+      if (activeStatus === 'all') return true;
       if (activeStatus === 'wip' && isCompleted) return false;
       if (activeStatus === 'write_up_completed' && !isWriteUp) return false;
       if (activeStatus === 'endorsed' && !isEndorsed) return false;
@@ -424,6 +424,7 @@ export default function ReportsPage() {
     );
   }, [filteredTasks, searchQuery, companies]);
 
+  // ... [Keep data extraction and stage applicability functions completely intact] ...
   const getDocumentForTaskStage = useCallback((task: any, stage: any) => {
     let linked = task.source_document_id?.[stage.id];
     if (!linked && task.stages?.[stage.id]?.documents) {
@@ -431,7 +432,7 @@ export default function ReportsPage() {
     }
     if (!linked) return [];
     const ids = Array.isArray(linked) ? linked : [linked];
-    return ids.map(ref => {
+    return ids.map((ref: any) => {
       const docId = typeof ref === 'string' ? ref : ref.id;
       if (!docId) return null;
       return allDocuments.find(d => d.id.toString() === docId.toString());
@@ -451,9 +452,7 @@ export default function ReportsPage() {
     });
   }, []);
 
-  const getTaskInitiatedDate = useCallback((task: any) => {
-    return parseDate(task?.date_initiated || task?.created_at || null);
-  }, []);
+  const getTaskInitiatedDate = useCallback((task: any) => parseDate(task?.date_initiated || task?.created_at || null), []);
 
   const getStageHandledDate = useCallback((task: any, stage: any) => {
     const stageData = task?.stages?.[stage?.id];
@@ -508,10 +507,8 @@ export default function ReportsPage() {
 
   const isStageApplicableToCurrentFilter = useCallback((stageId: string): boolean => {
     if (!activeDeptId || activeDeptId === 'all') return true;
-
     const dept = departments.find(d => d.id.toString() === activeDeptId);
     if (!dept) return true;
-
     const subdept = activeSubDeptId && activeSubDeptId !== 'all'
       ? dept.tm_subdepartments?.find((s: any) => s.id.toString() === activeSubDeptId)
       : null;
@@ -1080,7 +1077,7 @@ export default function ReportsPage() {
       cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
     });
 
-    filteredTasks.forEach((task, index) => {
+    searchedTasks.forEach((task, index) => {
       const rowData = [task.id, ...filteredColumns.map(col => getExportCellValue(task, col))];
       const row = ws.addRow(rowData);
       const isOdd = index % 2 !== 0;
@@ -1118,9 +1115,6 @@ export default function ReportsPage() {
     return sorted;
   }, [searchedTasks, sortConfig, filteredColumns, getSortableValue]);
 
-  const totalItems = sortedTasks.length;
-  const totalPages = Math.ceil(totalItems / itemsPerPage);
-
   const stageOnlyColumns = useMemo(() => filteredColumns.filter(c => c.type !== 'task'), [filteredColumns]);
 
   const filteredByNARows = useMemo(() => {
@@ -1132,15 +1126,6 @@ export default function ReportsPage() {
       })
     );
   }, [sortedTasks, showNARows, stageOnlyColumns, stages, checkStageApplicableForTask]);
-
-  const paginatedTasks = useMemo(() => {
-    const start = (currentPage - 1) * itemsPerPage;
-    return filteredByNARows.slice(start, start + itemsPerPage);
-  }, [filteredByNARows, currentPage, itemsPerPage]);
-
-  const handleNextPage = () => setCurrentPage(p => Math.min(p + 1, totalPages));
-  const handlePreviousPage = () => setCurrentPage(p => Math.max(p - 1, 1));
-  const handleItemsPerPageChange = (val: string) => { setItemsPerPage(Number(val)); setCurrentPage(1); };
 
   const columnGroups = useMemo(() => {
     if (!filteredColumns.length) return [];
@@ -1205,375 +1190,309 @@ export default function ReportsPage() {
     return rows;
   }, [activeReport, filteredColumns, expandedSections, stages, isStageApplicableToCurrentFilter]);
 
+  const breadcrumbParts = [
+    activeReport?.name,
+    activeDepartment?.name,
+    activeSubDeptId !== 'all' ? activeSubDepartments.find(s => s.id.toString() === activeSubDeptId)?.name : 'All Subdepartments',
+    activeStatus === 'all' ? 'All Statuses' : activeStatus.replace(/_/g, ' ').toUpperCase(),
+    activeClassId !== 'all' ? `Class: ${activeSubDepartments.find(s => s.id.toString() === activeSubDeptId)?.classes?.find((c: any) => c.id.toString() === activeClassId)?.name || activeClassId}` : null
+  ].filter(Boolean);
+
   if (reportLoading) {
-    return <div className="h-screen flex flex-col items-center justify-center bg-slate-50"><Loader2 className="h-8 w-8 animate-spin text-blue-600 mb-3" /><p className="text-sm text-slate-500">Loading Reports...</p></div>;
+    return (
+      <div className="flex-1 p-8 bg-slate-50/30 flex items-center justify-center min-h-screen">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-12 w-12 animate-spin text-slate-400 mx-auto" />
+          <p className="text-slate-700">Loading Reports...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="flex flex-col h-screen bg-slate-50/50">
-      {/* ── TOP HEADER ── */}
-      <header className="bg-white border-b border-slate-200 px-6 py-4 flex flex-col md:flex-row items-start md:items-center justify-between shadow-sm sticky top-0 z-50 gap-4">
-        <div className="flex flex-col">
-          <h3 className="text-2xl font-bold tracking-tight text-slate-900 leading-tight flex items-center gap-2.5">
-            <FileText className="h-6 w-6 text-blue-600" strokeWidth={2.5} />
-            {activeReport ? activeReport.name : "Report Viewer"}
-          </h3>
-          <p className="text-base text-slate-500 mt-1">
-            {activeReport ? (activeReport.description || "Generated Data Report View") : "Select a report template to begin analysis"}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button variant="outline" size="sm" onClick={() => setIsReportDialogOpen(true)} className="h-8 text-sm font-semibold text-slate-700 bg-white border-slate-200 shadow-sm hover:bg-slate-50">
-            <Filter className="mr-1.5 h-4 w-4 text-blue-500" />
+    <div className="flex-1 space-y-2 px-2 bg-slate-50/30 min-h-screen">
+      {/* ── Header exactly like DepartmentTasksManager ── */}
+      <div className="flex justify-between items-center px-1 pt-2">
+        <div className="flex gap-6">
+          <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+            <FileText className="h-6 w-6 text-blue-600" />
+            {activeReport ? activeReport.name : "Reports"}
+          </h2>
+          <Button variant="outline" size="sm" onClick={() => setIsReportDialogOpen(true)} className="flex items-center gap-2">
+            <Filter className="h-4 w-4" />
             {activeReport ? "Change Report" : "Select Report"}
           </Button>
-
-          <MemorizedReportDialog
-            open={isReportDialogOpen}
-            onOpenChange={setIsReportDialogOpen}
-            department={departments.find(d => d.id.toString() === activeDeptId) || null}
-            stages={stages}
-            kycDocuments={kycDocuments}
-            onApplyReport={(report) => { setActiveReport(report); setExpandedStageColumns(new Set()); setIsReportDialogOpen(false); }}
-            tableHeaders={ENHANCED_TABLE_HEADERS_IMMIGRATION}
-            availableJobLevels={availableJobLevels}
-            departments={departments}
-            subdepartments={departments.flatMap(d => d.tm_subdepartments || [])}
-            classes={departments.flatMap(d => (d.tm_subdepartments || []).flatMap((s: any) => s.classes || []))}
-          />
-
-          <div className="h-5 w-[1px] bg-slate-300 mx-1" />
-
-          {activeReport && (
-            <Tabs value={view} onValueChange={(v: any) => setView(v)} className="hidden md:block">
-              <TabsList className="h-8 bg-slate-100/80 p-0.5 border border-slate-200">
-                <TabsTrigger value="standard" className="text-[11px] h-6 px-3 data-[state=active]:bg-white data-[state=active]:shadow-sm"><Rows className="h-3 w-3 mr-1.5 text-blue-600" /> Rows</TabsTrigger>
-                <TabsTrigger value="transposed" className="text-[11px] h-6 px-3 data-[state=active]:bg-white data-[state=active]:shadow-sm"><LayoutGrid className="h-3 w-3 mr-1.5 text-blue-600" /> Cols</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          )}
-
-          <Button variant="outline" size="sm" onClick={() => refreshData()} disabled={loading} className="h-8 text-xs bg-white border-slate-200 shadow-sm px-2.5">
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin text-blue-600' : 'text-slate-600'}`} />
-          </Button>
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white shadow-sm font-semibold px-3">
-                <FileDown className="h-3.5 w-3.5 mr-1.5" /> Export Data
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48 text-xs font-medium">
-              <DropdownMenuItem onClick={() => handleExport('excel')} className="py-2 cursor-pointer">Excel (.xlsx)</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => toast({ title: "Coming Soon", description: "PDF export is being upgraded." })} className="py-2 cursor-pointer">PDF (.pdf)</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
-      </header>
-
-      {/* ── MAIN CONTENT ── */}
-      <main className="flex-1 overflow-hidden p-4 flex flex-col gap-3">
-        {/* Unified Filter Bar Block */}
-        {activeReport && departments.length > 0 && (
-          <div className="flex flex-col gap-2">
-
-            {/* Row 1: Dept & Subdept Routing */}
-            <Tabs value={activeDeptId} onValueChange={val => { setActiveDeptId(val); setActiveSubDeptId('all'); setCurrentPage(1); }}>
-              <TabsList className="h-8 bg-transparent p-0 gap-1">
-                {departments.map(dept => (
-                  <TabsTrigger key={dept.id} value={dept.id.toString()} className="text-[11px] font-bold uppercase tracking-wider text-slate-500 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded px-3 py-1.5">
-                    {dept.name}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
-            <Tabs value={activeSubDeptId} onValueChange={v => { setActiveSubDeptId(v); setCurrentPage(1); }}>
-              <TabsList className="h-8 bg-transparent p-0 gap-1">
-                <TabsTrigger value="all" className="text-[11px] font-bold uppercase tracking-wider text-slate-500 data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded px-3 py-1.5">
-                  All Sub-Depts
-                </TabsTrigger>
-                {activeSubDepartments.map(sub => (
-                  <TabsTrigger key={sub.id} value={sub.id.toString()} className="text-[11px] font-bold uppercase tracking-wider text-slate-500 data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded px-3 py-1.5">
-                    {sub.name}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
-            {/* Row 2: Secondary Filters & Settings */}
-            <div className="flex items-center justify-between gap-3 bg-slate-50 p-1.5 rounded-lg border border-slate-200/60 shadow-sm">
-              <div className="flex items-center gap-2 flex-1 overflow-x-auto scrollbar-thin">
-                <div className="relative w-full max-w-[250px] shrink-0">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                  <Input placeholder="Search tasks..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full bg-white pl-8 h-8 text-xs font-medium border-slate-200 focus-visible:ring-1 focus-visible:ring-blue-500" />
-                </div>
-
-                <div className="h-4 w-[1px] bg-slate-300 mx-1 shrink-0" />
-
-                <Select value={activeClassId} onValueChange={v => { setActiveClassId(v); setActiveSubClassId('all'); setCurrentPage(1); }}>
-                  <SelectTrigger className="w-[140px] h-8 text-[11px] font-bold uppercase tracking-wide bg-white border-slate-200 text-slate-600 shrink-0">
-                    <SelectValue placeholder="All Classes" />
-                  </SelectTrigger>
-                  <SelectContent className="z-[100]">
-                    <SelectItem value="all" className="text-xs font-medium">All Classes</SelectItem>
-                    {activeSubDepartments.find(s => s.id.toString() === (activeSubDeptId === 'all' ? activeSubDepartments[0]?.id.toString() : activeSubDeptId))?.classes?.map((cls: any) => (
-                      <SelectItem key={cls.id} value={cls.id.toString()} className="text-xs font-medium">{cls.name}</SelectItem>
-                    )) || []}
-                  </SelectContent>
-                </Select>
-
-                {activeClassId && activeClassId !== 'all' && (
-                  <Select value={activeSubClassId} onValueChange={v => { setActiveSubClassId(v); setCurrentPage(1); }}>
-                    <SelectTrigger className="w-[140px] h-8 text-[11px] font-bold uppercase tracking-wide bg-white border-slate-200 text-slate-600 shrink-0">
-                      <SelectValue placeholder="All Subclasses" />
-                    </SelectTrigger>
-                    <SelectContent className="z-[100]">
-                      <SelectItem value="all" className="text-xs font-medium">All Subclasses</SelectItem>
-                      {activeSubDepartments.find(s => s.id.toString() === (activeSubDeptId === 'all' ? activeSubDepartments[0]?.id.toString() : activeSubDeptId))?.classes?.find((c: any) => c.id.toString() === activeClassId)?.subClasses?.map((subCls: any) => (
-                        <SelectItem key={subCls.id} value={subCls.id.toString()} className="text-xs font-medium">{subCls.name}</SelectItem>
-                      )) || []}
-                    </SelectContent>
-                  </Select>
-                )}
-
-                <div className="h-4 w-[1px] bg-slate-300 mx-1 shrink-0" />
-
-                {/* Status Toggles */}
-                <Tabs value={activeStatus} onValueChange={v => { setActiveStatus(v); setCurrentPage(1); }} className="shrink-0">
-                  <TabsList className="h-8 bg-white border border-slate-200 p-0.5">
-                    <TabsTrigger value="all" className="text-[11px] font-bold uppercase tracking-widest px-2.5 data-[state=active]:bg-slate-700 data-[state=active]:text-white">All</TabsTrigger>
-                    <TabsTrigger value="wip" className="text-[11px] font-bold uppercase tracking-widest px-2.5 data-[state=active]:bg-blue-600 data-[state=active]:text-white">WIP</TabsTrigger>
-                    <TabsTrigger value="write_up_completed" className="text-[11px] font-bold uppercase tracking-widest px-2.5 data-[state=active]:bg-emerald-600 data-[state=active]:text-white">Write Up</TabsTrigger>
-                    <TabsTrigger value="endorsed" className="text-[11px] font-bold uppercase tracking-widest px-2.5 data-[state=active]:bg-purple-600 data-[state=active]:text-white">Endorsed</TabsTrigger>
-                  </TabsList>
-                </Tabs>
-
-                <div className="h-4 w-[1px] bg-slate-300 mx-1 shrink-0" />
-
-                <DropdownMenu open={isOfficerDropdownOpen} onOpenChange={setIsOfficerDropdownOpen}>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" disabled={!activeDeptId} className={cn("h-8 text-[11px] font-bold uppercase tracking-wide shrink-0", selectedOfficers.length > 0 ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-white text-slate-600 border-slate-200")}>
-                      <User className="mr-1.5 h-3.5 w-3.5" />
-                      {selectedOfficers.length > 0 ? `${selectedOfficers.length} Selected` : "Officers"}
-                      <ChevronDown className="ml-1.5 h-3.5 w-3.5 opacity-50" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent className="w-64 p-2 z-[100] border-slate-200 shadow-xl max-h-80 overflow-y-auto">
-                    {availableOfficers.length === 0 ? (
-                      <div className="p-3 text-[11px] font-medium text-slate-500 text-center italic">No officers assigned to view</div>
-                    ) : (
-                      <>
-                        <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2 px-1">Filter by Officer</div>
-                        <div className="space-y-1">
-                          {availableOfficers.map(o => (
-                            <div key={o.id} className="flex items-center space-x-2.5 p-1.5 hover:bg-slate-50 rounded-md transition-colors cursor-pointer" onClick={() => { setCurrentPage(1); setSelectedOfficers(prev => prev.includes(o.id) ? prev.filter(id => id !== o.id) : [...prev, o.id]); }}>
-                              <Checkbox checked={selectedOfficers.includes(o.id)} className="h-4 w-4 border-slate-300 data-[state=checked]:bg-blue-600 pointer-events-none" />
-                              <label className="text-[11px] font-semibold text-slate-700 cursor-pointer select-none">{o.name}</label>
-                            </div>
-                          ))}
-                        </div>
-                        {selectedOfficers.length > 0 && (
-                          <div className="border-t border-slate-100 mt-2 pt-2">
-                            <Button variant="ghost" size="sm" className="w-full h-7 text-[11px] font-bold uppercase tracking-widest text-slate-500 hover:text-slate-800 bg-slate-100" onClick={() => { setSelectedOfficers([]); setCurrentPage(1); }}>Clear Selection</Button>
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-
-                {/* View Toggles */}
-                <div className="flex items-center gap-1 shrink-0 ml-auto">
-                  <Button variant="outline" size="sm" onClick={() => setShowTimeStatuses(p => !p)} className={cn("h-8 text-[11px] font-bold uppercase tracking-wide px-2.5 transition-colors", showTimeStatuses ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-100")}>
-                    <Clock3 className="mr-1.5 h-3.5 w-3.5" /> {showTimeStatuses ? 'Hide Time' : 'Show Time'}
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => setShowNARows(p => !p)} className={cn("h-8 text-[11px] font-bold uppercase tracking-wide px-2.5 transition-colors", !showNARows ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-100")}>
-                    {showNARows ? <EyeOff className="mr-1.5 h-3.5 w-3.5 text-slate-400" /> : <Eye className="mr-1.5 h-3.5 w-3.5 text-amber-600" />}
-                    {showNARows ? 'Hide N/A Rows' : 'Show N/A Rows'}
-                  </Button>
-                </div>
-              </div>
-
-              {/* Pagination Controls */}
-              <div className="flex items-center gap-2 pl-2 border-l border-slate-200 shrink-0">
-                <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
-                  <SelectTrigger className="w-[70px] h-8 text-[11px] font-bold bg-white border-slate-200"><SelectValue /></SelectTrigger>
-                  <SelectContent className="z-[100]">
-                    {[100, 200, 500].map(n => <SelectItem key={n} value={n.toString()} className="text-[11px] font-semibold">{n}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-md p-0.5 shadow-sm">
-                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-500 rounded-sm hover:bg-slate-100" disabled={currentPage === 1} onClick={handlePreviousPage}><ChevronLeft className="h-4 w-4" /></Button>
-                  <span className="text-[11px] font-bold text-slate-600 min-w-[50px] text-center uppercase tracking-widest">{currentPage} / {totalPages || 1}</span>
-                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-500 rounded-sm hover:bg-slate-100" disabled={currentPage >= totalPages} onClick={handleNextPage}><ChevronRight className="h-4 w-4" /></Button>
-                </div>
-                {view === 'transposed' && (
-                  <div className="flex gap-1 ml-1 bg-white border border-slate-200 rounded-md p-0.5 shadow-sm">
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-500 rounded-sm hover:bg-slate-100" onClick={() => setExpandedSections(new Set(transposedRows.map(r => r.id)))} title="Expand All">
-                      <ChevronsDown className="h-3 w-3" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-500 rounded-sm hover:bg-slate-100" onClick={() => setExpandedSections(new Set())} title="Collapse All">
-                      <ChevronsRight className="h-3 w-3" />
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </div>
+        {!areTabsVisible && (
+          <div className="text-sm text-slate-600 font-medium flex items-center gap-2 flex-wrap">
+            <span className="font-bold text-slate-800">Viewing:</span>
+            {breadcrumbParts.map((part, index) => (
+              <React.Fragment key={index}>
+                <span className="bg-slate-100 px-2 py-1 rounded-md">{part}</span>
+                {index < breadcrumbParts.length - 1 && <ChevronRight className="h-4 w-4 text-slate-400" />}
+              </React.Fragment>
+            ))}
           </div>
         )}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setAreTabsVisible(!areTabsVisible)}
+          className={`ml-auto transition-all ${!areTabsVisible ? 'bg-slate-100' : ''}`}
+        >
+          {areTabsVisible ? <PanelLeftClose className="h-4 w-4 mr-2" /> : <PanelLeftOpen className="h-4 w-4 mr-2" />}
+          {areTabsVisible ? 'Hide Navigation' : 'Show Navigation'}
+        </Button>
+      </div>
 
-        {/* ── TABLE ── */}
-        <div className="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm overflow-auto relative scrollbar-thin">
-          {!activeReport ? (
-            <div className="flex flex-col items-center justify-center h-full text-slate-400 bg-slate-50/50">
-              <FileText className="h-16 w-16 mb-4 opacity-20 text-blue-600" />
-              <p className="text-lg font-bold text-slate-600 tracking-tight">No Report Selected</p>
-              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mt-2">Open the report menu to generate a view</p>
-            </div>
-          ) : loading ? (
-            <div className="flex flex-col items-center justify-center h-full bg-slate-50/50">
-              <Loader2 className="h-10 w-10 animate-spin text-blue-600 mb-3" />
-              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Processing Report Data...</p>
-            </div>
-          ) : view === 'standard' ? (
-            // ── STANDARD VIEW ───────────────────────────────────────────────
-            <Table className="border-separate border-spacing-0 w-full min-w-max">
-              <TableHeader className="sticky top-0 z-30 shadow-md">
-                {/* Group header */}
-                <TableRow className="bg-blue-700 hover:bg-blue-700">
-                  <TableHead className={`${INDEX_WIDTH_CLASS} border-b border-white/20 border-r bg-blue-800 text-white sticky left-0 z-40 text-center font-bold text-[11px] uppercase tracking-widest shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>IDX</TableHead>
-                  {columnGroups.map((group, i) => (
-                    <TableHead key={i} colSpan={group.span}
-                      className={`text-center font-bold text-white border-b border-white/20 border-r last:border-r-0 py-2.5 text-[11px] uppercase tracking-widest ${!group.applicable ? 'bg-blue-800/80' : 'bg-blue-700'}`}>
-                      <div className="flex items-center justify-center gap-2">
-                        {group.label}
-                        {!group.applicable && <span className="text-[11px] bg-amber-500 text-white px-1.5 py-0.5 rounded font-bold shadow-sm">FILTER N/A</span>}
-                      </div>
-                    </TableHead>
+      {/* ── Tabs Navigation exactly like DepartmentTasksManager ── */}
+      <Tabs value={activeDeptId} onValueChange={(val) => { setActiveDeptId(val); setActiveSubDeptId('all'); }} className="space-y-2">
+        {areTabsVisible && departments.length > 0 && (
+          <TabsList className="grid w-full rounded-lg p-1 shadow-sm bg-gradient-to-r from-slate-50 to-slate-100 border border-slate-200" style={{ gridTemplateColumns: `repeat(${departments.length}, 1fr)` }}>
+            {departments.map(dept => (
+              <TabsTrigger key={dept.id} value={dept.id.toString()} className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600 data-[state=active]:to-indigo-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
+                {dept.name}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        )}
+
+        {activeDepartment && (
+          <TabsContent value={activeDeptId} className="space-y-4 m-0">
+            {/* Subdepartments Tab */}
+            {areTabsVisible && activeSubDepartments.length > 0 && (
+              <Tabs value={activeSubDeptId} onValueChange={(v) => { setActiveSubDeptId(v); }}>
+                <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-gray-50 to-gray-100 border border-gray-200 h-auto">
+                  <TabsTrigger value="all" className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-teal-600 data-[state=active]:to-teal-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
+                    All Subdepartments
+                  </TabsTrigger>
+                  {activeSubDepartments.map(subdept => (
+                    <TabsTrigger key={subdept.id} value={subdept.id.toString()} className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-teal-600 data-[state=active]:to-teal-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
+                      {subdept.name}
+                    </TabsTrigger>
                   ))}
-                </TableRow>
-                {/* Column header */}
-                <TableRow className="bg-blue-600 hover:bg-blue-600">
-                  <TableHead className={`${INDEX_WIDTH_CLASS} border-b border-slate-200 border-r bg-blue-700 text-white sticky left-0 z-40 text-center font-bold text-[11px] uppercase tracking-widest shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]`}>#</TableHead>
-                  {filteredColumns.map(col => {
-                    const isColFilterNA = col.stageId ? !isStageApplicableToCurrentFilter(col.stageId) : false;
-                    return (
-                      <TableHead key={col.id} onClick={() => handleSort(col.id)}
-                        className={`${COLUMN_WIDTH_CLASS} whitespace-nowrap px-3 py-2.5 font-bold text-white border-b border-slate-200 border-r text-[11px] uppercase tracking-widest cursor-pointer hover:bg-blue-500 transition-colors group ${isColFilterNA ? 'bg-blue-700/80' : 'bg-blue-600'}`}>
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 truncate">
-                            <span className="truncate">{col.label}</span>
-                            {isColFilterNA && <span className="text-[11px] bg-amber-500 text-white px-1 py-0.5 rounded shrink-0 font-bold shadow-sm">N/A</span>}
-                            {col.hasSubColumns && (
-                              <button onClick={e => { e.stopPropagation(); toggleStageColumns(col.stageId); }}
-                                className="p-0.5 hover:bg-white/20 rounded text-white shrink-0 transition-colors">
-                                {expandedStageColumns.has(col.stageId) ? <Minus className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
-                              </button>
+                </TabsList>
+              </Tabs>
+            )}
+
+            {/* Statuses Tab */}
+            <Tabs value={activeStatus} onValueChange={(v) => { setActiveStatus(v); }}>
+              {areTabsVisible && (
+                <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-slate-50 to-slate-100 border border-slate-200">
+                  <TabsTrigger value="all" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-slate-600 data-[state=active]:to-slate-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
+                    All Statuses
+                  </TabsTrigger>
+                  <TabsTrigger value="wip" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-amber-600 data-[state=active]:to-amber-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
+                    WIP Stages
+                  </TabsTrigger>
+                  <TabsTrigger value="write_up_completed" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-green-600 data-[state=active]:to-green-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
+                    Write Up Completed
+                  </TabsTrigger>
+                  <TabsTrigger value="endorsed" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
+                    Endorsement Completed
+                  </TabsTrigger>
+                </TabsList>
+              )}
+
+              <TabsContent value={activeStatus} className="mt-4">
+                {/* Class, Subclass, Officer Filters (Rendered like sub-tabs wrapper if visible) */}
+                {areTabsVisible && (
+                  <div className="flex flex-wrap items-center gap-3 mb-4 bg-white/60 p-2 rounded-md border border-slate-200/50">
+                    <Select value={activeClassId} onValueChange={v => { setActiveClassId(v); setActiveSubClassId('all'); }}>
+                      <SelectTrigger className="w-[180px] h-9 text-sm font-medium bg-white border-slate-200 text-slate-700">
+                        <SelectValue placeholder="All Classes" />
+                      </SelectTrigger>
+                      <SelectContent className="z-[100]">
+                        <SelectItem value="all">All Classes</SelectItem>
+                        {activeSubDepartments.find(s => s.id.toString() === (activeSubDeptId === 'all' ? activeSubDepartments[0]?.id.toString() : activeSubDeptId))?.classes?.map((cls: any) => (
+                          <SelectItem key={cls.id} value={cls.id.toString()}>{cls.name}</SelectItem>
+                        )) || []}
+                      </SelectContent>
+                    </Select>
+
+                    {activeClassId && activeClassId !== 'all' && (
+                      <Select value={activeSubClassId} onValueChange={v => { setActiveSubClassId(v); }}>
+                        <SelectTrigger className="w-[180px] h-9 text-sm font-medium bg-white border-slate-200 text-slate-700">
+                          <SelectValue placeholder="All Subclasses" />
+                        </SelectTrigger>
+                        <SelectContent className="z-[100]">
+                          <SelectItem value="all">All Subclasses</SelectItem>
+                          {activeSubDepartments.find(s => s.id.toString() === (activeSubDeptId === 'all' ? activeSubDepartments[0]?.id.toString() : activeSubDeptId))?.classes?.find((c: any) => c.id.toString() === activeClassId)?.subClasses?.map((subCls: any) => (
+                            <SelectItem key={subCls.id} value={subCls.id.toString()}>{subCls.name}</SelectItem>
+                          )) || []}
+                        </SelectContent>
+                      </Select>
+                    )}
+
+                    <DropdownMenu open={isOfficerDropdownOpen} onOpenChange={setIsOfficerDropdownOpen}>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" disabled={!activeDeptId} className={cn("h-9 text-sm font-medium", selectedOfficers.length > 0 ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-white text-slate-700 border-slate-200")}>
+                          <User className="mr-2 h-4 w-4" />
+                          {selectedOfficers.length > 0 ? `${selectedOfficers.length} Selected Officers` : "Filter Officers"}
+                          <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent className="w-64 p-2 z-[100] border-slate-200 shadow-xl max-h-80 overflow-y-auto">
+                        {availableOfficers.length === 0 ? (
+                          <div className="p-3 text-sm text-slate-500 text-center italic">No officers assigned</div>
+                        ) : (
+                          <>
+                            <div className="space-y-1">
+                              {availableOfficers.map(o => (
+                                <div key={o.id} className="flex items-center space-x-2.5 p-1.5 hover:bg-slate-50 rounded-md transition-colors cursor-pointer" onClick={() => { setSelectedOfficers(prev => prev.includes(o.id) ? prev.filter(id => id !== o.id) : [...prev, o.id]); }}>
+                                  <Checkbox checked={selectedOfficers.includes(o.id)} className="pointer-events-none" />
+                                  <label className="text-sm font-medium text-slate-700 cursor-pointer">{o.name}</label>
+                                </div>
+                              ))}
+                            </div>
+                            {selectedOfficers.length > 0 && (
+                              <div className="border-t border-slate-100 mt-2 pt-2">
+                                <Button variant="ghost" size="sm" className="w-full text-sm text-slate-500 hover:text-slate-800" onClick={() => { setSelectedOfficers([]); }}>Clear Selection</Button>
+                              </div>
                             )}
-                          </div>
-                          <ArrowUpDown className={`h-3 w-3 shrink-0 transition-colors ${sortConfig?.key === col.id ? 'text-white opacity-100' : 'text-white/40 opacity-0 group-hover:opacity-100'}`} />
-                        </div>
-                      </TableHead>
-                    );
-                  })}
-                </TableRow>
-              </TableHeader>
-              <TableBody className="divide-y divide-slate-100 bg-white">
-                {paginatedTasks.length > 0 ? paginatedTasks.map((task, idx) => (
-                  <TableRow key={task.id} className="odd:bg-white even:bg-slate-50/50 hover:bg-blue-50/50 transition-colors group">
-                    <TableCell className={`${INDEX_WIDTH_CLASS} sticky left-0 z-20 odd:bg-white even:bg-slate-50/50 group-hover:bg-blue-50/80 border-r border-slate-200 font-bold text-[11px] text-center text-slate-500 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.03)]`}>
-                      {(currentPage - 1) * itemsPerPage + idx + 1}
-                    </TableCell>
-                    {filteredColumns.map(col => (
-                      <TableCell key={col.id} className={`${COLUMN_WIDTH_CLASS} border-r border-slate-100 p-2.5 text-[11px] font-medium text-slate-700 align-middle`}>
-                        <div className="truncate w-full">{safeRender(renderCellValue(task, col))}</div>
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                )) : (
-                  <TableRow>
-                    <TableCell colSpan={filteredColumns.length + 1} className="h-48 text-center bg-slate-50/50">
-                      <div className="flex flex-col items-center justify-center text-slate-400">
-                        <Briefcase className="h-10 w-10 mb-3 opacity-20 text-blue-500" />
-                        <p className="text-[13px] font-bold text-slate-600 tracking-tight">No matching tasks found</p>
-                        <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mt-1">Adjust your search or active filters</p>
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                          </>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                 )}
-              </TableBody>
-            </Table>
-          ) : (
-            // ── TRANSPOSED VIEW ─────────────────────────────────────────────
-            <Table className="border-separate border-spacing-0 w-full min-w-max">
-              <TableHeader className="sticky top-0 z-30 shadow-md">
-                <TableRow className="bg-blue-700 hover:bg-blue-700">
-                  <TableHead className="sticky left-0 z-40 w-[280px] min-w-[280px] bg-blue-800 text-white border-r border-blue-600 font-bold text-[11px] uppercase tracking-widest p-4 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
-                    Fields / Tasks →
-                  </TableHead>
-                  {paginatedTasks.map(task => (
-                    <TableHead key={task.id} className={`${COLUMN_WIDTH_CLASS} text-center bg-blue-700 text-white border-r border-blue-600 font-bold text-[11px] py-2.5 px-2`}>
-                      <div className="flex flex-col gap-1 w-full items-center justify-center">
-                        <span className="font-bold opacity-60 text-[11px] uppercase tracking-widest">IDX #{(currentPage - 1) * itemsPerPage + paginatedTasks.indexOf(task) + 1}</span>
-                        <span className="truncate w-full font-bold" title={task.applicant_name}>{task.applicant_name}</span>
-                        <Badge variant="outline" className="bg-blue-600 text-blue-100 border-blue-500 text-[11px] px-1.5 py-0">ID: {task.id}</Badge>
-                      </div>
-                    </TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody className="divide-y divide-slate-100 bg-white">
-                {paginatedTasks.length > 0 ? transposedRows.map((row, rIdx) => {
-                  if (row.type === 'section_header') {
-                    const Icon = row.icon;
-                    const isFilterNA = row.filterApplicable === false;
-                    return (
-                      <TableRow key={row.id} className={`border-y-2 border-slate-300 hover:bg-slate-200 cursor-pointer transition-colors ${isFilterNA ? 'bg-amber-50/80' : 'bg-slate-100'}`}
-                        onClick={() => toggleSection(row.id)}>
-                        <TableCell className={`sticky left-0 z-20 border-r border-slate-300 p-0 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] ${isFilterNA ? 'bg-amber-50/80' : 'bg-slate-100'}`} colSpan={paginatedTasks.length + 1}>
-                          <div className="flex items-center justify-between px-4 py-2.5">
-                            <div className="flex items-center gap-3">
-                              <Icon className={cn("h-4 w-4", isFilterNA ? "text-amber-500" : "text-blue-600")} />
-                              <span className="font-bold text-slate-800 text-xs uppercase tracking-wider">{row.label}</span>
-                              {isFilterNA && <span className="text-[11px] bg-amber-500 text-white px-1.5 py-0.5 rounded font-bold shadow-sm">FILTER N/A</span>}
-                            </div>
-                            <div className="text-slate-400">
-                              {expandedSections.has(row.id) ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                            </div>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  }
 
-                  return (
-                    <TableRow key={rIdx} className="odd:bg-white even:bg-slate-50/50 hover:bg-blue-50/50 group border-b border-slate-100 transition-colors">
-                      <TableCell className="sticky left-0 z-20 odd:bg-white even:bg-slate-50/50 group-hover:bg-blue-50/80 border-r border-slate-200 py-2.5 px-3 text-[11px] font-bold text-slate-600 uppercase tracking-widest shadow-[2px_0_5px_-2px_rgba(0,0,0,0.03)]">
-                        <div style={{ paddingLeft: row.isSubRow ? '24px' : '0' }} className="flex items-center truncate" title={row.label}>
-                          {safeRender(row.label)}
+                {/* Wrapper Card */}
+                <Card className="bg-white/80 backdrop-blur-sm shadow-lg border-slate-100 flex flex-col h-[calc(100vh-280px)]">
+                  <CardHeader className="border-b border-slate-100 bg-white shrink-0 pb-3">
+                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                      <div>
+                        <CardTitle className="text-lg text-slate-800">
+                          {activeReport ? activeReport.name : "Report Viewer"}
+                          {activeDeptId && ` - ${activeDepartment?.name}`}
+                        </CardTitle>
+                        <CardDescription className="text-slate-600">
+                          {activeReport ? activeReport.description : "Select a template"}
+                        </CardDescription>
+                      </div>
+
+                      {/* Action Tools aligned to right exactly like DepartmentTasksManager */}
+                      <div className="flex items-center gap-2 flex-wrap justify-end">
+                        <div className="relative">
+                          <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
+                          <Input
+                            placeholder="Search..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="pl-8 w-48 sm:w-64 h-9"
+                          />
+                          {searchQuery && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="absolute right-1 top-1.5 h-6 w-6"
+                              onClick={() => setSearchQuery('')}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          )}
                         </div>
-                      </TableCell>
-                      {paginatedTasks.map(task => (
-                        <TableCell key={task.id} className={`${COLUMN_WIDTH_CLASS} text-center border-r border-slate-100 p-2.5 align-middle`}>
-                          <div className="truncate w-full mx-auto">
-                            {safeRender(renderCellValue(task, row))}
-                          </div>
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  );
-                }) : (
-                  <TableRow>
-                    <TableCell colSpan={2} className="h-32 text-center text-slate-400 bg-slate-50/50">
-                      <div className="text-[11px] font-bold uppercase tracking-widest">No data available</div>
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          )}
-        </div>
-      </main>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex items-center gap-2"
+                          onClick={() => setView(view === 'standard' ? 'transposed' : 'standard')}
+                        >
+                          {view === 'standard' ? <LayoutGrid className="h-4 w-4" /> : <TableProperties className="h-4 w-4" />}
+                          {view === 'standard' ? 'Transposed View' : 'Standard View'}
+                        </Button>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex items-center gap-2"
+                          onClick={() => setShowTimeStatuses(!showTimeStatuses)}
+                        >
+                          <Clock className="h-4 w-4" />
+                          {showTimeStatuses ? 'Hide Time Details' : 'Show Time Details'}
+                        </Button>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex items-center gap-2"
+                          onClick={() => setShowNARows(!showNARows)}
+                        >
+                          {showNARows ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          {showNARows ? 'Hide N/A Rows' : 'Show N/A Rows'}
+                        </Button>
+
+                        <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport('excel')}>
+                          <Download className="h-4 w-4" />Export to Excel
+                        </Button>
+
+                        <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => refreshData()} disabled={loading}>
+                          <RotateCcw className={`h-4 w-4 ${loading ? 'animate-spin text-blue-600' : ''}`} />Refresh
+                        </Button>
+                      </div>
+                    </div>
+                  </CardHeader>
+
+                  {/* Table Main Area */}
+                  <CardContent className="flex-1 p-0 overflow-hidden relative">
+                    <div className="h-full w-full overflow-auto scrollbar-thin bg-white rounded-b-xl">
+                      {!activeReport ? (
+                        <div className="flex flex-col items-center justify-center h-full text-slate-400 bg-slate-50/50">
+                          <FileText className="h-16 w-16 mb-4 opacity-20 text-blue-600" />
+                          <p className="text-lg font-bold text-slate-600 tracking-tight">No Report Selected</p>
+                          <p className="text-sm font-medium text-slate-400 mt-2">Open the report menu to generate a view</p>
+                        </div>
+                      ) : loading ? (
+                        <div className="flex flex-col items-center justify-center h-full bg-slate-50/50">
+                          <Loader2 className="h-10 w-10 animate-spin text-blue-600 mb-3" />
+                          <p className="text-sm font-bold text-slate-500">Processing Report Data...</p>
+                        </div>
+                      ) : view === 'standard' ? (
+                        <StandardReportView
+                          allTasks={filteredByNARows}
+                          filteredColumns={filteredColumns}
+                          columnGroups={columnGroups}
+                          sortConfig={sortConfig}
+                          expandedStageColumns={expandedStageColumns}
+                          renderCellValue={renderCellValue}
+                          safeRender={safeRender}
+                          handleSort={handleSort}
+                          toggleStageColumns={toggleStageColumns}
+                          isStageApplicableToCurrentFilter={isStageApplicableToCurrentFilter}
+                        />
+                      ) : (
+                        <TransposedReportView
+                          allTasks={filteredByNARows}
+                          transposedRows={transposedRows}
+                          expandedSections={expandedSections}
+                          renderCellValue={renderCellValue}
+                          safeRender={safeRender}
+                          toggleSection={toggleSection}
+                        />
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
+          </TabsContent>
+        )}
+      </Tabs>
+
+      <MemorizedReportDialog
+        open={isReportDialogOpen}
+        onOpenChange={setIsReportDialogOpen}
+        department={departments.find(d => d.id.toString() === activeDeptId) || null}
+        stages={stages}
+        kycDocuments={kycDocuments}
+        onApplyReport={(report) => { setActiveReport(report); setExpandedStageColumns(new Set()); setIsReportDialogOpen(false); }}
+        tableHeaders={ENHANCED_TABLE_HEADERS_IMMIGRATION}
+        availableJobLevels={availableJobLevels}
+        departments={departments}
+        subdepartments={departments.flatMap(d => d.tm_subdepartments || [])}
+        classes={departments.flatMap(d => (d.tm_subdepartments || []).flatMap((s: any) => s.classes || []))}
+      />
     </div>
   );
 }
