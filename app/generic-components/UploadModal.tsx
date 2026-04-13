@@ -13,6 +13,28 @@ import { FileUpload } from '@/components/ui/file-upload'
 import { toast } from "@/lib/hooks/use-toast"
 import supabase from '@/lib/supabase/client'
 
+// File size constants (in bytes)
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB - Supabase standard limit
+const MAX_FILE_SIZE_MB = MAX_FILE_SIZE / (1024 * 1024);
+
+// Helper function to format file sizes
+const formatFileSize = (bytes: number): string => {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+};
+
+// Helper function to get file size color based on size
+const getFileSizeColor = (bytes: number): string => {
+  const sizeMB = bytes / (1024 * 1024);
+  if (sizeMB >= MAX_FILE_SIZE_MB) return 'text-red-600 font-semibold';
+  if (sizeMB >= MAX_FILE_SIZE_MB * 0.8) return 'text-orange-600 font-medium';
+  if (sizeMB >= MAX_FILE_SIZE_MB * 0.5) return 'text-yellow-600';
+  return 'text-gray-500';
+};
+
 const toastControllers = new Map<string, ReturnType<typeof toast>>();
 
 const showLoadingToast = (message: string, id?: string) => {
@@ -621,6 +643,14 @@ export function UploadModal({
     const fileArray = Array.isArray(files) ? files : [files];
     if (!fileArray.length) return;
 
+    // Validate file sizes before processing
+    const oversizedFiles = fileArray.filter(file => file.size > MAX_FILE_SIZE);
+    if (oversizedFiles.length > 0) {
+      const oversizedFileNames = oversizedFiles.map(f => `${f.name} (${(f.size / (1024 * 1024)).toFixed(1)}MB)`).join(', ');
+      showErrorToast(`Files exceed maximum size limit (${MAX_FILE_SIZE_MB}MB): ${oversizedFileNames}`);
+      return;
+    }
+
     const newDocs = fileArray.map(file => ({
       id: generateDocumentId(),
       file,
@@ -1079,7 +1109,16 @@ export function UploadModal({
             .from('kyc-documents')
             .upload(filePath, doc.file, { cacheControl: '3600', upsert: true });
 
-          if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
+          if (uploadError) {
+            // Provide more specific error messages for common issues
+            if (uploadError.message.includes('size') || uploadError.message.includes('exceeded')) {
+              throw new Error(`File "${doc.fileName}" exceeds maximum size limit (${MAX_FILE_SIZE_MB}MB). Please compress the file or contact support for larger file uploads.`);
+            } else if (uploadError.message.includes('quota') || uploadError.message.includes('limit')) {
+              throw new Error(`Storage quota exceeded for file "${doc.fileName}". Please contact support or try a smaller file.`);
+            } else {
+              throw new Error(`Upload failed for "${doc.fileName}": ${uploadError.message}`);
+            }
+          }
 
           const extractedDataWithAssetId = { ...doc.extractedData };
           let assetIdToUse = companyAssetId || '';
@@ -1242,6 +1281,15 @@ export function UploadModal({
       )}
 
       <div className="mt-4">
+        <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
+          <div className="flex items-center gap-2 text-sm text-blue-800">
+            <AlertTriangle className="h-4 w-4" />
+            <span>
+              <strong>File Size Limit:</strong> Maximum {MAX_FILE_SIZE_MB}MB per file.
+              Files larger than this will be rejected automatically.
+            </span>
+          </div>
+        </div>
         <div className="p-4">
           <FileUpload onFilesSelected={handleFileUpload} />
         </div>
@@ -1263,6 +1311,9 @@ export function UploadModal({
                           {doc.validationStatus ?
                             doc.validationStatus.charAt(0).toUpperCase() + doc.validationStatus.slice(1) :
                             'Pending'}
+                        </span>
+                        <span className="text-xs text-gray-700">
+                          {doc.fileName} (<span className={getFileSizeColor(doc.file.size)}>{formatFileSize(doc.file.size)}</span>)
                         </span>
 
                         {allowMultipleTypes && availableDocTypes.length > 1 && (

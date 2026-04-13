@@ -193,6 +193,7 @@ type Placeholder = {
   custom_ordinal_format?: string;
   source_logic?: 'all' | 'priority'
   linked_document_ids?: string[];
+  format?: string; // NEW: Format suffix like 'upper', 'lower', 'capital', etc.
   
   // Document Checklist Configuration (using DocumentChecklistConfig)
   document_checklist_config?: DocumentChecklistConfig;
@@ -2056,17 +2057,26 @@ export default function DocumentTemplateManager({
         rawTextContent = getCleanText(source.content).replace(/[\u200B-\u200D\uFEFF]/g, '');
       }
 
-      const tagRegex = /\{([#\/%])?\s*([a-zA-Z0-9_]+)\s*\}/g;
+      // Updated regex to capture format suffixes like /upper, /lower, /capital, etc.
+      const tagRegex = /\{([#\/%])?\s*([a-zA-Z0-9_]+)(?:\/([a-zA-Z0-9_]+))?\s*\}/g;
       const sequences = new Map(); // To track em_1, em_2 groups
 
       const results: Placeholder[] = [];
       const blockStack: string[] = [];
       const processedTags = new Set<string>();
 
+      // Common docxtemplater format functions
+      const formatFunctions = new Set([
+        'upper', 'lower', 'capital', 'capitalize', 'title', 'camel', 'snake', 'kebab',
+        'date', 'time', 'datetime', 'currency', 'number', 'int', 'float', 'round',
+        'prettify', 'escape', 'unescape', 'html', 'raw', 'json', 'parse', 'stringify'
+      ]);
+
       let match;
       while ((match = tagRegex.exec(rawTextContent)) !== null) {
         const prefix = match[1]; // #, /, %
         const tagName = match[2];
+        const formatSuffix = match[3]; // e.g., 'upper', 'lower', etc.
         const currentParent = blockStack.length > 0 ? blockStack[blockStack.length - 1] : undefined;
         const contextKey = currentParent ? `${currentParent}_${tagName}` : tagName;
 
@@ -2142,7 +2152,12 @@ export default function DocumentTemplateManager({
         else {
           if (processedTags.has(contextKey)) continue;
 
-          console.log(`[FIELD DETECTED] {${tagName}} ${currentParent ? `(Inside ${currentParent})` : '(Global)'}`);
+          // Log format suffix if present
+          if (formatSuffix) {
+            console.log(`[FORMAT DETECTED] {${tagName}/${formatSuffix}} - Format function: ${formatSuffix}`);
+          }
+
+          console.log(`[FIELD DETECTED] {${tagName}${formatSuffix ? '/' + formatSuffix : ''}} ${currentParent ? `(Inside ${currentParent})` : '(Global)'}`);
 
           const { ids: matchingFieldIds, sourceType } = findMatchingMasterFields(tagName, masterFields);
 
@@ -2170,7 +2185,7 @@ export default function DocumentTemplateManager({
             }
           }
 
-          results.push({
+          const placeholder: Placeholder = {
             id: `ph_${tagName}_${Date.now()}`,
             name: tagName,
             parent_name: currentParent,
@@ -2179,8 +2194,18 @@ export default function DocumentTemplateManager({
             entity_type: inferredEntity,
             master_field_ids: matchingFieldIds,
             ...(inferredRelationships.length > 0 && { dependant_relationship: inferredRelationships }),
-            description: currentParent ? `Inside ${currentParent}` : ''
-          });
+            description: currentParent ? `Inside ${currentParent}` : '',
+            ...(formatSuffix && formatFunctions.has(formatSuffix) && { format: formatSuffix })
+          };
+
+          if (formatSuffix && formatFunctions.has(formatSuffix)) {
+            placeholder.description = placeholder.description 
+              ? `${placeholder.description} (Format: ${formatSuffix})`
+              : `Format: ${formatSuffix}`;
+            console.log(`%c[FORMAT APPLIED] ${tagName} -> ${formatSuffix}`, "color: #8b5cf6; font-weight: bold;");
+          }
+
+          results.push(placeholder);
           processedTags.add(contextKey);
         }
       }
@@ -2354,10 +2379,13 @@ export default function DocumentTemplateManager({
               )}
               <div className="flex flex-col">
                 <span className={cn("font-bold", isBlock ? "text-blue-800" : "text-slate-700")}>
-                  {isBlock ? `{#${p.name}}` : `{${p.name}}`}
+                  {isBlock ? `{#${p.name}}` : `{${p.name}${p.format ? '/' + p.format : ''}}`}
                 </span>
                 {p.is_digit_split && (
                   <span className="text-[8px] text-orange-600 font-bold uppercase tracking-tighter">Digit Split: 1-{p.digit_count}</span>
+                )}
+                {p.format && (
+                  <span className="text-[8px] text-purple-600 font-bold uppercase tracking-tighter">Format: {p.format}</span>
                 )}
               </div>
             </div>

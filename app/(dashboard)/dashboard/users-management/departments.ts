@@ -88,3 +88,32 @@ export async function fetchDepartmentById(id: string): Promise<Department | null
     throw new Error('Failed to fetch department');
   }
 }
+
+export function getInheritedOfficer(
+  departments: Department[],
+  departmentId: string,
+  subdepartmentId: string
+): string | null {
+  try {
+    const department = departments.find(dept => dept.id === departmentId);
+    if (!department) return null;
+
+    const subdepartment = department.tm_subdepartments?.find(sub => sub.id === subdepartmentId);
+    if (!subdepartment) return null;
+
+    // Return task manager if available
+    if (subdepartment.task_manager_id) {
+      return subdepartment.task_manager_id;
+    }
+
+    // Check for task assistants
+    if (subdepartment.taskAssistants && subdepartment.taskAssistants.length > 0) {
+      return subdepartment.taskAssistants[0].id;
+    }
+
+    return null;
+  } catch (error) {
+    console.error('Error getting inherited officer:', error);
+    return null;
+  }
+}

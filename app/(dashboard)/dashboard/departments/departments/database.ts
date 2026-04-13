@@ -857,4 +857,69 @@ export async function saveSubdepartmentRequirements(subdepartmentId: string, req
   }
 }
 
+export function getInheritedOfficer(
+  departments: Department[],
+  departmentId: string,
+  subdepartmentId: string
+): string | null {
+  try {
+    const department = departments.find(dept => dept.id === departmentId);
+    if (!department) return null;
+
+    const subdepartment = department.tm_subdepartments?.find(sub => sub.id === subdepartmentId);
+    if (!subdepartment) return null;
+
+    // Return task manager if available
+    if (subdepartment.taskManagerId) {
+      return subdepartment.taskManagerId;
+    }
+
+    // Check for task assistants
+    if (subdepartment.taskAssistants && subdepartment.taskAssistants.length > 0) {
+      return subdepartment.taskAssistants[0].userId;
+    }
+
+    return null;
+  } catch (error) {
+    console.error('Error getting inherited officer:', error);
+    return null;
+  }
+}
+
+export function getDepartmentOfficerIds(
+  departments: Department[],
+  departmentId: string
+): string[] {
+  try {
+    const department = departments.find(dept => dept.id === departmentId);
+    if (!department) return [];
+
+    // Return department-level officers
+    return department.officers_history?.map(history => history.id) || [];
+  } catch (error) {
+    console.error('Error getting department officer IDs:', error);
+    return [];
+  }
+}
+
+export function getSubdepartmentOfficerIds(
+  departments: Department[],
+  departmentId: string,
+  subdepartmentId: string
+): string[] {
+  try {
+    const department = departments.find(dept => dept.id === departmentId);
+    if (!department) return [];
+
+    const subdepartment = department.tm_subdepartments?.find(sub => sub.id === subdepartmentId);
+    if (!subdepartment) return [];
+
+    // Return subdepartment-level officers
+    return subdepartment.officer_history?.map(history => history.id) || [];
+  } catch (error) {
+    console.error('Error getting subdepartment officer IDs:', error);
+    return [];
+  }
+}
+
 

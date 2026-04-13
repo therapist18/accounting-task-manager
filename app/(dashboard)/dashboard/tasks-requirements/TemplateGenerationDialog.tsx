@@ -26,7 +26,15 @@ import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { executeComputedField } from '../tasks/utils/automationComputedFunctions';
 
-// Around line 30
+// Common docxtemplater format functions
+const formatFunctions = new Set([
+    'upper', 'lower', 'capital', 'capitalize', 'title', 'camel', 'snake', 'kebab',
+    'date', 'time', 'datetime', 'currency', 'number', 'int', 'float', 'round',
+    'prettify', 'escape', 'unescape', 'html', 'raw', 'json', 'parse', 'stringify'
+]);
+
+const formatRegex = /\{\{\s*([a-zA-Z0-9_]+)\s*(\/([a-zA-Z0-9_]+))?\s*\}\}/g;
+
 const EDITOR_PREVIEW_STYLES = `
   prose prose-sm sm:prose-base dark:prose-invert max-w-full focus:outline-none 
   font-serif
@@ -3088,7 +3096,8 @@ export default function TemplateGenerationDialog({
                         let rowHtml = innerTemplate;
                         block.children.forEach(child => {
                             const rawValue = row?.[child.name];
-                            const childRegex = new RegExp(`\\{+\\s*%?\\s*${child.name}\\s*\\}+`, 'g');
+                            const childFormatSuffix = child.format || '';
+                            const childRegex = new RegExp(`\\{+\\s*%?\\s*${child.name}${childFormatSuffix ? '\\s*\\/\\s*' + childFormatSuffix : ''}\\s*\\}+`, 'g');
 
                             if (child.type === 'image') {
                                 const value = typeof rawValue === 'string' ? rawValue : extractDisplayValue(rawValue);
@@ -3139,7 +3148,8 @@ export default function TemplateGenerationDialog({
 
             const rawValue = data[placeholder.name];
             const cleanName = placeholder.name.replace(/[{}]/g, '').trim();
-            const regex = new RegExp(`\\{+\\s*%?\\s*${cleanName}\\s*\\}+`, 'gi');
+            const formatSuffix = placeholder.format || '';
+            const regex = new RegExp(`\\{+\\s*%?\\s*${cleanName}${formatSuffix ? '\\s*\\/\\s*' + formatSuffix : ''}\\s*\\}+`, 'gi');
 
             // Handle Digit Splitting (Sequences like {passport_1}, {passport_2})
             if (placeholder.is_digit_split) {
@@ -3152,7 +3162,8 @@ export default function TemplateGenerationDialog({
             } else if (placeholder.type === 'image') {
                 const value = typeof rawValue === 'string' ? rawValue : extractDisplayValue(rawValue);
                 const cleanName = placeholder.name.replace(/[{}]/g, '').trim();
-                const regex = new RegExp(`\\{+\\s*%?\\s*${cleanName}\\s*\\}+`, 'gi');
+                const imageFormatSuffix = placeholder.format || '';
+                const regex = new RegExp(`\\{+\\s*%?\\s*${cleanName}${imageFormatSuffix ? '\\s*\\/\\s*' + imageFormatSuffix : ''}\\s*\\}+`, 'gi');
                 if (value && (value.startsWith('http') || value.startsWith('data:image'))) {
                     const style = styles[placeholder.name] || {};
 
