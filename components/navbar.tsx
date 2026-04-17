@@ -10,8 +10,6 @@ import { Input } from "@/components/ui/input"
 export function Navbar() {
   return (
     <header className="flex h-16 shrink-0 items-center gap-2 bg-white dark:bg-slate-900 border-b-2 border-blue-100 dark:border-white/10 px-4 shadow-md">
-      <SidebarTrigger className="-ml-1 text-gray-600 dark:text-white/60 hover:bg-blue-100 dark:hover:bg-white/10" />
-      <Separator orientation="vertical" className="mr-2 h-4 bg-blue-100 dark:bg-white/10" />
       <div className="flex flex-1 items-center gap-2">
         <div className="relative flex-1 max-w-md group">
           <div className="absolute inset-0 bg-gradient-to-r from-blue-100 to-transparent dark:from-blue-900/20 dark:to-transparent rounded-lg blur-md opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>

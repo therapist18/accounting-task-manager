@@ -30,7 +30,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { processComputedFields, executeComputedField } from '../utils/automationComputedFunctions';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { ENTITY_TYPES, type EntityType } from "@/lib/constants/entity-types";
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -303,6 +303,74 @@ export const AutomationMappingDialog = ({
   // ── NEW: track the saved eTA screenshot document record ──────────────────────
   const [savedScreenshotDoc, setSavedScreenshotDoc] = useState<any>(null);
   const [isSavingScreenshot, setIsSavingScreenshot] = useState(false);
+  // ── NEW: progress tracking state ───────────────────────────────────────────────
+  const [automationJobId, setAutomationJobId] = useState<string | null>(null);
+  const [automationProgress, setAutomationProgress] = useState<any>(null);
+  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
+
+  // Progress polling function
+  const pollProgress = useCallback(async (jobId: string) => {
+    try {
+      // Assuming the imm-automations server runs on localhost:5000
+      const response = await fetch(`http://localhost:5000/api/permit/eta-kenya/progress/${jobId}`);
+
+      // Stop polling if job not found (404) - automation completed and job removed
+      if (response.status === 404) {
+        console.log('Job completed - stopping polling');
+        setPollingInterval(prevInterval => {
+          if (prevInterval) {
+            clearInterval(prevInterval);
+          }
+          return null;
+        });
+        setIsAutomationRunning(false);
+        setAutomationProgress(prev => ({ ...prev, isRunning: false, message: 'Automation completed' }));
+        return;
+      }
+
+      if (!response.ok) {
+        console.error('Failed to fetch progress:', response.status);
+        return;
+      }
+
+      const data = await response.json();
+      if (data.success && data.progress) {
+        setAutomationProgress(data.progress);
+
+        // Stop polling if job is complete or failed
+        if (!data.progress.isRunning) {
+          setPollingInterval(prevInterval => {
+            if (prevInterval) {
+              clearInterval(prevInterval);
+            }
+            return null;
+          });
+          setIsAutomationRunning(false);
+        }
+      }
+    } catch (error) {
+      console.error('Error polling progress:', error);
+      // Stop polling on connection errors (server might be down)
+      if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+        setPollingInterval(prevInterval => {
+          if (prevInterval) {
+            clearInterval(prevInterval);
+          }
+          return null;
+        });
+        setIsAutomationRunning(false);
+      }
+    }
+  }, []);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
+    };
+  }, [pollingInterval]);
 
   // Helper functions for document preview (moved inside component)
   const getFileUrl = (filePath: string) => {
@@ -320,7 +388,7 @@ export const AutomationMappingDialog = ({
     }
 
     // Construct full path
-    const fullPath = `${bucketName}/${cleanPath}`;
+    const fullPath = `${bucketName} / ${cleanPath}`;
 
     // Build complete URL
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -331,7 +399,7 @@ export const AutomationMappingDialog = ({
 
     // Use encodeURI for the entire path to handle spaces properly
     const encodedPath = encodeURI(fullPath);
-    return `${supabaseUrl}/storage/v1/object/public/${encodedPath}`;
+    return `${supabaseUrl} / storage / v1 / object / public / ${encodedPath}`;
   };
 
   const handlePreviewDocument = async (doc: any) => {
@@ -352,7 +420,7 @@ export const AutomationMappingDialog = ({
 
     // Update the specific document's extracted details
     const updatedDocuments = previewingDocuments.documents.map((doc: any) => {
-      if (doc.id === docId || doc.id === `doc-${docId}` || doc.file_path === docId) {
+      if (doc.id === docId || doc.id === `doc - ${docId}` || doc.file_path === docId) {
         return {
           ...doc,
           edited_details: {
@@ -416,7 +484,7 @@ export const AutomationMappingDialog = ({
       filePath = filePath.substring(bucketName.length + 1);
     }
 
-    const fullPath = `${bucketName}/${filePath}`;
+    const fullPath = `${bucketName} / ${filePath}`;
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (!supabaseUrl) {
@@ -424,7 +492,7 @@ export const AutomationMappingDialog = ({
       return null;
     }
     const encodedPath = encodeURI(fullPath);
-    return `${supabaseUrl}/storage/v1/object/public/${encodedPath}`;
+    return `${supabaseUrl} / storage / v1 / object / public / ${encodedPath}`;
   };
 
   // Memoize entity type to prevent recalculation
@@ -701,14 +769,14 @@ export const AutomationMappingDialog = ({
 
   const fetchSourceData = useCallback(async () => {
     if (!isOpen || !selectedAutomationId || Object.keys(jobFields).length === 0 || !webData.length) return;
-    const fetchKey = `${selectedAutomationId}-${Object.keys(jobFields).length}-${webData.length}-${Date.now()}`;
+    const fetchKey = `${selectedAutomationId} - ${Object.keys(jobFields).length} - ${webData.length} - ${Date.now()}`;
     if (isFetchingRef.current) return;
     lastFetchKey.current = fetchKey;
     isFetchingRef.current = true;
     setIsLoadingData(true);
     try {
       const standardFetchQueue = new Map<string, { table: string, ids: Set<string>, linkingVariable: string }>();
-      const addToQueue = (table: string, linkingVar: string, id: string) => { const queueKey = `${table}:${linkingVar}`; if (!standardFetchQueue.has(queueKey)) { standardFetchQueue.set(queueKey, { table, ids: new Set(), linkingVariable: linkingVar }); } standardFetchQueue.get(queueKey)!.ids.add(id); };
+      const addToQueue = (table: string, linkingVar: string, id: string) => { const queueKey = `${table}: ${linkingVar}`; if (!standardFetchQueue.has(queueKey)) { standardFetchQueue.set(queueKey, { table, ids: new Set(), linkingVariable: linkingVar }); } standardFetchQueue.get(queueKey)!.ids.add(id); };
       const computedRequirements = { individualIds: new Set<string>(), documentIds: new Set<string>() };
       const activeAutomation = webData.find(w => w.automationId === selectedAutomationId);
       const fieldsToProcess = activeAutomation?.fields || [];
@@ -957,7 +1025,7 @@ export const AutomationMappingDialog = ({
           finalWebDataItems = allRefs.map((ref: any) => { const autoDef = fetchedAutos.find(a => a.id === ref.automationId); return { ...ref, fields: autoDef?.webdata || [], automationName: autoDef?.name, automation: autoDef }; }).filter(item => item.automationId);
           setWebData(finalWebDataItems);
         } else { setWebData([]); }
-        const mappings = finalWebDataItems.map((item, idx) => ({ entityKey: `wd-${idx}`, entityName: item.documentName || item.automationName || `Flow ${idx + 1}`, entityType: 'webdata', automationId: item.automationId, documentId: item.documentId, automation: item.automation }));
+        const mappings = finalWebDataItems.map((item, idx) => ({ entityKey: `wd - ${idx}`, entityName: item.documentName || item.automationName || `Flow ${idx + 1}`, entityType: 'webdata', automationId: item.automationId, documentId: item.documentId, automation: item.automation }));
         setEntityAutomationMappings(mappings);
         if (mappings.length > 0) { if (!selectedAutomationId || !mappings.some(m => m.automationId === selectedAutomationId)) setSelectedAutomationId(mappings[0].automationId); } else { setSelectedAutomationId(''); }
         const fieldIds = finalWebDataItems.flatMap(i => { const fields = i.fields || []; const directIds = fields.flatMap((f: any) => f.linkedMasterFields || f.masterFieldIds || []); const arrayIds = fields.flatMap((f: any) => (f.arrayItems || []).flatMap((item: any) => item.linkedMasterFields || (item.linkedMasterFieldId ? [item.linkedMasterFieldId] : []))); return [...directIds, ...arrayIds]; }).filter(Boolean);
@@ -980,13 +1048,13 @@ export const AutomationMappingDialog = ({
     const fetchIndividualName = async () => {
       if (!currentIndividualId) return;
       if (relationshipData?.principal?.full_name) { setIndividualName(relationshipData.principal.full_name); return; }
-      if (relationshipData?.principal?.first_name && relationshipData?.principal?.last_name) { setIndividualName(`${relationshipData.principal.first_name} ${relationshipData.principal.last_name}`); return; }
+      if (relationshipData?.principal?.first_name && relationshipData?.principal?.last_name) { setIndividualName(`${relationshipData.principal.first_name} ${relationshipData.principal.last_name} `); return; }
 
       // Use bulk-fetched data instead of individual query
       const taskData = enhancedTasksData.get(task?.id?.toString());
       const individualData = taskData?.applicant_data;
       if (individualData) {
-        const name = individualData.full_name || (individualData.first_name && individualData.last_name ? `${individualData.first_name} ${individualData.last_name}` : currentIndividualId);
+        const name = individualData.full_name || (individualData.first_name && individualData.last_name ? `${individualData.first_name} ${individualData.last_name} ` : currentIndividualId);
         setIndividualName(name);
         return;
       }
@@ -995,7 +1063,7 @@ export const AutomationMappingDialog = ({
       try {
         const { data: individual } = await supabase.from('registry_individuals').select('first_name, last_name, full_name').eq('id', currentIndividualId).single();
         if (individual) {
-          const name = individual.full_name || (individual.first_name && individual.last_name ? `${individual.first_name} ${individual.last_name}` : currentIndividualId);
+          const name = individual.full_name || (individual.first_name && individual.last_name ? `${individual.first_name} ${individual.last_name} ` : currentIndividualId);
           setIndividualName(name);
         }
       } catch (error) {
@@ -1115,8 +1183,8 @@ export const AutomationMappingDialog = ({
 
       // 2. Build storage path
       const timestamp = Date.now();
-      const fileName = `eta-kenya-confirmation-${timestamp}.png`;
-      const storagePath = `individual-documents/${directorId}/${ETA_SCREENSHOT_DOCUMENT_ID}/${fileName}`;
+      const fileName = `eta - kenya - confirmation - ${timestamp}.png`;
+      const storagePath = `individual - documents / ${directorId} /${ETA_SCREENSHOT_DOCUMENT_ID}/${fileName} `;
 
       // 3. Upload to kyc-documents bucket
       const { data: uploadData, error: uploadError } = await supabase.storage
@@ -1126,7 +1194,7 @@ export const AutomationMappingDialog = ({
           upsert: false,
         });
 
-      if (uploadError) throw new Error(`Storage upload failed: ${uploadError.message}`);
+      if (uploadError) throw new Error(`Storage upload failed: ${uploadError.message} `);
 
       // 4. Insert record into acc_portal_directors_documents
       const { data: docRecord, error: insertError } = await supabase
@@ -1149,7 +1217,7 @@ export const AutomationMappingDialog = ({
         .select()
         .single();
 
-      if (insertError) throw new Error(`DB insert failed: ${insertError.message}`);
+      if (insertError) throw new Error(`DB insert failed: ${insertError.message} `);
 
       console.log('✅ Screenshot saved to Supabase:', docRecord);
       return docRecord;
@@ -1213,6 +1281,27 @@ export const AutomationMappingDialog = ({
 
       const response = await res.json();
 
+      console.log('🔍 Debug - Response:', response);
+      console.log('🔍 Debug - Automation ID:', mapping.automationId);
+      console.log('🔍 Debug - Has jobId:', !!response.jobId);
+      console.log('🔍 Debug - Includes eta:', mapping.automationId?.toLowerCase().includes('eta'));
+
+      // ── PROGRESS TRACKING: Capture jobId and start polling for eTA Kenya ────────
+      // TEMPORARY: Remove automation ID check for debugging
+      if (response.jobId) {
+        console.log('✅ Starting polling for jobId:', response.jobId);
+        setAutomationJobId(response.jobId);
+        setAutomationProgress({ isRunning: true, progress: 0, currentStep: 'Initializing', message: 'Starting automation...' });
+
+        // Start polling for progress
+        const interval = setInterval(() => {
+          pollProgress(response.jobId);
+        }, 2000); // Poll every 2 seconds
+        setPollingInterval(interval);
+      } else {
+        console.log('❌ No jobId in response - polling will not start');
+      }
+
       if (response.success) {
         // ── SAVE SCREENSHOT TO SUPABASE ─────────────────────────────────────
         if (response.screenshot) {
@@ -1256,10 +1345,10 @@ export const AutomationMappingDialog = ({
             }
           } else {
             // No valid director ID — fall back to download
-            const screenshotDataUrl = `data:image/png;base64,${response.screenshot}`;
+            const screenshotDataUrl = `data: image / png; base64, ${response.screenshot} `;
             const link = document.createElement('a');
             link.href = screenshotDataUrl;
-            link.download = `eta-confirmation-${Date.now()}.png`;
+            link.download = `eta - confirmation - ${Date.now()}.png`;
             link.click();
 
             toast({
@@ -1293,7 +1382,7 @@ export const AutomationMappingDialog = ({
         let record = sourceData[table]?.[entityId];
         if (!record) {
           let query = supabase.from(table).select('*');
-          if (masterFieldId) { const masterField = jobFields[masterFieldId.toString()]; if (masterField?.sources?.length) { const source = masterField.sources.find(s => s.table === table); if (source?.linking_variable) { query = query.eq(source.linking_variable, entityId); } else { query = query.or(`id.eq.${entityId},director_id.eq.${entityId},company_id.eq.${entityId}`); } } else { query = query.or(`id.eq.${entityId},director_id.eq.${entityId},company_id.eq.${entityId}`); } } else { query = query.or(`id.eq.${entityId},director_id.eq.${entityId},company_id.eq.${entityId}`); }
+          if (masterFieldId) { const masterField = jobFields[masterFieldId.toString()]; if (masterField?.sources?.length) { const source = masterField.sources.find(s => s.table === table); if (source?.linking_variable) { query = query.eq(source.linking_variable, entityId); } else { query = query.or(`id.eq.${entityId}, director_id.eq.${entityId}, company_id.eq.${entityId} `); } } else { query = query.or(`id.eq.${entityId}, director_id.eq.${entityId}, company_id.eq.${entityId} `); } } else { query = query.or(`id.eq.${entityId}, director_id.eq.${entityId}, company_id.eq.${entityId} `); }
           const { data, error } = await query.maybeSingle();
           if (error) throw error;
           record = data;
@@ -1341,13 +1430,13 @@ export const AutomationMappingDialog = ({
         if (table === 'tm_tasks') {
           query = query.eq('id', entityId);
         } else {
-          query = query.or(`id.eq.${entityId},director_id.eq.${entityId},company_id.eq.${entityId}`);
+          query = query.or(`id.eq.${entityId}, director_id.eq.${entityId}, company_id.eq.${entityId} `);
         }
 
         const { data: fetchedData, error: fetchError } = await query.maybeSingle();
 
         if (fetchError) throw fetchError;
-        if (!fetchedData) throw new Error(`Record not found in table ${table} with identifier ${entityId}`);
+        if (!fetchedData) throw new Error(`Record not found in table ${table} with identifier ${entityId} `);
 
         record = fetchedData;
 
@@ -1375,7 +1464,7 @@ export const AutomationMappingDialog = ({
         .single();
 
       if (fetchError) throw fetchError;
-      if (!existing) throw new Error(`Record not found in database: ${recordPK}`);
+      if (!existing) throw new Error(`Record not found in database: ${recordPK} `);
 
       // Use utility to merge JSON paths (handles ->> syntax)
       const updated = updateJsonValue(existing, path, valueToSave);
@@ -1543,7 +1632,7 @@ export const AutomationMappingDialog = ({
                     const isExpanded = expandedArrayFields.has(field.variableName);
 
                     return (
-                      <React.Fragment key={`field-${fIdx}`}>
+                      <React.Fragment key={`field - ${fIdx} `}>
                         <TableRow
                           className="bg-blue-50/80 border-b border-blue-200 hover:bg-blue-100 cursor-pointer transition-colors"
                           onClick={() => toggleArrayFieldExpansion(field.variableName)}
@@ -1562,7 +1651,7 @@ export const AutomationMappingDialog = ({
 
                         {isExpanded && arrayData.map((row, rowIndex) => (
                           (field.arrayItems || []).map((colItem, colIndex) => {
-                            const uniqueKey = `${field.variableName}-${rowIndex}-${colIndex}`;
+                            const uniqueKey = `${field.variableName} -${rowIndex} -${colIndex} `;
                             const isItemEditing = editingCell?.fieldId === uniqueKey;
                             const rawValue = row[colItem.variableName];
                             const isItemMissing = !isValidValue(rawValue);
@@ -1586,7 +1675,7 @@ export const AutomationMappingDialog = ({
                               const mDef = jobFields[String(firstMasterId)];
                               arrayPersist = mDef?.sources?.find(s => s.source_type === entityCategory) || mDef?.sources?.[0];
                             } else if (firstQId) {
-                              arrayPersist = { table: 'tm_tasks', path: `job_specific_answers->>'${firstQId}'`, linking_variable: 'id' };
+                              arrayPersist = { table: 'tm_tasks', path: `job_specific_answers ->> '${firstQId}'`, linking_variable: 'id' };
                               arrayEditId = taskId;
                             }
 
@@ -1610,21 +1699,13 @@ export const AutomationMappingDialog = ({
                                     <div className="flex items-center gap-2">
                                       {/* --- MODIFIED INPUT RENDER LOGIC --- */}
                                       {isDropdown ? (
-                                        <Select
+                                        <SearchableSelect
                                           value={editValue}
                                           onValueChange={(val) => setEditValue(val)}
-                                        >
-                                          <SelectTrigger className="h-7 text-xs border-blue-400 w-full bg-white">
-                                            <SelectValue placeholder="Select..." />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            {normalizedOptions.map((opt: any) => (
-                                              <SelectItem key={opt.value} value={opt.value}>
-                                                {opt.label}
-                                              </SelectItem>
-                                            ))}
-                                          </SelectContent>
-                                        </Select>
+                                          options={normalizedOptions}
+                                          placeholder="Select..."
+                                          buttonClassName="h-7 text-xs border-blue-400 w-full bg-white"
+                                        />
                                       ) : (
                                         <Input
                                           autoFocus
@@ -1676,7 +1757,7 @@ export const AutomationMappingDialog = ({
                                                   const val = getFieldValue(String(mid), String(row.entityId));
 
                                                   return (
-                                                    <div key={`am-${mid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-200 group">
+                                                    <div key={`am - ${mid} `} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-200 group">
                                                       <div className="flex flex-col min-w-0">
                                                         <span className="text-[9px] font-bold text-blue-600 flex items-center gap-1">
                                                           <Database className="h-2.5 w-2.5" /> Source {mIdx + 1}
@@ -1700,7 +1781,7 @@ export const AutomationMappingDialog = ({
                                                   const val = answers[String(qid)] ?? answers[Number(qid)];
 
                                                   return (
-                                                    <div key={`aq-${qid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-200 group">
+                                                    <div key={`aq - ${qid} `} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-200 group">
                                                       <div className="flex flex-col min-w-0">
                                                         <span className="text-[9px] font-bold text-purple-600 flex items-center gap-1">
                                                           <HelpCircle className="h-2.5 w-2.5" /> Question
@@ -1710,7 +1791,7 @@ export const AutomationMappingDialog = ({
                                                       </div>
                                                       <Button
                                                         size="sm" variant="ghost" className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100"
-                                                        onClick={() => startEditing(uniqueKey, 99 + qIdx, 'tm_tasks', `job_specific_answers->>'${qid}'`, isValidValue(val) ? val : '', taskId, 'id')}
+                                                        onClick={() => startEditing(uniqueKey, 99 + qIdx, 'tm_tasks', `job_specific_answers ->> '${qid}'`, isValidValue(val) ? val : '', taskId, 'id')}
                                                       >
                                                         <Edit3 className="h-3 w-3 text-blue-500" />
                                                       </Button>
@@ -1800,7 +1881,7 @@ export const AutomationMappingDialog = ({
                     persistenceSource = mDef?.sources?.find(s => s.source_type === entityCategory) || mDef?.sources?.[0];
                     fieldOptions = mDef?.options;
                   } else if (qIds.length > 0) {
-                    persistenceSource = { table: 'tm_tasks', path: `job_specific_answers->>'${qIds[0]}'`, linking_variable: 'id' };
+                    persistenceSource = { table: 'tm_tasks', path: `job_specific_answers ->> '${qIds[0]}'`, linking_variable: 'id' };
                     editTargetId = taskId;
                   }
 
@@ -1849,21 +1930,13 @@ export const AutomationMappingDialog = ({
                         {isEditing ? (
                           <div className="flex items-center gap-2">
                             {isDropdown ? (
-                              <Select
+                              <SearchableSelect
                                 value={editValue}
                                 onValueChange={(val) => setEditValue(val)}
-                              >
-                                <SelectTrigger className="h-8 text-sm border-blue-400 w-full bg-white">
-                                  <SelectValue placeholder="Select..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {normalizedOptions.map((opt: any) => (
-                                    <SelectItem key={opt.value} value={opt.value}>
-                                      {opt.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                                options={normalizedOptions}
+                                placeholder="Select..."
+                                buttonClassName="h-8 text-sm border-blue-400 w-full bg-white"
+                              />
                             ) : (
                               <Input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEditing(); }} className="h-8 text-sm border-blue-400" />
                             )}
@@ -1895,7 +1968,7 @@ export const AutomationMappingDialog = ({
                                     const sourceVal = getFieldValue(String(mid), String(field.targetId));
 
                                     return (
-                                      <div key={`m-${mid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-200 group">
+                                      <div key={`m - ${mid} `} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-200 group">
                                         <div className="flex flex-col min-w-0">
                                           <span className="text-[10px] font-bold text-blue-600 flex items-center gap-1">
                                             <Database className="h-3 w-3" /> DB FIELD {idx + 1}
@@ -1921,7 +1994,7 @@ export const AutomationMappingDialog = ({
                                     const sourceVal = getFieldValue(field.variableName, String(field.targetId)); // Simple for demo
 
                                     return (
-                                      <div key={`q-${qid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-200 group">
+                                      <div key={`q - ${qid} `} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-200 group">
                                         <div className="flex flex-col min-w-0">
                                           <span className="text-[10px] font-bold text-purple-600 flex items-center gap-1">
                                             <HelpCircle className="h-3 w-3" /> QUESTION
@@ -1933,7 +2006,7 @@ export const AutomationMappingDialog = ({
                                           size="sm"
                                           variant="ghost"
                                           className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100"
-                                          onClick={() => startEditing(field.variableName, 99 + idx, 'tm_tasks', `job_specific_answers->>'${qid}'`, isValidValue(sourceVal) ? sourceVal : '', taskId, 'id')}
+                                          onClick={() => startEditing(field.variableName, 99 + idx, 'tm_tasks', `job_specific_answers ->> '${qid}'`, isValidValue(sourceVal) ? sourceVal : '', taskId, 'id')}
                                         >
                                           <Edit3 className="h-3 w-3 text-blue-500" />
                                         </Button>
@@ -2041,7 +2114,7 @@ export const AutomationMappingDialog = ({
             const targetId = resolveTargetEntityId(req);
             const foundDoc = documentFiles.find(d => req.linkedKycDocuments?.includes(d.document_id) && String(d.owner_id) === String(targetId));
             const displayName = req.isFromArray
-              ? `${req.arrayFieldName} - ${req.displayName || req.name || req.variableName}`
+              ? `${req.arrayFieldName} - ${req.displayName || req.name || req.variableName} `
               : req.displayName || req.efnsDisplayName || req.variableName;
 
             return (
@@ -2052,7 +2125,7 @@ export const AutomationMappingDialog = ({
                     <div className="flex-1">
                       <h4 className="font-bold text-sm text-slate-900">{displayName}</h4>
                       <p className="text-[10px] text-slate-500">
-                        Target: {req.isFromArray ? `${req.arrayVariableName}.${req.variableName}` : req.variableName}
+                        Target: {req.isFromArray ? `${req.arrayVariableName}.${req.variableName} ` : req.variableName}
                       </p>
                       {req.isFromArray && (
                         <p className="text-[9px] text-blue-600 font-medium">Array Item</p>
@@ -2127,22 +2200,14 @@ export const AutomationMappingDialog = ({
             </div>
 
             <div className="flex items-center gap-3">
-              <Select value={selectedAutomationId} onValueChange={setSelectedAutomationId}>
-                <SelectTrigger className="w-[250px] bg-white/10 border-white/20 text-white h-10">
-                  <SelectValue placeholder="Select Workflow" />
-                </SelectTrigger>
-                <SelectContent>
-                  {entityAutomationMappings.length > 0 ? (
-                    entityAutomationMappings.map(m => (
-                      <SelectItem key={m.automationId} value={m.automationId}>
-                        {m.automation?.name || "Unnamed Flow"}
-                      </SelectItem>
-                    ))
-                  ) : (
-                    <div className="p-2 text-xs text-slate-400 italic text-center">No workflows found</div>
-                  )}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                value={selectedAutomationId}
+                onValueChange={setSelectedAutomationId}
+                options={entityAutomationMappings.map(m => ({ value: m.automationId, label: m.automation?.name || "Unnamed Flow" }))}
+                placeholder="Select Workflow"
+                buttonClassName="w-[250px] bg-white/10 border-white/20 text-white h-10"
+                emptyMessage="No workflows found"
+              />
 
               <div className="h-10 w-px bg-white/20" />
 
@@ -2166,6 +2231,84 @@ export const AutomationMappingDialog = ({
 
           {/* CONTENT AREA */}
           <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Progress Display Overlay - Shows during automation */}
+            {automationProgress && (
+              <div className="p-5 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-200 shadow-sm">
+                {/* Header with Status */}
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-full ${automationProgress.isRunning ? 'bg-blue-100' : automationProgress.error ? 'bg-red-100' : 'bg-green-100'}`}>
+                      {automationProgress.isRunning ? (
+                        <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                      ) : automationProgress.error ? (
+                        <AlertCircle className="h-5 w-5 text-red-500" />
+                      ) : (
+                        <CheckCircle2 className="h-5 w-5 text-green-500" />
+                      )}
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold text-slate-800">
+                        {automationProgress.isRunning ? 'Automation in Progress' : automationProgress.error ? 'Automation Failed' : 'Automation Complete'}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        {automationProgress.currentStep || 'Processing...'}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-bold text-blue-600">
+                      {automationProgress.progress}%
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      {automationProgress.isRunning ? 'Running' : 'Done'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Progress Bar with Gradient */}
+                <div className="w-full bg-slate-200 rounded-full h-3 mb-3 overflow-hidden">
+                  <div
+                    className={`h-3 rounded-full transition-all duration-500 ease-out ${automationProgress.error ? 'bg-gradient-to-r from-red-400 to-red-500' : automationProgress.isRunning ? 'bg-gradient-to-r from-blue-500 to-indigo-500' : 'bg-gradient-to-r from-green-400 to-green-500'}`}
+                    style={{ width: `${automationProgress.progress}%` }}
+                  >
+                    <div className="h-full w-full bg-white/20 animate-pulse" />
+                  </div>
+                </div>
+
+                {/* Status Message */}
+                <div className="flex items-start gap-2 text-sm text-slate-700">
+                  <div className="mt-0.5">
+                    {automationProgress.isRunning ? (
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-ping" />
+                    ) : automationProgress.error ? (
+                      <div className="w-2 h-2 bg-red-500 rounded-full" />
+                    ) : (
+                      <div className="w-2 h-2 bg-green-500 rounded-full" />
+                    )}
+                  </div>
+                  <p className="flex-1">
+                    {automationProgress.message || 'Processing automation...'}
+                  </p>
+                </div>
+
+                {/* Error Display */}
+                {automationProgress.error && (
+                  <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-sm font-medium text-red-700">
+                      Error: {automationProgress.error}
+                    </p>
+                  </div>
+                )}
+
+                {/* Job ID for debugging */}
+                {automationJobId && (
+                  <div className="mt-2 text-xs text-slate-400">
+                    Job ID: {automationJobId}
+                  </div>
+                )}
+              </div>
+            )}
+
             {!selectedAutomationId ? (
               <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
                 <Webhook className="h-16 w-16 mb-4 opacity-20" />
@@ -2285,7 +2428,7 @@ export const AutomationMappingDialog = ({
 
               <div className="flex-1 overflow-auto p-4">
                 {previewingDocuments?.documents?.map((doc, index) => {
-                  const docId = doc.id || `doc-${index}`;
+                  const docId = doc.id || `doc - ${index} `;
 
                   return (
                     <div key={docId} className="p-0 lg:p-4">
