@@ -10,15 +10,15 @@ export default function DashboardLayout({
 }) {
   return (
     <SidebarProvider>
-      <AppSidebar />
-      <SidebarInset>
-        <div className="flex h-full flex-col">
+      <div className="flex h-screen w-screen overflow-hidden bg-background">
+        <AppSidebar />
+        <SidebarInset className="flex flex-col w-full">
           <Navbar />
-          <div className="flex-1 overflow-auto p-4 md:p-6">
+          <main className="flex-1 relative overflow-y-auto p-4 md:p-6">
             {children}
-          </div>
-        </div>
-      </SidebarInset>
+          </main>
+        </SidebarInset>
+      </div>
     </SidebarProvider>
   )
 }
