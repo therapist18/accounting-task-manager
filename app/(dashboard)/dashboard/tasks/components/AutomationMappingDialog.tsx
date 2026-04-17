@@ -427,7 +427,8 @@ export const AutomationMappingDialog = ({
     return `${supabaseUrl}/storage/v1/object/public/${encodedPath}`;
   };
 
-  const getCurrentIndividualEntityType = useCallback((): string => {
+  // Memoize entity type to prevent recalculation
+  const currentEntityType = useMemo(() => {
     if (!currentIndividualId) return 'principal';
 
     // Check if current individual is a dependant
@@ -967,7 +968,13 @@ export const AutomationMappingDialog = ({
     fetchData();
   }, [isOpen, task?.job_level]);
 
-  useEffect(() => { if (isOpen && selectedAutomationId && Object.keys(jobFields).length > 0) { fetchSourceData(); fetchDocumentFiles(); } }, [selectedAutomationId, isOpen, fetchSourceData, fetchDocumentFiles]);
+  // Combine fetch operations into a single useEffect to prevent multiple triggers
+  useEffect(() => {
+    if (isOpen && selectedAutomationId && Object.keys(jobFields).length > 0) {
+      fetchSourceData();
+      fetchDocumentFiles();
+    }
+  }, [selectedAutomationId, isOpen, jobFields.length, webData.length]);
 
   useEffect(() => {
     const fetchIndividualName = async () => {
@@ -1439,57 +1446,54 @@ export const AutomationMappingDialog = ({
     return availableOptions;
   }, [jobFields, getFieldValue]);
 
+  // Memoize field processing at component level (not inside render function to avoid hooks violation)
+  const filteredFields = useMemo(() => {
+    if (!activeWebEntry || !activeWebEntry.fields || activeWebEntry.fields.length === 0) return [];
+    return activeWebEntry.fields.filter((field) => {
+      const fieldEntityTypes = field.entityTypes || [];
+      if (fieldEntityTypes.length === 0) return true;
+      return fieldEntityTypes.includes(currentEntityType);
+    });
+  }, [activeWebEntry, currentEntityType]);
+
+  const processedFields = useMemo(() => filteredFields.map((field) => {
+    const targetId = resolveTargetEntityId(field);
+    let value = "";
+
+    if (field.fieldType === 'array') {
+      const data = getArrayFieldData(field);
+      value = data.length > 0 ? `${data.length} Items Found` : "Missing";
+    } else if (field.fieldType === 'document') {
+      const foundDoc = documentFiles.find(d =>
+        field.linkedKycDocuments?.includes(d.document_id) &&
+        String(d.owner_id) === String(targetId)
+      );
+      value = foundDoc ? "Available" : "Missing";
+    } else if (field.fieldType === 'computed') {
+      value = computedFieldsPreview[field.variableName] || "Missing";
+    } else {
+      value = resolveVariableValue(field, String(targetId));
+    }
+
+    return {
+      ...field,
+      resolvedValue: value,
+      isMissing: !isValidValue(value),
+      targetId: String(targetId)
+    };
+  }), [filteredFields, resolveTargetEntityId, getArrayFieldData, documentFiles, computedFieldsPreview, resolveVariableValue]);
+
+  const sortedFields = useMemo(() => sortMissingFirst
+    ? [...processedFields].sort((a, b) => (a.isMissing === b.isMissing ? 0 : a.isMissing ? -1 : 1))
+    : processedFields, [processedFields, sortMissingFirst]);
+
   const renderFieldsTable = () => {
     if (!activeWebEntry?.fields || activeWebEntry.fields.length === 0) {
       return <div className="p-12 text-center text-slate-400 text-sm">No fields configured for this automation.</div>;
     }
 
-    // Get the current individual's entity type
-    const currentEntityType = getCurrentIndividualEntityType();
-
     // --- 1. PRE-PROCESS FIELDS (Calculate values and status) ---
-    // Filter fields to only show those applicable to the current individual's entity type
-    // This prevents duplicates when a field applies to multiple entity types
-    const filteredFields = activeWebEntry.fields.filter((field) => {
-      const fieldEntityTypes = field.entityTypes || [];
-      // If field has no entity types, show it (backward compatibility)
-      if (fieldEntityTypes.length === 0) return true;
-      // Show field if it applies to the current individual's entity type
-      return fieldEntityTypes.includes(currentEntityType);
-    });
-
-    const processedFields = filteredFields.map((field) => {
-      const targetId = resolveTargetEntityId(field);
-      let value = "";
-
-      if (field.fieldType === 'array') {
-        const data = getArrayFieldData(field);
-        value = data.length > 0 ? `${data.length} Items Found` : "Missing";
-      } else if (field.fieldType === 'document') {
-        const foundDoc = documentFiles.find(d =>
-          field.linkedKycDocuments?.includes(d.document_id) &&
-          String(d.owner_id) === String(targetId)
-        );
-        value = foundDoc ? "Available" : "Missing";
-      } else if (field.fieldType === 'computed') {
-        value = computedFieldsPreview[field.variableName] || "Missing";
-      } else {
-        // Use the unified resolver that respects priority/all logic
-        value = resolveVariableValue(field, String(targetId));
-      }
-
-      return {
-        ...field,
-        resolvedValue: value,
-        isMissing: !isValidValue(value),
-        targetId: String(targetId)
-      };
-    });
-
-    // Sort logic
-    const sortedFields = sortMissingFirst
-      ? [...processedFields].sort((a, b) => (a.isMissing === b.isMissing ? 0 : a.isMissing ? -1 : 1))
-      : processedFields;
+    // Fields are now pre-processed at component level for performance
 
     return (
       <div className="flex flex-col h-full">
@@ -1789,13 +1793,22 @@ export const AutomationMappingDialog = ({
                   let persistenceSource = null;
                   let editTargetId = field.targetId;
 
+                  // Get dropdown options for normal fields
+                  let fieldOptions = null;
                   if (mIds.length > 0) {
                     const mDef = jobFields[String(mIds[0])];
                     persistenceSource = mDef?.sources?.find(s => s.source_type === entityCategory) || mDef?.sources?.[0];
+                    fieldOptions = mDef?.options;
                   } else if (qIds.length > 0) {
                     persistenceSource = { table: 'tm_tasks', path: `job_specific_answers->>'${qIds[0]}'`, linking_variable: 'id' };
                     editTargetId = taskId;
                   }
+
+                  // Normalize options to ensure they are objects { label, value }
+                  const normalizedOptions = Array.isArray(fieldOptions)
+                    ? fieldOptions.map((opt: any) => typeof opt === 'string' ? { label: opt, value: opt } : opt)
+                    : [];
+                  const isDropdown = normalizedOptions.length > 0;
 
                   return (
                     <TableRow key={fIdx} className={cn("group border-b border-slate-200 transition-colors", isEditing ? "bg-blue-50/50" : (field.fieldType === 'computed' ? "bg-purple-50/10" : "hover:bg-blue-50"))}>
@@ -1835,8 +1848,26 @@ export const AutomationMappingDialog = ({
                       <TableCell className="px-4 py-1 border-r h-full">
                         {isEditing ? (
                           <div className="flex items-center gap-2">
-                            <Input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEditing(); }} className="h-8 text-sm border-blue-400" />
-                            <Button size="icon" onClick={() => saveEdit()} className="h-8 w-8 bg-green-600 hover:bg-green-700"><Check className="h-4 w-4" /></Button>
+                            {isDropdown ? (
+                              <Select
+                                value={editValue}
+                                onValueChange={(val) => setEditValue(val)}
+                              >
+                                <SelectTrigger className="h-8 text-sm border-blue-400 w-full bg-white">
+                                  <SelectValue placeholder="Select..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {normalizedOptions.map((opt: any) => (
+                                    <SelectItem key={opt.value} value={opt.value}>
+                                      {opt.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <Input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEditing(); }} className="h-8 text-sm border-blue-400" />
+                            )}
+                            <Button size="icon" onClick={() => saveEdit(isDropdown, normalizedOptions)} className="h-8 w-8 bg-green-600 hover:bg-green-700"><Check className="h-4 w-4" /></Button>
                             <Button size="icon" variant="ghost" onClick={cancelEditing} className="h-8 w-8 text-red-500"><X className="h-4 w-4" /></Button>
                           </div>
                         ) : (
