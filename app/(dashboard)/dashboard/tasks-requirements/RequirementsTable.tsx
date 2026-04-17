@@ -114,7 +114,7 @@ export function RequirementsTable({
 
   const [isLetterDialogOpen, setIsLetterDialogOpen] = useState(false);
   const [selectedLetterData, setSelectedLetterData] = useState(null);
-  const [isAutomationDialogOpen, setIsAutomationDialogOpen] = useState(false);    
+  const [isAutomationDialogOpen, setIsAutomationDialogOpen] = useState(false);
   const [selectedAutomationData, setSelectedAutomationData] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -174,27 +174,35 @@ export function RequirementsTable({
     const startTime = performance.now();
 
     const uniqueIds = new Set<number>();
-    const individualTypeMap = new Map<number, string>();
+    const individualTypeMap = new Map<number, Set<string>>();
 
     tasksToFetch.forEach(task => {
       const pId = task.individual_id || task.applicant_details?.id;
       if (pId) {
         uniqueIds.add(pId);
-        individualTypeMap.set(pId, 'principal');
+        if (!individualTypeMap.has(pId)) individualTypeMap.set(pId, new Set());
+        individualTypeMap.get(pId).add('principal');
       }
 
       if (Array.isArray(task.participants_details)) {
         task.participants_details.forEach(p => {
           if (p.id) {
             uniqueIds.add(p.id);
-            individualTypeMap.set(p.id, p.role || 'individual');
+            if (!individualTypeMap.has(p.id)) individualTypeMap.set(p.id, new Set());
+            const role = p.role || 'individual';
+            if (Array.isArray(role)) {
+              role.forEach(r => individualTypeMap.get(p.id).add(r));
+            } else {
+              individualTypeMap.get(p.id).add(role);
+            }
           }
         });
       }
 
       if (task.understudy) {
         uniqueIds.add(task.understudy);
-        if (!individualTypeMap.has(task.understudy)) individualTypeMap.set(task.understudy, 'understudy');
+        if (!individualTypeMap.has(task.understudy)) individualTypeMap.set(task.understudy, new Set());
+        individualTypeMap.get(task.understudy).add('understudy');
       }
     });
 

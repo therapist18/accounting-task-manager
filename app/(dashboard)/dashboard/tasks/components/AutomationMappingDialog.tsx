@@ -427,6 +427,38 @@ export const AutomationMappingDialog = ({
     return `${supabaseUrl}/storage/v1/object/public/${encodedPath}`;
   };
 
+  const getCurrentIndividualEntityType = useCallback((): string => {
+    if (!currentIndividualId) return 'principal';
+
+    // Check if current individual is a dependant
+    if (relationshipData?.dependants?.some((d: any) => String(d.id) === String(currentIndividualId))) {
+      return 'dependant';
+    }
+
+    // Check if current individual is a director
+    if (relationshipData?.directors?.some((d: any) => String(d.id) === String(currentIndividualId))) {
+      return 'director';
+    }
+
+    // Check if current individual is a sponsor
+    if (String(relationshipData?.sponsor?.id) === String(currentIndividualId)) {
+      return 'sponsor';
+    }
+
+    // Check if current individual is an understudy
+    if (String(relationshipData?.understudy?.id) === String(currentIndividualId)) {
+      return 'understudy';
+    }
+
+    // Check if current individual is the principal
+    if (String(relationshipData?.principal?.id) === String(currentIndividualId)) {
+      return 'principal';
+    }
+
+    // Default to principal if not found
+    return 'principal';
+  }, [currentIndividualId, relationshipData]);
+
   const resolveTargetEntityId = useCallback((field: any) => {
     const types = field.entityTypes || [];
 
@@ -1412,8 +1444,21 @@ export const AutomationMappingDialog = ({
       return <div className="p-12 text-center text-slate-400 text-sm">No fields configured for this automation.</div>;
     }
 
+    // Get the current individual's entity type
+    const currentEntityType = getCurrentIndividualEntityType();
+
     // --- 1. PRE-PROCESS FIELDS (Calculate values and status) ---
-    const processedFields = activeWebEntry.fields.map((field) => {
+    // Filter fields to only show those applicable to the current individual's entity type
+    // This prevents duplicates when a field applies to multiple entity types
+    const filteredFields = activeWebEntry.fields.filter((field) => {
+      const fieldEntityTypes = field.entityTypes || [];
+      // If field has no entity types, show it (backward compatibility)
+      if (fieldEntityTypes.length === 0) return true;
+      // Show field if it applies to the current individual's entity type
+      return fieldEntityTypes.includes(currentEntityType);
+    });
+
+    const processedFields = filteredFields.map((field) => {
       const targetId = resolveTargetEntityId(field);
       let value = "";
 

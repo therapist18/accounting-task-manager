@@ -335,7 +335,8 @@ export const performExtraction = async (
   fields: Field[],
   documentType: string,
   onProgress?: (message: string) => void,
-  originalFileName?: string
+  originalFileName?: string,
+  abortSignal?: AbortSignal
 ): Promise<{
   extractedData: ExtractionResult;
   success: boolean;
@@ -351,6 +352,12 @@ export const performExtraction = async (
 
   while (attempts < MAX_ATTEMPTS) {
     try {
+      // Check if extraction was aborted
+      if (abortSignal?.aborted) {
+        console.log('performExtraction: Abort signal detected, throwing AbortError');
+        throw new DOMException('Extraction aborted', 'AbortError');
+      }
+
       const progressMessage = `Attempt ${attempts + 1}/${MAX_ATTEMPTS}: Processing document...`;
       onProgress?.(progressMessage);
 
@@ -382,8 +389,18 @@ export const performExtraction = async (
 
       console.log('Extraction prompt:', prompt);
 
+      // Check if extraction was aborted before API call
+      if (abortSignal?.aborted) {
+        throw new DOMException('Extraction aborted', 'AbortError');
+      }
+
       // Generate content using the model
       const result = await model.generateContent([prompt, filePart]);
+
+      // Check if extraction was aborted after API call
+      if (abortSignal?.aborted) {
+        throw new DOMException('Extraction aborted', 'AbortError');
+      }
 
       // Extract and parse the response
       const response = await result.response;

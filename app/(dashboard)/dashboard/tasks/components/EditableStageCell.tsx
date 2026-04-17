@@ -544,16 +544,23 @@ export default function EditableStageCell({
         documentToDelete.director_id
       ];
 
+      // For one-off documents, use documentId or fileUrl as the identifier
+      const isOneOff = documentToDelete.type === 'one_off' || documentId === 'one_off';
       const documentId = documentToDelete.id || documentToDelete.file?.id || documentToDelete.documentId || documentToDelete.document_id;
-      if (!documentId) {
-        console.error(' [ERROR] Cannot delete document: Missing document ID. Document object:', documentToDelete);
-        throw new Error('Cannot delete document: Missing document ID');
+      const docIdentifier = isOneOff
+        ? (documentToDelete.documentId || documentToDelete.fileUrl || documentToDelete.fileName || documentId)
+        : documentId;
+
+      if (!docIdentifier) {
+        console.error(' [ERROR] Cannot delete document: Missing document identifier. Document object:', documentToDelete);
+        throw new Error('Cannot delete document: Missing document identifier');
       }
 
       // Handle one-off documents differently - they can't be deleted from acc_portal_directors_documents
-      if (documentId === 'one_off' || documentToDelete.type === 'one_off') {
-        console.log('Skipping database deletion for one-off document:', documentToDelete);
+      if (isOneOff) {
+        console.log('Skipping database deletion for one-off document, will remove from task data:', documentToDelete);
         // One-off documents are typically temporary/external documents that don't need DB deletion
+        // But we still need to remove them from the task's stage data
       } else {
         const { error: dbError } = await supabase.from('acc_portal_directors_documents').delete().eq('id', documentId);
         if (dbError) throw dbError;
@@ -570,7 +577,10 @@ export default function EditableStageCell({
           updatedSourceDocIds[stage.id] = updatedSourceDocIds[stage.id].filter(
             (doc: any) => {
               const docId = typeof doc === 'string' ? doc : doc.id;
-              return docId !== (documentToDelete.id || documentToDelete.file?.id);
+              // For one-off documents, compare against docIdentifier (which could be documentId or fileUrl)
+              // For regular documents, compare against the standard ID
+              const compareId = isOneOff ? docIdentifier : (documentToDelete.id || documentToDelete.file?.id);
+              return docId !== compareId;
             }
           );
           if (updatedSourceDocIds[stage.id].length === 0) {
@@ -584,7 +594,8 @@ export default function EditableStageCell({
             ? updatedSourceDocIds[stage.id]
             : updatedSourceDocIds[stage.id].id;
 
-          if (docId === (documentToDelete.id || documentToDelete.file?.id)) {
+          const compareId = isOneOff ? docIdentifier : (documentToDelete.id || documentToDelete.file?.id);
+          if (docId === compareId) {
             delete updatedSourceDocIds[stage.id];
             if (updatedStages[stage.id]) {
               delete updatedStages[stage.id];
@@ -602,7 +613,7 @@ export default function EditableStageCell({
       if (updateError) throw updateError;
 
       const updatedPreviewDocs = previewDocuments.filter(
-        (doc) => doc.documentId !== (documentToDelete.id || documentToDelete.file?.id)
+        (doc) => doc.documentId !== docIdentifier
       );
       setPreviewDocuments(updatedPreviewDocs);
 

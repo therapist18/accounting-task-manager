@@ -108,6 +108,11 @@ export default function DepartmentTasksManager({
   const [subdepartmentOfficers, setSubdepartmentOfficers] = useState<Array<{ id: string, name: string }>>([])
   const [subdepartmentManagers, setSubdepartmentManagers] = useState<Array<{ id: string, name: string }>>([])
   const [subdepartmentAssistants, setSubdepartmentAssistants] = useState<Array<{ id: string, name: string }>>([])
+
+  // Unified user data (same as EnquiryDialog)
+  const [unifiedOfficers, setUnifiedOfficers] = useState<any[]>([])
+  const [unifiedManagers, setUnifiedManagers] = useState<any[]>([])
+  const [unifiedAssistants, setUnifiedAssistants] = useState<any[]>([])
   const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
   const [linkingTask, setLinkingTask] = useState<UtilTask | null>(null);
   const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
@@ -207,9 +212,46 @@ export default function DepartmentTasksManager({
 
   const getStaffName = useCallback((userId) => {
     if (!userId) return '';
-    const user = tmUsers.get(parseInt(userId.toString()));
+    const userIdStr = userId.toString();
+
+    // Debug log for task 1402
+    if (userIdStr === 'a5f70cf6-b3c6-4c4d-ad16-a53979c2f941' || userIdStr === '339084a1-704e-4e0f-ad58-27f7d1dafaa1') {
+      console.log('[getStaffName] Looking up UUID:', userIdStr);
+      console.log('[getStaffName] unifiedOfficers count:', unifiedOfficers.length);
+      console.log('[getStaffName] unifiedManagers count:', unifiedManagers.length);
+      console.log('[getStaffName] unifiedAssistants count:', unifiedAssistants.length);
+    }
+
+    // First check unified user data (same as EnquiryDialog) - this has UUIDs with names
+    const unifiedOfficer = unifiedOfficers.find(o => o.id === userIdStr);
+    if (unifiedOfficer) {
+      return unifiedOfficer.full_name || unifiedOfficer.name || unifiedOfficer.displayName || `Officer ${userId}`;
+    }
+
+    const unifiedManager = unifiedManagers.find(m => m.id === userIdStr);
+    if (unifiedManager) {
+      return unifiedManager.full_name || unifiedManager.name || unifiedManager.displayName || `Manager ${userId}`;
+    }
+
+    const unifiedAssistant = unifiedAssistants.find(a => a.id === userIdStr);
+    if (unifiedAssistant) {
+      return unifiedAssistant.full_name || unifiedAssistant.name || unifiedAssistant.displayName || `Assistant ${userId}`;
+    }
+
+    // Fallback to subdepartment staff arrays (numeric IDs)
+    const officer = subdepartmentOfficers.find(o => o.id === userIdStr);
+    if (officer) return officer.name;
+
+    const manager = subdepartmentManagers.find(m => m.id === userIdStr);
+    if (manager) return manager.name;
+
+    const assistant = subdepartmentAssistants.find(a => a.id === userIdStr);
+    if (assistant) return assistant.name;
+
+    // Final fallback to tmUsers Map
+    const user = tmUsers.get(parseInt(userIdStr));
     return user?.name || `User ${userId}`;
-  }, [tmUsers]);
+  }, [tmUsers, subdepartmentOfficers, subdepartmentManagers, subdepartmentAssistants, unifiedOfficers, unifiedManagers, unifiedAssistants]);
 
   const getDocumentForTaskStage = useCallback((
     task: UtilTask,
@@ -397,22 +439,34 @@ export default function DepartmentTasksManager({
 
   const loadUserAssignmentData = useCallback(async () => {
     try {
-      // Use unified user assignment service (same as departments page)
+      // Use unified user assignment service (same as departments page and EnquiryDialog)
       const unifiedUserData = await userService.getAllUserData({ payrollAccess: true }, departments);
 
       // Create a map of all users for backward compatibility
       const usersMap = new Map()
-      unifiedUserData.allUsers.forEach(user => {
-        usersMap.set(parseInt(user.id), user)
-      })
+      if (unifiedUserData?.allUsers) {
+        unifiedUserData.allUsers.forEach(user => {
+          usersMap.set(parseInt(user.id), user)
+        })
+      }
 
       setTmUsers(usersMap)
+
+      // Set unified user data (same as EnquiryDialog) for UUID-to-name mapping
+      setUnifiedOfficers(unifiedUserData.officers || [])
+      setUnifiedManagers(unifiedUserData.managers || [])
+      setUnifiedAssistants(unifiedUserData.assistants || [])
+
+      // Debug: Log what unified user data contains
+      console.log('[DepartmentTasksManager] Unified officers sample:', (unifiedUserData.officers || []).slice(0, 3).map(o => ({ id: o.id, name: o.full_name || o.name })));
+      console.log('[DepartmentTasksManager] Unified managers sample:', (unifiedUserData.managers || []).slice(0, 3).map(m => ({ id: m.id, name: m.full_name || m.name })));
+
       return { usersMap, userAssignmentData: unifiedUserData }
     } catch (error) {
       console.error('Error fetching user assignment data:', error)
       return { usersMap: new Map(), userAssignmentData: null }
     }
-  }, [])
+  }, [departments])
 
   // Cache for tasks data to avoid re-fetching
   const tasksCacheRef = useRef<Map<string, { tasks: UtilTask[], stages: any[], timestamp: number }>>(new Map())
@@ -917,25 +971,25 @@ export default function DepartmentTasksManager({
 
         // Main row (Applicant)
         const mainRow = {
-          'Task ID': getRawCellValue(departments, task, 'id', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+          'Task ID': getRawCellValue(departments, task, 'id', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
           'Type': 'Applicant',
-          'Name': getRawCellValue(departments, task, 'applicant_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
-          'Nationality': getRawCellValue(departments, task, 'nationality', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
-          'Age': getRawCellValue(departments, task, 'age', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+          'Name': getRawCellValue(departments, task, 'applicant_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+          'Nationality': getRawCellValue(departments, task, 'nationality', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+          'Age': getRawCellValue(departments, task, 'age', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
           'Relationship': 'Principal',
-          'Company': getRawCellValue(departments, task, 'company_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
-          'Sub Department': getRawCellValue(departments, task, 'sub_department', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
-          'Class': getRawCellValue(departments, task, 'job_level', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
-          // 'Immigration Status': getRawCellValue(departments, task, 'immigration_status', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
-          'Immigration Document Type': getRawCellValue(departments, task, 'immigration_document_type', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
-          'Immigration Expiry Date': getRawCellValue(departments, task, 'immigration_expiry_date', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
-          'Current Stage': getRawCellValue(departments, task, 'current_stage_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
-          'Stage Status': getRawCellValue(departments, task, 'current_stage_status_value', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
-          'Stage Follow-up': getRawCellValue(departments, task, 'current_stage_follow_up', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
-          'Task Manager': getRawCellValue(departments, task, 'task_manager', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
-          'Officer': getRawCellValue(departments, task, 'officer', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
-          'Task Assistant': getRawCellValue(departments, task, 'task_assistant', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
-          'Renewal Status': getRawCellValue(departments, task, 'renewal_new', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper)
+          'Company': getRawCellValue(departments, task, 'company_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+          'Sub Department': getRawCellValue(departments, task, 'sub_department', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+          'Class': getRawCellValue(departments, task, 'job_level', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+          // 'Immigration Status': getRawCellValue(departments, task, 'immigration_status', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+          'Immigration Document Type': getRawCellValue(departments, task, 'immigration_document_type', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+          'Immigration Expiry Date': getRawCellValue(departments, task, 'immigration_expiry_date', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+          'Current Stage': getRawCellValue(departments, task, 'current_stage_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+          'Stage Status': getRawCellValue(departments, task, 'current_stage_status_value', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+          'Stage Follow-up': getRawCellValue(departments, task, 'current_stage_follow_up', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+          'Task Manager': getRawCellValue(departments, task, 'task_manager', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+          'Officer': getRawCellValue(departments, task, 'officer', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+          'Task Assistant': getRawCellValue(departments, task, 'task_assistant', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+          'Renewal Status': getRawCellValue(departments, task, 'renewal_new', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers)
         };
         exportData.push(mainRow);
 
@@ -948,18 +1002,18 @@ export default function DepartmentTasksManager({
             'Nationality': dep.nationality || 'N/A',
             'Age': dep.age?.toString() || 'N/A',
             'Relationship': dep.relationship || 'Dependant',
-            'Company': getRawCellValue(departments, task, 'company_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
-            'Sub Department': getRawCellValue(departments, task, 'sub_department', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
-            'Class': getRawCellValue(departments, task, 'job_level', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+            'Company': getRawCellValue(departments, task, 'company_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+            'Sub Department': getRawCellValue(departments, task, 'sub_department', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+            'Class': getRawCellValue(departments, task, 'job_level', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
             // 'Immigration Status': 'N/A',
             'Immigration Document Type': 'N/A',
             'Immigration Expiry Date': 'N/A',
             'Current Stage': 'N/A',
             'Stage Status': 'N/A',
             'Stage Follow-up': 'N/A',
-            'Task Manager': getRawCellValue(departments, task, 'task_manager', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
-            'Officer': getRawCellValue(departments, task, 'officer', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
-            'Task Assistant': getRawCellValue(departments, task, 'task_assistant', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+            'Task Manager': getRawCellValue(departments, task, 'task_manager', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+            'Officer': getRawCellValue(departments, task, 'officer', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+            'Task Assistant': getRawCellValue(departments, task, 'task_assistant', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
             'Renewal Status': task.renewal_status || 'New'
           };
           exportData.push(depRow);
@@ -1956,6 +2010,61 @@ export default function DepartmentTasksManager({
     loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true);
   }
 
+  const handleCancelTask = async (task: any, reason: string) => {
+    try {
+      const { error } = await supabase
+        .from('tm_tasks')
+        .update({
+          status: 'cancel',
+          cancellation_details: {
+            reason: reason,
+            cancelled_at: new Date().toISOString(),
+            cancelled_by: userData?.user?.id || null
+          },
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', task.id);
+
+      if (error) throw error;
+
+      // Update tasks list
+      setTasks(prevTasks =>
+        prevTasks.map(t =>
+          t.id === task.id
+            ? {
+              ...t,
+              status: 'cancel',
+              cancellation_details: {
+                reason: reason,
+                cancelled_at: new Date().toISOString(),
+                cancelled_by: userData?.user?.id || null
+              },
+              updated_at: new Date().toISOString()
+            }
+            : t
+        )
+      );
+
+      // Clear cache and reload
+      clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
+      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true);
+
+      toast({
+        title: 'Success',
+        description: 'Task cancelled successfully',
+        variant: 'default'
+      });
+
+    } catch (error) {
+      console.error('Error cancelling task:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to cancel task. Please try again.',
+        variant: 'destructive'
+      });
+    }
+  }
+
   const handleEnquiryCreated = useCallback(async (newEnquiry: any) => {
     try {
       setTasks(prevTasks => [newEnquiry, ...prevTasks])
@@ -2358,9 +2467,12 @@ export default function DepartmentTasksManager({
         toggleDependantsExpansion(id);
       },
       setLinkingTask,
-      setIsLinkDialogOpen
+      setIsLinkDialogOpen,
+      realOfficers
     );
   }, [
+    departments,
+    realOfficers,
     enhancedTasksData,
     taskDependants,
     expandedDependants,
@@ -3222,6 +3334,7 @@ export default function DepartmentTasksManager({
                             setIsDeleting(false);
                           }
                         }}
+                        onCancelTask={handleCancelTask}
                       />
                     ) : (
 
@@ -3319,7 +3432,7 @@ export default function DepartmentTasksManager({
       />
 
       {linkingTask && (
-          <LinkSourceDocumentDialog
+        <LinkSourceDocumentDialog
           open={isLinkDialogOpen}
           onOpenChange={setIsLinkDialogOpen}
           task={linkingTask}

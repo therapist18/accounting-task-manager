@@ -133,6 +133,7 @@ interface WebDataGroup {
   computedFunction?: string;
   computedDocuments?: string[];
   customFieldSource?: string;
+  defaultValue?: string;
 }
 
 interface KYCDocument {
@@ -1061,7 +1062,7 @@ function WebDataGroupEditDialog({
         <ScrollArea className="flex-1 bg-slate-50/30">
           <div className="p-6 space-y-8">
             {/* --- Section 1: Basic Identity --- */}
-            <div className="grid grid-cols-2 gap-6 bg-white p-4 rounded-xl border shadow-sm">
+            <div className="grid grid-cols-3 gap-6 bg-white p-4 rounded-xl border shadow-sm">
               <div className="space-y-1.5">
                 <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">JSON Variable Key</Label>
                 <div className="relative">
@@ -1081,6 +1082,15 @@ function WebDataGroupEditDialog({
                   onChange={(e) => updateField('efnsDisplayName', e.target.value)}
                   placeholder="e.g. Passport Number"
                   className="text-sm font-medium"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">Default Value</Label>
+                <Input
+                  value={editingGroup.defaultValue || ''}
+                  onChange={(e) => updateField('defaultValue', e.target.value)}
+                  placeholder="e.g. Not Provided"
+                  className="text-sm"
                 />
               </div>
             </div>

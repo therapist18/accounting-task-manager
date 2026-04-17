@@ -347,13 +347,101 @@ export const getCompanyNameFromParticipants = (task: any): string => {
   return company?.name || 'N/A';
 };
 
-export const getStaffFromParticipants = (task: any, role: string): string | null => {
+export const getStaffFromParticipants = (
+  task: any,
+  role: string,
+  getStaffNameFn?: (userId: any) => string,
+  departments?: any[],
+  officers?: any[]
+): string | null => {
+  // Log specifically for task 1402
+  if (task?.id === 1402) {
+    console.log('[getStaffFromParticipants] Task 1402 - role:', role);
+    console.log('[getStaffFromParticipants] Task 1402 - participants_details:', task.participants_details);
+  }
+
   if (!task?.participants_details || !Array.isArray(task.participants_details)) {
+    if (task?.id === 1402) {
+      console.log('[getStaffFromParticipants] Task 1402 - No participants_details or not an array');
+    }
     return null;
   }
 
-  const staff = task.participants_details.find((p: any) => p.role === role);
-  return staff?.name || null;
+  const staff = task.participants_details.find((p: any) =>
+    p.role && Array.isArray(p.role) ? p.role.includes(role) : p.role === role
+  );
+
+  if (task?.id === 1402) {
+    console.log('[getStaffFromParticipants] Task 1402 - Found staff for role', role, ':', staff);
+  }
+
+  // If participant has a valid ID, use their name
+  if (staff && staff.id !== null) {
+    // If name is missing, look it up using getStaffNameFn
+    if (staff.name && getStaffNameFn) {
+      const result = staff.name;
+      if (task?.id === 1402) {
+        console.log('[getStaffFromParticipants] Task 1402 - Returning staff.name:', result);
+      }
+      return result;
+    } else if (getStaffNameFn) {
+      // Name is missing, look up by ID
+      const lookedUpName = getStaffNameFn(staff.id);
+      if (task?.id === 1402) {
+        console.log('[getStaffFromParticipants] Task 1402 - staff.name missing, looked up by ID:', staff.id, '->', lookedUpName);
+      }
+      return lookedUpName;
+    }
+    return null;
+  }
+
+  // Fallback: check task's direct ID fields and look up name using getStaffName
+  const roleToIdField: Record<string, string> = {
+    'officer': 'officer_id',
+    'task_manager': 'task_manager_id',
+    'task_assistant': 'task_assistant_id'
+  };
+
+  const idField = roleToIdField[role];
+  if (idField && task[idField] && getStaffNameFn) {
+    return getStaffNameFn(task[idField]);
+  }
+
+  // Fallback: for officer role, try to get inherited officer from department/subdepartment
+  if (role === 'officer' && departments && officers) {
+    const inheritedOfficer = getInheritedOfficerForTask(task, departments, officers);
+    if (inheritedOfficer) {
+      return inheritedOfficer.displayName || inheritedOfficer.name || inheritedOfficer.full_name || null;
+    }
+  }
+
+  return null;
+};
+
+// Helper function to get inherited officer for a task (moved from EnhancedTable)
+const getInheritedOfficerForTask = (task: any, departments: any[] = [], officers: any[] = []) => {
+  if (!task || !departments.length) return null;
+
+  const department = departments.find(d =>
+    d.id === task.department_id || d.id === task.department?.id
+  );
+  if (!department) return null;
+
+  const subdepartment = department.tm_subdepartments?.find(s =>
+    s.id === task.subdepartment_id || s.id === task.subdepartment?.id
+  );
+  if (!subdepartment) return null;
+
+  // Filter officers by job level access
+  const filteredOfficers = officers.filter(officer => {
+    // Check if officer has access to this department/subdepartment/class
+    const hasDeptAccess = officer.assignments?.some((a: any) =>
+      a.department_id === department.id && (!a.subdepartment_id || a.subdepartment_id === subdepartment.id)
+    );
+    return hasDeptAccess;
+  });
+
+  return filteredOfficers.length > 0 ? filteredOfficers[0] : null;
 };
 
 export const getCompanyName = (task: any, companies: Map<number, string>): string => {
@@ -851,7 +939,8 @@ export const getCellContent = (
   renderStageStatusCell: (task: any) => React.ReactNode,
   toggleDependants: (id: string) => void,
   setLinkingTask: (task: any) => void,
-  setIsLinkDialogOpen: (open: boolean) => void
+  setIsLinkDialogOpen: (open: boolean) => void,
+  officers?: any[]
 ) => {
   const enhancedTask = task?.id ? enhancedTasksData.get(task.id.toString()) || task : task;
   const taskDeps = task?.id ? taskDependants.get(task.id.toString()) || [] : [];
@@ -873,12 +962,12 @@ export const getCellContent = (
     full_name: enhancedTask.full_name || 'N/A',
     age: enhancedTask.age?.toString() || 'N/A',
     r_number: enhancedTask.r_number?.toString() || 'N/A',
-    task_manager: getStaffFromParticipants(task, 'task_manager') || <span className="text-red-500 font-semibold">Unallocated</span>,
-    officer: getStaffFromParticipants(task, 'officer') || <span className="text-red-500 font-semibold">Unallocated</span>,
-    task_assistant: getStaffFromParticipants(task, 'task_assistant') || <span className="text-red-500 font-semibold">Unallocated</span>,
+    task_manager: getStaffFromParticipants(task, 'task_manager', getStaffName, departments, officers) || <span className="text-red-500 font-semibold">Unallocated</span>,
+    officer: getStaffFromParticipants(task, 'officer', getStaffName, departments, officers) || <span className="text-red-500 font-semibold">Unallocated</span>,
+    task_assistant: getStaffFromParticipants(task, 'task_assistant', getStaffName, departments, officers) || <span className="text-red-500 font-semibold">Unallocated</span>,
     cancellation_reason: task.cancellation_details?.reason || 'N/A',
     cancellation_date: task.cancellation_details?.cancelled_at ? format(new Date(task.cancellation_details.cancelled_at), 'dd MMM yyyy HH:mm') : 'N/A',
-    cancelled_by: task.cancellation_details?.cancelled_by || 'N/A'
+    cancelled_by: task.participants_details?.cancelled_by || 'N/A'
   };
 
   if (headerId in simpleCellMap) return simpleCellMap[headerId];
@@ -917,7 +1006,8 @@ export const getRawCellValue = (
   companies: Map<number, string>,
   getStaffName: (id: string) => string,
   getEnhancedStatus: (task: any) => StatusInfo,
-  getStageStatus: (task: any) => StageStatusInfo
+  getStageStatus: (task: any) => StageStatusInfo,
+  officers?: any[]
 ): string => {
   const enhancedTask = task?.id ? enhancedTasksData.get(task.id.toString()) || task : task;
 
@@ -940,12 +1030,12 @@ export const getRawCellValue = (
     full_name: enhancedTask.full_name || 'N/A',
     age: enhancedTask.age?.toString() || 'N/A',
     r_number: enhancedTask.r_number?.toString() || 'N/A',
-    task_manager: getStaffFromParticipants(task, 'task_manager') || 'N/A',
-    officer: getStaffFromParticipants(task, 'officer') || 'N/A',
-    task_assistant: getStaffFromParticipants(task, 'task_assistant') || 'N/A',
+    task_manager: getStaffFromParticipants(task, 'task_manager', getStaffName, departments, officers) || 'N/A',
+    officer: getStaffFromParticipants(task, 'officer', getStaffName, departments, officers) || 'N/A',
+    task_assistant: getStaffFromParticipants(task, 'task_assistant', getStaffName, departments, officers) || 'N/A',
     cancellation_reason: task.cancellation_details?.reason || 'N/A',
     cancellation_date: task.cancellation_details?.cancelled_at ? format(new Date(task.cancellation_details.cancelled_at), 'dd MMM yyyy HH:mm') : 'N/A',
-    cancelled_by: task.participants_details?.cancelled_by || 'N/A' // Fix: changed cancellation_details to participants_details
+    cancelled_by: task.participants_details?.cancelled_by || 'N/A'
   };
 
   return valueMap[headerId] || task[headerId]?.toString() || 'N/A';

@@ -149,10 +149,22 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
     const processedTasks = (data || []).map(task => {
       const jobLevel = task.job_level || {};
 
+      // Log specifically for task 1402
+      if (task.id === 1402) {
+        console.log('[taskManagerData] Processing task 1402');
+        console.log('[taskManagerData] task.participants_details:', task.participants_details);
+      }
+
       // Extract information from participants_details
       const officer = task.participants_details?.find((p: any) => p.role?.includes('officer'));
       const taskManager = task.participants_details?.find((p: any) => p.role?.includes('task_manager'));
       const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
+
+      if (task.id === 1402) {
+        console.log('[taskManagerData] Extracted officer:', officer);
+        console.log('[taskManagerData] Extracted taskManager:', taskManager);
+        console.log('[taskManagerData] Extracted company:', company);
+      }
 
       const processedTask: Task = {
         ...task,

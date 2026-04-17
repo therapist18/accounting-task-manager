@@ -5,9 +5,10 @@ import React, { useCallback, useMemo, useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { FileText, Plus, Minus, Loader2, AlertTriangle, Zap, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileIcon, Eye, EyeOff, Pencil } from "lucide-react"
+import { FileText, Plus, Minus, Loader2, AlertTriangle, Zap, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileIcon, Eye, EyeOff, Pencil, X } from "lucide-react"
 import { DeleteConfirmationDialog } from "../components/DeleteConfirmationDialog"
 import { EnquiryDialog } from "../components/EnquiryDialog"
+import { CancelConfirmationDialog } from "../components/CancelConfirmationDialog"
 import { userService, getOfficerDisplayName } from "@/lib/shared-user-assignment-service"
 
 // --- Helper Functions & Constants ---
@@ -47,6 +48,28 @@ const getInheritedOfficerForTask = (task: any, departments: any[], officers: any
   );
 
   return subdepartmentUsers.officers.length > 0 ? subdepartmentUsers.officers[0] : null;
+};
+
+// Helper function to extract participant by role from participants_details
+const getParticipantByRole = (task: any, role: string) => {
+  if (!task?.participants_details || !Array.isArray(task.participants_details)) {
+    return null;
+  }
+
+  const participant = task.participants_details.find(p =>
+    p.role && Array.isArray(p.role) && p.role.includes(role)
+  );
+
+  if (participant) {
+    return {
+      id: participant.id,
+      name: participant.name || '',
+      email: participant.email || '',
+      type: participant.type || 'individual'
+    };
+  }
+
+  return null;
 };
 
 const debugLog = (...args: any[]) => {
@@ -195,6 +218,8 @@ const MemoizedTableRow = React.memo(({
   toggleDocumentExpansion,
   onDeleteTask,
   setTaskToDelete,
+  onCancelTask,
+  setTaskToCancel,
   processedDocuments,
   kycDocuments,
   renderCellContent
@@ -236,6 +261,11 @@ const MemoizedTableRow = React.memo(({
                 {(onEditTask || true) && (
                   <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-400 hover:text-blue-600 hover:bg-blue-50" onClick={(e) => { e.stopPropagation(); setEditingTask(row.task); setEditDialogOpen(true); }}>
                     <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+                {onCancelTask && (
+                  <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-400 hover:text-orange-600 hover:bg-orange-50" onClick={(e) => { e.stopPropagation(); setTaskToCancel(row.task); setCancelDialogOpen(true); }}>
+                    <X className="h-3.5 w-3.5" />
                   </Button>
                 )}
                 {onDeleteTask && (
@@ -302,6 +332,7 @@ interface EnhancedTableProps {
   toggleDocumentExpansion: (taskId: string, documentId: string) => void;
   onDeleteTask?: (task: any) => void;
   onEditTask?: (task: any) => void;
+  onCancelTask?: (task: any, reason: string) => void;
   users?: any[];
   officers?: any[];
   initialColumnsPerPage?: number;
@@ -329,6 +360,7 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   toggleDocumentExpansion,
   onDeleteTask,
   onEditTask,
+  onCancelTask,
   users = [],
   officers = [],
   initialColumnsPerPage = 10,  // Set default render to 10
@@ -350,6 +382,8 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<any>(null);
   const [showNAStages, setShowNAStages] = useState(false);
+  const [taskToCancel, setTaskToCancel] = useState<any>(null);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
 
   // Memoized derived data
   const processedDocuments = useMemo(() => processDocumentsForTasks(tasks, allDocuments), [tasks, allDocuments]);
@@ -365,19 +399,30 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
     return tasks.flatMap(task => {
       if (!task) return [];
       const taskId = task.id || Math.random().toString(36).substr(2, 9);
+
+      // Extract participants from participants_details
+      const officerFromParticipants = getParticipantByRole(task, 'officer');
+      const managerFromParticipants = getParticipantByRole(task, 'task_manager');
+      const assistantFromParticipants = getParticipantByRole(task, 'task_assistant');
+
       // Get inherited officer if no direct officer assignment
       const inheritedOfficer = getInheritedOfficerForTask(task, departments || [], officers || []);
-      const officerWithInheritance = task.officer || inheritedOfficer || { id: task.officer_id, name: '' };
+
+      // Use participants_details first, then inherited officer, then fallback to task.officer
+      const officerWithInheritance = officerFromParticipants || task.officer || inheritedOfficer || { id: task.officer_id, name: '' };
+      const managerWithDetails = managerFromParticipants || task.task_manager || { id: task.task_manager_id, name: '' };
+      const assistantWithDetails = assistantFromParticipants || task.task_assistant || { id: task.task_assistant_id, name: '' };
 
       const taskWithDetails = {
         ...task,
         department: task.department || { id: task.department_id, name: '' },
         subdepartment: task.subdepartment || { id: task.subdepartment_id, name: '' },
         officer: officerWithInheritance,
-        task_manager: task.task_manager || { id: task.task_manager_id, name: '' },
+        task_manager: managerWithDetails,
+        task_assistant: assistantWithDetails,
         id: taskId,
         status: task.status || 'pending',
-        isInheritedOfficer: !!inheritedOfficer && !task.officer
+        isInheritedOfficer: !!inheritedOfficer && !task.officer && !officerFromParticipants
       };
 
       const principal = {
@@ -446,6 +491,18 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
     setTaskToDelete(null);
   }, [taskToDelete, onDeleteTask]);
 
+  const handleConfirmCancel = useCallback(async (reason: string) => {
+    if (taskToCancel && onCancelTask) {
+      try {
+        await onCancelTask(taskToCancel, reason);
+      } catch (err) {
+        console.error('Error in cancel confirmation:', err);
+      }
+    }
+    setTaskToCancel(null);
+    setCancelDialogOpen(false);
+  }, [taskToCancel, onCancelTask]);
+
   const handleNextPage = useCallback(() => setCurrentPage(prev => Math.min(prev + 1, totalPages)), [totalPages]);
   const handlePreviousPage = useCallback(() => setCurrentPage(prev => Math.max(prev - 1, 1)), []);
   const handleFirstPage = useCallback(() => setCurrentPage(1), []);
@@ -476,6 +533,19 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
         title="Delete Task"
         description="Are you sure you want to delete this task? This action cannot be undone."
         confirmText="Delete Task"
+        loading={loading}
+      />
+
+      <CancelConfirmationDialog
+        open={cancelDialogOpen}
+        onOpenChange={(open) => {
+          setCancelDialogOpen(open);
+          if (!open) setTaskToCancel(null);
+        }}
+        onConfirm={handleConfirmCancel}
+        title="Cancel Task"
+        description="Are you sure you want to cancel this task? Please provide a reason."
+        confirmText="Cancel Task"
         loading={loading}
       />
 
@@ -603,6 +673,8 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
                   toggleDocumentExpansion={toggleDocumentExpansion}
                   onDeleteTask={onDeleteTask}
                   setTaskToDelete={setTaskToDelete}
+                  onCancelTask={onCancelTask}
+                  setTaskToCancel={setTaskToCancel}
                   processedDocuments={processedDocuments}
                   kycDocuments={kycDocuments}
                   renderCellContent={renderCellContent}

@@ -4,7 +4,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Trash2, RotateCw, AlertTriangle, CheckCircle, XCircle } from 'lucide-react'
+import { Trash2, RotateCw, AlertTriangle, CheckCircle, XCircle, Square, Loader2 } from 'lucide-react'
 import { performExtraction } from '@/lib/extractionUtils'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
@@ -569,6 +569,9 @@ export function UploadModal({
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [currentDocumentName, setCurrentDocumentName] = useState(documentName);
   const [selectedValues, setSelectedValues] = useState<Record<string, string>>({});
+  const [extractingDocIds, setExtractingDocIds] = useState<Set<string>>(new Set());
+  const [stopExtraction, setStopExtraction] = useState(false);
+  const abortControllersRef = useRef<Record<string, AbortController>>({});
 
   useEffect(() => {
     setCurrentDocumentName(documentName);
@@ -773,11 +776,30 @@ export function UploadModal({
   };
 
   const handleDocTypeChange = async (docId: string, newDocTypeId: string) => {
+    console.log('handleDocTypeChange called for docId:', docId, 'newDocTypeId:', newDocTypeId);
     const doc = uploadedDocs.find(d => d.id === docId);
-    if (!doc) return;
+    if (!doc) {
+      console.log('Doc not found with id:', docId);
+      return;
+    }
 
     const selectedDocType = availableDocTypes.find(dt => dt.id === newDocTypeId);
-    if (!selectedDocType) return;
+    if (!selectedDocType) {
+      console.log('DocType not found with id:', newDocTypeId);
+      return;
+    }
+
+    // Create AbortController for this extraction
+    const abortController = new AbortController();
+    abortControllersRef.current[docId] = abortController;
+    console.log('Created AbortController for docId:', docId);
+
+    // Add to extracting set
+    setExtractingDocIds(prev => {
+      const newSet = new Set(prev).add(docId);
+      console.log('Added docId to extracting set:', docId, 'New set:', Array.from(newSet));
+      return newSet;
+    });
 
     setUploadedDocs(prev => prev.map(d =>
       d.id === docId ? { ...d, selectedDocTypeId: newDocTypeId, validationStatus: 'pending', validationMessage: 'Re-extracting...' } : d
@@ -797,12 +819,22 @@ export function UploadModal({
           selectedDocType.display_name || selectedDocType.name,
           (progressMessage) => showExtractionProgressToast(doc.fileName, progressMessage, extractionToastId),
           doc.fileName,
+          abortController.signal
         );
         extractedData = result.extractedData;
         success = result.success;
       } else {
         showSuccessToast(`${doc.fileName} processed (no extraction needed)`, extractionToastId);
       }
+
+      // Check if this document was stopped while extraction was in progress
+      console.log('Checking if doc was stopped. stoppedDocIdsRef:', Array.from(stoppedDocIdsRef.current), 'docId:', docId);
+      if (stoppedDocIdsRef.current.has(docId)) {
+        console.log(`Document ${doc.fileName} was stopped, ignoring extraction results`);
+        stoppedDocIdsRef.current.delete(docId);
+        return;
+      }
+      console.log('Document was not stopped, proceeding with extraction results');
 
       if (!extractedData || (typeof extractedData === 'object' && Object.keys(extractedData).length === 0)) {
         if (fieldsToExtract.length > 0) {
@@ -857,7 +889,29 @@ export function UploadModal({
           validationMessage: validation.message,
         } : d
       ));
+
+      // Remove from extracting set
+      setExtractingDocIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(docId);
+        return newSet;
+      });
+
+      // Clean up abort controller
+      delete abortControllersRef.current[docId];
+
+      // Remove from stopped docs ref
+      stoppedDocIdsRef.current.delete(docId);
     } catch (error) {
+      // Clean up abort controller
+      delete abortControllersRef.current[docId];
+
+      // Check if it was an abort error
+      if (error.name === 'AbortError' || error.message?.includes('aborted')) {
+        console.log(`Extraction aborted for ${doc.fileName}`);
+        return;
+      }
+
       console.error(`Error processing ${doc.fileName}:`, error);
       showErrorToast(`Extraction failed. Please enter details manually.`, extractionToastId);
       const emptyData = {};
@@ -876,21 +930,91 @@ export function UploadModal({
           validationMessage: 'Extraction failed. Please fill in the details manually.'
         } : d
       ));
+
+      // Remove from extracting set on error
+      setExtractingDocIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(docId);
+        return newSet;
+      });
     }
   };
 
+  // Add a ref to track which docs were explicitly stopped
+  const stoppedDocIdsRef = useRef<Set<string>>(new Set());
+
+  const handleStopExtraction = (docId: string) => {
+    console.log('Stop extraction clicked for docId:', docId);
+    console.log('Current extractingDocIds:', Array.from(extractingDocIds));
+    console.log('Current abortControllers:', Object.keys(abortControllersRef.current));
+
+    // Track that this doc was explicitly stopped
+    stoppedDocIdsRef.current.add(docId);
+    console.log('Added to stoppedDocIdsRef');
+
+    // Abort the extraction
+    if (abortControllersRef.current[docId]) {
+      console.log('Aborting controller for doc:', docId);
+      abortControllersRef.current[docId].abort();
+      delete abortControllersRef.current[docId];
+    } else {
+      console.log('No abort controller found for doc:', docId);
+    }
+
+    // Immediately update document state to stopped
+    setExtractingDocIds(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(docId);
+      console.log('Removed from extractingDocIds:', docId);
+      return newSet;
+    });
+
+    setUploadedDocs(prevDocs =>
+      prevDocs.map(d =>
+        d.id === docId ? {
+          ...d,
+          validationStatus: 'warning',
+          validationMessage: 'Extraction stopped. You can now manually enter the data.'
+        } : d
+      )
+    );
+
+    toast({
+      title: 'Extraction Stopped',
+      description: 'You can now manually enter the data.',
+      variant: 'default'
+    });
+  };
+
   const handleReExtract = async (docIdToReExtract: string) => {
+    console.log('handleReExtract called for docId:', docIdToReExtract);
     const docToUpdate = uploadedDocs.find(d => d.id === docIdToReExtract);
-    if (!docToUpdate) return;
+    if (!docToUpdate) {
+      console.log('Doc not found with id:', docIdToReExtract);
+      return;
+    }
 
     const docTypeToUse = allowMultipleTypes && docToUpdate.selectedDocTypeId
       ? availableDocTypes.find(dt => dt.id === docToUpdate.selectedDocTypeId)
       : finalSelectedDoc;
 
     if (!docTypeToUse) {
+      console.log('DocType not found');
       showErrorToast('Please select a document type first');
       return;
     }
+
+    // Create AbortController for this extraction
+    const abortController = new AbortController();
+    abortControllersRef.current[docIdToReExtract] = abortController;
+    console.log('Created AbortController for docId in handleReExtract:', docIdToReExtract);
+
+    // Add to extracting set
+    setExtractingDocIds(prev => {
+      const newSet = new Set(prev).add(docIdToReExtract);
+      console.log('Added docId to extracting set in handleReExtract:', docIdToReExtract, 'New set:', Array.from(newSet));
+      return newSet;
+    });
 
     setUploadedDocs(prevDocs =>
       prevDocs.map(d =>
@@ -923,12 +1047,22 @@ export function UploadModal({
           docTypeToUse.display_name || docTypeToUse.name || documentName,
           (progressMessage) => showExtractionProgressToast(docToUpdate.fileName, progressMessage, extractionToastId),
           docToUpdate.fileName,
+          abortController.signal
         );
         extractedData = result.extractedData;
         success = result.success;
       } else {
         showSuccessToast(`${docToUpdate.fileName} processed (no extraction needed)`, extractionToastId);
       }
+
+      // Check if this document was stopped while extraction was in progress
+      console.log('Checking if doc was stopped in handleReExtract. stoppedDocIdsRef:', Array.from(stoppedDocIdsRef.current), 'docId:', docIdToReExtract);
+      if (stoppedDocIdsRef.current.has(docIdToReExtract)) {
+        console.log(`Document ${docToUpdate.fileName} was stopped, ignoring extraction results`);
+        stoppedDocIdsRef.current.delete(docIdToReExtract);
+        return;
+      }
+      console.log('Document was not stopped in handleReExtract, proceeding with extraction results');
 
       const newExtractedData = typeof extractedData === 'string' ? JSON.parse(extractedData) : extractedData || {};
       const updatedDocForValidation = { ...docToUpdate, extractedData: newExtractedData, status: success ? 'valid' : 'pending' };
@@ -948,7 +1082,26 @@ export function UploadModal({
           } : d
         )
       );
+
+      // Remove from extracting set
+      setExtractingDocIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(docIdToReExtract);
+        return newSet;
+      });
+
+      // Clean up abort controller
+      delete abortControllersRef.current[docIdToReExtract];
     } catch (error) {
+      // Clean up abort controller
+      delete abortControllersRef.current[docIdToReExtract];
+
+      // Check if it was an abort error
+      if (error.name === 'AbortError' || error.message?.includes('aborted')) {
+        console.log(`Extraction aborted for ${docToUpdate.fileName}`);
+        return;
+      }
+
       showErrorToast(`Re-extraction failed for ${docToUpdate.fileName}. Please enter details manually.`, extractionToastId);
       const emptyData = {};
       if (docTypeToUse.fields) {
@@ -967,6 +1120,16 @@ export function UploadModal({
           } : d
         )
       );
+
+      // Remove from extracting set on error
+      setExtractingDocIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(docIdToReExtract);
+        return newSet;
+      });
+
+      // Remove from stopped docs ref
+      stoppedDocIdsRef.current.delete(docIdToReExtract);
     }
   };
 
@@ -1341,19 +1504,37 @@ export function UploadModal({
                         <Button
                           variant="ghost"
                           size="sm"
+                          title="Stop Extraction"
+                          className="text-amber-600 hover:text-amber-800 hover:bg-amber-100"
+                          onClick={() => handleStopExtraction(doc.id)}
+                          disabled={!extractingDocIds.has(doc.id)}
+                        >
+                          <Square className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           title="Re-extract"
                           className="text-blue-600 hover:text-blue-800 hover:bg-blue-100"
                           onClick={() => handleReExtract(doc.id)}
-                          disabled={allowMultipleTypes && !doc.selectedDocTypeId}
+                          disabled={allowMultipleTypes && !doc.selectedDocTypeId || extractingDocIds.has(doc.id)}
                         >
-                          <RotateCw className="h-4 w-4" />
+                          {extractingDocIds.has(doc.id) ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />}
                         </Button>
                         <Button
                           variant="ghost"
                           size="sm"
                           title="Remove"
                           className="text-red-600 hover:text-red-800 hover:bg-red-100"
-                          onClick={() => setUploadedDocs(uploadedDocs.filter(d => d.id !== doc.id))}
+                          onClick={() => {
+                            setExtractingDocIds(prev => {
+                              const newSet = new Set(prev);
+                              newSet.delete(doc.id);
+                              return newSet;
+                            });
+                            setUploadedDocs(uploadedDocs.filter(d => d.id !== doc.id));
+                          }}
+                          disabled={extractingDocIds.has(doc.id)}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>

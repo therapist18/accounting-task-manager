@@ -443,7 +443,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
   const classDocsAndFields = useMemo(() => { return classRequirements?.[0]?.documents_and_fields || []; }, [classRequirements]);
 
-  const checkApplicability = (colType: string, requirement: any) => {
+  const checkApplicability = (colType: string, requirement: any, colRoles?: string[]) => {
     if (!requirement) return false;
 
     const typeMap: Record<string, string> = {
@@ -455,15 +455,57 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       'shareholder': 'shareholder',
       'sponsor': 'sponsor' // Add this line
     };
-    const targetType = typeMap[colType] || colType;
     const allowedTypes = requirement.entityTypes || (requirement.applicantType ? [requirement.applicantType] : []);
 
+    // If column has multiple roles, check if document is applicable to ANY of them
+    if (colRoles && colRoles.length > 0) {
+      return colRoles.some(role => {
+        const targetType = typeMap[role] || role;
+        return allowedTypes.includes(targetType);
+      });
+    }
+
+    // Fallback to single type check
+    const targetType = typeMap[colType] || colType;
     return allowedTypes.includes(targetType);
   };
 
   const columnDefinitions = useMemo(() => {
     const cols = [];
     if (!filteredGroupedTasks) return cols;
+
+    // Map to track all roles for each individual across all participants
+    const individualRolesMap = new Map<number, Set<string>>();
+
+    filteredGroupedTasks.forEach((group, groupIndex) => {
+      const task = group.tasks?.[0];
+      if (!task) return;
+
+      const participants = task.participants_details || [];
+
+      // Collect all roles for each individual
+      participants.forEach(p => {
+        if (p.type === 'individual' && p.id) {
+          if (!individualRolesMap.has(p.id)) individualRolesMap.set(p.id, new Set());
+          const roles = Array.isArray(p.role) ? p.role : (p.role ? [p.role] : []);
+          roles.forEach(role => individualRolesMap.get(p.id).add(role));
+        }
+      });
+
+      // Also check applicant_details
+      const applicant = task.applicant_details || {};
+      if (applicant.type === 'individual' && applicant.id) {
+        if (!individualRolesMap.has(applicant.id)) individualRolesMap.set(applicant.id, new Set());
+        const roles = Array.isArray(applicant.role) ? applicant.role : (applicant.role ? [applicant.role] : []);
+        roles.forEach(role => individualRolesMap.get(applicant.id).add(role));
+      }
+
+      // Check understudy
+      if (task.understudy) {
+        if (!individualRolesMap.has(task.understudy)) individualRolesMap.set(task.understudy, new Set());
+        individualRolesMap.get(task.understudy).add('understudy');
+      }
+    });
 
     filteredGroupedTasks.forEach((group, groupIndex) => {
       const task = group.tasks?.[0];
@@ -505,11 +547,16 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             }
           }
 
+          // Get all roles for this individual
+          const allRoles = Array.from(individualRolesMap.get(applicant.id) || new Set());
+          const primaryRole = columnType;
+
           groupCols.push({
             type: columnType,
             id: applicant.id,
             label: applicant.name,
-            subLabel: applicant.role?.toUpperCase() || 'PRINCIPAL',
+            subLabel: primaryRole.toUpperCase(),
+            roles: allRoles,
             task,
             groupIndex,
             priority
@@ -542,11 +589,13 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         (!p.role && !p.relationship)
       );
       if (principalIndividual && (!applicant || applicant.id !== principalIndividual.id)) {
+        const allRoles = Array.from(individualRolesMap.get(principalIndividual.id) || new Set());
         groupCols.push({
           type: 'principal',
           id: principalIndividual.id,
           label: principalIndividual.name,
           subLabel: 'PRINCIPAL',
+          roles: allRoles,
           task,
           groupIndex,
           priority: 2 // Principal gets second priority
@@ -562,11 +611,13 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       directors.forEach(d => {
         // Avoid duplicates
         if (!groupCols.find(col => col.id === d.id && col.groupIndex === groupIndex)) {
+          const allRoles = Array.from(individualRolesMap.get(d.id) || new Set());
           groupCols.push({
             type: 'director',
             id: d.id,
             label: d.name,
             subLabel: 'Director',
+            roles: allRoles,
             task,
             groupIndex,
             priority: 3 // Directors get third priority
@@ -583,11 +634,13 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         dependants.forEach(dep => {
           // Avoid duplicates
           if (!groupCols.find(col => col.id === dep.id && col.groupIndex === groupIndex)) {
+            const allRoles = Array.from(individualRolesMap.get(dep.id) || new Set());
             groupCols.push({
               type: 'dependant',
               id: dep.id,
               label: dep.name,
               subLabel: dep.relationship || 'Dependant',
+              roles: allRoles,
               task,
               groupIndex,
               relationship: dep.relationship,
@@ -610,6 +663,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             id: understudyParticipant.id,
             label: understudyParticipant.name,
             subLabel: 'Understudy',
+            roles: Array.from(individualRolesMap.get(understudyParticipant.id) || new Set()),
             task,
             groupIndex,
             priority: 5 // Understudy gets fifth priority
@@ -626,6 +680,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             id: understudyId,
             label: uPart?.name || individualNames[understudyId] || 'Understudy',
             subLabel: 'Understudy',
+            roles: Array.from(individualRolesMap.get(understudyId) || new Set()),
             task,
             groupIndex,
             priority: 5 // Understudy gets fifth priority
@@ -645,6 +700,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
             id: sponsorParticipant.id,
             label: sponsorParticipant.name,
             subLabel: 'Sponsor',
+            roles: Array.from(individualRolesMap.get(sponsorParticipant.id) || new Set()),
             task,
             groupIndex,
             priority: 6 // Sponsor gets sixth priority
@@ -1495,7 +1551,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                   </TableCell>
 
                   {columnDefinitions.map((col, colIdx) => {
-                    const isApplicable = checkApplicability(col.type, reqItem);
+                    const isApplicable = checkApplicability(col.type, reqItem, col.roles);
                     const groupRelationshipData = relationshipData[col.groupIndex];
 
                     if (!isApplicable) {
@@ -1626,7 +1682,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                         </span>
                       </TableCell>
                       {columnDefinitions.map((col, colIdx) => {
-                        const isApplicable = checkApplicability(col.type, reqItem);
+                        const isApplicable = checkApplicability(col.type, reqItem, col.roles);
                         if (!isApplicable) {
                           return (
                             <TableCell key={`${docId}-col-${colIdx}`} className="text-center border p-3 align-middle">
@@ -1752,7 +1808,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                       {field.name}
                     </TableCell>
                     {columnDefinitions.map((col, colIdx) => {
-                      const isApplicable = checkApplicability(col.type, reqItem);
+                      const isApplicable = checkApplicability(col.type, reqItem, col.roles);
                       const docData = isApplicable ? getDocumentDataForPreview(col.task, reqItem, col.type, col.id) : null;
                       return (
                         <TableCell key={`${field.id}-val-${colIdx}`} className="text-center border p-1 text-[11px] text-slate-600">
@@ -2304,10 +2360,20 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                         <span className="text-[11px] font-bold uppercase line-clamp-1 px-1">
                           {col.label}
                         </span>
-                        <span className="flex justify-between items-center gap-6">
-                          <span className="text-[9px] bg-black/20 rounded px-1.5 py-0.5 font-medium tracking-wider">
-                            {col.subLabel}
-                          </span>
+                        <span className="flex justify-between items-center gap-2">
+                          {col.roles && col.roles.length > 1 ? (
+                            <div className="flex gap-1">
+                              {col.roles.map((role, roleIdx) => (
+                                <span key={roleIdx} className="text-[8px] bg-black/30 text-white rounded px-1 py-0.5 font-medium tracking-wider">
+                                  {role.toUpperCase()}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-[9px] bg-black/20 rounded px-1.5 py-0.5 font-medium tracking-wider">
+                              {col.subLabel}
+                            </span>
+                          )}
                           {col.role && (
                             <span className="text-[8px] bg-blue-900/20 text-white rounded px-1.5 py-0.5 font-medium tracking-wider">
                               {Array.isArray(col.role) ? col.role.join(', ') : col.role}
