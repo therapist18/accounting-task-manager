@@ -128,12 +128,6 @@ export default function DepartmentDialog({
                 if (current.subClasses) current.subClasses = current.subClasses.map(s => ({ ...s, entity_types: value }))
             }
 
-            if (lastKey === 'manager_history' && path.length === 1 && newState.subdepartments) {
-                newState.subdepartments = newState.subdepartments.map(subdept => {
-                    const hasActiveManagers = (subdept.manager_history || []).some(m => !m.end_date)
-                    return hasActiveManagers ? subdept : { ...subdept, manager_history: value }
-                })
-            }
             return newState
         })
     }, [setDepartmentForm])
@@ -163,7 +157,7 @@ export default function DepartmentDialog({
     const addSubdepartment = () => {
         updateFormState(['subdepartments'], [
             ...(departmentForm.subdepartments || []),
-            { name: '', description: '', classes: [], entity_types: [...(departmentForm.entity_types || [])], officer_history: [], manager_history: [], assistant_history: [], default_display: true }
+            { name: '', description: '', classes: [], entity_types: [...(departmentForm.entity_types || [])], default_display: true }
         ])
     }
 
@@ -284,29 +278,9 @@ export default function DepartmentDialog({
                                             </div>
                                         </div>
 
-                                        {/* Expanded Content: Roles & Classes */}
+                                        {/* Expanded Content: Classes */}
                                         {isSubExpanded && (
                                             <div className="p-5 space-y-6">
-                                                {/* Role Assignments Row */}
-                                                <div className="grid grid-cols-4 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-100">
-                                                    <div className="space-y-1.5">
-                                                        <Label className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1.5"><Briefcase className="w-3 h-3" /> Officer</Label>
-                                                        <MultiSelectUser users={officerUsers} value={getCurrentIds(sub.officer_history)} onChange={(ids) => updateFormState(['subdepartments', sIdx, 'officer_history'], ids.map(id => ({ id, start_date: new Date().toISOString() })))} placeholder="All officers" />
-                                                    </div>
-                                                    <div className="space-y-1.5">
-                                                        <Label className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1.5"><UserCog className="w-3 h-3" /> Task Manager</Label>
-                                                        <MultiSelectUser users={managerUsers} value={getCurrentManagerIds(sIdx)} onChange={(ids) => updateFormState(['subdepartments', sIdx, 'manager_history'], ids.map(id => ({ id, start_date: new Date().toISOString() })))} placeholder="All managers" />
-                                                    </div>
-                                                    <div className="space-y-1.5">
-                                                        <Label className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1.5"><Users className="w-3 h-3" /> Assistants</Label>
-                                                        <MultiSelectUser users={assistantUsers} value={getCurrentAssistantIds(sIdx)} onChange={(ids) => updateFormState(['subdepartments', sIdx, 'assistant_history'], ids.map(id => ({ id, start_date: new Date().toISOString() })))} placeholder="Add assistants" />
-                                                    </div>
-                                                    <div className="space-y-1.5">
-                                                        <Label className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1.5"><Network className="w-3 h-3" /> Entity Types</Label>
-                                                        <MultiSelectSpec value={sub.entity_types} onChange={(v) => updateFormState(['subdepartments', sIdx, 'entity_types'], v)} />
-                                                    </div>
-                                                </div>
-
                                                 {/* Classes List */}
                                                 <div className="space-y-3">
                                                     {sub.classes.map((cls, cIdx) => {

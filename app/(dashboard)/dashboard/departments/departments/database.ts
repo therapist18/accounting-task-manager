@@ -156,9 +156,6 @@ export type Subdepartment = {
   upload_requirements?: Requirement[]
   default_display?: boolean
   order?: number
-  // History tracking for managers and assistants
-  manager_history?: ManagerHistory[]
-  assistant_history?: AssistantHistory[]
 }
 
 export type Department = {
@@ -901,25 +898,4 @@ export function getDepartmentOfficerIds(
     return [];
   }
 }
-
-export function getSubdepartmentOfficerIds(
-  departments: Department[],
-  departmentId: string,
-  subdepartmentId: string
-): string[] {
-  try {
-    const department = departments.find(dept => dept.id === departmentId);
-    if (!department) return [];
-
-    const subdepartment = department.tm_subdepartments?.find(sub => sub.id === subdepartmentId);
-    if (!subdepartment) return [];
-
-    // Return subdepartment-level officers
-    return subdepartment.officer_history?.map(history => history.id) || [];
-  } catch (error) {
-    console.error('Error getting subdepartment officer IDs:', error);
-    return [];
-  }
-}
-
 

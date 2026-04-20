@@ -394,12 +394,6 @@ export default function DepartmentTasksManager({
         }];
       }
     }
-    const activeManagers = subdepartment.manager_history
-      ? subdepartment.manager_history.filter(h => !h.end_date)
-      : [];
-    const activeAssistantsHistory = subdepartment.assistant_history
-      ? subdepartment.assistant_history.filter(h => !h.end_date)
-      : [];
 
     const officers = activeOfficers.map(oh => {
       const displayName = getOfficerDisplayName(oh);
@@ -408,31 +402,23 @@ export default function DepartmentTasksManager({
         name: displayName,
         email: oh.email || '',
         display_name: displayName,
-        isInherited: !subdepartment.officer_history?.some(h => !h.end_date && h.id === oh.id)
+        isInherited: true
       };
     });
 
-    const managers = activeManagers.map(mh => {
-      const user = tmUsers.get(parseInt(mh.id.toString()));
-      const displayName = user?.name || `Manager ${mh.id}`;
-      return {
-        id: mh.id.toString(),
-        name: displayName,
-        email: user?.email || '',
-        display_name: displayName
-      };
-    }).filter(m => m.name !== `Manager ${m.id}`);
+    const managers = subdepartmentUsers.managers.map(m => ({
+      id: m.id,
+      name: m.displayName || m.name || `Manager ${m.id}`,
+      email: m.email || '',
+      display_name: m.displayName || m.name || `Manager ${m.id}`
+    }));
 
-    const assistants = activeAssistantsHistory.map(ah => {
-      const user = tmUsers.get(parseInt(ah.id.toString()));
-      const displayName = user?.name || `Assistant ${ah.id}`;
-      return {
-        id: ah.id.toString(),
-        name: displayName,
-        email: user?.email || '',
-        display_name: displayName
-      };
-    }).filter(a => a.name !== `Assistant ${a.id}`);
+    const assistants = subdepartmentUsers.assistants.map(a => ({
+      id: a.id,
+      name: a.displayName || a.name || `Assistant ${a.id}`,
+      email: a.email || '',
+      display_name: a.displayName || a.name || `Assistant ${a.id}`
+    }));
 
     return { officers, managers, assistants };
   }, [departments, activeDepartmentTab, tmUsers, realOfficers]);

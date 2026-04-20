@@ -450,8 +450,7 @@ export default function Departments() {
         const payload = {
           name: sub.name.trim(), description: sub.description, department_id: editingDepartmentId,
           default_display: sub.default_display, classes: sub.classes || [],
-          officer_history: sub.officer_history || [], manager_history: sub.manager_history || [],
-          assistant_history: sub.assistant_history || [], entity_types: sub.entity_types || []
+          entity_types: sub.entity_types || []
         };
 
         if (isNew) {
@@ -494,9 +493,7 @@ export default function Departments() {
       if (!subdept.name.trim()) continue;
       const { data: newSubdept, error } = await supabase.from('tm_subdepartments').insert({
         name: subdept.name.trim(), description: subdept.description, department_id: departmentId,
-        default_display: subdept.default_display, order: i + 1,
-        officer_history: subdept.officer_history || [], manager_history: subdept.manager_history || [],
-        assistant_history: subdept.assistant_history || []
+        default_display: subdept.default_display, order: i + 1
       }).select().single();
       if (error) continue;
       if (subdept.classes?.length > 0) await saveClassRequirements(newSubdept.id, subdept.classes);
@@ -544,7 +541,6 @@ export default function Departments() {
     const associatedOfficerIds = userService.getDepartmentUsers(userData.allUsers, dept.id.toString()).officers.map(o => o.id);
     const mappedSubdepartments = (dept.tm_subdepartments || []).map(sub => ({
       ...sub,
-      officer_history: sub.officer_history || [],
       classes: (sub.classes || []).map(cls => ({
         ...cls,
         subClasses: (cls.subClasses || []).map(sc => ({ ...sc, requirements: sc.requirements || [] }))
@@ -562,10 +558,10 @@ export default function Departments() {
   const handleAddSubdepartment = (deptId, deptName) => {
     setEditingDepartmentId(deptId); setEditingSubdepartmentId(null);
     setDepartmentForm({
-      name: deptName, description: '', default_display: true, officers_history: [], officerId: '',
+      name: deptName, description: '', default_display: true, officerId: '',
       subdepartments: [{
         name: '', description: '', classes: [], taskManagerId: '', taskAssistantIds: [],
-        default_display: true, entity_types: [], officer_history: [], manager_history: [], assistant_history: [], officerId: ''
+        default_display: true, entity_types: [], officerId: ''
       }]
     });
     setIsAddDepartmentOpen(true);
