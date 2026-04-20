@@ -350,8 +350,7 @@ export function EnquiryDialog({
             return [{ value: 'none', label: 'No Manager' }];
         }
         const filteredManagers = managersData.filter(manager =>
-            hasJobLevelAccess(manager, formData.department_id, formData.subdepartment_id, formData.class_id) &&
-            manager.assignments && manager.assignments.some((assignment: any) => assignment.role === 'manager')
+            hasJobLevelAccess(manager, formData.department_id, formData.subdepartment_id, formData.class_id)
         );
         return [
             { value: 'none', label: 'No Manager' },
@@ -365,8 +364,7 @@ export function EnquiryDialog({
             return [{ value: 'none', label: 'No Assistant' }];
         }
         const filteredAssistants = assistantsData.filter(assistant =>
-            hasJobLevelAccess(assistant, formData.department_id, formData.subdepartment_id, formData.class_id) &&
-            assistant.assignments && assistant.assignments.some((assignment: any) => assignment.role === 'assistant')
+            hasJobLevelAccess(assistant, formData.department_id, formData.subdepartment_id, formData.class_id)
         );
         return [
             { value: 'none', label: 'No Assistant' },
@@ -497,22 +495,33 @@ export function EnquiryDialog({
                 const existingAssistants = [...assistantsData];
 
                 taskToEdit.participants_details.forEach(participant => {
+                    const role = participant.role?.includes('officer') ? 'officer' :
+                        participant.role?.includes('task_manager') ? 'manager' :
+                            participant.role?.includes('task_assistant') ? 'assistant' : null;
+
                     const normalizedParticipant = {
                         id: participant.id,
                         full_name: participant.name,
-                        name: participant.name
+                        name: participant.name,
+                        assignments: role ? [{
+                            role: role,
+                            department_id: taskToEdit.job_level?.department_id || null,
+                            subdepartment_id: taskToEdit.job_level?.subdepartment_id || null,
+                            class_id: taskToEdit.job_level?.class_id || null,
+                            subclass_id: taskToEdit.job_level?.subclass_id || null
+                        }] : []
                     };
 
                     if (participant.role?.includes('officer')) {
-                        if (!existingOfficers.find(o => o.id.toString() === participant.id.toString())) {
+                        if (!existingOfficers.find(o => o.id.toString() === (participant.id?.toString() || ''))) {
                             existingOfficers.push(normalizedParticipant);
                         }
                     } else if (participant.role?.includes('task_manager')) {
-                        if (!existingManagers.find(m => m.id.toString() === participant.id.toString())) {
+                        if (!existingManagers.find(m => m.id.toString() === (participant.id?.toString() || ''))) {
                             existingManagers.push(normalizedParticipant);
                         }
                     } else if (participant.role?.includes('task_assistant')) {
-                        if (!existingAssistants.find(a => a.id.toString() === participant.id.toString())) {
+                        if (!existingAssistants.find(a => a.id.toString() === (participant.id?.toString() || ''))) {
                             existingAssistants.push(normalizedParticipant);
                         }
                     }

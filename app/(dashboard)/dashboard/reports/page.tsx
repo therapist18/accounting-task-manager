@@ -167,7 +167,10 @@ export default function ReportsPage() {
   const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map());
   const [taskDependants, setTaskDependants] = useState<Map<string, any[]>>(new Map());
   const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(new Map());
-  const [tmUsers, setTmUsers] = useState<Map<number, any>>(new Map());
+  const [tmUsers, setTmUsers] = useState<Map<string, any>>(new Map());
+  const [unifiedOfficers, setUnifiedOfficers] = useState<any[]>([]);
+  const [unifiedManagers, setUnifiedManagers] = useState<any[]>([]);
+  const [unifiedAssistants, setUnifiedAssistants] = useState<any[]>([]);
   const [availableJobLevels, setAvailableJobLevels] = useState<any[]>([]);
 
   // ── Filter state ───────────────────────────────────────────────────────────
@@ -184,6 +187,16 @@ export default function ReportsPage() {
   const [availableOfficers, setAvailableOfficers] = useState<any[]>([]);
   const [isOfficerDropdownOpen, setIsOfficerDropdownOpen] = useState(false);
 
+  const [selectedManagers, setSelectedManagers] = useState<string[]>([]);
+  const [allManagers, setAllManagers] = useState<any[]>([]);
+  const [availableManagers, setAvailableManagers] = useState<any[]>([]);
+  const [isManagerDropdownOpen, setIsManagerDropdownOpen] = useState(false);
+
+  const [selectedAssistants, setSelectedAssistants] = useState<string[]>([]);
+  const [allAssistants, setAllAssistants] = useState<any[]>([]);
+  const [availableAssistants, setAvailableAssistants] = useState<any[]>([]);
+  const [isAssistantDropdownOpen, setIsAssistantDropdownOpen] = useState(false);
+
   // ── Sort / view state ──────────────────────────────────────────────────────
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [view, setView] = useState<'standard' | 'transposed'>('standard');
@@ -198,9 +211,45 @@ export default function ReportsPage() {
   // ... [Keep exact initializations and hooks intact] ...
   const getStaffName = useCallback((userId: any) => {
     if (!userId) return '';
-    const user = tmUsers.get(parseInt(userId.toString()));
-    return user?.name || `User ${userId}`;
-  }, [tmUsers]);
+    const userIdStr = String(userId);
+
+    // Check unified user data (has UUIDs with names)
+    const unifiedOfficer = unifiedOfficers.find(o => o.id === userIdStr);
+    if (unifiedOfficer) return unifiedOfficer.full_name || unifiedOfficer.name || unifiedOfficer.displayName || `Officer ${userId}`;
+
+    const unifiedManager = unifiedManagers.find(m => m.id === userIdStr);
+    if (unifiedManager) return unifiedManager.full_name || unifiedManager.name || unifiedManager.displayName || `Manager ${userId}`;
+
+    const unifiedAssistant = unifiedAssistants.find(a => a.id === userIdStr);
+    if (unifiedAssistant) return unifiedAssistant.full_name || unifiedAssistant.name || unifiedAssistant.displayName || `Assistant ${userId}`;
+
+    // Fallback to tmUsers map for backward compatibility
+    const user = tmUsers.get(userIdStr);
+    if (user?.name) return user.name;
+
+    // If it looks like a UUID but wasn't found, return a more descriptive fallback
+    if (userIdStr.length > 20) {
+      return `Unknown (${userIdStr.substring(0, 8)}...)`;
+    }
+
+    return userIdStr;
+  }, [tmUsers, unifiedOfficers, unifiedManagers, unifiedAssistants]);
+
+  const getStaffFromParticipants = useCallback((task: any, role: string): string | null => {
+    if (!task?.participants_details || !Array.isArray(task.participants_details)) {
+      return null;
+    }
+
+    const staff = task.participants_details.find((p: any) =>
+      p.role && Array.isArray(p.role) ? p.role.includes(role) : p.role === role
+    );
+
+    if (staff && staff.id !== null) {
+      return getStaffName(staff.id);
+    }
+
+    return null;
+  }, [getStaffName]);
 
   const getTaskHierarchy = useCallback((task: any) => {
     if (!task || !departments.length) return null;
@@ -240,21 +289,48 @@ export default function ReportsPage() {
         setAvailableReports(reports || []);
         if (reports?.length > 0) setActiveReport(reports[0]);
 
-        const [usersResponse, authOfficers] = await Promise.all([
-          fetch('/api/auth/users/unified?payrollAccess=true').then(res => res.json()),
-          fetchAuthOfficers()
-        ]);
+        // Load departments first to enrich user data with role assignments
+        const depts = await fetchDepartments();
+        setDepartments(depts);
 
-        const users = usersResponse.data || [];
+        // Load unified user data using userService with departments
+        const unifiedUserData = await userService.getAllUserData({ payrollAccess: true }, depts);
+        setUnifiedOfficers(unifiedUserData.officers || []);
+        setUnifiedManagers(unifiedUserData.managers || []);
+        setUnifiedAssistants(unifiedUserData.assistants || []);
+
+        // Also populate tmUsers map for backward compatibility
         const usersMap = new Map();
-        users?.forEach((u: any) => usersMap.set(u.id, u));
+        unifiedUserData.allUsers?.forEach((u: any) => usersMap.set(u.id, u));
         setTmUsers(usersMap);
+
+        // Set allOfficers for backward compatibility with existing filtering logic
         setAllOfficers(
-          (authOfficers || []).map((officer: any) => ({
+          (unifiedUserData.officers || []).map((officer: any) => ({
             ...officer,
-            id: officer.id.toString(),
+            id: officer.id,
             name: getOfficerDisplayName(officer),
             email: officer.email || ""
+          }))
+        );
+
+        // Set allManagers
+        setAllManagers(
+          (unifiedUserData.managers || []).map((manager: any) => ({
+            ...manager,
+            id: manager.id,
+            name: manager.displayName || manager.name || `Manager ${manager.id}`,
+            email: manager.email || ""
+          }))
+        );
+
+        // Set allAssistants
+        setAllAssistants(
+          (unifiedUserData.assistants || []).map((assistant: any) => ({
+            ...assistant,
+            id: assistant.id,
+            name: assistant.displayName || assistant.name || `Assistant ${assistant.id}`,
+            email: assistant.email || ""
           }))
         );
       } catch (err) {
@@ -266,17 +342,6 @@ export default function ReportsPage() {
     };
     init();
   }, []);
-
-  const fetchAuthOfficers = async () => {
-    try {
-      const response = await fetch('/api/auth/users/unified?payrollAccess=true');
-      const data = await response.json();
-      return data.data || [];
-    } catch (error) {
-      console.error('Failed to fetch auth officers:', error);
-      return [];
-    }
-  };
 
   useEffect(() => {
     if (activeReport && !activeReport.sessionIncludedFields) {
@@ -360,27 +425,60 @@ export default function ReportsPage() {
       return;
     }
 
+    const allUsers = [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants];
     const departmentUsers = userService.getDepartmentUsers(
-      allOfficers.map(o => ({
-        id: o.id,
-        displayName: getOfficerDisplayName(o),
-        email: o.email,
-        role: 'officer',
-        firstName: o.firstName,
-        lastName: o.lastName,
-        isActive: o.isActive
-      })),
+      allUsers,
       activeDeptId,
       activeSubDeptId === 'all' ? undefined : activeSubDeptId
     );
 
     const allowedIds = new Set(departmentUsers.officers.map(o => o.id));
 
-    const final = allOfficers.filter(o => allowedIds.has(o.id));
+    const final = unifiedOfficers.filter(o => allowedIds.has(o.id));
     setAvailableOfficers(final);
     setSelectedOfficers(prev => prev.filter(id => final.some(o => o.id === id)));
     setActiveOfficerTab(prev => (prev === 'all' || final.some(o => o.id === prev) ? prev : 'all'));
-  }, [activeDeptId, activeSubDeptId, allOfficers, activeSubDepartments]);
+  }, [activeDeptId, activeSubDeptId, unifiedOfficers, activeSubDepartments]);
+
+  useEffect(() => {
+    if (!activeDeptId) {
+      setAvailableManagers([]);
+      setSelectedManagers([]);
+      return;
+    }
+
+    const departmentUsers = userService.getDepartmentUsers(
+      [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants],
+      activeDeptId,
+      activeSubDeptId === 'all' ? undefined : activeSubDeptId
+    );
+
+    const allowedIds = new Set(departmentUsers.managers.map(m => m.id));
+
+    const final = unifiedManagers.filter(m => allowedIds.has(m.id));
+    setAvailableManagers(final);
+    setSelectedManagers(prev => prev.filter(id => final.some(m => m.id === id)));
+  }, [activeDeptId, activeSubDeptId, unifiedManagers, activeSubDepartments]);
+
+  useEffect(() => {
+    if (!activeDeptId) {
+      setAvailableAssistants([]);
+      setSelectedAssistants([]);
+      return;
+    }
+
+    const departmentUsers = userService.getDepartmentUsers(
+      [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants],
+      activeDeptId,
+      activeSubDeptId === 'all' ? undefined : activeSubDeptId
+    );
+
+    const allowedIds = new Set(departmentUsers.assistants.map(a => a.id));
+
+    const final = unifiedAssistants.filter(a => allowedIds.has(a.id));
+    setAvailableAssistants(final);
+    setSelectedAssistants(prev => prev.filter(id => final.some(a => a.id === id)));
+  }, [activeDeptId, activeSubDeptId, unifiedAssistants, activeSubDepartments]);
 
   const effectiveOfficerIds = useMemo(() => {
     const ids = new Set(selectedOfficers);
@@ -396,9 +494,27 @@ export default function ReportsPage() {
       if (activeSubClassId !== 'all' && task.subclass_id?.toString() !== activeSubClassId) return false;
 
       if (effectiveOfficerIds.length > 0) {
-        const oid = task.officer_id?.toString();
-        const aid = task.assigned_to?.toString();
-        if (!(oid && effectiveOfficerIds.includes(oid)) && !(aid && effectiveOfficerIds.includes(aid))) return false;
+        const officer = task.participants_details?.find((p: any) =>
+          p.role && Array.isArray(p.role) ? p.role.includes('officer') : p.role === 'officer'
+        );
+        const oid = officer?.id?.toString();
+        if (!oid || !effectiveOfficerIds.includes(oid)) return false;
+      }
+
+      if (selectedManagers.length > 0) {
+        const manager = task.participants_details?.find((p: any) =>
+          p.role && Array.isArray(p.role) ? p.role.includes('task_manager') : p.role === 'task_manager'
+        );
+        const mid = manager?.id?.toString();
+        if (!mid || !selectedManagers.includes(mid)) return false;
+      }
+
+      if (selectedAssistants.length > 0) {
+        const assistant = task.participants_details?.find((p: any) =>
+          p.role && Array.isArray(p.role) ? p.role.includes('task_assistant') : p.role === 'task_assistant'
+        );
+        const aid = assistant?.id?.toString();
+        if (!aid || !selectedAssistants.includes(aid)) return false;
       }
 
       const isWriteUp = task.status === 'write_up_completed';
@@ -411,7 +527,7 @@ export default function ReportsPage() {
       if (activeStatus === 'endorsed' && !isEndorsed) return false;
       return true;
     });
-  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, activeStatus, effectiveOfficerIds]);
+  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, activeStatus, effectiveOfficerIds, selectedManagers, selectedAssistants]);
 
   const searchedTasks = useMemo(() => {
     if (!searchQuery) return filteredTasks;
@@ -971,7 +1087,8 @@ export default function ReportsPage() {
         getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper,
         (t: any) => renderImmigrationStatusCell(t, getEnhancedImmigrationStatusWrapper, new Set(), () => { }),
         (t: any) => renderCurrentStageStatusCell(t, getCurrentStageStatusWrapper),
-        () => { }, () => { }, () => { }
+        () => { }, () => { }, () => { },
+        unifiedOfficers
       );
     }
 
@@ -981,7 +1098,7 @@ export default function ReportsPage() {
     enhancedTasksData, taskDependants, showTimeStatuses,
     checkStageApplicableForTask, isDocumentApplicable, getDocumentForTaskStage,
     getStaffName, getTaskHierarchy, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper,
-    getCurrentStageTracking, getTaskInitiatedDate
+    getCurrentStageTracking, getTaskInitiatedDate, unifiedOfficers
   ]);
 
   const getExportCellValue = useCallback((task: any, col: any): string => {
@@ -1341,7 +1458,7 @@ export default function ReportsPage() {
                               {availableOfficers.map(o => (
                                 <div key={o.id} className="flex items-center space-x-2.5 p-1.5 hover:bg-slate-50 rounded-md transition-colors cursor-pointer" onClick={() => { setSelectedOfficers(prev => prev.includes(o.id) ? prev.filter(id => id !== o.id) : [...prev, o.id]); }}>
                                   <Checkbox checked={selectedOfficers.includes(o.id)} className="pointer-events-none" />
-                                  <label className="text-sm font-medium text-slate-700 cursor-pointer">{o.name}</label>
+                                  <label className="text-sm font-medium text-slate-700 cursor-pointer">{o.full_name || o.name || o.displayName || `Officer ${o.id}`}</label>
                                 </div>
                               ))}
                             </div>
@@ -1354,11 +1471,73 @@ export default function ReportsPage() {
                         )}
                       </DropdownMenuContent>
                     </DropdownMenu>
+
+                    <DropdownMenu open={isManagerDropdownOpen} onOpenChange={setIsManagerDropdownOpen}>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" disabled={!activeDeptId} className={cn("h-9 text-sm font-medium", selectedManagers.length > 0 ? "bg-purple-50 text-purple-700 border-purple-200" : "bg-white text-slate-700 border-slate-200")}>
+                          <Briefcase className="mr-2 h-4 w-4" />
+                          {selectedManagers.length > 0 ? `${selectedManagers.length} Selected Managers` : "Filter Managers"}
+                          <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent className="w-64 p-2 z-[100] border-slate-200 shadow-xl max-h-80 overflow-y-auto">
+                        {availableManagers.length === 0 ? (
+                          <div className="p-3 text-sm text-slate-500 text-center italic">No managers assigned</div>
+                        ) : (
+                          <>
+                            <div className="space-y-1">
+                              {availableManagers.map(m => (
+                                <div key={m.id} className="flex items-center space-x-2.5 p-1.5 hover:bg-slate-50 rounded-md transition-colors cursor-pointer" onClick={() => { setSelectedManagers(prev => prev.includes(m.id) ? prev.filter(id => id !== m.id) : [...prev, m.id]); }}>
+                                  <Checkbox checked={selectedManagers.includes(m.id)} className="pointer-events-none" />
+                                  <label className="text-sm font-medium text-slate-700 cursor-pointer">{m.full_name || m.name || m.displayName || `Manager ${m.id}`}</label>
+                                </div>
+                              ))}
+                            </div>
+                            {selectedManagers.length > 0 && (
+                              <div className="border-t border-slate-100 mt-2 pt-2">
+                                <Button variant="ghost" size="sm" className="w-full text-sm text-slate-500 hover:text-slate-800" onClick={() => { setSelectedManagers([]); }}>Clear Selection</Button>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+
+                    <DropdownMenu open={isAssistantDropdownOpen} onOpenChange={setIsAssistantDropdownOpen}>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" disabled={!activeDeptId} className={cn("h-9 text-sm font-medium", selectedAssistants.length > 0 ? "bg-green-50 text-green-700 border-green-200" : "bg-white text-slate-700 border-slate-200")}>
+                          <User className="mr-2 h-4 w-4" />
+                          {selectedAssistants.length > 0 ? `${selectedAssistants.length} Selected Assistants` : "Filter Assistants"}
+                          <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent className="w-64 p-2 z-[100] border-slate-200 shadow-xl max-h-80 overflow-y-auto">
+                        {availableAssistants.length === 0 ? (
+                          <div className="p-3 text-sm text-slate-500 text-center italic">No assistants assigned</div>
+                        ) : (
+                          <>
+                            <div className="space-y-1">
+                              {availableAssistants.map(a => (
+                                <div key={a.id} className="flex items-center space-x-2.5 p-1.5 hover:bg-slate-50 rounded-md transition-colors cursor-pointer" onClick={() => { setSelectedAssistants(prev => prev.includes(a.id) ? prev.filter(id => id !== a.id) : [...prev, a.id]); }}>
+                                  <Checkbox checked={selectedAssistants.includes(a.id)} className="pointer-events-none" />
+                                  <label className="text-sm font-medium text-slate-700 cursor-pointer">{a.full_name || a.name || a.displayName || `Assistant ${a.id}`}</label>
+                                </div>
+                              ))}
+                            </div>
+                            {selectedAssistants.length > 0 && (
+                              <div className="border-t border-slate-100 mt-2 pt-2">
+                                <Button variant="ghost" size="sm" className="w-full text-sm text-slate-500 hover:text-slate-800" onClick={() => { setSelectedAssistants([]); }}>Clear Selection</Button>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 )}
 
                 {/* Wrapper Card */}
-                <Card className="bg-white/80 backdrop-blur-sm shadow-lg border-slate-100 flex flex-col h-[calc(100vh-280px)]">
+                <Card className="bg-white/80 backdrop-blur-sm shadow-lg border-slate-100 flex flex-col h-[calc(100vh-200px)]">
                   <CardHeader className="border-b border-slate-100 bg-white shrink-0 pb-3">
                     <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                       <div>
@@ -1460,15 +1639,32 @@ export default function ReportsPage() {
                           handleSort={handleSort}
                           toggleStageColumns={toggleStageColumns}
                           isStageApplicableToCurrentFilter={isStageApplicableToCurrentFilter}
+                          userData={{
+                            officers: unifiedOfficers,
+                            managers: unifiedManagers,
+                            assistants: unifiedAssistants,
+                            allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants]
+                          }}
+                          departments={departments}
+                          getStaffFromParticipants={getStaffFromParticipants}
                         />
                       ) : (
                         <TransposedReportView
-                          allTasks={filteredByNARows}
+                          paginatedTasks={filteredByNARows}
                           transposedRows={transposedRows}
+                          currentPage={1}
+                          itemsPerPage={filteredByNARows.length}
                           expandedSections={expandedSections}
                           renderCellValue={renderCellValue}
-                          safeRender={safeRender}
                           toggleSection={toggleSection}
+                          userData={{
+                            officers: unifiedOfficers,
+                            managers: unifiedManagers,
+                            assistants: unifiedAssistants,
+                            allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants]
+                          }}
+                          departments={departments}
+                          getStaffFromParticipants={getStaffFromParticipants}
                         />
                       )}
                     </div>

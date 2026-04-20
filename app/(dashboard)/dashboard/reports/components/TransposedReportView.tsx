@@ -5,12 +5,218 @@ import { Table, TableBody, TableCell, TableRow, TableHeader } from "@/components
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Minus, Briefcase, FileText, AlertTriangle, Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Plus, Minus, Briefcase, FileText, AlertTriangle, Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Building, Layers, Shield, User as UserIcon, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { userService, getOfficerDisplayName } from "@/lib/shared-user-assignment-service";
 
 const DATA_COLUMN_WIDTH = "w-[150px]";
 const INDEX_WIDTH = "w-14 min-w-14 max-w-14";
 const LABEL_WIDTH = "w-[280px] min-w-[280px] max-w-[280px]";
+
+// Helper function to group role assignments by hierarchy
+const groupAssignmentsByHierarchy = (roleAssignments: any[]) => {
+  return {
+    departments: roleAssignments.filter((a: any) => a.department_id && !a.subdepartment_id),
+    subDepartments: roleAssignments.filter((a: any) => a.subdepartment_id && !a.class_id),
+    classes: roleAssignments.filter((a: any) => a.class_id)
+  };
+};
+
+// --- Role Assignments Display Component for Popover ---
+function RoleAssignmentsDisplay({ officer, departments }: { officer: any; departments: any[] }) {
+  if (!officer.roleAssignments || officer.roleAssignments.length === 0) {
+    return <div className="text-xs text-slate-500 italic">No specific assignments</div>;
+  }
+
+  const grouped = groupAssignmentsByHierarchy(officer.roleAssignments);
+  const hasAssignments = Object.values(grouped).some((list: any) => list && list.length > 0);
+
+  if (!hasAssignments) {
+    return <div className="text-xs text-slate-500 italic">No specific assignments</div>;
+  }
+
+  const formatJobLevel = (assignment: any, departments: any[]) => {
+    if (!assignment) return '';
+    const dept = departments.find((d: any) => d.id === assignment.department_id);
+    const subdept = dept?.tm_subdepartments?.find((s: any) => s.id === assignment.subdepartment_id);
+    const cls = subdept?.classes?.find((c: any) => c.id === assignment.class_id);
+
+    if (cls) return `${dept?.name || ''} > ${subdept?.name || ''} > ${cls.name}`;
+    if (subdept) return `${dept?.name || ''} > ${subdept.name}`;
+    if (dept) return dept.name;
+    return '';
+  };
+
+  return (
+    <div className="space-y-1">
+      {grouped.departments.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {grouped.departments.map((assignment: any, idx: number) => (
+            <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-50 text-blue-700 border-blue-200">
+              <Building className="h-2.5 w-2.5 mr-1" />{formatJobLevel(assignment, departments)}
+            </Badge>
+          ))}
+        </div>
+      )}
+      {grouped.subDepartments.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {grouped.subDepartments.map((assignment: any, idx: number) => (
+            <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0 bg-indigo-50 text-indigo-700 border-indigo-200">
+              <Layers className="h-2.5 w-2.5 mr-1" />{formatJobLevel(assignment, departments)}
+            </Badge>
+          ))}
+        </div>
+      )}
+      {grouped.classes.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {grouped.classes.map((assignment: any, idx: number) => (
+            <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0 bg-violet-50 text-violet-700 border-violet-200">
+              <Layers className="h-2.5 w-2.5 mr-1" />{formatJobLevel(assignment, departments)}
+            </Badge>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// User Details Popover 
+function UserDetailsPopover({ userId, users, officers = [], role, children, departments = [] }: {
+  userId: string,
+  users: any[],
+  officers?: any[],
+  departments?: any[],
+  role: 'manager' | 'assistant' | 'officer',
+  children: React.ReactNode
+}) {
+  const officer = role === 'officer' ? officers.find((o: any) => o.id === userId) : null;
+  const user = role === 'officer'
+    ? (officer ? { name: getOfficerDisplayName(officer), email: officer.email } : null)
+    : users.find((u: any) => u.id === userId);
+
+  if (!user) return <span className="text-slate-400">{children}</span>;
+
+  const roleIcons = {
+    manager: <UserIcon className="h-5 w-5" />,
+    assistant: <Users className="h-5 w-5" />,
+    officer: <Shield className="h-5 w-5" />
+  };
+
+  const roleColors = {
+    manager: 'bg-emerald-100 text-emerald-700',
+    assistant: 'bg-purple-100 text-purple-700',
+    officer: 'bg-blue-100 text-blue-700'
+  };
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <div className="cursor-pointer hover:opacity-80 transition-opacity inline-block w-full">{children}</div>
+      </PopoverTrigger>
+      <PopoverContent className="w-80 p-4 shadow-xl border-slate-200" align="start">
+        <div className="space-y-4">
+          <div className="flex items-center space-x-3">
+            <div className={`flex h-10 w-10 items-center justify-center rounded-full ${roleColors[role]}`}>
+              {roleIcons[role]}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-bold text-slate-900 text-sm truncate">{user.name || 'No name'}</p>
+              <p className="text-[11px] text-slate-500 truncate">{user.email}</p>
+              <Badge variant="outline" className="mt-1 capitalize text-[9px] font-semibold px-1.5">{role}</Badge>
+            </div>
+          </div>
+          {role === 'officer' && officer && (
+            <div className="space-y-2 pt-2 border-t border-slate-100">
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Role Assignments</p>
+              <RoleAssignmentsDisplay officer={officer} departments={departments} />
+            </div>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// Enhanced Role Assignment Display Component
+function RoleAssignmentDisplay({ userIds, users, officers, departments, role, emptyLabel = 'None assigned' }: any) {
+  if (!userIds || userIds.length === 0) {
+    return <span className="text-sm text-slate-400 italic">{emptyLabel}</span>;
+  }
+
+  const getRoleInfo = (r: string) => {
+    switch (r) {
+      case 'officer': return { color: 'blue', icon: Shield, label: 'Officer' };
+      case 'manager': return { color: 'emerald', icon: UserIcon, label: 'Manager' };
+      case 'assistant': return { color: 'purple', icon: Users, label: 'Assistant' };
+      default: return { color: 'slate', icon: UserIcon, label: role };
+    }
+  };
+
+  const getName = (id: string) => {
+    if (role === 'officer') {
+      const off = officers.find((o: any) => o.id === id);
+      return off ? getOfficerDisplayName(off) : 'Unknown';
+    }
+    const u = users.find((u: any) => u.id === id);
+    return u ? (u.displayName || u.name) : 'Unknown';
+  };
+
+  const roleInfo = getRoleInfo(role);
+  const Icon = roleInfo.icon;
+
+  // If only 1-2 people, show them directly
+  if (userIds.length <= 2) {
+    return (
+      <div className="space-y-1">
+        {userIds.map((id: string) => (
+          <UserDetailsPopover key={id} userId={id} users={users} officers={officers} departments={departments} role={role}>
+            <div className="flex items-center gap-2 p-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer">
+              <Icon className={`h-4 w-4 text-${roleInfo.color}-600`} />
+              <span className="text-sm font-medium text-slate-700">{getName(id)}</span>
+            </div>
+          </UserDetailsPopover>
+        ))}
+      </div>
+    );
+  }
+
+  // If 3+ people, show summary with popover
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <div className={`flex items-center gap-2 p-2 rounded-lg bg-${roleInfo.color}-50 hover:bg-${roleInfo.color}-100 transition-colors cursor-pointer border border-${roleInfo.color}-200`}>
+          <Icon className={`h-4 w-4 text-${roleInfo.color}-600`} />
+          <span className={`text-sm font-semibold text-${roleInfo.color}-700`}>{userIds.length} {roleInfo.label}s</span>
+          <span className={`text-xs text-${roleInfo.color}-600`}>({userIds.slice(0, 2).map(getName).join(', ')})</span>
+        </div>
+      </PopoverTrigger>
+      <PopoverContent className="w-80 p-4 shadow-xl border-slate-200" align="start">
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 pb-2 border-b border-slate-200">
+            <Icon className={`h-5 w-5 text-${roleInfo.color}-600`} />
+            <h4 className="font-semibold text-slate-900">{userIds.length} Assigned {roleInfo.label}s</h4>
+          </div>
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {userIds.map((id: string) => (
+              <UserDetailsPopover key={id} userId={id} users={users} officers={officers} departments={departments} role={role}>
+                <div className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer">
+                  <div className={`flex h-8 w-8 items-center justify-center rounded-full bg-${roleInfo.color}-100`}>
+                    <Icon className={`h-4 w-4 text-${roleInfo.color}-700`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-slate-900 truncate">{getName(id)}</p>
+                    <p className="text-xs text-slate-500">{roleInfo.label}</p>
+                  </div>
+                </div>
+              </UserDetailsPopover>
+            ))}
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 // --- Safe Rendering Function (Matching EnhancedTable) ---
 const safeRender = (content: any) => {
@@ -50,11 +256,19 @@ interface TransposedReportViewProps {
   currentPage: number;
   itemsPerPage: number;
   expandedSections: Set<string>;
-  renderCellValue: (task: any, col: any) => React.ReactNode;
-  toggleSection: (id: string) => void;
+  renderCellValue: (task: any, col: any) => any;
+  toggleSection: (section: string) => void;
   loading?: boolean;
-  error?: string | null;
+  error?: any;
   initialColumnsPerPage?: number;
+  userData?: {
+    officers: any[];
+    managers: any[];
+    assistants: any[];
+    allUsers: any[];
+  };
+  departments?: any[];
+  getStaffFromParticipants?: (task: any, role: string) => string | null;
 }
 
 export function TransposedReportView({
@@ -67,7 +281,10 @@ export function TransposedReportView({
   toggleSection,
   loading = false,
   error = null,
-  initialColumnsPerPage = 10
+  initialColumnsPerPage = 10,
+  userData = { officers: [], managers: [], assistants: [], allUsers: [] },
+  departments = [],
+  getStaffFromParticipants
 }: TransposedReportViewProps) {
 
   // Column pagination state
@@ -104,6 +321,38 @@ export function TransposedReportView({
   const bodyRows = transposedRows.filter(row => !isHeaderRow(row));
 
   let dataRowCounter = 1;
+
+  // Helper to detect role columns and render appropriately
+  const isRoleColumn = (col: any) => {
+    const colId = col.id?.toLowerCase() || col.field?.toLowerCase() || '';
+    return colId.includes('officer') || colId.includes('manager') || colId.includes('assistant');
+  };
+
+  const getRoleFromColumn = (col: any) => {
+    const colId = col.id?.toLowerCase() || col.field?.toLowerCase() || '';
+    if (colId.includes('officer')) return 'officer';
+    if (colId.includes('manager')) return 'task_manager';
+    if (colId.includes('assistant')) return 'task_assistant';
+    return null;
+  };
+
+  // Enhanced render function that handles role columns
+  const enhancedRenderCellValue = (task: any, col: any) => {
+    const role = getRoleFromColumn(col);
+
+    if (!role || !getStaffFromParticipants) {
+      return safeRender(renderCellValue(task, col));
+    }
+
+    // Use getStaffFromParticipants to extract staff name from participants_details
+    const staffName = getStaffFromParticipants(task, role);
+
+    if (!staffName) {
+      return <span className="text-sm text-slate-400 italic">None assigned</span>;
+    }
+
+    return <span className="text-sm text-slate-700">{staffName}</span>;
+  };
 
   return (
     <div className="space-y-4">
@@ -216,7 +465,7 @@ export function TransposedReportView({
 
                 {paginatedColumns.map((task) => (
                   <TableCell key={`${row.id}-${task.id}`} className={`text-center text-sm py-1 px-2 align-middle bg-blue-500 text-white border border-gray-100 ${DATA_COLUMN_WIDTH} ${task.type === 'dependant' ? 'bg-orange-500' : ''}`}>
-                    {safeRender(renderCellValue(task, row))}
+                    {safeRender(enhancedRenderCellValue(task, row))}
                   </TableCell>
                 ))}
 
@@ -315,7 +564,7 @@ export function TransposedReportView({
                   {paginatedColumns.map(task => (
                     <TableCell key={`${row.id}-${task.id}`} className={`text-center text-sm py-1 px-2 align-middle border-l-4 border-t border-b border-gray-100 ${DATA_COLUMN_WIDTH} ${task.type === 'dependant' ? 'bg-orange-50/50' : ''}`}>
                       <div className="w-full mx-auto flex items-center justify-center min-h-[24px]">
-                        {safeRender(renderCellValue(task, row))}
+                        {safeRender(enhancedRenderCellValue(task, row))}
                       </div>
                     </TableCell>
                   ))}

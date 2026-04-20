@@ -8,7 +8,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { FileText, Plus, Minus, Loader2, AlertTriangle, Zap, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileIcon, Eye, EyeOff, Pencil, X } from "lucide-react"
 import { DeleteConfirmationDialog } from "../components/DeleteConfirmationDialog"
 import { EnquiryDialog } from "../components/EnquiryDialog"
-import { CancelConfirmationDialog } from "../components/CancelConfirmationDialog"
 import { userService, getOfficerDisplayName } from "@/lib/shared-user-assignment-service"
 
 // --- Helper Functions & Constants ---
@@ -218,8 +217,6 @@ const MemoizedTableRow = React.memo(({
   toggleDocumentExpansion,
   onDeleteTask,
   setTaskToDelete,
-  onCancelTask,
-  setTaskToCancel,
   processedDocuments,
   kycDocuments,
   renderCellContent
@@ -261,11 +258,6 @@ const MemoizedTableRow = React.memo(({
                 {(onEditTask || true) && (
                   <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-400 hover:text-blue-600 hover:bg-blue-50" onClick={(e) => { e.stopPropagation(); setEditingTask(row.task); setEditDialogOpen(true); }}>
                     <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                )}
-                {onCancelTask && (
-                  <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-400 hover:text-orange-600 hover:bg-orange-50" onClick={(e) => { e.stopPropagation(); setTaskToCancel(row.task); setCancelDialogOpen(true); }}>
-                    <X className="h-3.5 w-3.5" />
                   </Button>
                 )}
                 {onDeleteTask && (
@@ -332,7 +324,6 @@ interface EnhancedTableProps {
   toggleDocumentExpansion: (taskId: string, documentId: string) => void;
   onDeleteTask?: (task: any) => void;
   onEditTask?: (task: any) => void;
-  onCancelTask?: (task: any, reason: string) => void;
   users?: any[];
   officers?: any[];
   initialColumnsPerPage?: number;
@@ -360,7 +351,6 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   toggleDocumentExpansion,
   onDeleteTask,
   onEditTask,
-  onCancelTask,
   users = [],
   officers = [],
   initialColumnsPerPage = 10,  // Set default render to 10
@@ -369,6 +359,14 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   enhancedTasksData = new Map(),
 }) => {
   const didLogRef = useRef(false);
+
+  // Create a wrapper for getCellContent that includes cancellation parameters using EnhancedTable's own state
+  const getCellContentWithCancel = useCallback((task: any, headerId: string) => {
+    // Since getCellContent is already fully parameterized from DepartmentTasksManager,
+    // we don't need to add cancellation parameters here - they're already included
+    return getCellContent(task, headerId);
+  }, [getCellContent]);
+
   useEffect(() => {
     if (DEBUG && !didLogRef.current) {
       didLogRef.current = true;
@@ -382,8 +380,6 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<any>(null);
   const [showNAStages, setShowNAStages] = useState(false);
-  const [taskToCancel, setTaskToCancel] = useState<any>(null);
-  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
 
   // Memoized derived data
   const processedDocuments = useMemo(() => processDocumentsForTasks(tasks, allDocuments), [tasks, allDocuments]);
@@ -491,18 +487,6 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
     setTaskToDelete(null);
   }, [taskToDelete, onDeleteTask]);
 
-  const handleConfirmCancel = useCallback(async (reason: string) => {
-    if (taskToCancel && onCancelTask) {
-      try {
-        await onCancelTask(taskToCancel, reason);
-      } catch (err) {
-        console.error('Error in cancel confirmation:', err);
-      }
-    }
-    setTaskToCancel(null);
-    setCancelDialogOpen(false);
-  }, [taskToCancel, onCancelTask]);
-
   const handleNextPage = useCallback(() => setCurrentPage(prev => Math.min(prev + 1, totalPages)), [totalPages]);
   const handlePreviousPage = useCallback(() => setCurrentPage(prev => Math.max(prev - 1, 1)), []);
   const handleFirstPage = useCallback(() => setCurrentPage(1), []);
@@ -533,19 +517,6 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
         title="Delete Task"
         description="Are you sure you want to delete this task? This action cannot be undone."
         confirmText="Delete Task"
-        loading={loading}
-      />
-
-      <CancelConfirmationDialog
-        open={cancelDialogOpen}
-        onOpenChange={(open) => {
-          setCancelDialogOpen(open);
-          if (!open) setTaskToCancel(null);
-        }}
-        onConfirm={handleConfirmCancel}
-        title="Cancel Task"
-        description="Are you sure you want to cancel this task? Please provide a reason."
-        confirmText="Cancel Task"
         loading={loading}
       />
 
@@ -635,11 +606,11 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
                   {header.label}
                 </TableCell>
 
-                {paginatedHeaderStructure.map((item) => (
+                {paginatedHeaderStructure.map((item, colIndex) => (
                   <React.Fragment key={`header-${header.id}-${item.key}`}>
                     <TableCell colSpan={2} className={`text-center text-sm py-1 px-2 align-middle bg-blue-500 text-white border border-gray-100 w-[150px] ${item.type === 'dependant' ? 'bg-orange-500' : ''}`}>
-                      <div className="flex flex-col items-center">
-                        <TableHeaderCell item={item} header={header} getCellContent={getCellContent} />
+                      <div className="flex flex-col items-center gap-1">
+                        <TableHeaderCell item={item} header={header} getCellContent={getCellContentWithCancel} />
                       </div>
                     </TableCell>
                   </React.Fragment>
@@ -673,8 +644,6 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
                   toggleDocumentExpansion={toggleDocumentExpansion}
                   onDeleteTask={onDeleteTask}
                   setTaskToDelete={setTaskToDelete}
-                  onCancelTask={onCancelTask}
-                  setTaskToCancel={setTaskToCancel}
                   processedDocuments={processedDocuments}
                   kycDocuments={kycDocuments}
                   renderCellContent={renderCellContent}

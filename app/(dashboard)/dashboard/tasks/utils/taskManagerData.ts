@@ -148,67 +148,38 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
     // Process the data to ensure consistent structure
     const processedTasks = (data || []).map(task => {
       const jobLevel = task.job_level || {};
-
-      // Log specifically for task 1402
-      if (task.id === 1402) {
-        console.log('[taskManagerData] Processing task 1402');
-        console.log('[taskManagerData] task.participants_details:', task.participants_details);
-      }
-
-      // Extract information from participants_details
       const officer = task.participants_details?.find((p: any) => p.role?.includes('officer'));
       const taskManager = task.participants_details?.find((p: any) => p.role?.includes('task_manager'));
       const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
 
-      if (task.id === 1402) {
-        console.log('[taskManagerData] Extracted officer:', officer);
-        console.log('[taskManagerData] Extracted taskManager:', taskManager);
-        console.log('[taskManagerData] Extracted company:', company);
-      }
-
       const processedTask: Task = {
         ...task,
-        // Extract applicant name from applicant_details
         applicant_name: task.applicant_details?.name || task.applicant_name || '',
-        // Extract company name from participants_details
         company_name: company?.name || '',
-        // Use job_level for hierarchy data
         department_id: jobLevel.department_id,
         subdepartment_id: jobLevel.subdepartment_id,
         class_id: jobLevel.class_id,
         subclass_id: jobLevel.subclass_id,
-        // Ensure job_level has the correct structure
-        job_level: {
+          job_level: {
           level: jobLevel.level || 0,
           class_id: jobLevel.class_id || '',
           subclass_id: jobLevel.subclass_id || null,
           department_id: jobLevel.department_id,
           subdepartment_id: jobLevel.subdepartment_id
         },
-        // Extract officer from participants_details
         officer: officer ? {
           id: officer.id,
           name: officer.name,
           email: officer.email || '',
           phone: officer.phone || ''
         } : undefined,
-        // Extract task manager from participants_details
         task_manager: taskManager ? {
           id: taskManager.id,
           name: taskManager.name,
           email: taskManager.email || '',
           phone: taskManager.phone || ''
         } : undefined
-      };
-
-      // Handle mock dependants for demonstration
-      if (task.id === 2 && task.dependant_member?.length > 0) {
-        processedTask.dependnats_members = [
-          { id: 766, name: 'Pooja J Suthar', relationship: 'wife', nationality: 'Indian', age: 40 },
-          { id: 765, name: 'Tisha J Suthar', relationship: 'daughter', nationality: 'Indian', age: 15 }
-        ];
-      }
-
+      };    
       return processedTask;
     });
 

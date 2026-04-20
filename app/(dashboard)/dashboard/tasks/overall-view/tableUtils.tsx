@@ -2,7 +2,7 @@
 "use client"
 
 import { format, isAfter, isEqual, isValid, parse, startOfToday } from 'date-fns';
-import { Plus, Minus, LinkIcon } from "lucide-react";
+import { Plus, Minus, LinkIcon, X, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import React, { useMemo, useCallback, useEffect, useState } from "react";
@@ -354,16 +354,7 @@ export const getStaffFromParticipants = (
   departments?: any[],
   officers?: any[]
 ): string | null => {
-  // Log specifically for task 1402
-  if (task?.id === 1402) {
-    console.log('[getStaffFromParticipants] Task 1402 - role:', role);
-    console.log('[getStaffFromParticipants] Task 1402 - participants_details:', task.participants_details);
-  }
-
   if (!task?.participants_details || !Array.isArray(task.participants_details)) {
-    if (task?.id === 1402) {
-      console.log('[getStaffFromParticipants] Task 1402 - No participants_details or not an array');
-    }
     return null;
   }
 
@@ -371,28 +362,12 @@ export const getStaffFromParticipants = (
     p.role && Array.isArray(p.role) ? p.role.includes(role) : p.role === role
   );
 
-  if (task?.id === 1402) {
-    console.log('[getStaffFromParticipants] Task 1402 - Found staff for role', role, ':', staff);
-  }
-
-  // If participant has a valid ID, use their name
   if (staff && staff.id !== null) {
-    // If name is missing, look it up using getStaffNameFn
-    if (staff.name && getStaffNameFn) {
-      const result = staff.name;
-      if (task?.id === 1402) {
-        console.log('[getStaffFromParticipants] Task 1402 - Returning staff.name:', result);
-      }
-      return result;
-    } else if (getStaffNameFn) {
-      // Name is missing, look up by ID
+    if (getStaffNameFn) {
       const lookedUpName = getStaffNameFn(staff.id);
-      if (task?.id === 1402) {
-        console.log('[getStaffFromParticipants] Task 1402 - staff.name missing, looked up by ID:', staff.id, '->', lookedUpName);
-      }
       return lookedUpName;
     }
-    return null;
+    return staff.name || null;
   }
 
   // Fallback: check task's direct ID fields and look up name using getStaffName
@@ -940,6 +915,12 @@ export const getCellContent = (
   toggleDependants: (id: string) => void,
   setLinkingTask: (task: any) => void,
   setIsLinkDialogOpen: (open: boolean) => void,
+  onCancelTask?: (task: any, reason: string) => void,
+  setTaskToCancel?: (task: any) => void,
+  setCancelDialogOpen?: (open: boolean) => void,
+  onUncancelTask?: (task: any) => void,
+  setTaskToUncancel?: (task: any) => void,
+  setUncancelDialogOpen?: (open: boolean) => void,
   officers?: any[]
 ) => {
   const enhancedTask = task?.id ? enhancedTasksData.get(task.id.toString()) || task : task;
@@ -987,6 +968,19 @@ export const getCellContent = (
           <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-blue-100 flex-shrink-0" title="Link source documents" onClick={() => { setLinkingTask(task); setIsLinkDialogOpen(true); }}>
             <LinkIcon className="h-4 w-4" />
           </Button>
+          {task.status === 'cancel' ? (
+            onUncancelTask && setTaskToUncancel && setUncancelDialogOpen && (
+              <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-green-100 flex-shrink-0" title="Reactivate task" onClick={(e) => { e.stopPropagation(); setTaskToUncancel(task); setUncancelDialogOpen(true); }}>
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            )
+          ) : (
+            onCancelTask && setTaskToCancel && setCancelDialogOpen && (
+              <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-orange-100 flex-shrink-0" title="Cancel task" onClick={(e) => { e.stopPropagation(); setTaskToCancel(task); setCancelDialogOpen(true); }}>
+                <X className="h-4 w-4" />
+              </Button>
+            )
+          )}
         </div>
       </div>
     ),

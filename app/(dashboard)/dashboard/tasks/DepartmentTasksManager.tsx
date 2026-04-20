@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertCircle, Plus, Minus, Download, Edit, Trash2, ChevronDown, Send, DownloadCloud, Eye, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, EyeOff, CheckCircle2, XCircle, Briefcase, Loader2 } from "lucide-react"
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog"
+import { CancelConfirmationDialog } from "./components/CancelConfirmationDialog"
 import { EnquiryDialog } from "./components/EnquiryDialog"
 import { format } from 'date-fns';
 import { toast } from "@/lib/hooks/use-toast"
@@ -115,6 +116,10 @@ export default function DepartmentTasksManager({
   const [unifiedAssistants, setUnifiedAssistants] = useState<any[]>([])
   const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
   const [linkingTask, setLinkingTask] = useState<UtilTask | null>(null);
+  const [taskToCancel, setTaskToCancel] = useState<any>(null);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [taskToUncancel, setTaskToUncancel] = useState<any>(null);
+  const [uncancelDialogOpen, setUncancelDialogOpen] = useState(false);
   const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
   const [selectedAutomation, setSelectedAutomation] = useState<any>(null);
   const [isClassSelectionOpen, setIsClassSelectionOpen] = useState(false);
@@ -213,16 +218,6 @@ export default function DepartmentTasksManager({
   const getStaffName = useCallback((userId) => {
     if (!userId) return '';
     const userIdStr = userId.toString();
-
-    // Debug log for task 1402
-    if (userIdStr === 'a5f70cf6-b3c6-4c4d-ad16-a53979c2f941' || userIdStr === '339084a1-704e-4e0f-ad58-27f7d1dafaa1') {
-      console.log('[getStaffName] Looking up UUID:', userIdStr);
-      console.log('[getStaffName] unifiedOfficers count:', unifiedOfficers.length);
-      console.log('[getStaffName] unifiedManagers count:', unifiedManagers.length);
-      console.log('[getStaffName] unifiedAssistants count:', unifiedAssistants.length);
-    }
-
-    // First check unified user data (same as EnquiryDialog) - this has UUIDs with names
     const unifiedOfficer = unifiedOfficers.find(o => o.id === userIdStr);
     if (unifiedOfficer) {
       return unifiedOfficer.full_name || unifiedOfficer.name || unifiedOfficer.displayName || `Officer ${userId}`;
@@ -274,11 +269,8 @@ export default function DepartmentTasksManager({
       return [];
     }
 
-    // Get task's class and subdepartment IDs for comparison
     const taskClassId = task.class_id?.toString();
     const taskSubdeptId = task.subdepartment?.id?.toString() || task.subdepartment_id?.toString();
-
-    // Handle both single document and array of documents
     const documentRefs = Array.isArray(linkedDocumentData)
       ? linkedDocumentData
       : [linkedDocumentData];
@@ -287,13 +279,8 @@ export default function DepartmentTasksManager({
       .map(ref => {
         const documentId = typeof ref === 'string' ? ref : ref.id;
         const doc = allDocuments.find(doc => doc.id.toString() === documentId.toString());
-
         if (!doc) return null;
-
-        // For non-special documents, always include them
         if (!doc.isSpecial) return doc;
-
-        // For special documents, check target entities
         if (Array.isArray(doc.targetEntities) && doc.targetEntities.length > 0) {
           const isApplicable = doc.targetEntities.some(entity => {
             const classMatch = !entity.class_id || entity.class_id.toString() === taskClassId;
@@ -303,8 +290,6 @@ export default function DepartmentTasksManager({
 
           return isApplicable ? doc : null;
         }
-
-        // For backward compatibility, include the document if no target entities are defined
         return doc;
       })
       .filter((doc): doc is Document => !!doc);
@@ -315,19 +300,10 @@ export default function DepartmentTasksManager({
   // Helper function to fetch officers using unified user assignment service
   const fetchOfficersFromApi = useCallback(async () => {
     try {
-      console.log('DepartmentTasksManager: Fetching unified user data...');
       const unifiedUserData = await userService.getAllUserData({ payrollAccess: true }, departments);
-
-      console.log('DepartmentTasksManager: Received unified userData:', {
-        allUsersCount: unifiedUserData.allUsers?.length || 0,
-        officersCount: unifiedUserData.officers?.length || 0,
-        managersCount: unifiedUserData.managers?.length || 0,
-        assistantsCount: unifiedUserData.assistants?.length || 0
-      });
-
       const officerArray = unifiedUserData.officers;
       setRealOfficers(officerArray);
-      setUserData(unifiedUserData); // Store complete userData for dialogs
+      setUserData(unifiedUserData);
       return officerArray;
     } catch (error) {
       console.error('Error fetching officers from API:', error);
@@ -425,28 +401,17 @@ export default function DepartmentTasksManager({
 
   const loadUserAssignmentData = useCallback(async () => {
     try {
-      // Use unified user assignment service (same as departments page and EnquiryDialog)
       const unifiedUserData = await userService.getAllUserData({ payrollAccess: true }, departments);
-
-      // Create a map of all users for backward compatibility
       const usersMap = new Map()
       if (unifiedUserData?.allUsers) {
         unifiedUserData.allUsers.forEach(user => {
           usersMap.set(parseInt(user.id), user)
         })
       }
-
       setTmUsers(usersMap)
-
-      // Set unified user data (same as EnquiryDialog) for UUID-to-name mapping
       setUnifiedOfficers(unifiedUserData.officers || [])
       setUnifiedManagers(unifiedUserData.managers || [])
       setUnifiedAssistants(unifiedUserData.assistants || [])
-
-      // Debug: Log what unified user data contains
-      console.log('[DepartmentTasksManager] Unified officers sample:', (unifiedUserData.officers || []).slice(0, 3).map(o => ({ id: o.id, name: o.full_name || o.name })));
-      console.log('[DepartmentTasksManager] Unified managers sample:', (unifiedUserData.managers || []).slice(0, 3).map(m => ({ id: m.id, name: m.full_name || m.name })));
-
       return { usersMap, userAssignmentData: unifiedUserData }
     } catch (error) {
       console.error('Error fetching user assignment data:', error)
@@ -803,10 +768,13 @@ export default function DepartmentTasksManager({
     const currentDept = departments.find(d => d.id.toString() === activeDepartmentTab)
     if (!currentDept) return []
 
+    // Map 'cancelled' to 'cancel' for proper filtering
+    const statusToFilter = status === 'cancelled' ? 'cancel' : status;
+
     let filteredTasks = tasks.filter(task =>
       task &&
       task.department_id?.toString() === currentDept.id.toString() &&
-      (!status || task.status === status)
+      (!statusToFilter || task.status === statusToFilter)
     )
 
     if (activeSubdepartmentTab) {
@@ -2005,7 +1973,8 @@ export default function DepartmentTasksManager({
           cancellation_details: {
             reason: reason,
             cancelled_at: new Date().toISOString(),
-            cancelled_by: userData?.user?.id || null
+            cancelled_by: userData?.user?.id || null,
+            previous_status: task.status || 'pending'
           },
           updated_at: new Date().toISOString()
         })
@@ -2023,7 +1992,8 @@ export default function DepartmentTasksManager({
               cancellation_details: {
                 reason: reason,
                 cancelled_at: new Date().toISOString(),
-                cancelled_by: userData?.user?.id || null
+                cancelled_by: userData?.user?.id || null,
+                previous_status: task.status || 'pending'
               },
               updated_at: new Date().toISOString()
             }
@@ -2050,6 +2020,53 @@ export default function DepartmentTasksManager({
       });
     }
   }
+
+  const handleUncancelTask = async (task: any) => {
+    try {
+      const previousStatus = task.cancellation_details?.previous_status || 'pending';
+
+      const { error } = await supabase
+        .from('tm_tasks')
+        .update({
+          status: previousStatus,
+          cancellation_details: null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', task.id);
+
+      if (error) throw error;
+
+      // Update tasks list
+      setTasks(prevTasks =>
+        prevTasks.map(t =>
+          t.id === task.id
+            ? {
+              ...t,
+              status: previousStatus,
+              cancellation_details: null,
+              updated_at: new Date().toISOString()
+            }
+            : t
+        )
+      );
+
+      // Clear cache and reload
+      clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
+      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true);
+
+      toast({
+        title: "Task reactivated successfully",
+        description: "The task has been restored to its previous status."
+      });
+    } catch (err) {
+      console.error('Error reactivating task:', err);
+      toast({
+        title: "Error",
+        description: "Failed to reactivate task. Please try again.",
+        variant: "destructive"
+      });
+    }
+  };
 
   const handleEnquiryCreated = useCallback(async (newEnquiry: any) => {
     try {
@@ -2454,6 +2471,12 @@ export default function DepartmentTasksManager({
       },
       setLinkingTask,
       setIsLinkDialogOpen,
+      handleCancelTask,
+      setTaskToCancel,
+      setCancelDialogOpen,
+      handleUncancelTask,
+      setTaskToUncancel,
+      setUncancelDialogOpen,
       realOfficers
     );
   }, [
@@ -2471,7 +2494,13 @@ export default function DepartmentTasksManager({
     toggleImmigrationStatusExpansion,
     toggleDependantsExpansion,
     setLinkingTask,
-    setIsLinkDialogOpen
+    setIsLinkDialogOpen,
+    handleCancelTask,
+    setTaskToCancel,
+    setCancelDialogOpen,
+    handleUncancelTask,
+    setTaskToUncancel,
+    setUncancelDialogOpen
   ]);
 
   const requestSort = (key: string) => {
@@ -2859,8 +2888,6 @@ export default function DepartmentTasksManager({
       setSubdepartmentManagers(staffData.managers);
       setSubdepartmentAssistants(staffData.assistants);
 
-      // If we have an active manager tab but no active assistant tab, and the manager has assistants,
-      // auto-select the first assistant if there's only one
       if (activeManagerTab && !activeAssistantTab) {
         const managerAssistants = getAssistantsForManager(activeManagerTab);
         if (managerAssistants.length === 1) {
@@ -2885,15 +2912,12 @@ export default function DepartmentTasksManager({
     if (activeManagerTab) {
       const managerAssistants = getAssistantsForManager(activeManagerTab);
       setSubdepartmentAssistants(managerAssistants);
-
-      // Auto-select the first assistant if there's only one
       if (managerAssistants.length === 1) {
         setActiveAssistantTab(managerAssistants[0].id);
       } else {
         setActiveAssistantTab(null);
       }
     } else {
-      // Reset to all assistants when no manager is selected
       if (activeSubdepartmentTab && tmUsers.size > 0) {
         const staffData = getActiveStaffFromSubdepartment(activeSubdepartmentTab);
         setSubdepartmentAssistants(staffData.assistants);
@@ -3259,7 +3283,6 @@ export default function DepartmentTasksManager({
                         enhancedTasksData={enhancedTasksData}
                         getCellContent={getCellContentWrapper}
                         renderCellContent={renderCellContent}
-                        toggleSectionExpansion={toggleSectionExpansion}
                         toggleStageExpansion={toggleStageExpansion}
                         toggleDocumentExpansion={toggleDocumentExpansion}
                         getTaskHierarchy={getTaskHierarchy}
@@ -3320,7 +3343,6 @@ export default function DepartmentTasksManager({
                             setIsDeleting(false);
                           }
                         }}
-                        onCancelTask={handleCancelTask}
                       />
                     ) : (
 
@@ -3432,6 +3454,58 @@ export default function DepartmentTasksManager({
           }}
         />
       )}
+
+      <CancelConfirmationDialog
+        open={cancelDialogOpen}
+        onOpenChange={(open) => {
+          setCancelDialogOpen(open);
+          if (!open) setTaskToCancel(null);
+        }}
+        onConfirm={async (reason: string) => {
+          if (taskToCancel && handleCancelTask) {
+            await handleCancelTask(taskToCancel, reason);
+            setCancelDialogOpen(false);
+            setTaskToCancel(null);
+          }
+        }}
+      />
+
+      <Dialog open={uncancelDialogOpen} onOpenChange={(open) => {
+        setUncancelDialogOpen(open);
+        if (!open) setTaskToUncancel(null);
+      }}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="text-green-600">Reactivate Task</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to reactivate this task? It will be restored to its previous status.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setUncancelDialogOpen(false);
+                setTaskToUncancel(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="bg-green-600 hover:bg-green-700"
+              onClick={async () => {
+                if (taskToUncancel) {
+                  await handleUncancelTask(taskToUncancel);
+                  setUncancelDialogOpen(false);
+                  setTaskToUncancel(null);
+                }
+              }}
+            >
+              Reactivate
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ExtractionPreviewDialog
         open={!!previewDocument}
