@@ -16,7 +16,7 @@ export default function Page() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const handleStageStatusSave = useCallback(async (stageId: string, taskId: string, date: string) => {
+  const handleStageStatusSave = useCallback(async (stageId: string, taskId: string, date: string, stages?: any[]) => {
     try {
       // 1. Get current task stages (Lightweight fetch)
       const { data: currentTask, error: fetchError } = await supabase
@@ -45,6 +45,10 @@ export default function Page() {
       const existingStages = currentTask?.stages || {}
       const timestamp = new Date().toISOString()
 
+      // Get the stage configuration to copy officer_ids
+      const stageConfig = stages?.find((s: any) => s.id === stageId)
+      const stageOfficerIds = stageConfig?.officer_ids || []
+
       const updatedStages = {
         ...existingStages,
         [stageId]: {
@@ -52,7 +56,8 @@ export default function Page() {
           date: date, // Using the passed date string directly
           status: newStatus,
           completedAt: timestamp,
-          updatedAt: timestamp
+          updatedAt: timestamp,
+          officer_ids: existingStages[stageId]?.officer_ids || stageOfficerIds
         }
       }
 
@@ -85,7 +90,7 @@ export default function Page() {
 
       throw error
     }
-  }, []) // Removed the dependencies since we don't need them here
+  }, [])
 
   return (
     <>

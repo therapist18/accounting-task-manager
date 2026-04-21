@@ -29,18 +29,18 @@ export interface StageDocument {
     subclass_id?: string | number
     entityName?: string
     targetEntities?: Array<{
-      entityType: 'subdept' | 'class' | 'subclass'
-      subdept_id: number
-      class_id?: string | number
-      subclass_id?: string | number
-      entityName: string
+        entityType: 'subdept' | 'class' | 'subclass'
+        subdept_id: number
+        class_id?: string | number
+        subclass_id?: string | number
+        entityName: string
     }>
     kycId?: string
     linkedKycDocument?: string
     docType?: 'form' | 'normal_doc'
-  }
-  
-  export interface EntityOption {
+}
+
+export interface EntityOption {
     id: string | number
     name: string
     type: 'subdept' | 'class' | 'subclass'
@@ -49,7 +49,7 @@ export interface StageDocument {
     class_id?: string | number
     subclass_id?: string | number
     selected?: boolean
-  }
+}
 
 // Update NewStage interface if needed
 export interface NewStage {
@@ -60,6 +60,7 @@ export interface NewStage {
     hours: number
     minutes: number
     followUp: string
+    officer_ids?: string[] // Multiple officers assigned when follow_up is 'Officer'
     isSpecial: boolean
     timeConfigs: TimeConfig[]
     documents: StageDocument[] // Updated to use the enhanced StageDocument interface
@@ -73,6 +74,7 @@ export interface Stage {
     order_num: number
     estimated_time: number | null
     follow_up?: 'Client' | 'Officer' | 'BCL' | null
+    officer_ids?: string[] // Multiple officers assigned when follow_up is 'Officer'
     isSpecial?: boolean
     timeConfigs?: TimeConfig[]
     documents?: StageDocument[] // Updated to use the enhanced StageDocument interface
@@ -167,6 +169,7 @@ export type StageForm = {
     description: string
     duration: StageDuration
     follow_up: 'Client' | 'Officer' | 'BCL' | 'none'
+    officer_ids?: string[] // Multiple officers assigned when follow_up is 'Officer'
     documents: StageDocument[]
 }
 
@@ -241,6 +244,7 @@ export async function createStage(departmentId: string, stageData: StageForm): P
             order_num: nextOrder,
             estimated_time: stageData.duration,
             follow_up: stageData.follow_up === 'none' ? null : stageData.follow_up as any,
+            officer_ids: stageData.officer_ids || [],
             documents: stageData.documents
         }
 
@@ -286,6 +290,7 @@ export async function updateStage(departmentId: string, stageId: string, stageDa
                     ...(stageData.follow_up !== undefined && {
                         follow_up: stageData.follow_up === 'none' ? null : stageData.follow_up
                     }),
+                    ...(stageData.officer_ids !== undefined && { officer_ids: stageData.officer_ids }),
                     ...(stageData.documents && { documents: stageData.documents })
                 }
             }

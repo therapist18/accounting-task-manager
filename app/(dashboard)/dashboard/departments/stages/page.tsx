@@ -20,6 +20,7 @@ import EntityVisibilityControl, { type EntityVisibilityOption } from "../main-sh
 import * as XLSX from "xlsx"
 import * as ExcelJS from "exceljs"
 import { toast } from "@/lib/hooks/use-toast"
+import { userService, DisplayUser, getOfficerDisplayName } from "@/lib/shared-user-assignment-service"
 
 // Simple UUID generator for client-side use
 const generateId = () => {
@@ -97,6 +98,12 @@ export default function Stages() {
   const [kycDocumentsLoading, setKycDocumentsLoading] = useState(false)
   const [columnVisibility, setColumnVisibility] = useState({ index: true, entity: true, stageName: true, duration: true, followUp: true, status: true, controls: true })
   const [entityVisibility, setEntityVisibility] = useState<Record<string, boolean>>({})
+  const [userData, setUserData] = useState<{
+    officers: DisplayUser[];
+    managers: DisplayUser[];
+    assistants: DisplayUser[];
+    allUsers: DisplayUser[];
+  }>({ officers: [], managers: [], assistants: [], allUsers: [] })
 
   const getEntityAutomation = (stage: Stage, entityKey: string) => {
     if (!stage.documents) return null;
@@ -899,6 +906,14 @@ export default function Stages() {
         // Sort departments by order
         const sortedDepartments = sortByOrder(transformedDepartments)
         setDepartments(sortedDepartments)
+
+        // Load officer data
+        try {
+          const unifiedUserData = await userService.getAllUserData({ payrollAccess: true }, sortedDepartments)
+          setUserData(unifiedUserData)
+        } catch (error) {
+          console.error('Failed to load users:', error)
+        }
 
         if (sortedDepartments.length > 0) {
           setActiveTab(sortedDepartments[0].id)
@@ -1941,7 +1956,10 @@ export default function Stages() {
             const cDur = row.getCell(currentCell++);
             cDur.value = minutesToTimeString(stage.estimated_time);
             const cFol = row.getCell(currentCell++);
-            cFol.value = stage.follow_up || '-';
+            const officerIds = stage.officer_ids && stage.officer_ids.length > 0 ? stage.officer_ids : (stage.officer_id ? [stage.officer_id] : []);
+            cFol.value = stage.follow_up === 'Officer' && officerIds.length > 0
+              ? officerIds.map(id => userData.officers.find(o => o.id === id)?.displayName).filter(Boolean).join(', ') || stage.follow_up
+              : stage.follow_up || '-';
           }
 
           // Dynamic Entity Data
@@ -2120,7 +2138,10 @@ export default function Stages() {
             }
             if (columnVisibility.followUp) {
               const c = row.getCell(currCell++);
-              c.value = stage.follow_up || '-';
+              const officerIds = stage.officer_ids && stage.officer_ids.length > 0 ? stage.officer_ids : (stage.officer_id ? [stage.officer_id] : []);
+              c.value = stage.follow_up === 'Officer' && officerIds.length > 0
+                ? officerIds.map(id => userData.officers.find(o => o.id === id)?.displayName).filter(Boolean).join(', ') || stage.follow_up
+                : stage.follow_up || '-';
               c.alignment = { horizontal: 'center' };
             }
             if (columnVisibility.status) {
@@ -2321,8 +2342,6 @@ export default function Stages() {
     tree.forEach((node) => traverse(node, 1))
     return { rows, maxDepth }
   }
-
-
   // Render transposed table
   const renderTransposedTable = () => {
     if (!currentDept) return null;
@@ -2555,7 +2574,14 @@ export default function Stages() {
                         </div>
                       </TableCell>
                       <TableCell className="sticky bg-slate-100 border-r-2 border-slate-300 z-10">
-                        <div className="text-gray-700 text-sm">{stage.follow_up || "-"}</div>
+                        <div className="text-gray-700 text-sm">
+                          {(() => {
+                            const officerIds = stage.officer_ids && stage.officer_ids.length > 0 ? stage.officer_ids : (stage.officer_id ? [stage.officer_id] : []);
+                            return stage.follow_up === 'Officer' && officerIds.length > 0
+                              ? officerIds.map(id => userData.officers.find(o => o.id === id)?.displayName).filter(Boolean).join(', ') || stage.follow_up
+                              : stage.follow_up || "-";
+                          })()}
+                        </div>
                       </TableCell>
                     </>
                   )}
@@ -2985,7 +3011,12 @@ export default function Stages() {
                       className="border-r border-blue-400 text-center bg-blue-600"
                     >
                       <div className="font-bold text-sm text-white py-2">
-                        {stage.follow_up || "-"}
+                        {(() => {
+                          const officerIds = stage.officer_ids && stage.officer_ids.length > 0 ? stage.officer_ids : (stage.officer_id ? [stage.officer_id] : []);
+                          return stage.follow_up === 'Officer' && officerIds.length > 0
+                            ? officerIds.map(id => userData.officers.find(o => o.id === id)?.displayName).filter(Boolean).join(', ') || stage.follow_up
+                            : stage.follow_up || "-";
+                        })()}
                       </div>
                     </TableHead>
                   ))}
@@ -3579,6 +3610,7 @@ export default function Stages() {
               onOpenChange={setIsDialogOpen}
               onAddStages={handleAddStages}
               departments={departmentList}
+              officers={userData.officers}
             />
           </div>
         </div>
@@ -3632,6 +3664,7 @@ export default function Stages() {
           }}
           stage={editingStage}
           onSave={handleUpdateStage}
+          officers={userData.officers}
         />
       </div>
     </div>

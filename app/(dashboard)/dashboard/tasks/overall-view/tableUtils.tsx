@@ -2,7 +2,7 @@
 "use client"
 
 import { format, isAfter, isEqual, isValid, parse, startOfToday } from 'date-fns';
-import { Plus, Minus, LinkIcon, X, RefreshCw } from "lucide-react";
+import { Plus, Minus, LinkIcon, X, RefreshCw, Edit } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import React, { useMemo, useCallback, useEffect, useState } from "react";
@@ -358,6 +358,26 @@ export const getStaffFromParticipants = (
     return null;
   }
 
+  // For officer role, handle multiple officers with fallback logic
+  if (role === 'officer') {
+    // First, check for officer_ids array (new multi-officer support)
+    if (task.officer_ids && Array.isArray(task.officer_ids) && task.officer_ids.length > 0) {
+      if (getStaffNameFn) {
+        const officerNames = task.officer_ids
+          .map(id => getStaffNameFn(id))
+          .filter(Boolean);
+        return officerNames.length > 0 ? officerNames.join(', ') : null;
+      }
+      return task.officer_ids.join(', ');
+    }
+
+    // Fallback to officer_id (single string)
+    if (task.officer_id && getStaffNameFn) {
+      return getStaffNameFn(task.officer_id);
+    }
+  }
+
+  // Check participants_details for the role
   const staff = task.participants_details.find((p: any) =>
     p.role && Array.isArray(p.role) ? p.role.includes(role) : p.role === role
   );
@@ -417,6 +437,69 @@ const getInheritedOfficerForTask = (task: any, departments: any[] = [], officers
   });
 
   return filteredOfficers.length > 0 ? filteredOfficers[0] : null;
+};
+
+// Helper function to get officers for the current stage of a task
+export const getOfficersForCurrentStage = (
+  task: any,
+  stages: any[],
+  getStaffNameFn?: (userId: any) => string
+): string | null => {
+  if (!task || !stages || !stages.length) return null;
+
+  // Find the current stage for this task
+  const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
+  let currentStage = null;
+
+  // Find the highest completed stage
+  let highestCompletedIndex = -1;
+  for (let i = 0; i < sortedStages.length; i++) {
+    const stage = sortedStages[i];
+    const stageData = task.stages?.[stage.id];
+    if (stageData && (stageData.status === 'completed' || stageData.completedAt)) {
+      highestCompletedIndex = i;
+    }
+  }
+
+  if (highestCompletedIndex === -1) {
+    currentStage = sortedStages[0];
+  } else if (highestCompletedIndex + 1 < sortedStages.length) {
+    currentStage = sortedStages[highestCompletedIndex + 1];
+  } else {
+    currentStage = sortedStages[highestCompletedIndex];
+  }
+
+  if (!currentStage) return null;
+
+  // First, check task-stage specific officer_ids
+  const stageData = task.stages?.[currentStage.id];
+  if (stageData?.officer_ids && Array.isArray(stageData.officer_ids) && stageData.officer_ids.length > 0) {
+    if (getStaffNameFn) {
+      const officerNames = stageData.officer_ids
+        .map(id => getStaffNameFn(id))
+        .filter(Boolean);
+      return officerNames.length > 0 ? officerNames.join(', ') : null;
+    }
+    return stageData.officer_ids.join(', ');
+  }
+
+  // Fallback to stage configuration officer_ids
+  if (currentStage.officer_ids && Array.isArray(currentStage.officer_ids) && currentStage.officer_ids.length > 0) {
+    if (getStaffNameFn) {
+      const officerNames = currentStage.officer_ids
+        .map(id => getStaffNameFn(id))
+        .filter(Boolean);
+      return officerNames.length > 0 ? officerNames.join(', ') : null;
+    }
+    return currentStage.officer_ids.join(', ');
+  }
+
+  // Fallback to stage configuration officer_id (single string)
+  if (currentStage.officer_id && getStaffNameFn) {
+    return getStaffNameFn(currentStage.officer_id);
+  }
+
+  return null;
 };
 
 export const getCompanyName = (task: any, companies: Map<number, string>): string => {
@@ -921,7 +1004,9 @@ export const getCellContent = (
   onUncancelTask?: (task: any) => void,
   setTaskToUncancel?: (task: any) => void,
   setUncancelDialogOpen?: (open: boolean) => void,
-  officers?: any[]
+  officers?: any[],
+  stages?: any[],
+  onEditOfficers?: (task: any) => void
 ) => {
   const enhancedTask = task?.id ? enhancedTasksData.get(task.id.toString()) || task : task;
   const taskDeps = task?.id ? taskDependants.get(task.id.toString()) || [] : [];
@@ -944,7 +1029,6 @@ export const getCellContent = (
     age: enhancedTask.age?.toString() || 'N/A',
     r_number: enhancedTask.r_number?.toString() || 'N/A',
     task_manager: getStaffFromParticipants(task, 'task_manager', getStaffName, departments, officers) || <span className="text-red-500 font-semibold">Unallocated</span>,
-    officer: getStaffFromParticipants(task, 'officer', getStaffName, departments, officers) || <span className="text-red-500 font-semibold">Unallocated</span>,
     task_assistant: getStaffFromParticipants(task, 'task_assistant', getStaffName, departments, officers) || <span className="text-red-500 font-semibold">Unallocated</span>,
     cancellation_reason: task.cancellation_details?.reason || 'N/A',
     cancellation_date: task.cancellation_details?.cancelled_at ? format(new Date(task.cancellation_details.cancelled_at), 'dd MMM yyyy HH:mm') : 'N/A',
@@ -968,6 +1052,11 @@ export const getCellContent = (
           <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-blue-100 flex-shrink-0" title="Link source documents" onClick={() => { setLinkingTask(task); setIsLinkDialogOpen(true); }}>
             <LinkIcon className="h-4 w-4" />
           </Button>
+          {onEditOfficers && (
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-purple-100 flex-shrink-0" title="Assign officers" onClick={(e) => { e.stopPropagation(); onEditOfficers(task); }}>
+              <Edit className="h-4 w-4" />
+            </Button>
+          )}
           {task.status === 'cancel' ? (
             onUncancelTask && setTaskToUncancel && setUncancelDialogOpen && (
               <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-green-100 flex-shrink-0" title="Reactivate task" onClick={(e) => { e.stopPropagation(); setTaskToUncancel(task); setUncancelDialogOpen(true); }}>
@@ -984,6 +1073,7 @@ export const getCellContent = (
         </div>
       </div>
     ),
+    officer: (stages ? getOfficersForCurrentStage(task, stages, getStaffName) : null) || getStaffFromParticipants(task, 'officer', getStaffName, departments, officers) || 'Unallocated',
     // immigration_status: renderStatusCell(task),
     current_stage_status_value: renderStageStatusCell(task),
   };

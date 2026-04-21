@@ -80,6 +80,7 @@ interface AddStageDialogProps {
     open: boolean; onOpenChange: (open: boolean) => void;
     onAddStages: (stages: NewStage[], departmentId: string) => Promise<void>;
     departments: DepartmentOption[];
+    officers?: any[]; // Officers data for selection
 }
 
 interface AutomationType {
@@ -87,13 +88,13 @@ interface AutomationType {
     webhook_type?: string; is_active: boolean;
 }
 
-export function AddStageDialog({ open, onOpenChange, onAddStages, departments = [] }: AddStageDialogProps) {
+export function AddStageDialog({ open, onOpenChange, onAddStages, departments = [], officers = [] }: AddStageDialogProps) {
     const [selectedDepartment, setSelectedDepartment] = useState<string>('');
     const [automationTypes, setAutomationTypes] = useState<AutomationType[]>([]);
     const [loadingAutomations, setLoadingAutomations] = useState(false);
     const [newStages, setNewStages] = useState<NewStage[]>([{
         id: generateId(), name: '', description: '', days: 0, hours: 0, minutes: 0,
-        followUp: 'none', isSpecial: false,
+        followUp: 'none', officer_id: null, isSpecial: false,
         timeConfigs: [{ applicationType: 'Default', days: 0, hours: 0, minutes: 0 }],
         documents: []
     }]);
@@ -366,7 +367,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
                                 </TabsList>
                                 {newStages.map((stage) => (
                                     <TabsContent key={stage.id} value={stage.id} className="space-y-6 mt-6">
-                                        <StageForm stage={stage} onUpdate={(updates) => updateNewStage(stage.id, updates)} />
+                                        <StageForm stage={stage} onUpdate={(updates) => updateNewStage(stage.id, updates)} officers={officers} />
                                         <Separator className="my-6" />
                                         <DocumentsSection
                                             stage={stage} entityOptions={entityOptions} loadingEntities={loadingEntities}
@@ -386,7 +387,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
                         ) : (
                             currentStage && (
                                 <div className="space-y-6">
-                                    <StageForm stage={currentStage} onUpdate={(updates) => updateNewStage(currentStage.id, updates)} />
+                                    <StageForm stage={currentStage} onUpdate={(updates) => updateNewStage(currentStage.id, updates)} officers={officers} />
                                     <Separator className="my-6" />
                                     <DocumentsSection
                                         stage={currentStage} entityOptions={entityOptions} loadingEntities={loadingEntities}
@@ -417,7 +418,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
     );
 }
 
-function StageForm({ stage, onUpdate }: { stage: NewStage; onUpdate: (updates: Partial<NewStage>) => void }) {
+function StageForm({ stage, onUpdate, officers }: { stage: NewStage; onUpdate: (updates: Partial<NewStage>) => void; officers?: any[] }) {
     const addTimeConfig = () => onUpdate({ timeConfigs: [...stage.timeConfigs, { applicationType: '', days: 0, hours: 0, minutes: 0 }] });
     const removeTimeConfig = (index: number) => onUpdate({ timeConfigs: stage.timeConfigs.filter((_, i) => i !== index) });
     const updateTimeConfig = (index: number, updates: Partial<TimeConfig>) => {
@@ -440,8 +441,14 @@ function StageForm({ stage, onUpdate }: { stage: NewStage; onUpdate: (updates: P
             </div>
             <div className="space-y-2">
                 <Label className="flex items-center gap-2"><User className="h-4 w-4 text-blue-600" />Follow Up With</Label>
-                <Select value={stage.followUp} onValueChange={(value) => onUpdate({ followUp: value })}><SelectTrigger className="max-w-md"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">No follow up</SelectItem><SelectItem value="Client">Client</SelectItem><SelectItem value="Officer">Officer</SelectItem><SelectItem value="BCL">BCL</SelectItem></SelectContent></Select>
+                <Select value={stage.followUp} onValueChange={(value) => onUpdate({ followUp: value, officer_ids: value === 'Officer' ? stage.officer_ids : [] })}><SelectTrigger className="max-w-md"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">No follow up</SelectItem><SelectItem value="Client">Client</SelectItem><SelectItem value="Officer">Officer</SelectItem><SelectItem value="BCL">BCL</SelectItem></SelectContent></Select>
             </div>
+            {stage.followUp === 'Officer' && (
+                <div className="space-y-2">
+                    <Label className="flex items-center gap-2"><User className="h-4 w-4 text-blue-600" />Assign Officers</Label>
+                    <MultiOfficerPicker officers={officers || []} selectedOfficerIds={stage.officer_ids || []} onSelectionChange={(selectedIds) => onUpdate({ officer_ids: selectedIds })} />
+                </div>
+            )}
             <div className="space-y-4 pt-4 border-t">
                 <div className="flex items-center space-x-3">
                     <Checkbox id={`special-${stage.id}`} checked={stage.isSpecial} onCheckedChange={(checked) => onUpdate({ isSpecial: checked === true })} className="data-[state=checked]:bg-blue-600" />
@@ -557,6 +564,65 @@ function MultiEntityPicker({ entities, selectedEntities = [], onSelectionChange,
                             </Button>
                         </Badge>
                     ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function MultiOfficerPicker({ officers, selectedOfficerIds = [], onSelectionChange }: { officers: any[]; selectedOfficerIds: string[]; onSelectionChange: (selectedIds: string[]) => void }) {
+    const [open, setOpen] = useState(false);
+    const toggleOfficer = (officerId: string) => {
+        if (selectedOfficerIds.includes(officerId)) {
+            onSelectionChange(selectedOfficerIds.filter(id => id !== officerId));
+        } else {
+            onSelectionChange([...selectedOfficerIds, officerId]);
+        }
+    };
+    const isOfficerSelected = (officerId: string) => selectedOfficerIds.includes(officerId);
+
+    return (
+        <div className="space-y-2">
+            <Popover open={open} onOpenChange={setOpen}>
+                <PopoverTrigger asChild>
+                    <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between bg-white">
+                        {selectedOfficerIds.length === 0 ? <span className="text-muted-foreground">Select officers...</span> : <span>{selectedOfficerIds.length} officer{selectedOfficerIds.length === 1 ? '' : 's'} selected</span>}
+                        <X className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-96 p-0">
+                    <Command>
+                        <CommandInput placeholder="Search officers..." />
+                        <CommandEmpty>No officers found.</CommandEmpty>
+                        <div className="max-h-72 overflow-y-auto">
+                            <CommandGroup>
+                                {officers.map((officer) => (
+                                    <CommandItem key={officer.id} onSelect={() => toggleOfficer(officer.id)} className="flex items-center gap-2">
+                                        <div className="flex items-center gap-2 flex-1">
+                                            <div className="flex h-4 w-4 items-center justify-center">{isOfficerSelected(officer.id) && <Check className="h-3 w-3 text-blue-600" />}</div>
+                                            <span>{officer.displayName || officer.name}</span>
+                                        </div>
+                                    </CommandItem>
+                                ))}
+                            </CommandGroup>
+                        </div>
+                    </Command>
+                </PopoverContent>
+            </Popover>
+            {selectedOfficerIds.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-2">
+                    {selectedOfficerIds.map((officerId) => {
+                        const officer = officers.find(o => o.id === officerId);
+                        if (!officer) return null;
+                        return (
+                            <Badge key={officerId} variant="secondary" className="flex items-center gap-1 text-xs bg-blue-100 text-blue-800 hover:bg-blue-200">
+                                {officer.displayName || officer.name}
+                                <Button variant="ghost" size="icon" className="h-4 w-4 ml-1 p-0 hover:bg-destructive hover:text-destructive-foreground rounded-full" onClick={() => toggleOfficer(officerId)}>
+                                    <X className="h-3 w-3" />
+                                </Button>
+                            </Badge>
+                        );
+                    })}
                 </div>
             )}
         </div>

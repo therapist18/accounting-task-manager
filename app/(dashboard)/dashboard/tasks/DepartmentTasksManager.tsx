@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertCircle, Plus, Minus, Download, Edit, Trash2, ChevronDown, Send, DownloadCloud, Eye, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, EyeOff, CheckCircle2, XCircle, Briefcase, Loader2 } from "lucide-react"
+import { Settings, Search, X, TableProperties, RotateCcw, Edit, AlertCircle, Plus, Minus, Download, Trash2, ChevronDown, Send, DownloadCloud, Eye, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, EyeOff, CheckCircle2, XCircle, Briefcase, Loader2 } from "lucide-react"
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog"
 import { CancelConfirmationDialog } from "./components/CancelConfirmationDialog"
 import { EnquiryDialog } from "./components/EnquiryDialog"
@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import * as XLSX from 'xlsx'
@@ -37,6 +38,7 @@ import EditableStageCell from "./components/EditableStageCell"
 import { NewCompanyInquiryDialog } from "./components/NewCompanyInquiryDialog"
 import { ExtractionPreviewDialog } from "./components/ExtractionPreviewDialog"
 import { ClassSelectionDialog } from "./components/ClassSelectionDialog"
+import { AssignOfficersDialog } from "./components/AssignOfficersDialog"
 import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, formatWorkflowRestrictionReason, taskBundleService } from "./utils/workflowBundleHelpers"
 import { determineCurrentStage, getStageProgress } from './utils/stageUtils'
 import { calculateStageDate } from './utils/dateUtils'
@@ -143,6 +145,9 @@ export default function DepartmentTasksManager({
   const [companyInquiryDialogOpen, setCompanyInquiryDialogOpen] = useState(false);
   const [realOfficers, setRealOfficers] = useState<any[]>([]);
   const [userData, setUserData] = useState<any>(null);
+  const [assignOfficersDialogOpen, setAssignOfficersDialogOpen] = useState(false);
+  const [selectedTaskForOfficers, setSelectedTaskForOfficers] = useState<any>(null);
+  const [selectedStageForOfficers, setSelectedStageForOfficers] = useState<any>(null);
 
   useEffect(() => {
     const loadDepartments = async () => {
@@ -793,6 +798,7 @@ export default function DepartmentTasksManager({
       } else if (activeFollowUpFilter === 'officer') {
         if (activeOfficerTab) {
           filteredTasks = filteredTasks.filter(task =>
+            (task.officer_ids && Array.isArray(task.officer_ids) && task.officer_ids.includes(activeOfficerTab)) ||
             task.officer_id?.toString() === activeOfficerTab
           );
         }
@@ -851,6 +857,7 @@ export default function DepartmentTasksManager({
 
   const getTaskCountForOfficer = useCallback((officerId: string) => {
     const officerTasks = getFilteredTasks('in_progress').filter(task =>
+      (task.officer_ids && Array.isArray(task.officer_ids) && task.officer_ids.includes(officerId)) ||
       task.officer_id?.toString() === officerId
     );
     return officerTasks.length;
@@ -873,6 +880,32 @@ export default function DepartmentTasksManager({
       }
     })
   }, [getFilteredTasks, stages, determineCurrentStage])
+
+  // Extract officers from stages marked as "officer" follow-up
+  const getOfficersFromOfficerFollowUpStages = useCallback(() => {
+    if (!stages || !stages.length) return []
+
+    const officerFollowUpStages = stages.filter(stage =>
+      stage.follow_up?.toLowerCase() === 'officer'
+    )
+
+    // Collect all unique officer IDs from these stages
+    const officerIdSet = new Set<string>()
+    officerFollowUpStages.forEach(stage => {
+      if (stage.officer_ids && Array.isArray(stage.officer_ids)) {
+        stage.officer_ids.forEach(id => officerIdSet.add(id.toString()))
+      } else if (stage.officer_id) {
+        officerIdSet.add(stage.officer_id.toString())
+      }
+    })
+
+    // Map officer IDs to officer objects
+    const officers = Array.from(officerIdSet)
+      .map(id => realOfficers.find(officer => officer.id?.toString() === id))
+      .filter(Boolean)
+
+    return officers
+  }, [stages, realOfficers])
 
   const filterTasksBySearchWrapper = useCallback((tasks: any[]) => {
     return filterTasksBySearch(
@@ -1411,6 +1444,106 @@ export default function DepartmentTasksManager({
     } finally { setIsDownloading(false); }
   }, [allDocuments, getTaskHierarchy, stages]);
 
+  const updateTaskStageOfficers = useCallback(async (taskId: string, stageId: string, officerIds: string[]) => {
+    try {
+      const { data: currentTask } = await supabase
+        .from('tm_tasks')
+        .select('stages')
+        .eq('id', taskId)
+        .single();
+
+      if (!currentTask) throw new Error('Task not found');
+
+      const existingStages = currentTask.stages || {};
+      const timestamp = new Date().toISOString();
+
+      const updatedStages = {
+        ...existingStages,
+        [stageId]: {
+          ...existingStages[stageId],
+          officer_ids: officerIds,
+          updatedAt: timestamp
+        }
+      };
+
+      const { error } = await supabase
+        .from('tm_tasks')
+        .update({
+          stages: updatedStages,
+          updated_at: timestamp
+        })
+        .eq('id', taskId);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Officers updated successfully",
+      });
+
+      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
+    } catch (error: any) {
+      console.error('Error updating task stage officers:', error);
+      toast({
+        title: "Error",
+        description: `Failed to update officers: ${error.message}`,
+        variant: "destructive"
+      });
+    }
+  }, [loadTasksData, activeDepartmentTab, activeSubdepartmentTab]);
+
+  const updateAllTaskStageOfficers = useCallback(async (taskId: string, stageAssignments: Record<string, string[]>) => {
+    try {
+      const { data: currentTask } = await supabase
+        .from('tm_tasks')
+        .select('stages')
+        .eq('id', taskId)
+        .single();
+
+      if (!currentTask) throw new Error('Task not found');
+
+      const existingStages = currentTask.stages || {};
+      const timestamp = new Date().toISOString();
+
+      const updatedStages = { ...existingStages };
+
+      // Update all stages with their assigned officers
+      Object.entries(stageAssignments).forEach(([stageId, officerIds]) => {
+        if (stageId !== 'all') { // Skip the 'all' key
+          updatedStages[stageId] = {
+            ...existingStages[stageId],
+            officer_ids: officerIds,
+            updatedAt: timestamp
+          };
+        }
+      });
+
+      const { error } = await supabase
+        .from('tm_tasks')
+        .update({
+          stages: updatedStages,
+          updated_at: timestamp
+        })
+        .eq('id', taskId);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "All stage officers updated successfully",
+      });
+
+      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
+    } catch (error: any) {
+      console.error('Error updating all task stage officers:', error);
+      toast({
+        title: "Error",
+        description: `Failed to update officers: ${error.message}`,
+        variant: "destructive"
+      });
+    }
+  }, [loadTasksData, activeDepartmentTab, activeSubdepartmentTab]);
+
   const enhancedHandleStageStatusSave = useCallback(async (
     stageId: string,
     taskId: string,
@@ -1486,7 +1619,8 @@ export default function DepartmentTasksManager({
       const stageUpdate: any = {
         ...task.stages?.[stageId],
         date: statusValue, // Use statusValue instead of value
-        updatedAt: timestamp
+        updatedAt: timestamp,
+        officer_ids: task.stages?.[stageId]?.officer_ids || stages?.find((s: any) => s.id === stageId)?.officer_ids || []
       };
 
       // Handle extracted data if provided
@@ -1755,7 +1889,7 @@ export default function DepartmentTasksManager({
       }
     }
 
-    rows.push({ key: 'section_header_actions', type: 'section_header', label: 'Actions', id: 'actions', icon: Pencil })
+    rows.push({ key: 'section_header_actions', type: 'section_header', label: 'Actions', id: 'actions', icon: Edit })
 
     if (expandedSections.has('actions')) {
       rows.push({ key: 'actions_row', type: 'actions', label: 'Actions', id: 'actions' })
@@ -2477,11 +2611,18 @@ export default function DepartmentTasksManager({
       handleUncancelTask,
       setTaskToUncancel,
       setUncancelDialogOpen,
-      realOfficers
+      realOfficers,
+      stages,
+      (task) => {
+        setSelectedTaskForOfficers(task);
+        setSelectedStageForOfficers(determineCurrentStage(task, stages));
+        setAssignOfficersDialogOpen(true);
+      }
     );
   }, [
     departments,
     realOfficers,
+    stages,
     enhancedTasksData,
     taskDependants,
     expandedDependants,
@@ -2630,12 +2771,61 @@ export default function DepartmentTasksManager({
     }
 
     if (activeFollowUpFilter === 'officer' && activeSubdepartmentTab) {
+      const stageOfficers = getOfficersFromOfficerFollowUpStages();
+
       return (
         <div className="space-y-3">
-          {/* Officer Tabs */}
-          {subdepartmentOfficers.length > 0 ? (
-            <div>
-              <Label className="text-sm font-medium text-gray-700 mb-2 block">Officers</Label>
+          {/* Officer Dropdown - populated by stages with follow_up === 'officer' */}
+          <div>
+            <Label className="text-sm font-medium text-gray-700 mb-2 block">
+              Officers from Officer Follow-up Stages
+            </Label>
+            {stageOfficers.length > 0 ? (
+              <div className="flex items-center gap-2">
+                <Select
+                  value={activeOfficerTab || "all"}
+                  onValueChange={(value) => setActiveOfficerTab(value === "all" ? null : value)}
+                >
+                  <SelectTrigger className="w-[300px]">
+                    <SelectValue placeholder="Select an officer" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Officers</SelectItem>
+                    {stageOfficers.map((officer) => (
+                      <SelectItem key={officer.id} value={officer.id?.toString()}>
+                        <div className="flex items-center gap-2">
+                          <span>{officer.name || officer.display_name || officer.email}</span>
+                          <Badge variant="secondary" className="text-xs">
+                            {getTaskCountForOfficer(officer.id)}
+                          </Badge>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {activeOfficerTab && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setActiveOfficerTab(null)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <div className="text-center text-gray-500 text-sm py-4 bg-amber-50 rounded-lg border border-amber-200">
+                No officers assigned to stages marked as "Officer" follow-up
+              </div>
+            )}
+          </div>
+
+          {/* Show subdepartment officers as fallback if no stage officers */}
+          {stageOfficers.length === 0 && subdepartmentOfficers.length > 0 && (
+            <div className="mt-3">
+              <Label className="text-sm font-medium text-gray-700 mb-2 block">
+                Subdepartment Officers (Fallback)
+              </Label>
               <div className="flex space-x-2 overflow-x-auto pb-2">
                 <Button
                   variant={!activeOfficerTab ? "default" : "outline"}
@@ -2665,10 +2855,6 @@ export default function DepartmentTasksManager({
                   </Button>
                 ))}
               </div>
-            </div>
-          ) : (
-            <div className="text-center text-gray-500 text-sm py-4">
-              No officers assigned to this subdepartment
             </div>
           )}
         </div>
@@ -3283,6 +3469,7 @@ export default function DepartmentTasksManager({
                         enhancedTasksData={enhancedTasksData}
                         getCellContent={getCellContentWrapper}
                         renderCellContent={renderCellContent}
+                        toggleSectionExpansion={toggleSectionExpansion}
                         toggleStageExpansion={toggleStageExpansion}
                         toggleDocumentExpansion={toggleDocumentExpansion}
                         getTaskHierarchy={getTaskHierarchy}
@@ -3412,6 +3599,20 @@ export default function DepartmentTasksManager({
         departments={departments}
         userData={userData}
         onEnquiryCreated={handleTaskUpdate}
+      />
+      <AssignOfficersDialog
+        open={assignOfficersDialogOpen}
+        onOpenChange={setAssignOfficersDialogOpen}
+        task={selectedTaskForOfficers}
+        officers={realOfficers}
+        stages={stages}
+        initialStageAssignments={selectedTaskForOfficers?.stages ? Object.entries(selectedTaskForOfficers.stages).reduce((acc, [stageId, stageData]: [string, any]) => {
+          if (stageData?.officer_ids) {
+            acc[stageId] = stageData.officer_ids;
+          }
+          return acc;
+        }, {} as Record<string, string[]>) : {}}
+        onAssign={(stageAssignments) => updateAllTaskStageOfficers(selectedTaskForOfficers?.id, stageAssignments)}
       />
       {companyInquiryDialogOpen && editingTask && (
         <NewCompanyInquiryDialog

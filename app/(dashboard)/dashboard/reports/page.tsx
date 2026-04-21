@@ -458,6 +458,55 @@ export default function ReportsPage() {
     return Array.from(ids);
   }, [activeOfficerTab, selectedOfficers]);
 
+  const tasksByFilters = useMemo(() => {
+    return tasks.filter(task => {
+      if (activeDeptId && task.department_id?.toString() !== activeDeptId) return false;
+      if (activeSubDeptId !== 'all' && task.subdepartment_id?.toString() !== activeSubDeptId) return false;
+      if (activeClassId !== 'all' && task.class_id?.toString() !== activeClassId) return false;
+      if (activeSubClassId !== 'all' && task.subclass_id?.toString() !== activeSubClassId) return false;
+
+      if (effectiveOfficerIds.length > 0) {
+        const officer = task.participants_details?.find((p: any) =>
+          p.role && Array.isArray(p.role) ? p.role.includes('officer') : p.role === 'officer'
+        );
+        const oid = officer?.id?.toString();
+        if (!oid || !effectiveOfficerIds.includes(oid)) return false;
+      }
+
+      if (selectedManagers.length > 0) {
+        const manager = task.participants_details?.find((p: any) =>
+          p.role && Array.isArray(p.role) ? p.role.includes('task_manager') : p.role === 'task_manager'
+        );
+        const mid = manager?.id?.toString();
+        if (!mid || !selectedManagers.includes(mid)) return false;
+      }
+
+      if (selectedAssistants.length > 0) {
+        const assistant = task.participants_details?.find((p: any) =>
+          p.role && Array.isArray(p.role) ? p.role.includes('task_assistant') : p.role === 'task_assistant'
+        );
+        const aid = assistant?.id?.toString();
+        if (!aid || !selectedAssistants.includes(aid)) return false;
+      }
+
+      return true;
+    });
+  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, effectiveOfficerIds, selectedManagers, selectedAssistants]);
+
+  const allTasksCount = useMemo(() => tasksByFilters.length, [tasksByFilters]);
+  const wipTasksCount = useMemo(() => {
+    return tasksByFilters.filter(task => {
+      const isWriteUp = task.status === 'write_up_completed';
+      const isEndorsed = task.status === 'endorsed';
+      const isCancelled = task.status === 'cancel';
+      const isCompleted = isWriteUp || isEndorsed || ['completed', 'archived'].includes(task.status);
+      return !isCompleted && !isCancelled;
+    }).length;
+  }, [tasksByFilters]);
+  const writeUpCompletedCount = useMemo(() => tasksByFilters.filter(t => t.status === 'write_up_completed').length, [tasksByFilters]);
+  const endorsedCount = useMemo(() => tasksByFilters.filter(t => t.status === 'endorsed').length, [tasksByFilters]);
+  const cancelledCount = useMemo(() => tasksByFilters.filter(t => t.status === 'cancel').length, [tasksByFilters]);
+
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
       if (activeDeptId && task.department_id?.toString() !== activeDeptId) return false;
@@ -491,7 +540,7 @@ export default function ReportsPage() {
 
       const isWriteUp = task.status === 'write_up_completed';
       const isEndorsed = task.status === 'endorsed';
-      const isCancelled = task.status === 'cancelled';
+      const isCancelled = task.status === 'cancel';
       const isCompleted = isWriteUp || isEndorsed || ['completed', 'archived'].includes(task.status);
 
       if (activeStatus === 'all') return true;
@@ -1436,19 +1485,19 @@ export default function ReportsPage() {
               {areTabsVisible && (
                 <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-slate-50 to-slate-100 border border-slate-200">
                   <TabsTrigger value="all" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-slate-600 data-[state=active]:to-slate-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                    All Statuses
+                    All Statuses <Badge variant="secondary" className="bg-slate-100 text-slate-800">{allTasksCount}</Badge>
                   </TabsTrigger>
                   <TabsTrigger value="wip" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-amber-600 data-[state=active]:to-amber-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                    WIP Stages
+                    WIP Stages <Badge variant="secondary" className="bg-amber-100 text-amber-800">{wipTasksCount}</Badge>
                   </TabsTrigger>
                   <TabsTrigger value="write_up_completed" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-green-600 data-[state=active]:to-green-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                    Write Up Completed
+                    Write Up Completed <Badge variant="secondary" className="bg-green-100 text-green-800">{writeUpCompletedCount}</Badge>
                   </TabsTrigger>
                   <TabsTrigger value="endorsed" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                    Endorsement Completed
+                    Endorsement Completed <Badge variant="secondary" className="bg-purple-100 text-purple-800">{endorsedCount}</Badge>
                   </TabsTrigger>
                   <TabsTrigger value="cancelled" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-red-600 data-[state=active]:to-red-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                    Cancelled
+                    Cancelled <Badge variant="secondary" className="bg-red-100 text-red-800">{cancelledCount}</Badge>
                   </TabsTrigger>
                 </TabsList>
               )}

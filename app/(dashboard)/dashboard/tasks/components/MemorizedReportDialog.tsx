@@ -13,7 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/lib/hooks/use-toast"
-import { Loader2, Plus, Pencil, Trash2, X, Save } from "lucide-react"
+import { Loader2, Plus, Edit, Trash2, X, Save } from "lucide-react"
 import type { Department, KycDocument } from "../utils/taskManagerData"
 import { ENHANCED_TABLE_HEADERS_IMMIGRATION } from "../overall-view/tableUtils"
 
@@ -271,7 +271,7 @@ export function MemorizedReportDialog({
               <span className="font-medium text-sm">{report.name}</span>
               {selectedReport?.id === report.id && (
                 <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); handleEditReport(); }}><Pencil className="h-4 w-4 text-blue-600" /></Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); handleEditReport(); }}><Edit className="h-4 w-4 text-blue-600" /></Button>
                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); handleDeleteReport(report.id); }}><Trash2 className="h-4 w-4 text-red-600" /></Button>
                 </div>
               )}

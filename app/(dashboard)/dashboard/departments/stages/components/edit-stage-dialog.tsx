@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Plus, X, Clock, User, FileText, Info, Pencil, MessageSquare, Star, Trash2, Check, Zap, Webhook, Layers, LayoutGrid } from "lucide-react"
+import { Plus, X, Clock, User, FileText, Info, Edit, MessageSquare, Star, Trash2, Check, Zap, Webhook, Layers, LayoutGrid } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
@@ -16,6 +16,7 @@ import { Separator } from "@/components/ui/separator"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command"
 import { SearchableSelect } from "@/components/ui/searchable-select"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import supabase from "@/lib/supabase/client"
 import type { Stage, TimeConfig, StageDocument, DocumentExtraction, EntityOption } from "../types"
 import { createKYCDocument, updateKYCDocument } from "../kycDocuments"
@@ -101,9 +102,10 @@ interface EditStageDialogProps {
   stage: Stage | null
   onSave: (stage: Stage) => Promise<void>
   departmentName?: string
+  officers?: any[] // Officers data for selection
 }
 
-export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentName }: EditStageDialogProps) {
+export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentName, officers }: EditStageDialogProps) {
   const [formData, setFormData] = useState<Stage | null>(null);
   const [activeTab, setActiveTab] = useState('general');
   const [saving, setSaving] = useState(false);
@@ -471,7 +473,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
       <DialogContent className="max-w-6xl max-h-[95vh] p-0 bg-slate-50 flex flex-col">
         <DialogHeader className="p-6 border-b bg-white sticky top-0 z-10">
           <DialogTitle className="text-xl font-bold text-gray-800 flex items-center gap-3">
-            <Pencil className="h-6 w-6 text-blue-600" />
+            <Edit className="h-6 w-6 text-blue-600" />
             Edit Stage: {stage.name}
           </DialogTitle>
           <DialogDescription className="text-sm text-gray-500 !mt-1">
@@ -499,7 +501,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
 
             <form onSubmit={handleSubmit}>
               <TabsContent value="general" className="mt-6 space-y-6">
-                <SectionWrapper title="Basic Information" icon={<Pencil />}>
+                <SectionWrapper title="Basic Information" icon={<Edit />}>
                   <FormField label="Stage Name" required description="A clear, descriptive name for the stage.">
                     <Input id="name" name="name" value={formData.name || ''} onChange={handleInputChange} placeholder="e.g., Application Review" required />
                   </FormField>
@@ -572,7 +574,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
                   <FormField label="Follow Up With" description="Who to contact when this stage is done.">
                     <SearchableSelect
                       value={formData.follow_up || 'none'}
-                      onValueChange={(value) => setFormData(prev => (prev ? { ...prev, follow_up: value === 'none' ? null : value as 'Client' | 'Officer' | 'BCL' } : null))}
+                      onValueChange={(value) => setFormData(prev => (prev ? { ...prev, follow_up: value === 'none' ? null : value as 'Client' | 'Officer' | 'BCL', officer_ids: value === 'Officer' ? prev.officer_ids : [] } : null))}
                       options={[
                         { value: 'none', label: 'No follow up required' },
                         { value: 'Client', label: 'Client' },
@@ -582,6 +584,11 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
                       placeholder="Select follow up person"
                     />
                   </FormField>
+                  {formData.follow_up === 'Officer' && (
+                    <FormField label="Assign Officers" description="Select the specific officers to follow up with.">
+                      <MultiOfficerPicker officers={officers || []} selectedOfficerIds={formData.officer_ids || []} onSelectionChange={(selectedIds) => setFormData(prev => prev ? { ...prev, officer_ids: selectedIds } : null)} />
+                    </FormField>
+                  )}
                 </SectionWrapper>
               </TabsContent>
               <TabsContent value="documents" className="mt-6 space-y-6">
@@ -700,6 +707,65 @@ function MultiEntityPicker({ entities, selectedEntities = [], onSelectionChange,
               </Button>
             </Badge>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MultiOfficerPicker({ officers, selectedOfficerIds = [], onSelectionChange }: { officers: any[]; selectedOfficerIds: string[]; onSelectionChange: (selectedIds: string[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const toggleOfficer = (officerId: string) => {
+    if (selectedOfficerIds.includes(officerId)) {
+      onSelectionChange(selectedOfficerIds.filter(id => id !== officerId));
+    } else {
+      onSelectionChange([...selectedOfficerIds, officerId]);
+    }
+  };
+  const isOfficerSelected = (officerId: string) => selectedOfficerIds.includes(officerId);
+
+  return (
+    <div className="space-y-2">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between bg-white">
+            {selectedOfficerIds.length === 0 ? <span className="text-muted-foreground">Select officers...</span> : <span>{selectedOfficerIds.length} officer{selectedOfficerIds.length === 1 ? '' : 's'} selected</span>}
+            <X className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-96 p-0">
+          <Command>
+            <CommandInput placeholder="Search officers..." />
+            <CommandEmpty>No officers found.</CommandEmpty>
+            <div className="max-h-72 overflow-y-auto">
+              <CommandGroup>
+                {officers.map((officer) => (
+                  <CommandItem key={officer.id} onSelect={() => toggleOfficer(officer.id)} className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-1">
+                      <div className="flex h-4 w-4 items-center justify-center">{isOfficerSelected(officer.id) && <Check className="h-3 w-3 text-blue-600" />}</div>
+                      <span>{officer.displayName || officer.name}</span>
+                    </div>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </div>
+          </Command>
+        </PopoverContent>
+      </Popover>
+      {selectedOfficerIds.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-2">
+          {selectedOfficerIds.map((officerId) => {
+            const officer = officers.find(o => o.id === officerId);
+            if (!officer) return null;
+            return (
+              <Badge key={officerId} variant="secondary" className="flex items-center gap-1 text-xs bg-blue-100 text-blue-800 hover:bg-blue-200">
+                {officer.displayName || officer.name}
+                <Button variant="ghost" size="icon" className="h-4 w-4 ml-1 p-0 hover:bg-destructive hover:text-destructive-foreground rounded-full" onClick={() => toggleOfficer(officerId)}>
+                  <X className="h-3 w-3" />
+                </Button>
+              </Badge>
+            );
+          })}
         </div>
       )}
     </div>

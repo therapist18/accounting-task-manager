@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/lib/hooks/use-toast"
 import {
-  Loader2, Plus, Minus, Pencil, Trash2, X, Save, Star, Filter,
+  Loader2, Plus, Minus, Edit, Trash2, X, Save, Star, Filter,
   Table as TableIcon, ChevronsUpDown, ChevronUp,
   CheckSquare, AlertCircle
 } from "lucide-react"
@@ -191,6 +191,455 @@ const isStageApplicable = (
     return true; // Fail-safe
   }
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sub-components (moved outside to prevent re-renders)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const TableHeaderRow = React.memo(({ handleSelectAllDefault, handleSelectAllReports }: { handleSelectAllDefault: () => void; handleSelectAllReports: () => void }) => (
+  <div className="grid grid-cols-12 gap-0 border-b border-slate-200 bg-slate-100 text-xs font-semibold text-slate-700 sticky top-0 z-20 shadow-sm">
+    <div className="col-span-8 px-4 py-3 border-r border-slate-200">Field / Category</div>
+    <div className="col-span-2 px-2 py-3 border-r border-slate-200 text-center bg-green-50/50 text-green-700 flex items-center justify-center gap-1">
+      <span>Default</span>
+      <Button variant="ghost" size="sm" className="h-5 w-5 p-0 hover:bg-green-100 text-green-600" onClick={handleSelectAllDefault} title="Toggle All Default">
+        <CheckSquare className="h-3 w-3" />
+      </Button>
+    </div>
+    <div className="col-span-2 px-2 py-3 text-center bg-blue-50/50 text-blue-700 flex items-center justify-center gap-1">
+      <span>Reports Table</span>
+      <Button variant="ghost" size="sm" className="h-5 w-5 p-0 hover:bg-blue-100 text-blue-600" onClick={handleSelectAllReports} title="Toggle All Report Fields">
+        <CheckSquare className="h-3 w-3" />
+      </Button>
+    </div>
+  </div>
+));
+
+const TableRowItem = React.memo(({
+  label,
+  isIncluded,
+  isDefault,
+  onToggleInclude,
+  onToggleDefault,
+  depth = 0,
+  isSessionOnly = false,
+  className = "",
+  icon = null,
+  readOnly = false
+}: {
+  label: React.ReactNode;
+  isIncluded?: boolean;
+  isDefault?: boolean;
+  onToggleInclude?: () => void;
+  onToggleDefault?: () => void;
+  depth?: number;
+  isSessionOnly?: boolean;
+  className?: string;
+  icon?: React.ReactNode;
+  readOnly?: boolean;
+}) => (
+  <div className={cn("grid grid-cols-12 gap-0 border-b border-slate-100 items-stretch text-sm transition-colors bg-white hover:bg-slate-50", className)}>
+    <div className="col-span-8 flex items-center border-r border-slate-100 py-2">
+      <div style={{ width: `${depth * 24}px` }} className="shrink-0 h-full border-r border-dashed border-slate-100 mr-2 opacity-50" />
+      <div className="flex items-center gap-2 px-2 min-w-0">
+        {icon}
+        <span className={cn("truncate font-medium", isSessionOnly ? "text-blue-600" : "text-slate-700")}>
+          {label}
+          {isSessionOnly && <span className="text-xs text-blue-500 font-normal ml-1">(Session Only)</span>}
+        </span>
+      </div>
+    </div>
+    <div className="col-span-2 flex items-center justify-center border-r border-slate-100 bg-slate-50/30 py-2">
+      {(onToggleDefault || readOnly) && (
+        <Checkbox
+          checked={isDefault}
+          onCheckedChange={onToggleDefault}
+          disabled={readOnly || isSessionOnly}
+          className="data-[state=checked]:bg-green-600 data-[state=checked]:border-green-600 disabled:opacity-50"
+        />
+      )}
+    </div>
+    <div className="col-span-2 flex items-center justify-center bg-slate-50/30 py-2">
+      {(onToggleInclude || readOnly) && (
+        <Checkbox
+          checked={isIncluded}
+          onCheckedChange={onToggleInclude}
+          disabled={readOnly}
+          className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 disabled:opacity-50"
+        />
+      )}
+    </div>
+  </div>
+));
+
+const ExpandableRow = React.memo(({ title, children, stageId, getSectionId, nonApplicableStageIds }: { title: string; children: React.ReactNode; stageId?: string; getSectionId: (title: string) => string; nonApplicableStageIds: Set<string> }) => {
+  const sectionId = getSectionId(title);
+  const isNA = stageId ? nonApplicableStageIds.has(stageId) : false;
+
+  return (
+    <AccordionItem value={sectionId} className={cn(
+      "border-b border-slate-200 last:border-0 transition-opacity",
+      isNA && "bg-slate-50/50"
+    )}>
+      <AccordionTrigger className="w-full py-0 hover:no-underline group bg-white">
+        <div className="grid grid-cols-12 w-full gap-0 text-left">
+          <div className="col-span-12 px-4 py-3 flex justify-between items-center">
+            <div className="flex items-center gap-2">
+              <span className={cn("font-bold text-sm", isNA ? "text-slate-400" : "text-slate-800")}>
+                {title}
+              </span>
+              {isNA && (
+                <Badge variant="outline" className="text-[10px] bg-white text-amber-600 border-amber-200">
+                  N/A for Job Level
+                </Badge>
+              )}
+            </div>
+            <div className="h-5 w-5 rounded border border-slate-300 bg-white flex items-center justify-center text-slate-500 shadow-sm">
+              <Plus className="h-3 w-3 group-data-[state=open]:hidden" />
+              <Minus className="h-3 w-3 hidden group-data-[state=open]:block" />
+            </div>
+          </div>
+        </div>
+      </AccordionTrigger>
+      <AccordionContent className="p-0 animate-in slide-in-from-top-1">
+        {children}
+      </AccordionContent>
+    </AccordionItem>
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Report Editor Component (moved outside to prevent re-renders)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ReportEditorProps {
+  selectedReport: MemorizedReport | null;
+  reportName: string;
+  setReportName: (name: string) => void;
+  reportConfig: ReportConfiguration;
+  showSelectedOnly: boolean;
+  setShowSelectedOnly: (show: boolean) => void;
+  includedFields: Set<string>;
+  expandedSections: string[];
+  setExpandedSections: (sections: string[]) => void;
+  setIsEditing: (editing: boolean) => void;
+  selectedDepartment: string;
+  setSelectedDepartment: (dept: string) => void;
+  selectedSubdepartment: string;
+  setSelectedSubdepartment: (subdept: string) => void;
+  selectedClass: string;
+  setSelectedClass: (cls: string) => void;
+  selectedSubClass: string;
+  setSelectedSubClass: (subclass: string) => void;
+  tableHeaders: typeof ENHANCED_TABLE_HEADERS_IMMIGRATION;
+  sortedStages: any[];
+  kycDocuments: Map<string, KycDocument>;
+  memoizedDepartments: any[];
+  department: Department | null;
+  nonApplicableStageIds: Set<string>;
+  availableSubdepartments: any[];
+  availableClasses: any[];
+  availableSubClasses: any[];
+  countSelectedFields: () => number;
+  isTaskFieldIncluded: (fieldId: string) => boolean;
+  toggleTaskFieldInclude: (fieldId: string) => void;
+  toggleTaskFieldDefault: (fieldId: string) => void;
+  toggleStageDateInclude: (stageId: string) => void;
+  toggleStageDateDefault: (stageId: string) => void;
+  toggleDocument: (stageId: string, kycId: string) => void;
+  toggleDocFieldInclude: (stageId: string, kycId: string, fieldId: string) => void;
+  toggleDocFieldDefault: (stageId: string, kycId: string, fieldId: string) => void;
+  handleSelectAllDefault: () => void;
+  handleSelectAllReports: () => void;
+  getSectionId: (title: string) => string;
+}
+
+const ReportEditor = React.memo(({
+  selectedReport,
+  reportName,
+  setReportName,
+  reportConfig,
+  showSelectedOnly,
+  setShowSelectedOnly,
+  includedFields,
+  expandedSections,
+  setExpandedSections,
+  setIsEditing,
+  selectedDepartment,
+  setSelectedDepartment,
+  selectedSubdepartment,
+  setSelectedSubdepartment,
+  selectedClass,
+  setSelectedClass,
+  selectedSubClass,
+  setSelectedSubClass,
+  tableHeaders,
+  sortedStages,
+  kycDocuments,
+  memoizedDepartments,
+  department,
+  nonApplicableStageIds,
+  availableSubdepartments,
+  availableClasses,
+  availableSubClasses,
+  countSelectedFields,
+  isTaskFieldIncluded,
+  toggleTaskFieldInclude,
+  toggleTaskFieldDefault,
+  toggleStageDateInclude,
+  toggleStageDateDefault,
+  toggleDocument,
+  toggleDocFieldInclude,
+  toggleDocFieldDefault,
+  handleSelectAllDefault,
+  handleSelectAllReports,
+  getSectionId
+}: ReportEditorProps) => {
+  const selectedCount = countSelectedFields();
+
+  const filteredTaskFields = tableHeaders.filter(field =>
+    showSelectedOnly ? includedFields.has(field.id) : true
+  );
+
+  const filteredStages = sortedStages.filter(stage => {
+    if (!showSelectedOnly) return true;
+    const stageConfig = reportConfig.stages?.[stage.id];
+    if (!stageConfig) return false;
+    if (stageConfig.isStageDateSelected) return true;
+    return Object.keys(stageConfig.documents).length > 0;
+  });
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="mb-4 pb-4 border-b px-1">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900">
+              {selectedReport ? `Edit "${selectedReport.name}"` : 'Create New Report'}
+            </h3>
+            <p className="text-sm text-slate-500 mt-0.5">{selectedCount} field{selectedCount !== 1 ? 's' : ''} selected</p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="bg-blue-50 text-blue-700 text-sm px-3 py-1.5 rounded-md border border-blue-100">
+              {selectedCount} selected
+            </div>
+            <Button variant="outline" size="sm" className="text-xs h-8 px-3 flex items-center gap-1.5" onClick={() => setShowSelectedOnly(!showSelectedOnly)}>
+              <Filter className="h-3.5 w-3.5" />
+              {showSelectedOnly ? 'Show All' : 'Show Selected'}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)}>
+              <X className="mr-2 h-4 w-4" /> Cancel
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Report Name */}
+      <div className="mb-3 space-y-1">
+        <Label htmlFor="report-name">Report Name *</Label>
+        <Input
+          id="report-name"
+          value={reportName}
+          onChange={e => setReportName(e.target.value)}
+          placeholder="Enter report name..."
+          className="h-9"
+        />
+      </div>
+
+      {/* ── Job-level Hierarchy ── */}
+      <div className="grid grid-cols-4 gap-3 mb-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
+        <div className="space-y-1">
+          <Label className="text-xs text-slate-600">Department</Label>
+          <Select value={selectedDepartment} onValueChange={v => { setSelectedDepartment(v); setSelectedSubdepartment('all'); setSelectedClass('all'); setSelectedSubClass('all'); }}>
+            <SelectTrigger className="h-9 bg-white border-slate-200 text-xs">
+              <SelectValue placeholder="All Departments" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Departments</SelectItem>
+              {memoizedDepartments.map((d: any) => (
+                <SelectItem key={d.id} value={d.id.toString()}>
+                  {d.name}{department?.id === d.id ? ' (Current)' : ''}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-slate-600">Sub-Department</Label>
+          <Select value={selectedSubdepartment} onValueChange={v => { setSelectedSubdepartment(v); setSelectedClass('all'); setSelectedSubClass('all'); }} disabled={!selectedDepartment}>
+            <SelectTrigger className="h-9 bg-white border-slate-200 text-xs">
+              <SelectValue placeholder="All Sub-Departments" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Sub-Departments</SelectItem>
+              {availableSubdepartments.map((s: any) => (
+                <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-slate-600">Service Class</Label>
+          <Select value={selectedClass} onValueChange={v => { setSelectedClass(v); setSelectedSubClass('all'); }} disabled={!selectedSubdepartment}>
+            <SelectTrigger className="h-9 bg-white border-slate-200 text-xs">
+              <SelectValue placeholder="All Classes" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Classes</SelectItem>
+              {availableClasses.map((c: any) => (
+                <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-slate-600">Subclass</Label>
+          <Select value={selectedSubClass} onValueChange={setSelectedSubClass} disabled={!selectedClass}>
+            <SelectTrigger className="h-9 bg-white border-slate-200 text-xs">
+              <SelectValue placeholder="All Subclasses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Subclasses</SelectItem>
+              {availableSubClasses.map((sc: any) => (
+                <SelectItem key={sc.id} value={sc.id.toString()}>{sc.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Applicability summary */}
+        {selectedDepartment && nonApplicableStageIds.size > 0 && (
+          <div className="col-span-4 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded-md border border-amber-200">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+            <span>
+              <strong>{nonApplicableStageIds.size}</strong> stage{nonApplicableStageIds.size !== 1 ? 's are' : ' is'} not applicable to the selected job level and shown greyed out.
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* ── Field Table ── */}
+      <div className="flex-1 flex flex-col min-h-0 border rounded-lg shadow-sm overflow-hidden bg-white">
+        <TableHeaderRow handleSelectAllDefault={handleSelectAllDefault} handleSelectAllReports={handleSelectAllReports} />
+        <ScrollArea className="flex-1">
+          <Accordion
+            type="multiple"
+            className="w-full divide-y divide-slate-200"
+            value={expandedSections}
+            onValueChange={setExpandedSections}
+          >
+            {/* Task Details */}
+            {filteredTaskFields.length > 0 && (
+              <ExpandableRow title="Task Details" getSectionId={getSectionId} nonApplicableStageIds={nonApplicableStageIds}>
+                {filteredTaskFields.map(field => {
+                  const isIncluded = isTaskFieldIncluded(field.id);
+                  const config = reportConfig.taskFields?.find(f => f.id === field.id);
+                  const isSessionOnly = isIncluded && !config?.isDefault;
+                  return (
+                    <TableRowItem
+                      key={field.id}
+                      label={field.label}
+                      isIncluded={isIncluded}
+                      isDefault={!!config?.isDefault}
+                      onToggleInclude={() => toggleTaskFieldInclude(field.id)}
+                      onToggleDefault={() => toggleTaskFieldDefault(field.id)}
+                      depth={1}
+                      isSessionOnly={isSessionOnly}
+                    />
+                  );
+                })}
+              </ExpandableRow>
+            )}
+
+            {/* Stages — only applicable stages shown; N/A ones filtered out */}
+            {filteredStages.map(stage => {
+              const stageConfig = reportConfig.stages?.[stage.id];
+              const filteredDocs = (stage.documents || []).filter((doc: any) =>
+                showSelectedOnly ? !!stageConfig?.documents?.[doc.kycId] : true
+              );
+
+              if (showSelectedOnly && !stageConfig?.isStageDateSelected && filteredDocs.length === 0) return null;
+
+              return (
+                <ExpandableRow key={`stage-${stage.id}`} title={stage.name} stageId={stage.id} getSectionId={getSectionId} nonApplicableStageIds={nonApplicableStageIds}>
+                  {/* Stage date row */}
+                  {(!showSelectedOnly || stageConfig?.isStageDateSelected) && (
+                    <TableRowItem
+                      label="Stage Completion Date"
+                      isIncluded={!!stageConfig?.isStageDateSelected}
+                      isDefault={!!stageConfig?.isStageDateDefault}
+                      onToggleInclude={() => toggleStageDateInclude(stage.id)}
+                      onToggleDefault={() => toggleStageDateDefault(stage.id)}
+                      depth={1}
+                      className="bg-slate-50/50 italic text-slate-600"
+                    />
+                  )}
+
+                  {/* Documents */}
+                  {filteredDocs.map((doc: any) => {
+                    const kycDoc = kycDocuments.get(doc.kycId);
+                    if (!kycDoc) return null;
+                    const isDocActive = !!stageConfig?.documents?.[doc.kycId];
+
+                    return (
+                      <div key={`doc-${stage.id}-${doc.kycId}`}>
+                        {/* Document header */}
+                        <div className="grid grid-cols-12 gap-0 border-b border-slate-100 items-stretch text-sm hover:bg-slate-50">
+                          <div className="col-span-8 flex items-center border-r border-slate-100 py-2">
+                            <div style={{ width: `24px` }} className="shrink-0 h-full border-r border-dashed border-slate-100 mr-2 opacity-50" />
+                            <div className="flex items-center gap-2 px-2 py-1 w-full">
+                              <Checkbox
+                                id={`doc-${stage.id}-${doc.kycId}`}
+                                checked={isDocActive}
+                                onCheckedChange={() => toggleDocument(stage.id, doc.kycId)}
+                              />
+                              <Label htmlFor={`doc-${stage.id}-${doc.kycId}`} className="cursor-pointer font-semibold text-slate-700 flex-1 truncate">
+                                {kycDoc.display_name || kycDoc.name}
+                              </Label>
+                            </div>
+                          </div>
+                          <div className="col-span-2 border-r border-slate-100 bg-slate-50/30" />
+                          <div className="col-span-2 bg-slate-50/30" />
+                        </div>
+
+                        {/* Document fields */}
+                        {isDocActive && (
+                          <div className="bg-slate-50/30">
+                            {kycDoc.fields?.map((field: any) => {
+                              const docConfig = stageConfig?.documents?.[doc.kycId];
+                              const fieldConfig = docConfig?.fields.find((f: any) => f.id === field.id);
+                              if (showSelectedOnly && !fieldConfig) return null;
+                              return (
+                                <TableRowItem
+                                  key={`field-${stage.id}-${doc.kycId}-${field.id}`}
+                                  label={field.fieldName}
+                                  isIncluded={!!fieldConfig}
+                                  isDefault={!!fieldConfig?.isDefault}
+                                  onToggleInclude={() => toggleDocFieldInclude(stage.id, doc.kycId, field.id)}
+                                  onToggleDefault={() => toggleDocFieldDefault(stage.id, doc.kycId, field.id)}
+                                  depth={2}
+                                  isSessionOnly={!!fieldConfig && !fieldConfig.isDefault}
+                                  className="bg-white"
+                                />
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </ExpandableRow>
+              );
+            })}
+          </Accordion>
+        </ScrollArea>
+      </div>
+    </div>
+  );
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Component
@@ -704,119 +1153,6 @@ export function MemorizedReportDialog({
     });
   }, [reports]);
 
-  // ─── Sub-components ───────────────────────────────────────────────────────
-
-  const TableHeaderRow = () => (
-    <div className="grid grid-cols-12 gap-0 border-b border-slate-200 bg-slate-100 text-xs font-semibold text-slate-700 sticky top-0 z-20 shadow-sm">
-      <div className="col-span-8 px-4 py-3 border-r border-slate-200">Field / Category</div>
-      <div className="col-span-2 px-2 py-3 border-r border-slate-200 text-center bg-green-50/50 text-green-700 flex items-center justify-center gap-1">
-        <span>Default</span>
-        <Button variant="ghost" size="sm" className="h-5 w-5 p-0 hover:bg-green-100 text-green-600" onClick={handleSelectAllDefault} title="Toggle All Default">
-          <CheckSquare className="h-3 w-3" />
-        </Button>
-      </div>
-      <div className="col-span-2 px-2 py-3 text-center bg-blue-50/50 text-blue-700 flex items-center justify-center gap-1">
-        <span>Reports Table</span>
-        <Button variant="ghost" size="sm" className="h-5 w-5 p-0 hover:bg-blue-100 text-blue-600" onClick={handleSelectAllReports} title="Toggle All Report Fields">
-          <CheckSquare className="h-3 w-3" />
-        </Button>
-      </div>
-    </div>
-  );
-
-  const TableRowItem = ({
-    label,
-    isIncluded,
-    isDefault,
-    onToggleInclude,
-    onToggleDefault,
-    depth = 0,
-    isSessionOnly = false,
-    className = "",
-    icon = null,
-    readOnly = false
-  }: {
-    label: React.ReactNode;
-    isIncluded?: boolean;
-    isDefault?: boolean;
-    onToggleInclude?: () => void;
-    onToggleDefault?: () => void;
-    depth?: number;
-    isSessionOnly?: boolean;
-    className?: string;
-    icon?: React.ReactNode;
-    readOnly?: boolean;
-  }) => (
-    <div className={cn("grid grid-cols-12 gap-0 border-b border-slate-100 items-stretch text-sm transition-colors bg-white hover:bg-slate-50", className)}>
-      <div className="col-span-8 flex items-center border-r border-slate-100 py-2">
-        <div style={{ width: `${depth * 24}px` }} className="shrink-0 h-full border-r border-dashed border-slate-100 mr-2 opacity-50" />
-        <div className="flex items-center gap-2 px-2 min-w-0">
-          {icon}
-          <span className={cn("truncate font-medium", isSessionOnly ? "text-blue-600" : "text-slate-700")}>
-            {label}
-            {isSessionOnly && <span className="text-xs text-blue-500 font-normal ml-1">(Session Only)</span>}
-          </span>
-        </div>
-      </div>
-      <div className="col-span-2 flex items-center justify-center border-r border-slate-100 bg-slate-50/30 py-2">
-        {(onToggleDefault || readOnly) && (
-          <Checkbox
-            checked={isDefault}
-            onCheckedChange={onToggleDefault}
-            disabled={readOnly || isSessionOnly}
-            className="data-[state=checked]:bg-green-600 data-[state=checked]:border-green-600 disabled:opacity-50"
-          />
-        )}
-      </div>
-      <div className="col-span-2 flex items-center justify-center bg-slate-50/30 py-2">
-        {(onToggleInclude || readOnly) && (
-          <Checkbox
-            checked={isIncluded}
-            onCheckedChange={onToggleInclude}
-            disabled={readOnly}
-            className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 disabled:opacity-50"
-          />
-        )}
-      </div>
-    </div>
-  );
-
-  const ExpandableRow = React.memo(({ title, children, stageId }: { title: string; children: React.ReactNode; stageId?: string }) => {
-    const sectionId = getSectionId(title);
-    const isNA = stageId ? nonApplicableStageIds.has(stageId) : false;
-
-    return (
-      <AccordionItem value={sectionId} className={cn(
-        "border-b border-slate-200 last:border-0 transition-opacity",
-        isNA && "bg-slate-50/50"
-      )}>
-        <AccordionTrigger className="w-full py-0 hover:no-underline group bg-white">
-          <div className="grid grid-cols-12 w-full gap-0 text-left">
-            <div className="col-span-12 px-4 py-3 flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <span className={cn("font-bold text-sm", isNA ? "text-slate-400" : "text-slate-800")}>
-                  {title}
-                </span>
-                {isNA && (
-                  <Badge variant="outline" className="text-[10px] bg-white text-amber-600 border-amber-200">
-                    N/A for Job Level
-                  </Badge>
-                )}
-              </div>
-              <div className="h-5 w-5 rounded border border-slate-300 bg-white flex items-center justify-center text-slate-500 shadow-sm">
-                <Plus className="h-3 w-3 group-data-[state=open]:hidden" />
-                <Minus className="h-3 w-3 hidden group-data-[state=open]:block" />
-              </div>
-            </div>
-          </div>
-        </AccordionTrigger>
-        <AccordionContent className="p-0 animate-in slide-in-from-top-1">
-          {children}
-        </AccordionContent>
-      </AccordionItem>
-    );
-  });
-
   // ─── Render: Report List ──────────────────────────────────────────────────
 
   const renderReportList = () => (
@@ -862,7 +1198,7 @@ export function MemorizedReportDialog({
               {selectedReport?.id === report.id && (
                 <div className="flex items-center gap-1">
                   <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-500 hover:text-blue-600" onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}>
-                    <Pencil className="h-3.5 w-3.5" />
+                    <Edit className="h-3.5 w-3.5" />
                   </Button>
                   <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-500 hover:text-red-600" onClick={(e) => { e.stopPropagation(); handleDeleteReport(report.id); }}>
                     <Trash2 className="h-3.5 w-3.5" />
@@ -876,256 +1212,6 @@ export function MemorizedReportDialog({
       </ScrollArea>
     </div>
   );
-
-  // ─── Render: Report Editor ────────────────────────────────────────────────
-
-  const renderReportEditor = () => {
-    const selectedCount = countSelectedFields();
-
-    const filteredTaskFields = tableHeaders.filter(field =>
-      showSelectedOnly ? includedFields.has(field.id) : true
-    );
-
-    const filteredStages = sortedStages.filter(stage => {
-      if (!showSelectedOnly) return true;
-      const stageConfig = reportConfig.stages?.[stage.id];
-      if (!stageConfig) return false;
-      if (stageConfig.isStageDateSelected) return true;
-      return Object.keys(stageConfig.documents).length > 0;
-    });
-
-    return (
-      <div className="flex flex-col h-full">
-        {/* Header */}
-        <div className="mb-4 pb-4 border-b px-1">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div>
-              <h3 className="text-lg font-bold text-slate-900">
-                {selectedReport ? `Edit "${selectedReport.name}"` : 'Create New Report'}
-              </h3>
-              <p className="text-sm text-slate-500 mt-0.5">{selectedCount} field{selectedCount !== 1 ? 's' : ''} selected</p>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="bg-blue-50 text-blue-700 text-sm px-3 py-1.5 rounded-md border border-blue-100">
-                {selectedCount} selected
-              </div>
-              <Button variant="outline" size="sm" className="text-xs h-8 px-3 flex items-center gap-1.5" onClick={() => setShowSelectedOnly(!showSelectedOnly)}>
-                <Filter className="h-3.5 w-3.5" />
-                {showSelectedOnly ? 'Show All' : 'Show Selected'}
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)}>
-                <X className="mr-2 h-4 w-4" /> Cancel
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        {/* Report Name */}
-        <div className="mb-3 space-y-1">
-          <Label htmlFor="report-name">Report Name *</Label>
-          <Input
-            id="report-name"
-            value={reportName}
-            onChange={e => setReportName(e.target.value)}
-            placeholder="Enter report name..."
-            className="h-9"
-          />
-        </div>
-
-        {/* ── Job-level Hierarchy ── */}
-        <div className="grid grid-cols-4 gap-3 mb-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
-          <div className="space-y-1">
-            <Label className="text-xs text-slate-600">Department</Label>
-            <Select value={selectedDepartment} onValueChange={v => { setSelectedDepartment(v); setSelectedSubdepartment('all'); setSelectedClass('all'); setSelectedSubClass('all'); }}>
-              <SelectTrigger className="h-9 bg-white border-slate-200 text-xs">
-                <SelectValue placeholder="All Departments" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Departments</SelectItem>
-                {memoizedDepartments.map((d: any) => (
-                  <SelectItem key={d.id} value={d.id.toString()}>
-                    {d.name}{department?.id === d.id ? ' (Current)' : ''}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1">
-            <Label className="text-xs text-slate-600">Sub-Department</Label>
-            <Select value={selectedSubdepartment} onValueChange={v => { setSelectedSubdepartment(v); setSelectedClass('all'); setSelectedSubClass('all'); }} disabled={!selectedDepartment}>
-              <SelectTrigger className="h-9 bg-white border-slate-200 text-xs">
-                <SelectValue placeholder="All Sub-Departments" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Sub-Departments</SelectItem>
-                {availableSubdepartments.map((s: any) => (
-                  <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1">
-            <Label className="text-xs text-slate-600">Service Class</Label>
-            <Select value={selectedClass} onValueChange={v => { setSelectedClass(v); setSelectedSubClass('all'); }} disabled={!selectedSubdepartment}>
-              <SelectTrigger className="h-9 bg-white border-slate-200 text-xs">
-                <SelectValue placeholder="All Classes" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Classes</SelectItem>
-                {availableClasses.map((c: any) => (
-                  <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1">
-            <Label className="text-xs text-slate-600">Subclass</Label>
-            <Select value={selectedSubClass} onValueChange={setSelectedSubClass} disabled={!selectedClass}>
-              <SelectTrigger className="h-9 bg-white border-slate-200 text-xs">
-                <SelectValue placeholder="All Subclasses" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Subclasses</SelectItem>
-                {availableSubClasses.map((sc: any) => (
-                  <SelectItem key={sc.id} value={sc.id.toString()}>{sc.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Applicability summary */}
-          {selectedDepartment && nonApplicableStageIds.size > 0 && (
-            <div className="col-span-4 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded-md border border-amber-200">
-              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-              <span>
-                <strong>{nonApplicableStageIds.size}</strong> stage{nonApplicableStageIds.size !== 1 ? 's are' : ' is'} not applicable to the selected job level and shown greyed out.
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* ── Field Table ── */}
-        <div className="flex-1 flex flex-col min-h-0 border rounded-lg shadow-sm overflow-hidden bg-white">
-          <TableHeaderRow />
-          <ScrollArea className="flex-1">
-            <Accordion
-              type="multiple"
-              className="w-full divide-y divide-slate-200"
-              value={expandedSections}
-              onValueChange={setExpandedSections}
-            >
-              {/* Task Details */}
-              {filteredTaskFields.length > 0 && (
-                <ExpandableRow title="Task Details">
-                  {filteredTaskFields.map(field => {
-                    const isIncluded = isTaskFieldIncluded(field.id);
-                    const config = reportConfig.taskFields?.find(f => f.id === field.id);
-                    const isSessionOnly = isIncluded && !config?.isDefault;
-                    return (
-                      <TableRowItem
-                        key={field.id}
-                        label={field.label}
-                        isIncluded={isIncluded}
-                        isDefault={!!config?.isDefault}
-                        onToggleInclude={() => toggleTaskFieldInclude(field.id)}
-                        onToggleDefault={() => toggleTaskFieldDefault(field.id)}
-                        depth={1}
-                        isSessionOnly={isSessionOnly}
-                      />
-                    );
-                  })}
-                </ExpandableRow>
-              )}
-
-              {/* Stages — only applicable stages shown; N/A ones filtered out */}
-              {filteredStages.map(stage => {
-                const stageConfig = reportConfig.stages?.[stage.id];
-                const filteredDocs = (stage.documents || []).filter((doc: any) =>
-                  showSelectedOnly ? !!stageConfig?.documents?.[doc.kycId] : true
-                );
-
-                if (showSelectedOnly && !stageConfig?.isStageDateSelected && filteredDocs.length === 0) return null;
-
-                return (
-                  <ExpandableRow key={`stage-${stage.id}`} title={stage.name} stageId={stage.id}>
-                    {/* Stage date row */}
-                    {(!showSelectedOnly || stageConfig?.isStageDateSelected) && (
-                      <TableRowItem
-                        label="Stage Completion Date"
-                        isIncluded={!!stageConfig?.isStageDateSelected}
-                        isDefault={!!stageConfig?.isStageDateDefault}
-                        onToggleInclude={() => toggleStageDateInclude(stage.id)}
-                        onToggleDefault={() => toggleStageDateDefault(stage.id)}
-                        depth={1}
-                        className="bg-slate-50/50 italic text-slate-600"
-                      />
-                    )}
-
-                    {/* Documents */}
-                    {filteredDocs.map((doc: any) => {
-                      const kycDoc = kycDocuments.get(doc.kycId);
-                      if (!kycDoc) return null;
-                      const isDocActive = !!stageConfig?.documents?.[doc.kycId];
-
-                      return (
-                        <div key={`doc-${stage.id}-${doc.kycId}`}>
-                          {/* Document header */}
-                          <div className="grid grid-cols-12 gap-0 border-b border-slate-100 items-stretch text-sm hover:bg-slate-50">
-                            <div className="col-span-8 flex items-center border-r border-slate-100 py-2">
-                              <div style={{ width: `24px` }} className="shrink-0 h-full border-r border-dashed border-slate-100 mr-2 opacity-50" />
-                              <div className="flex items-center gap-2 px-2 py-1 w-full">
-                                <Checkbox
-                                  id={`doc-${stage.id}-${doc.kycId}`}
-                                  checked={isDocActive}
-                                  onCheckedChange={() => toggleDocument(stage.id, doc.kycId)}
-                                />
-                                <Label htmlFor={`doc-${stage.id}-${doc.kycId}`} className="cursor-pointer font-semibold text-slate-700 flex-1 truncate">
-                                  {kycDoc.display_name || kycDoc.name}
-                                </Label>
-                              </div>
-                            </div>
-                            <div className="col-span-2 border-r border-slate-100 bg-slate-50/30" />
-                            <div className="col-span-2 bg-slate-50/30" />
-                          </div>
-
-                          {/* Document fields */}
-                          {isDocActive && (
-                            <div className="bg-slate-50/30">
-                              {kycDoc.fields?.map((field: any) => {
-                                const docConfig = stageConfig?.documents?.[doc.kycId];
-                                const fieldConfig = docConfig?.fields.find((f: any) => f.id === field.id);
-                                if (showSelectedOnly && !fieldConfig) return null;
-                                return (
-                                  <TableRowItem
-                                    key={`field-${stage.id}-${doc.kycId}-${field.id}`}
-                                    label={field.fieldName}
-                                    isIncluded={!!fieldConfig}
-                                    isDefault={!!fieldConfig?.isDefault}
-                                    onToggleInclude={() => toggleDocFieldInclude(stage.id, doc.kycId, field.id)}
-                                    onToggleDefault={() => toggleDocFieldDefault(stage.id, doc.kycId, field.id)}
-                                    depth={2}
-                                    isSessionOnly={!!fieldConfig && !fieldConfig.isDefault}
-                                    className="bg-white"
-                                  />
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </ExpandableRow>
-                );
-              })}
-            </Accordion>
-          </ScrollArea>
-        </div>
-      </div>
-    );
-  };
 
   // ─── Render: Report Viewer ────────────────────────────────────────────────
 
@@ -1152,7 +1238,7 @@ export function MemorizedReportDialog({
         </div>
 
         <div className="border rounded-lg shadow-sm flex-1 flex flex-col min-h-0 overflow-hidden bg-white">
-          <TableHeaderRow />
+          <TableHeaderRow handleSelectAllDefault={() => { }} handleSelectAllReports={() => { }} />
           <ScrollArea className="flex-1">
             <div className="divide-y divide-slate-100">
               <div className="bg-slate-50 px-4 py-2 font-bold text-xs uppercase text-slate-500 tracking-wider">Task Fields</div>
@@ -1244,7 +1330,47 @@ export function MemorizedReportDialog({
         <div className="col-span-9 p-6 flex flex-col h-full overflow-hidden">
           <div className="flex-1 min-h-0 mb-4 overflow-hidden flex flex-col">
             {isEditing
-              ? renderReportEditor()
+              ? <ReportEditor
+                selectedReport={selectedReport}
+                reportName={reportName}
+                setReportName={setReportName}
+                reportConfig={reportConfig}
+                showSelectedOnly={showSelectedOnly}
+                setShowSelectedOnly={setShowSelectedOnly}
+                includedFields={includedFields}
+                expandedSections={expandedSections}
+                setExpandedSections={setExpandedSections}
+                setIsEditing={setIsEditing}
+                selectedDepartment={selectedDepartment}
+                setSelectedDepartment={setSelectedDepartment}
+                selectedSubdepartment={selectedSubdepartment}
+                setSelectedSubdepartment={setSelectedSubdepartment}
+                selectedClass={selectedClass}
+                setSelectedClass={setSelectedClass}
+                selectedSubClass={selectedSubClass}
+                setSelectedSubClass={setSelectedSubClass}
+                tableHeaders={tableHeaders}
+                sortedStages={sortedStages}
+                kycDocuments={kycDocuments}
+                memoizedDepartments={memoizedDepartments}
+                department={department}
+                nonApplicableStageIds={nonApplicableStageIds}
+                availableSubdepartments={availableSubdepartments}
+                availableClasses={availableClasses}
+                availableSubClasses={availableSubClasses}
+                countSelectedFields={countSelectedFields}
+                isTaskFieldIncluded={isTaskFieldIncluded}
+                toggleTaskFieldInclude={toggleTaskFieldInclude}
+                toggleTaskFieldDefault={toggleTaskFieldDefault}
+                toggleStageDateInclude={toggleStageDateInclude}
+                toggleStageDateDefault={toggleStageDateDefault}
+                toggleDocument={toggleDocument}
+                toggleDocFieldInclude={toggleDocFieldInclude}
+                toggleDocFieldDefault={toggleDocFieldDefault}
+                handleSelectAllDefault={handleSelectAllDefault}
+                handleSelectAllReports={handleSelectAllReports}
+                getSectionId={getSectionId}
+              />
               : selectedReport
                 ? renderReportViewer()
                 : (

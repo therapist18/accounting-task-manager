@@ -28,6 +28,8 @@ export interface Task {
   };
   officer?: any;
   officer_name?: string;
+  officer_ids?: string[];
+  officer_id?: string;
   task_manager?: any;
   task_manager_name?: string;
   assigned_to_name?: string;
@@ -160,7 +162,7 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
         subdepartment_id: jobLevel.subdepartment_id,
         class_id: jobLevel.class_id,
         subclass_id: jobLevel.subclass_id,
-          job_level: {
+        job_level: {
           level: jobLevel.level || 0,
           class_id: jobLevel.class_id || '',
           subclass_id: jobLevel.subclass_id || null,
@@ -179,7 +181,7 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
           email: taskManager.email || '',
           phone: taskManager.phone || ''
         } : undefined
-      };    
+      };
       return processedTask;
     });
 
