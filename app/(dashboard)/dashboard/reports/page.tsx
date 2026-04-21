@@ -1507,11 +1507,11 @@ export default function ReportsPage() {
                               <X className="h-4 w-4" />
                             </Button>
                           )}
-                          <Button onClick={() => setView(view === 'standard' ? 'transposed' : 'standard')} className="flex items-center gap-2 cursor-pointer">
-                            {view === 'standard' ? <LayoutGrid className="h-4 w-4" /> : <TableProperties className="h-4 w-4" />}
-                            {view === 'standard' ? 'Transposed View' : 'Standard View'}
-                          </Button>
                         </div>
+                        <Button onClick={() => setView(view === 'standard' ? 'transposed' : 'standard')} className="flex items-center gap-2 cursor-pointer">
+                          {view === 'standard' ? <LayoutGrid className="h-4 w-4" /> : <TableProperties className="h-4 w-4" />}
+                          {view === 'standard' ? 'Transposed View' : 'Standard View'}
+                        </Button>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="outline" size="sm" className="flex items-center gap-2">

@@ -477,7 +477,7 @@ export function StandardReportView({
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
-                        <span className="break-words leading-tight">Time Gap</span>
+                        <span className="break-words leading-tight">{col.label}</span>
 
                         {isColFilterNA && (
                           <Badge variant="outline" className="bg-blue-800 text-blue-200 border-blue-400 text-[10px] px-1 py-0 h-4 shrink-0">
@@ -546,7 +546,7 @@ export function StandardReportView({
                       key={col.id}
                       className={`${COLUMN_WIDTH_CLASS} border-r border-purple-200 bg-orange-50 text-center font-semibold text-xs text-orange-700`}
                     >
-                      {col.label}
+                     Time Gap
                     </TableHead>
                   );
                 }
