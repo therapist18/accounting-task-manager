@@ -7,14 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Loader2, LayoutGrid, Rows, Plus, Minus, Briefcase, FileDown,
-  ChevronDown, ChevronsRight, ChevronsDown, FileText,
-  ChevronLeft, ChevronRight, RefreshCw, AlertTriangle,
-  Clock, ArrowUpDown, Search, Timer, AlertCircle,
-  CheckCircle2, Clock3, User, EyeOff, Eye, Filter,
-  PanelLeftClose, PanelLeftOpen, RotateCcw, X, TableProperties, Download
-} from "lucide-react";
+import { Loader2, LayoutGrid, Rows, Plus, Minus, Briefcase, FileDown, ChevronDown, ChevronsRight, ChevronsDown, FileText, ChevronLeft, ChevronRight, RefreshCw, AlertTriangle, Clock, ArrowUpDown, Search, Timer, AlertCircle, CheckCircle2, Clock3, User, EyeOff, Eye, Filter, PanelLeftClose, PanelLeftOpen, RotateCcw, X, TableProperties, Download, ArrowRight } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -113,7 +106,6 @@ const safeRender = (content: any) => {
   return String(content);
 };
 
-// ... [Keep existing helper functions intact: isStageApplicableToTask] ...
 const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boolean => {
   if (!task || !stage || !departments?.length) return true;
   try {
@@ -148,16 +140,11 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boo
 };
 
 export default function ReportsPage() {
-  // ── UI Visibility State ────────────────────────────────────────────────────
   const [areTabsVisible, setAreTabsVisible] = useState(true);
-
-  // ── Report state ───────────────────────────────────────────────────────────
   const [activeReport, setActiveReport] = useState<any | null>(null);
   const [availableReports, setAvailableReports] = useState<any[]>([]);
   const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
   const [reportLoading, setReportLoading] = useState(true);
-
-  // ── Data state ─────────────────────────────────────────────────────────────
   const [loading, setLoading] = useState(false);
   const [tasks, setTasks] = useState<any[]>([]);
   const [stages, setStages] = useState<any[]>([]);
@@ -172,48 +159,36 @@ export default function ReportsPage() {
   const [unifiedManagers, setUnifiedManagers] = useState<any[]>([]);
   const [unifiedAssistants, setUnifiedAssistants] = useState<any[]>([]);
   const [availableJobLevels, setAvailableJobLevels] = useState<any[]>([]);
-
-  // ── Filter state ───────────────────────────────────────────────────────────
   const [activeDeptId, setActiveDeptId] = useState<string>("");
   const [activeSubDeptId, setActiveSubDeptId] = useState<string>("all");
   const [activeClassId, setActiveClassId] = useState<string>("all");
   const [activeSubClassId, setActiveSubClassId] = useState<string>("all");
   const [activeStatus, setActiveStatus] = useState<string>("wip");
   const [searchQuery, setSearchQuery] = useState<string>("");
-
   const [selectedOfficers, setSelectedOfficers] = useState<string[]>([]);
   const [activeOfficerTab, setActiveOfficerTab] = useState<string>("all");
   const [allOfficers, setAllOfficers] = useState<any[]>([]);
   const [availableOfficers, setAvailableOfficers] = useState<any[]>([]);
   const [isOfficerDropdownOpen, setIsOfficerDropdownOpen] = useState(false);
-
+  const [isFiltersDropdownOpen, setIsFiltersDropdownOpen] = useState(false);
   const [selectedManagers, setSelectedManagers] = useState<string[]>([]);
   const [allManagers, setAllManagers] = useState<any[]>([]);
   const [availableManagers, setAvailableManagers] = useState<any[]>([]);
   const [isManagerDropdownOpen, setIsManagerDropdownOpen] = useState(false);
-
   const [selectedAssistants, setSelectedAssistants] = useState<string[]>([]);
   const [allAssistants, setAllAssistants] = useState<any[]>([]);
   const [availableAssistants, setAvailableAssistants] = useState<any[]>([]);
   const [isAssistantDropdownOpen, setIsAssistantDropdownOpen] = useState(false);
-
-  // ── Sort / view state ──────────────────────────────────────────────────────
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [view, setView] = useState<'standard' | 'transposed'>('standard');
   const [expandedSections, setExpandedSections] = useState(() => new Set(['task_details', 'time_tracking']));
   const [showTimeStatuses, setShowTimeStatuses] = useState(false);
   const [showNARows, setShowNARows] = useState(true);
-
-  // ── Column state ───────────────────────────────────────────────────────────
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>([]);
   const [expandedStageColumns, setExpandedStageColumns] = useState<Set<string>>(new Set());
-
-  // ... [Keep exact initializations and hooks intact] ...
   const getStaffName = useCallback((userId: any) => {
     if (!userId) return '';
     const userIdStr = String(userId);
-
-    // Check unified user data (has UUIDs with names)
     const unifiedOfficer = unifiedOfficers.find(o => o.id === userIdStr);
     if (unifiedOfficer) return unifiedOfficer.full_name || unifiedOfficer.name || unifiedOfficer.displayName || `Officer ${userId}`;
 
@@ -223,11 +198,8 @@ export default function ReportsPage() {
     const unifiedAssistant = unifiedAssistants.find(a => a.id === userIdStr);
     if (unifiedAssistant) return unifiedAssistant.full_name || unifiedAssistant.name || unifiedAssistant.displayName || `Assistant ${userId}`;
 
-    // Fallback to tmUsers map for backward compatibility
     const user = tmUsers.get(userIdStr);
     if (user?.name) return user.name;
-
-    // If it looks like a UUID but wasn't found, return a more descriptive fallback
     if (userIdStr.length > 20) {
       return `Unknown (${userIdStr.substring(0, 8)}...)`;
     }
@@ -519,12 +491,14 @@ export default function ReportsPage() {
 
       const isWriteUp = task.status === 'write_up_completed';
       const isEndorsed = task.status === 'endorsed';
+      const isCancelled = task.status === 'cancelled';
       const isCompleted = isWriteUp || isEndorsed || ['completed', 'archived'].includes(task.status);
 
       if (activeStatus === 'all') return true;
-      if (activeStatus === 'wip' && isCompleted) return false;
+      if (activeStatus === 'wip' && (isCompleted || isCancelled)) return false;
       if (activeStatus === 'write_up_completed' && !isWriteUp) return false;
       if (activeStatus === 'endorsed' && !isEndorsed) return false;
+      if (activeStatus === 'cancelled' && !isCancelled) return false;
       return true;
     });
   }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, activeStatus, effectiveOfficerIds, selectedManagers, selectedAssistants]);
@@ -540,7 +514,6 @@ export default function ReportsPage() {
     );
   }, [filteredTasks, searchQuery, companies]);
 
-  // ... [Keep data extraction and stage applicability functions completely intact] ...
   const getDocumentForTaskStage = useCallback((task: any, stage: any) => {
     let linked = task.source_document_id?.[stage.id];
     if (!linked && task.stages?.[stage.id]?.documents) {
@@ -742,84 +715,105 @@ export default function ReportsPage() {
     });
 
     const activeStageIds = Object.keys(activeReport.configuration?.stages || {});
-    stages
+    const sortedStages = stages
       .filter(s => activeStageIds.includes(s.id))
       .filter(stage => isStageApplicableToCurrentFilter(stage.id))
-      .forEach(stage => {
-        const config = activeReport.configuration.stages[stage.id];
-        const isSpecialStage = SPECIAL_STAGE_IDS.includes(stage.id);
-        const hasDocuments = config.documents && Object.keys(config.documents).length > 0;
-        const shouldShowDateColumn = config.isStageDateSelected || hasDocuments;
+      .sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
 
-        if (shouldShowDateColumn) {
-          const dateColId = `stage_${stage.id}_date`;
-          if (!cols.some(c => c.id === dateColId)) {
+    sortedStages.forEach((stage, index) => {
+      const config = activeReport.configuration.stages[stage.id];
+      const isSpecialStage = SPECIAL_STAGE_IDS.includes(stage.id);
+      const hasDocuments = config.documents && Object.keys(config.documents).length > 0;
+      const shouldShowDateColumn = config.isStageDateSelected || hasDocuments;
+      if (shouldShowDateColumn) {
+        const dateColId = `stage_${stage.id}_date`;
+        if (!cols.some(c => c.id === dateColId)) {
+          cols.push({
+            id: dateColId,
+            label: `${stage.name} (Date)`,
+            type: 'stage_date',
+            stageId: stage.id,
+            stageName: stage.name,
+            hasSubColumns: hasDocuments,
+            filterApplicable: isStageApplicableToCurrentFilter(stage.id)
+          });
+        }
+
+        // Add gap column after this stage (except for the last stage)
+        if (index < sortedStages.length - 1) {
+          const nextStage = sortedStages[index + 1];
+          const nextConfig = activeReport.configuration.stages[nextStage.id];
+          const nextShouldShowDateColumn = nextConfig.isStageDateSelected || (nextConfig.documents && Object.keys(nextConfig.documents).length > 0);
+
+          if (nextShouldShowDateColumn) {
             cols.push({
-              id: dateColId,
-              label: `${stage.name} (Date)`,
-              type: 'stage_date',
-              stageId: stage.id,
-              stageName: stage.name,
-              hasSubColumns: hasDocuments,
-              filterApplicable: isStageApplicableToCurrentFilter(stage.id)
+              id: `gap_${stage.id}_to_${nextStage.id}`,
+              label: `→`,
+              type: 'stage_gap',
+              fromStageId: stage.id,
+              toStageId: nextStage.id,
+              fromStageName: stage.name,
+              toStageName: nextStage.name,
+              filterApplicable: isStageApplicableToCurrentFilter(stage.id) || isStageApplicableToCurrentFilter(nextStage.id)
             });
           }
         }
+      }
 
-        if (hasDocuments && expandedStageColumns.has(stage.id)) {
-          if (isSpecialStage) {
-            let wefAdded = false, toAdded = false;
-            for (const [kycId] of Object.entries(config.documents)) {
-              if (wefAdded && toAdded) break;
-              const kycDoc = kycDocuments.get(kycId as string);
-              if (!kycDoc) continue;
+      if (hasDocuments && expandedStageColumns.has(stage.id)) {
+        if (isSpecialStage) {
+          let wefAdded = false, toAdded = false;
+          for (const [kycId] of Object.entries(config.documents)) {
+            if (wefAdded && toAdded) break;
+            const kycDoc = kycDocuments.get(kycId as string);
+            if (!kycDoc) continue;
 
-              if (!wefAdded) {
-                const wefField = kycDoc.fields?.find((f: any) => {
-                  const n = (f.name || f.fieldName || '').toLowerCase();
-                  return n === 'with_effect_from' || f.isEffectiveFrom === true || n.includes('effect_from') || n.includes('effective_from');
-                });
-                if (wefField) {
-                  const fieldId = wefField.id || wefField.name;
-                  const colId = `stage_${stage.id}_${kycId}_${fieldId}`;
-                  if (!cols.some(c => c.id === colId)) {
-                    cols.push({ id: colId, label: `${stage.name} - WEF`, type: 'extracted_field', stageId: stage.id, kycId, fieldId, fieldName: wefField.name || wefField.fieldName, fieldType: wefField.type || wefField.fieldType || 'date', isAutoAdded: true });
-                  }
-                  wefAdded = true;
+            if (!wefAdded) {
+              const wefField = kycDoc.fields?.find((f: any) => {
+                const n = (f.name || f.fieldName || '').toLowerCase();
+                return n === 'with_effect_from' || f.isEffectiveFrom === true || n.includes('effect_from') || n.includes('effective_from');
+              });
+              if (wefField) {
+                const fieldId = wefField.id || wefField.name;
+                const colId = `stage_${stage.id}_${kycId}_${fieldId}`;
+                if (!cols.some(c => c.id === colId)) {
+                  cols.push({ id: colId, label: `${stage.name} - WEF`, type: 'extracted_field', stageId: stage.id, kycId, fieldId, fieldName: wefField.name || wefField.fieldName, fieldType: wefField.type || wefField.fieldType || 'date', isAutoAdded: true });
                 }
-              }
-              if (!toAdded) {
-                const toField = kycDoc.fields?.find((f: any) => {
-                  const n = (f.name || f.fieldName || '').toLowerCase();
-                  return n === 'expiry_date' || f.isEffectiveTo === true || n.includes('expiry') || n.includes('effective_to');
-                });
-                if (toField) {
-                  const fieldId = toField.id || toField.name;
-                  const colId = `stage_${stage.id}_${kycId}_${fieldId}`;
-                  if (!cols.some(c => c.id === colId)) {
-                    cols.push({ id: colId, label: `${stage.name} - TO`, type: 'extracted_field', stageId: stage.id, kycId, fieldId, fieldName: toField.name || toField.fieldName, fieldType: toField.type || toField.fieldType || 'date', isAutoAdded: true });
-                  }
-                  toAdded = true;
-                }
+                wefAdded = true;
               }
             }
-          } else {
-            Object.entries(config.documents).forEach(([kycId, docConfig]: [string, any]) => {
-              const kycDoc = kycDocuments.get(kycId);
-              if (!kycDoc) return;
-              (docConfig.fields || []).forEach((fieldId: any) => {
-                const field = kycDoc.fields?.find((f: any) => f.id === fieldId);
-                if (field) {
-                  const colId = `stage_${stage.id}_${kycId}_${fieldId}`;
-                  if (!cols.some(c => c.id === colId)) {
-                    cols.push({ id: colId, label: `${kycDoc.display_name || kycDoc.name} - ${field.fieldName || field.name}`, type: 'extracted_field', stageId: stage.id, kycId, fieldId, fieldName: field.fieldName || field.name, fieldType: field.fieldType || field.type });
-                  }
-                }
+            if (!toAdded) {
+              const toField = kycDoc.fields?.find((f: any) => {
+                const n = (f.name || f.fieldName || '').toLowerCase();
+                return n === 'expiry_date' || f.isEffectiveTo === true || n.includes('expiry') || n.includes('effective_to');
               });
-            });
+              if (toField) {
+                const fieldId = toField.id || toField.name;
+                const colId = `stage_${stage.id}_${kycId}_${fieldId}`;
+                if (!cols.some(c => c.id === colId)) {
+                  cols.push({ id: colId, label: `${stage.name} - TO`, type: 'extracted_field', stageId: stage.id, kycId, fieldId, fieldName: toField.name || toField.fieldName, fieldType: toField.type || toField.fieldType || 'date', isAutoAdded: true });
+                }
+                toAdded = true;
+              }
+            }
           }
+        } else {
+          Object.entries(config.documents).forEach(([kycId, docConfig]: [string, any]) => {
+            const kycDoc = kycDocuments.get(kycId);
+            if (!kycDoc) return;
+            (docConfig.fields || []).forEach((fieldId: any) => {
+              const field = kycDoc.fields?.find((f: any) => f.id === fieldId);
+              if (field) {
+                const colId = `stage_${stage.id}_${kycId}_${fieldId}`;
+                if (!cols.some(c => c.id === colId)) {
+                  cols.push({ id: colId, label: `${kycDoc.display_name || kycDoc.name} - ${field.fieldName || field.name}`, type: 'extracted_field', stageId: stage.id, kycId, fieldId, fieldName: field.fieldName || field.name, fieldType: field.fieldType || field.type });
+                }
+              }
+            });
+          });
         }
-      });
+      }
+    });
 
     return cols;
   }, [activeReport, stages, kycDocuments, isStageApplicableToCurrentFilter, expandedStageColumns]);
@@ -881,6 +875,47 @@ export default function ReportsPage() {
             <div className="space-y-1">
               <div><span className="font-semibold text-slate-500">Initiated:</span> {formatDateTimeForDisplay(initiatedAt)}</div>
               <div><span className="font-semibold text-slate-500">Elapsed:</span> <span className="text-violet-600">{formatDuration(elapsedMinutes)}</span></div>
+            </div>
+          </TooltipContent>
+        </Tooltip>
+      );
+    }
+
+    if (col.type === 'stage_gap') {
+      const fromStage = stages.find(s => s.id === col.fromStageId);
+      const toStage = stages.find(s => s.id === col.toStageId);
+      if (!fromStage || !toStage) return <span className="text-sm text-slate-400">—</span>;
+
+      const fromDate = getStageHandledDate(task, fromStage);
+      const toDate = getStageHandledDate(task, toStage);
+
+      if (!fromDate || !toDate) return <span className="text-sm text-slate-400">—</span>;
+
+      const diffMs = toDate.getTime() - fromDate.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffDays = Math.floor(diffMins / (60 * 24));
+      const diffHours = Math.floor((diffMins % (60 * 24)) / 60);
+
+      let displayText = '';
+      if (diffDays > 0) displayText += `${diffDays}d `;
+      if (diffHours > 0) displayText += `${diffHours}h `;
+      if (diffMins % 60 > 0) displayText += `${diffMins % 60}m`;
+
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="flex items-center gap-1 text-sm font-medium text-orange-600 cursor-default">
+              <ArrowRight className="h-4 w-4" />
+              <span>{displayText.trim() || '0m'}</span>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent className="bg-white text-slate-700 border-slate-200 shadow-xl p-2">
+            <div className="text-sm space-y-1">
+              <div><span className="font-semibold text-slate-500">From:</span> {col.fromStageName}</div>
+              <div><span className="font-semibold text-slate-500">To:</span> {col.toStageName}</div>
+              <div><span className="font-semibold text-slate-500">Gap:</span> <span className="text-orange-600">{displayText.trim() || '0m'}</span></div>
+              <div><span className="font-semibold text-slate-500">From Date:</span> {formatDateForDisplay(fromDate)}</div>
+              <div><span className="font-semibold text-slate-500">To Date:</span> {formatDateForDisplay(toDate)}</div>
             </div>
           </TooltipContent>
         </Tooltip>
@@ -1254,15 +1289,19 @@ export default function ReportsPage() {
 
     const stageMap = new Map<string, { id: string; label: string; count: number; applicable: boolean }>();
     filteredColumns.filter(c => c.type !== 'task' && c.type !== 'current_stage_age' && c.type !== 'total_process_age').forEach(col => {
-      if (!stageMap.has(col.stageId)) {
-        stageMap.set(col.stageId, {
-          id: col.stageId,
-          label: stages.find(s => s.id === col.stageId)?.name || 'Stage',
+      // For gap columns, use fromStageId; for other stage columns, use stageId
+      const stageId = col.type === 'stage_gap' ? col.fromStageId : col.stageId;
+      if (!stageId) return;
+
+      if (!stageMap.has(stageId)) {
+        stageMap.set(stageId, {
+          id: stageId,
+          label: stages.find(s => s.id === stageId)?.name || 'Stage',
           count: 0,
-          applicable: isStageApplicableToCurrentFilter(col.stageId)
+          applicable: isStageApplicableToCurrentFilter(stageId)
         });
       }
-      stageMap.get(col.stageId)!.count++;
+      stageMap.get(stageId)!.count++;
     });
     stageMap.forEach(g => groups.push({ id: g.id, label: g.label, span: g.count, applicable: g.applicable }));
     return groups;
@@ -1408,136 +1447,34 @@ export default function ReportsPage() {
                   <TabsTrigger value="endorsed" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
                     Endorsement Completed
                   </TabsTrigger>
+                  <TabsTrigger value="cancelled" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-red-600 data-[state=active]:to-red-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
+                    Cancelled
+                  </TabsTrigger>
                 </TabsList>
               )}
 
               <TabsContent value={activeStatus} className="mt-4">
-                {/* Class, Subclass, Officer Filters (Rendered like sub-tabs wrapper if visible) */}
                 {areTabsVisible && (
-                  <div className="flex flex-wrap items-center gap-3 mb-4 bg-white/60 p-2 rounded-md border border-slate-200/50">
-                    <Select value={activeClassId} onValueChange={v => { setActiveClassId(v); setActiveSubClassId('all'); }}>
-                      <SelectTrigger className="w-[180px] h-9 text-sm font-medium bg-white border-slate-200 text-slate-700">
-                        <SelectValue placeholder="All Classes" />
-                      </SelectTrigger>
-                      <SelectContent className="z-[100]">
-                        <SelectItem value="all">All Classes</SelectItem>
-                        {activeSubDepartments.find(s => s.id.toString() === (activeSubDeptId === 'all' ? activeSubDepartments[0]?.id.toString() : activeSubDeptId))?.classes?.map((cls: any) => (
-                          <SelectItem key={cls.id} value={cls.id.toString()}>{cls.name}</SelectItem>
-                        )) || []}
-                      </SelectContent>
-                    </Select>
-
-                    {activeClassId && activeClassId !== 'all' && (
-                      <Select value={activeSubClassId} onValueChange={v => { setActiveSubClassId(v); }}>
-                        <SelectTrigger className="w-[180px] h-9 text-sm font-medium bg-white border-slate-200 text-slate-700">
-                          <SelectValue placeholder="All Subclasses" />
-                        </SelectTrigger>
-                        <SelectContent className="z-[100]">
-                          <SelectItem value="all">All Subclasses</SelectItem>
-                          {activeSubDepartments.find(s => s.id.toString() === (activeSubDeptId === 'all' ? activeSubDepartments[0]?.id.toString() : activeSubDeptId))?.classes?.find((c: any) => c.id.toString() === activeClassId)?.subClasses?.map((subCls: any) => (
-                            <SelectItem key={subCls.id} value={subCls.id.toString()}>{subCls.name}</SelectItem>
-                          )) || []}
-                        </SelectContent>
-                      </Select>
+                  <>
+                    {availableOfficers.length > 0 && (
+                      <Tabs value={activeOfficerTab} onValueChange={setActiveOfficerTab} className="w-full">
+                        <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 h-auto">
+                          <TabsTrigger value="all" className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
+                            All Officers
+                          </TabsTrigger>
+                          {availableOfficers.map(officer => (
+                            <TabsTrigger key={officer.id} value={officer.id} className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
+                              {officer.full_name || officer.name || officer.displayName || `Officer ${officer.id}`}
+                            </TabsTrigger>
+                          ))}
+                        </TabsList>
+                      </Tabs>
                     )}
-
-                    <DropdownMenu open={isOfficerDropdownOpen} onOpenChange={setIsOfficerDropdownOpen}>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm" disabled={!activeDeptId} className={cn("h-9 text-sm font-medium", selectedOfficers.length > 0 ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-white text-slate-700 border-slate-200")}>
-                          <User className="mr-2 h-4 w-4" />
-                          {selectedOfficers.length > 0 ? `${selectedOfficers.length} Selected Officers` : "Filter Officers"}
-                          <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent className="w-64 p-2 z-[100] border-slate-200 shadow-xl max-h-80 overflow-y-auto">
-                        {availableOfficers.length === 0 ? (
-                          <div className="p-3 text-sm text-slate-500 text-center italic">No officers assigned</div>
-                        ) : (
-                          <>
-                            <div className="space-y-1">
-                              {availableOfficers.map(o => (
-                                <div key={o.id} className="flex items-center space-x-2.5 p-1.5 hover:bg-slate-50 rounded-md transition-colors cursor-pointer" onClick={() => { setSelectedOfficers(prev => prev.includes(o.id) ? prev.filter(id => id !== o.id) : [...prev, o.id]); }}>
-                                  <Checkbox checked={selectedOfficers.includes(o.id)} className="pointer-events-none" />
-                                  <label className="text-sm font-medium text-slate-700 cursor-pointer">{o.full_name || o.name || o.displayName || `Officer ${o.id}`}</label>
-                                </div>
-                              ))}
-                            </div>
-                            {selectedOfficers.length > 0 && (
-                              <div className="border-t border-slate-100 mt-2 pt-2">
-                                <Button variant="ghost" size="sm" className="w-full text-sm text-slate-500 hover:text-slate-800" onClick={() => { setSelectedOfficers([]); }}>Clear Selection</Button>
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-
-                    <DropdownMenu open={isManagerDropdownOpen} onOpenChange={setIsManagerDropdownOpen}>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm" disabled={!activeDeptId} className={cn("h-9 text-sm font-medium", selectedManagers.length > 0 ? "bg-purple-50 text-purple-700 border-purple-200" : "bg-white text-slate-700 border-slate-200")}>
-                          <Briefcase className="mr-2 h-4 w-4" />
-                          {selectedManagers.length > 0 ? `${selectedManagers.length} Selected Managers` : "Filter Managers"}
-                          <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent className="w-64 p-2 z-[100] border-slate-200 shadow-xl max-h-80 overflow-y-auto">
-                        {availableManagers.length === 0 ? (
-                          <div className="p-3 text-sm text-slate-500 text-center italic">No managers assigned</div>
-                        ) : (
-                          <>
-                            <div className="space-y-1">
-                              {availableManagers.map(m => (
-                                <div key={m.id} className="flex items-center space-x-2.5 p-1.5 hover:bg-slate-50 rounded-md transition-colors cursor-pointer" onClick={() => { setSelectedManagers(prev => prev.includes(m.id) ? prev.filter(id => id !== m.id) : [...prev, m.id]); }}>
-                                  <Checkbox checked={selectedManagers.includes(m.id)} className="pointer-events-none" />
-                                  <label className="text-sm font-medium text-slate-700 cursor-pointer">{m.full_name || m.name || m.displayName || `Manager ${m.id}`}</label>
-                                </div>
-                              ))}
-                            </div>
-                            {selectedManagers.length > 0 && (
-                              <div className="border-t border-slate-100 mt-2 pt-2">
-                                <Button variant="ghost" size="sm" className="w-full text-sm text-slate-500 hover:text-slate-800" onClick={() => { setSelectedManagers([]); }}>Clear Selection</Button>
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-
-                    <DropdownMenu open={isAssistantDropdownOpen} onOpenChange={setIsAssistantDropdownOpen}>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm" disabled={!activeDeptId} className={cn("h-9 text-sm font-medium", selectedAssistants.length > 0 ? "bg-green-50 text-green-700 border-green-200" : "bg-white text-slate-700 border-slate-200")}>
-                          <User className="mr-2 h-4 w-4" />
-                          {selectedAssistants.length > 0 ? `${selectedAssistants.length} Selected Assistants` : "Filter Assistants"}
-                          <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent className="w-64 p-2 z-[100] border-slate-200 shadow-xl max-h-80 overflow-y-auto">
-                        {availableAssistants.length === 0 ? (
-                          <div className="p-3 text-sm text-slate-500 text-center italic">No assistants assigned</div>
-                        ) : (
-                          <>
-                            <div className="space-y-1">
-                              {availableAssistants.map(a => (
-                                <div key={a.id} className="flex items-center space-x-2.5 p-1.5 hover:bg-slate-50 rounded-md transition-colors cursor-pointer" onClick={() => { setSelectedAssistants(prev => prev.includes(a.id) ? prev.filter(id => id !== a.id) : [...prev, a.id]); }}>
-                                  <Checkbox checked={selectedAssistants.includes(a.id)} className="pointer-events-none" />
-                                  <label className="text-sm font-medium text-slate-700 cursor-pointer">{a.full_name || a.name || a.displayName || `Assistant ${a.id}`}</label>
-                                </div>
-                              ))}
-                            </div>
-                            {selectedAssistants.length > 0 && (
-                              <div className="border-t border-slate-100 mt-2 pt-2">
-                                <Button variant="ghost" size="sm" className="w-full text-sm text-slate-500 hover:text-slate-800" onClick={() => { setSelectedAssistants([]); }}>Clear Selection</Button>
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
+                  </>
                 )}
 
                 {/* Wrapper Card */}
-                <Card className="bg-white/80 backdrop-blur-sm shadow-lg border-slate-100 flex flex-col h-[calc(100vh-200px)]">
+                <Card className="bg-white/80 backdrop-blur-sm shadow-lg border-slate-100 flex flex-col h-[calc(100vh - 100px)]">
                   <CardHeader className="border-b border-slate-100 bg-white shrink-0 pb-3">
                     <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                       <div>
@@ -1570,45 +1507,195 @@ export default function ReportsPage() {
                               <X className="h-4 w-4" />
                             </Button>
                           )}
+                          <Button onClick={() => setView(view === 'standard' ? 'transposed' : 'standard')} className="flex items-center gap-2 cursor-pointer">
+                            {view === 'standard' ? <LayoutGrid className="h-4 w-4" /> : <TableProperties className="h-4 w-4" />}
+                            {view === 'standard' ? 'Transposed View' : 'Standard View'}
+                          </Button>
                         </div>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="outline" size="sm" className="flex items-center gap-2">
+                              <Filter className="h-4 w-4" />Actions
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-48">
+                            <DropdownMenuItem onClick={() => setShowTimeStatuses(!showTimeStatuses)} className="flex items-center gap-2 cursor-pointer">
+                              <Clock className="h-4 w-4" />
+                              {showTimeStatuses ? 'Hide Time Details' : 'Show Time Details'}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setShowNARows(!showNARows)} className="flex items-center gap-2 cursor-pointer">
+                              {showNARows ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              {showNARows ? 'Hide N/A Rows' : 'Show N/A Rows'}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleExport('excel')} className="flex items-center gap-2 cursor-pointer">
+                              <Download className="h-4 w-4" />Export to Excel
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => refreshData()} disabled={loading} className="flex items-center gap-2 cursor-pointer">
+                              <RotateCcw className={`h-4 w-4 ${loading ? 'animate-spin text-blue-600' : ''}`} />Refresh
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                        {areTabsVisible && (
+                          <div className="flex justify-between">
+                            <DropdownMenu open={isFiltersDropdownOpen} onOpenChange={setIsFiltersDropdownOpen}>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="outline" size="sm" className="flex items-center gap-2">
+                                  <Filter className="h-4 w-4" />Filters
+                                  {activeClassId !== 'all' || activeSubClassId !== 'all' || selectedOfficers.length > 0 || selectedManagers.length > 0 || selectedAssistants.length > 0 || activeOfficerTab !== 'all' ? (
+                                    <Badge variant="secondary" className="ml-1 h-5 px-2">Active</Badge>
+                                  ) : null}
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="start" className="w-80 max-h-[80vh] overflow-y-auto">
+                                <div className="p-4 space-y-4">
+                                  {/* Class Select */}
+                                  <div>
+                                    <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Class</label>
+                                    <Select value={activeClassId} onValueChange={v => { setActiveClassId(v); setActiveSubClassId('all'); }}>
+                                      <SelectTrigger className="w-full h-9 text-sm font-medium bg-white border-slate-200 text-slate-700">
+                                        <SelectValue placeholder="All Classes" />
+                                      </SelectTrigger>
+                                      <SelectContent className="z-[100]">
+                                        <SelectItem value="all">All Classes</SelectItem>
+                                        {activeSubDepartments.find(s => s.id.toString() === (activeSubDeptId === 'all' ? activeSubDepartments[0]?.id.toString() : activeSubDeptId))?.classes?.map((cls: any) => (
+                                          <SelectItem key={cls.id} value={cls.id.toString()}>{cls.name}</SelectItem>
+                                        )) || []}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
 
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex items-center gap-2"
-                          onClick={() => setView(view === 'standard' ? 'transposed' : 'standard')}
-                        >
-                          {view === 'standard' ? <LayoutGrid className="h-4 w-4" /> : <TableProperties className="h-4 w-4" />}
-                          {view === 'standard' ? 'Transposed View' : 'Standard View'}
-                        </Button>
+                                  {/* Subclass Select */}
+                                  {activeClassId && activeClassId !== 'all' && (
+                                    <div>
+                                      <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Subclass</label>
+                                      <Select value={activeSubClassId} onValueChange={v => { setActiveSubClassId(v); }}>
+                                        <SelectTrigger className="w-full h-9 text-sm font-medium bg-white border-slate-200 text-slate-700">
+                                          <SelectValue placeholder="All Subclasses" />
+                                        </SelectTrigger>
+                                        <SelectContent className="z-[100]">
+                                          <SelectItem value="all">All Subclasses</SelectItem>
+                                          {activeSubDepartments.find(s => s.id.toString() === (activeSubDeptId === 'all' ? activeSubDepartments[0]?.id.toString() : activeSubDeptId))?.classes?.find((c: any) => c.id.toString() === activeClassId)?.subClasses?.map((subCls: any) => (
+                                            <SelectItem key={subCls.id} value={subCls.id.toString()}>{subCls.name}</SelectItem>
+                                          )) || []}
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                  )}
 
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex items-center gap-2"
-                          onClick={() => setShowTimeStatuses(!showTimeStatuses)}
-                        >
-                          <Clock className="h-4 w-4" />
-                          {showTimeStatuses ? 'Hide Time Details' : 'Show Time Details'}
-                        </Button>
+                                  {/* Officer Dropdown */}
+                                  <div>
+                                    <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Officers</label>
+                                    <DropdownMenu open={isOfficerDropdownOpen} onOpenChange={setIsOfficerDropdownOpen}>
+                                      <DropdownMenuTrigger asChild>
+                                        <Button variant="outline" size="sm" disabled={!activeDeptId} className={cn("w-full h-9 text-sm font-medium justify-between", selectedOfficers.length > 0 ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-white text-slate-700 border-slate-200")}>
+                                          <span className="flex items-center gap-2">
+                                            <User className="h-4 w-4" />
+                                            {selectedOfficers.length > 0 ? `${selectedOfficers.length} Selected` : "Filter Officers"}
+                                          </span>
+                                          <ChevronDown className="h-4 w-4 opacity-50" />
+                                        </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent className="w-64 p-2 z-[100] border-slate-200 shadow-xl max-h-80 overflow-y-auto">
+                                        {availableOfficers.length === 0 ? (
+                                          <div className="p-3 text-sm text-slate-500 text-center italic">No officers assigned</div>
+                                        ) : (
+                                          <>
+                                            <div className="space-y-1">
+                                              {availableOfficers.map(o => (
+                                                <div key={o.id} className="flex items-center space-x-2.5 p-1.5 hover:bg-slate-50 rounded-md transition-colors cursor-pointer" onClick={() => { setSelectedOfficers(prev => prev.includes(o.id) ? prev.filter(id => id !== o.id) : [...prev, o.id]); }}>
+                                                  <Checkbox checked={selectedOfficers.includes(o.id)} className="pointer-events-none" />
+                                                  <label className="text-sm font-medium text-slate-700 cursor-pointer">{o.full_name || o.name || o.displayName || `Officer ${o.id}`}</label>
+                                                </div>
+                                              ))}
+                                            </div>
+                                            {selectedOfficers.length > 0 && (
+                                              <div className="border-t border-slate-100 mt-2 pt-2">
+                                                <Button variant="ghost" size="sm" className="w-full text-sm text-slate-500 hover:text-slate-800" onClick={() => { setSelectedOfficers([]); }}>Clear Selection</Button>
+                                              </div>
+                                            )}
+                                          </>
+                                        )}
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                  </div>
 
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex items-center gap-2"
-                          onClick={() => setShowNARows(!showNARows)}
-                        >
-                          {showNARows ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                          {showNARows ? 'Hide N/A Rows' : 'Show N/A Rows'}
-                        </Button>
+                                  {/* Manager Dropdown */}
+                                  <div>
+                                    <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Managers</label>
+                                    <DropdownMenu open={isManagerDropdownOpen} onOpenChange={setIsManagerDropdownOpen}>
+                                      <DropdownMenuTrigger asChild>
+                                        <Button variant="outline" size="sm" disabled={!activeDeptId} className={cn("w-full h-9 text-sm font-medium justify-between", selectedManagers.length > 0 ? "bg-purple-50 text-purple-700 border-purple-200" : "bg-white text-slate-700 border-slate-200")}>
+                                          <span className="flex items-center gap-2">
+                                            <Briefcase className="h-4 w-4" />
+                                            {selectedManagers.length > 0 ? `${selectedManagers.length} Selected` : "Filter Managers"}
+                                          </span>
+                                          <ChevronDown className="h-4 w-4 opacity-50" />
+                                        </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent className="w-64 p-2 z-[100] border-slate-200 shadow-xl max-h-80 overflow-y-auto">
+                                        {availableManagers.length === 0 ? (
+                                          <div className="p-3 text-sm text-slate-500 text-center italic">No managers assigned</div>
+                                        ) : (
+                                          <>
+                                            <div className="space-y-1">
+                                              {availableManagers.map(m => (
+                                                <div key={m.id} className="flex items-center space-x-2.5 p-1.5 hover:bg-slate-50 rounded-md transition-colors cursor-pointer" onClick={() => { setSelectedManagers(prev => prev.includes(m.id) ? prev.filter(id => id !== m.id) : [...prev, m.id]); }}>
+                                                  <Checkbox checked={selectedManagers.includes(m.id)} className="pointer-events-none" />
+                                                  <label className="text-sm font-medium text-slate-700 cursor-pointer">{m.full_name || m.name || m.displayName || `Manager ${m.id}`}</label>
+                                                </div>
+                                              ))}
+                                            </div>
+                                            {selectedManagers.length > 0 && (
+                                              <div className="border-t border-slate-100 mt-2 pt-2">
+                                                <Button variant="ghost" size="sm" className="w-full text-sm text-slate-500 hover:text-slate-800" onClick={() => { setSelectedManagers([]); }}>Clear Selection</Button>
+                                              </div>
+                                            )}
+                                          </>
+                                        )}
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                  </div>
 
-                        <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport('excel')}>
-                          <Download className="h-4 w-4" />Export to Excel
-                        </Button>
-
-                        <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => refreshData()} disabled={loading}>
-                          <RotateCcw className={`h-4 w-4 ${loading ? 'animate-spin text-blue-600' : ''}`} />Refresh
-                        </Button>
+                                  {/* Assistant Dropdown */}
+                                  <div>
+                                    <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Assistants</label>
+                                    <DropdownMenu open={isAssistantDropdownOpen} onOpenChange={setIsAssistantDropdownOpen}>
+                                      <DropdownMenuTrigger asChild>
+                                        <Button variant="outline" size="sm" disabled={!activeDeptId} className={cn("w-full h-9 text-sm font-medium justify-between", selectedAssistants.length > 0 ? "bg-green-50 text-green-700 border-green-200" : "bg-white text-slate-700 border-slate-200")}>
+                                          <span className="flex items-center gap-2">
+                                            <User className="h-4 w-4" />
+                                            {selectedAssistants.length > 0 ? `${selectedAssistants.length} Selected` : "Filter Assistants"}
+                                          </span>
+                                          <ChevronDown className="h-4 w-4 opacity-50" />
+                                        </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent className="w-64 p-2 z-[100] border-slate-200 shadow-xl max-h-80 overflow-y-auto">
+                                        {availableAssistants.length === 0 ? (
+                                          <div className="p-3 text-sm text-slate-500 text-center italic">No assistants assigned</div>
+                                        ) : (
+                                          <>
+                                            <div className="space-y-1">
+                                              {availableAssistants.map(a => (
+                                                <div key={a.id} className="flex items-center space-x-2.5 p-1.5 hover:bg-slate-50 rounded-md transition-colors cursor-pointer" onClick={() => { setSelectedAssistants(prev => prev.includes(a.id) ? prev.filter(id => id !== a.id) : [...prev, a.id]); }}>
+                                                  <Checkbox checked={selectedAssistants.includes(a.id)} className="pointer-events-none" />
+                                                  <label className="text-sm font-medium text-slate-700 cursor-pointer">{a.full_name || a.name || a.displayName || `Assistant ${a.id}`}</label>
+                                                </div>
+                                              ))}
+                                            </div>
+                                            {selectedAssistants.length > 0 && (
+                                              <div className="border-t border-slate-100 mt-2 pt-2">
+                                                <Button variant="ghost" size="sm" className="w-full text-sm text-slate-500 hover:text-slate-800" onClick={() => { setSelectedAssistants([]); }}>Clear Selection</Button>
+                                              </div>
+                                            )}
+                                          </>
+                                        )}
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                  </div>
+                                </div>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>)}
                       </div>
                     </div>
                   </CardHeader>
@@ -1646,6 +1733,7 @@ export default function ReportsPage() {
                             allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants]
                           }}
                           departments={departments}
+                          stages={stages}
                           getStaffFromParticipants={getStaffFromParticipants}
                         />
                       ) : (

@@ -236,6 +236,7 @@ interface StandardReportViewProps {
     allUsers: any[];
   };
   departments?: any[];
+  stages?: any[];
   getStaffFromParticipants?: (task: any, role: string) => string | null;
 }
 
@@ -253,8 +254,40 @@ export function StandardReportView({
   initialRowsPerPage = 25,
   userData = { officers: [], managers: [], assistants: [], allUsers: [] },
   departments = [],
+  stages = [],
   getStaffFromParticipants
 }: StandardReportViewProps) {
+
+  // Helper to format minutes to time string
+  const minutesToTimeString = (minutes: number | null): string => {
+    if (minutes === null || minutes === 0) return "0m";
+    const days = Math.floor(minutes / (60 * 24));
+    const hours = Math.floor((minutes % (60 * 24)) / 60);
+    const mins = minutes % 60;
+    const parts = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0) parts.push(`${hours}h`);
+    if (mins > 0) parts.push(`${mins}m`);
+    return parts.join(" ") || "0m";
+  };
+
+  // Define which columns should be sticky (frozen)
+  const stickyColumnIds = new Set(['task_applicant_name', 'task_job_level', 'task_renewal_new', 'task_sub_department']);
+
+  // Calculate sticky column offsets
+  const stickyColumnOffsets = useMemo(() => {
+    const offsets: Record<string, number> = {};
+    let currentOffset = 50; // Start after index column (50px)
+
+    filteredColumns.forEach(col => {
+      if (stickyColumnIds.has(col.id)) {
+        offsets[col.id] = currentOffset;
+        currentOffset += 180; // Each sticky column is 180px (COLUMN_WIDTH_CLASS)
+      }
+    });
+
+    return offsets;
+  }, [filteredColumns, stickyColumnIds]);
 
   // Row pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -391,7 +424,7 @@ export function StandardReportView({
         </div>
       )}
 
-      <div className="border-2 border-slate-300 rounded-b-lg rounded-tl-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 240px)' }}>
+      <div className="border-2 border-slate-300 rounded-b-lg rounded-tl-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 200px)' }}>
         <Table className="border-separate border-spacing-0 w-full min-w-max">
           <TableHeader className="sticky top-0 z-30 shadow-sm backdrop-blur-md">
 
@@ -428,19 +461,23 @@ export function StandardReportView({
               </TableHead>
               {filteredColumns.map(col => {
                 const isColFilterNA = col.stageId ? !isStageApplicableToCurrentFilter(col.stageId) : false;
+                const isSticky = stickyColumnIds.has(col.id);
+                const leftOffset = isSticky ? stickyColumnOffsets[col.id] : undefined;
 
                 return (
                   <TableHead
                     key={col.id}
                     onClick={() => handleSort(col.id)}
                     className={cn(
-                      `${COLUMN_WIDTH_CLASS} whitespace-nowrap px-3 py-2.5 font-medium text-sm border-r border-blue-500/50 cursor-pointer transition-colors group select-none`,
-                      isColFilterNA ? 'bg-blue-700/80 text-blue-100' : 'bg-blue-600 hover:bg-blue-700 text-white'
+                      `${COLUMN_WIDTH_CLASS} px-3 py-2.5 font-medium text-sm border-r border-blue-500/50 cursor-pointer transition-colors group select-none`,
+                      isColFilterNA ? 'bg-blue-700/80 text-blue-100' : 'bg-blue-600 hover:bg-blue-700 text-white',
+                      isSticky && `sticky left-[${leftOffset}px] z-30`
                     )}
+                    style={isSticky ? { left: `${leftOffset}px` } : undefined}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 truncate">
-                        <span className="truncate">{col.label}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="break-words leading-tight">Time Gap</span>
 
                         {isColFilterNA && (
                           <Badge variant="outline" className="bg-blue-800 text-blue-200 border-blue-400 text-[10px] px-1 py-0 h-4 shrink-0">
@@ -472,6 +509,60 @@ export function StandardReportView({
                 );
               })}
             </TableRow>
+
+            {/* --- STAGE DURATION HEADER ROW --- */}
+            <TableRow className="bg-purple-100 border-b border-purple-300">
+              <TableHead className={`${INDEX_WIDTH_CLASS} sticky left-0 z-40 bg-purple-100 border-r border-purple-200 text-center font-semibold text-xs text-purple-800`}>
+                Duration
+              </TableHead>
+              {filteredColumns.map(col => {
+                const isSticky = stickyColumnIds.has(col.id);
+                const leftOffset = isSticky ? stickyColumnOffsets[col.id] : undefined;
+
+                // Only show duration for stage columns
+                if (col.type === 'stage_date' && col.stageId) {
+                  const stage = stages.find((s: any) => s.id === col.stageId);
+                  const duration = stage?.estimated_time ? minutesToTimeString(stage.estimated_time) : '-';
+                  const isColFilterNA = !isStageApplicableToCurrentFilter(col.stageId);
+
+                  return (
+                    <TableHead
+                      key={col.id}
+                      className={cn(
+                        `${COLUMN_WIDTH_CLASS} text-center font-semibold text-xs border-r border-purple-200`,
+                        isColFilterNA ? 'bg-purple-200/80 text-purple-400' : 'bg-purple-100 text-purple-800',
+                        isSticky && `sticky left-[${leftOffset}px] z-30`
+                      )}
+                      style={isSticky ? { left: `${leftOffset}px` } : undefined}
+                    >
+                      {duration}
+                    </TableHead>
+                  );
+                }
+                // Gap columns show time difference between stages
+                if (col.type === 'stage_gap') {
+                  return (
+                    <TableHead
+                      key={col.id}
+                      className={`${COLUMN_WIDTH_CLASS} border-r border-purple-200 bg-orange-50 text-center font-semibold text-xs text-orange-700`}
+                    >
+                      {col.label}
+                    </TableHead>
+                  );
+                }
+                // Empty cells for other non-stage columns
+                return (
+                  <TableHead
+                    key={col.id}
+                    className={cn(
+                      `${COLUMN_WIDTH_CLASS} border-r border-purple-200 bg-purple-50`,
+                      isSticky && `sticky left-[${leftOffset}px] z-30`
+                    )}
+                    style={isSticky ? { left: `${leftOffset}px` } : undefined}
+                  />
+                );
+              })}
+            </TableRow>
           </TableHeader>
 
           <TableBody className="divide-y divide-slate-100 bg-white">
@@ -492,13 +583,25 @@ export function StandardReportView({
                   </TableCell>
 
                   {/* Data Cells */}
-                  {filteredColumns.map(col => (
-                    <TableCell key={col.id} className={`${COLUMN_WIDTH_CLASS} border-r border-b border-slate-200 px-3 py-2.5 text-sm text-slate-700 align-middle`}>
-                      <div className="truncate w-full flex items-center min-h-[24px]">
-                        {safeRender(enhancedRenderCellValue(task, col))}
-                      </div>
-                    </TableCell>
-                  ))}
+                  {filteredColumns.map(col => {
+                    const isSticky = stickyColumnIds.has(col.id);
+                    const leftOffset = isSticky ? stickyColumnOffsets[col.id] : undefined;
+
+                    return (
+                      <TableCell
+                        key={col.id}
+                        className={cn(
+                          `${COLUMN_WIDTH_CLASS} border-r border-b border-slate-200 px-3 py-2.5 text-sm text-slate-700 align-middle`,
+                          isSticky && `sticky left-[${leftOffset}px] z-20 ${baseBgClass} group-hover:bg-blue-50/50`
+                        )}
+                        style={isSticky ? { left: `${leftOffset}px` } : undefined}
+                      >
+                        <div className="truncate w-full flex items-center min-h-[24px]">
+                          {safeRender(enhancedRenderCellValue(task, col))}
+                        </div>
+                      </TableCell>
+                    );
+                  })}
 
                 </TableRow>
               );

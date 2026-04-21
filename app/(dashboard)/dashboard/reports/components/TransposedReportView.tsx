@@ -460,7 +460,7 @@ export function TransposedReportView({
                 </TableCell>
 
                 <TableCell className={`sticky left-14 z-40 bg-blue-600 text-white group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm p-2 ${LABEL_WIDTH}`}>
-                  {row.label}
+                  <span className="break-words leading-tight">{row.label}</span>
                 </TableCell>
 
                 {paginatedColumns.map((task) => (
@@ -555,7 +555,7 @@ export function TransposedReportView({
 
                   <TableCell className={`sticky left-14 z-20 ${baseBgClass} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 ${LABEL_WIDTH}`}>
                     <div style={{ paddingLeft: row.isSubSubRow ? '32px' : row.isSubRow ? '16px' : '0px' }} className="flex items-center gap-2">
-                      <span className={row.type === 'stage' ? 'font-semibold' : ''}>
+                      <span className={cn(row.type === 'stage' ? 'font-semibold' : '', 'break-words leading-tight')}>
                         {safeRender(row.label)}
                       </span>
                     </div>

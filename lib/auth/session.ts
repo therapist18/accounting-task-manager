@@ -1,51 +1,115 @@
+import "server-only";
 import { cookies } from "next/headers";
+import type { DecodedIdToken } from "firebase-admin/auth";
+import { getFirebaseAdminAuth } from "@/lib/firebase/admin";
+import {
+  findScannerUserByEmail,
+  getScannerUserByFirebaseUid,
+  linkScannerUserFirebaseUid,
+  touchScannerUserLogin,
+} from "@/lib/auth/scanner-users";
+import { AuthError } from "@/lib/auth/errors";
+import type { AppSession, AuthUser } from "@/lib/auth/types";
 
-const AUTH_SESSION_COOKIE_NAME =
+export const AUTH_SESSION_COOKIE_NAME =
   process.env.AUTH_SESSION_COOKIE_NAME ?? "bcl_auth_session";
 
-export async function getAppSessionFromRequest(request: Request) {
-  const cookieStore = await cookies();
-  const sessionCookie = cookieStore.get(AUTH_SESSION_COOKIE_NAME)?.value;
+const DEFAULT_SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 5; // 5 days
+const sessionMaxAgeMs = Number.parseInt(
+  process.env.AUTH_SESSION_MAX_AGE_MS ?? String(DEFAULT_SESSION_MAX_AGE_MS),
+  10
+);
 
-  if (!sessionCookie) {
-    return null;
+function parseCookieHeader(cookieHeader: string | null, name: string): string | null {
+  if (!cookieHeader) return null;
+  for (const pair of cookieHeader.split(";").map((p) => p.trim())) {
+    const [key, ...rest] = pair.split("=");
+    if (key === name) return decodeURIComponent(rest.join("="));
   }
-
-  try {
-    const sessionData = JSON.parse(sessionCookie);
-    return sessionData;
-  } catch (error) {
-    console.error("Failed to parse session:", error);
-    return null;
-  }
+  return null;
 }
 
-export async function getServerAppSession() {
-  try {
-    const cookieStore = await cookies();
-    const sessionCookie = cookieStore.get(AUTH_SESSION_COOKIE_NAME)?.value;
+async function resolveUserFromVerifiedToken(token: DecodedIdToken): Promise<AuthUser | null> {
+  const directUser = await getScannerUserByFirebaseUid(token.uid);
+  if (directUser) return directUser;
 
-    if (!sessionCookie) {
-      return null;
+  if (typeof token.email === "string" && token.email.trim()) {
+    const emailUser = await findScannerUserByEmail(token.email.trim());
+    if (emailUser) {
+      if (emailUser.payrollAccessEnabled) {
+        await linkScannerUserFirebaseUid(emailUser.id, token.uid);
+        return { ...emailUser, firebaseUid: token.uid };
+      }
+      return emailUser;
     }
-
-    const sessionData = JSON.parse(sessionCookie);
-    return sessionData;
-  } catch (error) {
-    console.error("Failed to get server session:", error);
-    return null;
   }
+  return null;
+}
+
+export async function createFirebaseSessionCookie(idToken: string) {
+  return getFirebaseAdminAuth().createSessionCookie(idToken, { expiresIn: sessionMaxAgeMs });
 }
 
 export function getSessionCookieOptions() {
-  const isSecure = process.env.NODE_ENV === "production";
   return {
     httpOnly: true,
-    secure: isSecure,
     sameSite: "lax" as const,
+    secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 60 * 60 * 24 * 7, // 7 days
+    maxAge: Math.floor(sessionMaxAgeMs / 1000),
   };
+}
+
+export async function getAppSessionFromRequest(request: Request): Promise<AppSession | null> {
+  const sessionCookie = parseCookieHeader(
+    request.headers.get("cookie"),
+    AUTH_SESSION_COOKIE_NAME
+  );
+  if (!sessionCookie) return null;
+
+  try {
+    const decoded = await getFirebaseAdminAuth().verifySessionCookie(sessionCookie, false);
+    const user = await resolveUserFromVerifiedToken(decoded);
+    if (!user || !user.isActive) return null;
+    return { tokenUid: decoded.uid, user };
+  } catch {
+    return null;
+  }
+}
+
+export async function getServerAppSession(): Promise<AppSession | null> {
+  const cookieStore = await cookies();
+  const sessionCookie = cookieStore.get(AUTH_SESSION_COOKIE_NAME)?.value;
+  if (!sessionCookie) return null;
+
+  try {
+    const decoded = await getFirebaseAdminAuth().verifySessionCookie(sessionCookie, false);
+    const user = await resolveUserFromVerifiedToken(decoded);
+    if (!user || !user.isActive) return null;
+    return { tokenUid: decoded.uid, user };
+  } catch {
+    return null;
+  }
+}
+
+export async function requireAppSession(request: Request): Promise<AppSession> {
+  const session = await getAppSessionFromRequest(request);
+  if (!session) throw new AuthError(401, "Authentication required.");
+  if (!session.user.isActive) throw new AuthError(403, "This account is inactive.");
+  return session;
+}
+
+export async function resolveSessionFromIdToken(idToken: string): Promise<AppSession> {
+  const decoded = await getFirebaseAdminAuth().verifyIdToken(idToken, false);
+  const user = await resolveUserFromVerifiedToken(decoded);
+  if (!user) throw new AuthError(403, "No account profile is linked to this Firebase account.");
+  if (!user.isActive) throw new AuthError(403, "This account is inactive.");
+
+  void touchScannerUserLogin(user.id, decoded.email ?? user.email).catch((error: unknown) => {
+    console.error("[Auth] Failed to update last_login", error);
+  });
+
+  return { tokenUid: decoded.uid, user };
 }
 
 export const AUTH_SESSION_COOKIE = AUTH_SESSION_COOKIE_NAME;

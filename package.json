@@ -59,6 +59,7 @@
     "@tiptap/starter-kit": "^3.7.2",
     "@types/jspdf": "^1.3.3",
     "autoprefixer": "^10.4.20",
+    "bcryptjs": "^3.0.3",
     "ckeditor5": "^47.3.0",
     "ckeditor5-premium-features": "^47.3.0",
     "class-variance-authority": "^0.7.1",

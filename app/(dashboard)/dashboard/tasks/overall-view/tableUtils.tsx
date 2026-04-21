@@ -62,7 +62,7 @@ export const ENHANCED_TABLE_HEADERS_IMMIGRATION: TableHeader[] = [
   { id: 'applicant_name', label: 'Applicant Full Name', default: true, width: 'w-48' },
   { id: 'company_name', label: 'Company Name', default: true, width: 'w-48' },
   { id: 'sub_department', label: 'Sub Department', default: true, width: 'w-32' }, // New column
-  { id: 'job_level', label: 'Job Title', default: true, width: 'w-32' },
+  { id: 'job_level', label: 'Class', default: true, width: 'w-32' },
   { id: 'renewal_new', label: 'Renewal/New', default: true, width: 'w-28' },
   { id: 'immigration_document_type', label: 'Current Immigration Document Type', default: false, width: 'w-48' },
   { id: 'immigration_expiry_date', label: 'Current Immigration Expiry Date', default: false, width: 'w-40' },
