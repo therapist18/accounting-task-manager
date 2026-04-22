@@ -122,8 +122,9 @@ interface ApiRequirement {
   instructions?: string
   requirement_context?: any
   web_automation?: any
-  category?: 'general' | 'processing' | 'issuance'
+  category?: 'general' | 'processing' | 'issuance' | 'reference'
   webdata?: WebDataField[]
+  inherit_from_parent?: boolean
 }
 
 interface RequirementTableEntry extends ApiRequirement {
@@ -153,6 +154,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [banks, setBanks] = useState<any[]>([]);
   const [selectedBank, setSelectedBank] = useState<any | null>(null);
+  const [disabledInheritedReqs, setDisabledInheritedReqs] = useState<Set<string>>(new Set());
   const sidebarPanelRef = useRef(null);
 
   // Add the programmatic toggle handler
@@ -509,9 +511,34 @@ export default function UploadRequirements({ departments: initialDepartments }: 
 
         {String(activeDept) === "1" ? (
           <div className="space-y-12">
-            <section><div className="flex items-center gap-2 mb-4 font-semibold">General Requirements</div>{renderRequirements(reqs.filter(r => r.category === 'general'), targetContext)}</section>
-            <section><div className="flex items-center gap-2 mb-4 font-semibold">Processing Requirements</div>{renderRequirements(reqs.filter(r => r.category === 'processing' || !r.category), targetContext)}</section>
-            <section><div className="flex items-center gap-2 mb-4 font-semibold">Issuance Requirements</div>{renderRequirements(reqs.filter(r => r.category === 'issuance'), targetContext)}</section>
+            <section>
+              <div className="flex items-center gap-2 mb-4 font-semibold">General Requirements</div>
+              {reqs.filter(r => r.category === 'general').length > 0
+                ? renderRequirements(reqs.filter(r => r.category === 'general'), targetContext)
+                : <div className="text-center py-8 text-muted-foreground italic bg-slate-50/30 rounded-lg border">No requirements found in this section.</div>
+              }
+            </section>
+            <section>
+              <div className="flex items-center gap-2 mb-4 font-semibold">Processing Requirements</div>
+              {reqs.filter(r => r.category === 'processing' || !r.category).length > 0
+                ? renderRequirements(reqs.filter(r => r.category === 'processing' || !r.category), targetContext)
+                : <div className="text-center py-8 text-muted-foreground italic bg-slate-50/30 rounded-lg border">No requirements found in this section.</div>
+              }
+            </section>
+            <section>
+              <div className="flex items-center gap-2 mb-4 font-semibold">Issuance Requirements</div>
+              {reqs.filter(r => r.category === 'issuance').length > 0
+                ? renderRequirements(reqs.filter(r => r.category === 'issuance'), targetContext)
+                : <div className="text-center py-8 text-muted-foreground italic bg-slate-50/30 rounded-lg border">No requirements found in this section.</div>
+              }
+            </section>
+            <section>
+              <div className="flex items-center gap-2 mb-4 font-semibold">Reference Requirements</div>
+              {reqs.filter(r => r.category === 'reference').length > 0
+                ? renderRequirements(reqs.filter(r => r.category === 'reference'), targetContext)
+                : <div className="text-center py-8 text-muted-foreground italic bg-slate-50/30 rounded-lg border">No requirements found in this section.</div>
+              }
+            </section>
           </div>
         ) : renderRequirements(reqs, targetContext)}
 
@@ -655,8 +682,10 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                 <TableHead className="border-r">Applies To</TableHead>
                 <TableHead className="border-r">Documents</TableHead>
                 <TableHead className="border-r">Function</TableHead>
+                <TableHead className="border-r">Source Config</TableHead>
                 <TableHead className="border-r">Web Data</TableHead>
                 <TableHead className="border-r">Automation</TableHead>
+                <TableHead className="w-16 text-center border-r">Apply</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -680,6 +709,16 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                         <TableCell className="border-r">{getDocumentsDisplay(req)}</TableCell>
                         <TableCell className="border-r">{getFunctionDisplay(req)}</TableCell>
                         <TableCell className="border-r">
+                          {req.category === 'reference' ? (
+                            <div className="space-y-1">
+                              <div className="text-[10px] text-slate-500">Source: <span className="font-medium text-slate-700">{req.sourceTable || '-'}</span></div>
+                              <div className="text-[10px] text-slate-500">Link: <span className="font-medium text-slate-700">{req.linkingVariable || '-'}</span></div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-400">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="border-r">
                           {(() => {
                             const hasWebData = req.webdata && req.webdata.length > 0;
                             return hasWebData ? (
@@ -697,6 +736,27 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                           })()}
                         </TableCell>
                         <TableCell className="border-r">{getAutomationDisplay(req)}</TableCell>
+                        <TableCell className="border-r text-center">
+                          {req.inherit_from_parent ? (
+                            <Checkbox
+                              checked={!disabledInheritedReqs.has(req.id || '')}
+                              onCheckedChange={(checked) => {
+                                setDisabledInheritedReqs(prev => {
+                                  const next = new Set(prev);
+                                  if (checked) {
+                                    next.delete(req.id || '');
+                                  } else {
+                                    next.add(req.id || '');
+                                  }
+                                  return next;
+                                });
+                              }}
+                              className="mx-auto"
+                            />
+                          ) : (
+                            <span className="text-xs text-slate-400">-</span>
+                          )}
+                        </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
                             <Button
@@ -744,7 +804,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                       {/* EXPANDED WEB DATA ROW */}
                       {isExpanded && hasWebData && (
                         <TableRow className="bg-slate-50 hover:bg-slate-50">
-                          <TableCell colSpan={9} className="p-0 border-b border-t shadow-inner">
+                          <TableCell colSpan={11} className="p-0 border-b border-t shadow-inner">
                             <div className="p-4 pl-12">
                               <div className="flex items-center gap-2 mb-3 text-blue-600">
                                 <Database className="h-4 w-4" />
@@ -789,7 +849,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground italic bg-slate-50/30">
+                  <TableCell colSpan={10} className="text-center py-8 text-muted-foreground italic bg-slate-50/30">
                     No requirements found in this section.
                   </TableCell>
                 </TableRow>
@@ -957,9 +1017,15 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       const updatedRequirements = existing.requirements.map((req: any) =>
         req.id === updatedRequirement.id ? updatedRequirement : req
       );
+      const filteredRequirements = updatedRequirements.filter((req: any) => {
+        if (req.inherit_from_parent && disabledInheritedReqs.has(req.id || '')) {
+          return false;
+        }
+        return true;
+      });
       const { error: updateError } = await supabase
         .from('tm_class_requirements')
-        .update({ requirements: updatedRequirements, updated_at: new Date().toISOString() })
+        .update({ requirements: filteredRequirements, updated_at: new Date().toISOString() })
         .eq('id', existing.id);
       if (updateError) throw updateError;
       await refreshDepartments();

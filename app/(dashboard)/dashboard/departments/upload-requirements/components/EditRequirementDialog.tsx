@@ -110,6 +110,7 @@ export function EditRequirementDialog({
         isStageDocument: requirement.isStageDocument || false,
         category: requirement.category || 'general',
         hasTemplate: requirement.hasTemplate || false,
+        inherit_from_parent: requirement.inherit_from_parent || false,
         webdata: requirement.webdata || [],
         executionMode: requirement.execution_mode || 'latest',
         computedFunction: requirement.computed_function || 'getLatestDocument',
@@ -301,6 +302,7 @@ export function EditRequirementDialog({
         isStageDocument: formData.isStageDocument || false,
         category: formData.category || 'processing',
         hasTemplate: formData.hasTemplate || false,
+        inherit_from_parent: formData.inherit_from_parent || false,
         web_automation: web_automation,
         execution_mode: formData.executionMode,
         computed_function: formData.computedFunction,
@@ -634,6 +636,15 @@ export function EditRequirementDialog({
                       </div>
                       <Switch checked={formData.hasTemplate || false} onCheckedChange={(v) => updateField('hasTemplate', v)} />
                     </div>
+                    {context?.type === 'class' && (
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <Label className="text-sm">Inherit to Child Levels</Label>
+                          <p className="text-[10px] text-slate-500">Apply this requirement to all subclasses automatically.</p>
+                        </div>
+                        <Switch checked={formData.inherit_from_parent || false} onCheckedChange={(v) => updateField('inherit_from_parent', v)} />
+                      </div>
+                    )}
                     {formData.hasTemplate && (
                       <div className="mt-4 space-y-3">
                         <div className="flex items-center gap-2">

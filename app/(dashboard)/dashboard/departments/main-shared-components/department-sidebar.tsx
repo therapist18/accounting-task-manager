@@ -214,6 +214,23 @@ export function DepartmentSidebar({
   const [searchQuery, setSearchQuery] = React.useState('')
   const [isAllCollapsed, setIsAllCollapsed] = React.useState(false)
 
+  // Sync isAllCollapsed with actual expandedItems state
+  React.useEffect(() => {
+    const allKeys = departments.flatMap(dept => {
+      const deptKey = `dept-${dept.id}`
+      const subKeys = (dept.subdepartments || []).map(
+        subdept => `subdept-${dept.id}-${subdept.id}`
+      )
+      const classKeys = (dept.subdepartments || []).flatMap(subdept =>
+        (subdept.classes || []).map(cls => `class-${dept.id}-${subdept.id}-${cls.id}`)
+      )
+      return [deptKey, ...subKeys, ...classKeys]
+    })
+
+    const allExpanded = allKeys.every(key => expandedItems[key] !== false)
+    setIsAllCollapsed(!allExpanded)
+  }, [expandedItems, departments])
+
   const toggleAll = () => {
     const newState = !isAllCollapsed
     setIsAllCollapsed(newState)
@@ -230,8 +247,13 @@ export function DepartmentSidebar({
       return [deptKey, ...subKeys, ...classKeys]
     })
 
-    // Collapse or expand all
-    allKeys.forEach(key => onToggleExpand(key))
+    // Collapse or expand all - set each key to the desired state
+    allKeys.forEach(key => {
+      const isCurrentlyExpanded = expandedItems[key] ?? true
+      if (newState !== isCurrentlyExpanded) {
+        onToggleExpand(key)
+      }
+    })
   }
 
   // Count default display items

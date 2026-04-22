@@ -477,7 +477,8 @@ export async function createDepartment(departmentData: any): Promise<Department>
             isRequired: req.isRequired,
             order: reqIndex + 1,
             isVisible: req.isVisible,
-            type: 'standard'
+            type: 'standard',
+            inherit_from_parent: req.inherit_from_parent || false
           }))
 
           const { error: reqError } = await supabase
@@ -508,7 +509,8 @@ export async function createDepartment(departmentData: any): Promise<Department>
               isRequired: req.isRequired,
               order: reqIndex + 1,
               isVisible: req.isVisible,
-              type: 'standard'
+              type: 'standard',
+              inherit_from_parent: req.inherit_from_parent || false
             }))
 
             const { error: subReqError } = await supabase
@@ -699,7 +701,8 @@ export async function saveClassRequirements(subdepartmentId: string, classes: Cl
             isRequired: req.isRequired,
             order: req.order || reqIndex + 1,
             isVisible: req.isVisible,
-            type: req.type || 'standard'
+            type: req.type || 'standard',
+            inherit_from_parent: req.inherit_from_parent || false
           };
         });
 
@@ -725,6 +728,9 @@ export async function saveClassRequirements(subdepartmentId: string, classes: Cl
         console.log(`No requirements to save for class ${cls.name}`);
       }
 
+      // Collect inherited requirements from this class to propagate to subclasses
+      const inheritedFromClass = (cls.requirements || []).filter(req => req.inherit_from_parent === true);
+
       // Handle sub-class requirements
       if (cls.subClasses && cls.subClasses.length > 0) {
         console.log(`Processing ${cls.subClasses.length} subclasses for class ${cls.name}`);
@@ -744,12 +750,16 @@ export async function saveClassRequirements(subdepartmentId: string, classes: Cl
             throw deleteSubclassError;
           }
 
-          if (subCls.requirements && subCls.requirements.length > 0) {
-            console.log(`  Saving ${subCls.requirements.length} requirements for subclass ${subCls.name}`);
+          // Merge subclass own requirements with inherited from parent class
+          const ownRequirements = subCls.requirements || [];
+          const mergedRequirements = [...inheritedFromClass, ...ownRequirements];
 
-            const subRequirementsArray = subCls.requirements.map((req, reqIndex) => {
+          if (mergedRequirements.length > 0) {
+            console.log(`  Saving ${mergedRequirements.length} requirements for subclass ${subCls.name} (${inheritedFromClass.length} inherited from parent)`);
+
+            const subRequirementsArray = mergedRequirements.map((req, reqIndex) => {
               const newId = req.id || generateRequirementId(
-                subCls.requirements.slice(0, reqIndex).filter(r => r.id)
+                mergedRequirements.slice(0, reqIndex).filter(r => r.id)
               );
 
               return {
@@ -759,7 +769,8 @@ export async function saveClassRequirements(subdepartmentId: string, classes: Cl
                 isRequired: req.isRequired,
                 order: req.order || reqIndex + 1,
                 isVisible: req.isVisible,
-                type: req.type || 'standard'
+                type: req.type || 'standard',
+                inherit_from_parent: req.inherit_from_parent || false
               };
             });
 

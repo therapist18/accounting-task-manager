@@ -8,12 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2, LayoutGrid, Rows, Plus, Minus, Briefcase, FileDown, ChevronDown, ChevronsRight, ChevronsDown, FileText, ChevronLeft, ChevronRight, RefreshCw, AlertTriangle, Clock, ArrowUpDown, Search, Timer, AlertCircle, CheckCircle2, Clock3, User, EyeOff, Eye, Filter, PanelLeftClose, PanelLeftOpen, RotateCcw, X, TableProperties, Download, ArrowRight } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -22,26 +17,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { toast } from "@/lib/hooks/use-toast";
 import { supabase } from "@/lib/supabase/client";
 import ExcelJS from 'exceljs';
-import {
-  getCurrentStageStatus,
-  getCellContent,
-  getEnhancedImmigrationStatus,
-  renderImmigrationStatusCell,
-  renderCurrentStageStatusCell,
-  ENHANCED_TABLE_HEADERS_IMMIGRATION,
-  enhanceTasksWithIndividualData,
-  getRawCellValue,
-  getTimeStatus,
-  formatDuration,
-  parseDate
-} from "../tasks/overall-view/tableUtils";
-import {
-  fetchTasks,
-  fetchStages,
-  fetchCompanies,
-  fetchAllDocuments,
-  fetchAllKycFields,
-} from "../tasks/utils/taskManagerData";
+import { getCurrentStageStatus, getCellContent, getEnhancedImmigrationStatus, renderImmigrationStatusCell, renderCurrentStageStatusCell, ENHANCED_TABLE_HEADERS_IMMIGRATION, enhanceTasksWithIndividualData, getRawCellValue, getTimeStatus, formatDuration, parseDate } from "../tasks/overall-view/tableUtils";
+import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields } from "../tasks/utils/taskManagerData";
 import { getOfficerDisplayName } from "@/lib/shared-user-assignment-service";
 import { fetchDepartments } from "../departments/departments/database";
 import { userService } from "@/lib/shared-user-assignment-service";
@@ -51,10 +28,6 @@ import { cn } from "@/lib/utils";
 import { StandardReportView } from "./components/StandardReportView";
 import { TransposedReportView } from "./components/TransposedReportView";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Constants
-// ─────────────────────────────────────────────────────────────────────────────
-
 const SPECIAL_STAGE_IDS = [
   '072b9710-45df-4a05-ba65-01b4ef29d61d',
   'caefd742-5de5-4341-a3bb-81d7b9dd2b73'
@@ -62,10 +35,6 @@ const SPECIAL_STAGE_IDS = [
 
 const COLUMN_WIDTH_CLASS = "w-[180px] min-w-[180px] max-w-[180px]";
 const INDEX_WIDTH_CLASS = "w-[50px] min-w-[50px] max-w-[50px]";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
 const formatDateForDisplay = (date: any): string => {
   if (!date) return '-';
@@ -185,6 +154,7 @@ export default function ReportsPage() {
   const [expandedSections, setExpandedSections] = useState(() => new Set(['task_details', 'time_tracking']));
   const [showTimeStatuses, setShowTimeStatuses] = useState(false);
   const [showNARows, setShowNARows] = useState(true);
+  const [showTimeTrackingColumns, setShowTimeTrackingColumns] = useState(false);
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>([]);
   const [expandedStageColumns, setExpandedStageColumns] = useState<Set<string>>(new Set());
   const getStaffName = useCallback((userId: any) => {
@@ -740,23 +710,54 @@ export default function ReportsPage() {
       cols.push({ id: `task_${fieldId}`, label: getLabel(fieldId), type: 'task', field: fieldId });
     });
 
-    cols.push({
-      id: 'current_stage_age',
-      label: 'Days In Current Stage',
-      type: 'current_stage_age'
+    // Add columns for Document Requirements (displayed before time tracking and stage columns)
+    // Collect Document Requirements from all tasks
+    const referenceRequirements = new Map<string, any>();
+    tasks.forEach(task => {
+      if (task.requirements && Array.isArray(task.requirements)) {
+        task.requirements.forEach((req: any) => {
+          if (req.category === 'reference') {
+            const reqId = `req_${req.id || req.name}`;
+            if (!referenceRequirements.has(reqId)) {
+              referenceRequirements.set(reqId, req);
+            }
+          }
+        });
+      }
     });
 
-    cols.push({
-      id: 'total_process_age',
-      label: 'Total Process Time',
-      type: 'total_process_age'
+    // Add columns for each unique reference requirement
+    referenceRequirements.forEach((req, reqId) => {
+      cols.push({
+        id: reqId,
+        label: req.name || 'Reference Requirement',
+        type: 'reference_requirement',
+        requirementId: req.id,
+        requirementName: req.name,
+        sourceTable: req.sourceTable,
+        linkingVariable: req.linkingVariable
+      });
     });
 
-    cols.push({
-      id: 'current_stage_officer',
-      label: 'Current Stage Officer',
-      type: 'current_stage_officer'
-    });
+    if (showTimeTrackingColumns) {
+      cols.push({
+        id: 'current_stage_age',
+        label: 'Days In Current Stage',
+        type: 'current_stage_age'
+      });
+
+      cols.push({
+        id: 'total_process_age',
+        label: 'Total Process Time',
+        type: 'total_process_age'
+      });
+
+      cols.push({
+        id: 'current_stage_officer',
+        label: 'Current Stage Officer',
+        type: 'current_stage_officer'
+      });
+    }
 
     const activeStageIds = Object.keys(activeReport.configuration?.stages || {});
     const sortedStages = stages
@@ -806,7 +807,7 @@ export default function ReportsPage() {
           const nextConfig = activeReport.configuration.stages[nextStage.id];
           const nextShouldShowDateColumn = nextConfig.isStageDateSelected || (nextConfig.documents && Object.keys(nextConfig.documents).length > 0);
 
-          if (nextShouldShowDateColumn) {
+          if (nextShouldShowDateColumn && showTimeTrackingColumns) {
             cols.push({
               id: `gap_${stage.id}_to_${nextStage.id}`,
               label: `→`,
@@ -877,7 +878,7 @@ export default function ReportsPage() {
     });
 
     return cols;
-  }, [activeReport, stages, kycDocuments, isStageApplicableToCurrentFilter, expandedStageColumns]);
+  }, [activeReport, stages, kycDocuments, isStageApplicableToCurrentFilter, expandedStageColumns, showTimeTrackingColumns, tasks]);
 
   useEffect(() => {
     if (columns.length > 0) {
@@ -1189,6 +1190,62 @@ export default function ReportsPage() {
       );
     }
 
+    if (col.type === 'reference_requirement') {
+      // Find the requirement in the task's requirements
+      const requirement = task.requirements?.find((r: any) =>
+        r.category === 'reference' && (r.id === col.requirementId || r.name === col.requirementName)
+      );
+
+      if (!requirement) {
+        return <span className="text-sm text-slate-400">—</span>;
+      }
+
+      // Check if task has fetched reference documents
+      const referenceDocs = task.referenceDocuments?.[col.requirementId] || [];
+
+      if (referenceDocs.length === 0) {
+        return (
+          <div className="space-y-1">
+            <div className="text-[10px] text-slate-500">Source: <span className="font-medium text-slate-700">{requirement.sourceTable || '-'}</span></div>
+            <div className="text-[10px] text-slate-500">Link: <span className="font-medium text-slate-700">{requirement.linkingVariable || '-'}</span></div>
+            <div className="text-[10px] text-slate-400 italic">No documents found</div>
+          </div>
+        );
+      }
+
+      // Display the isEffectiveTo field value from the latest document
+      const latestDoc = referenceDocs.reduce((prev, curr) =>
+        new Date(curr.created_at) > new Date(prev.created_at) ? curr : prev
+      );
+
+      console.log('[Reports] latestDoc:', latestDoc);
+      console.log('[Reports] kycDocuments keys:', Array.from(kycDocuments.keys()));
+
+      // Find the field with isEffectiveTo: true from the KYC metadata
+      const docId = latestDoc.document_id || latestDoc.kyc_document_id;
+      console.log('[Reports] docId:', docId);
+      const kycMetadata = kycDocuments.get(docId);
+      console.log('[Reports] kycMetadata:', kycMetadata);
+      const effectiveToField = kycMetadata?.fields?.find((field: any) => field.isEffectiveTo === true);
+      console.log('[Reports] effectiveToField:', effectiveToField);
+
+      // Extract the value from the field with isEffectiveTo: true
+      const isEffectiveTo = effectiveToField
+        ? (latestDoc.extracted_details?.[effectiveToField.fieldName] || latestDoc.edited_details?.[effectiveToField.fieldName])
+        : (latestDoc.extracted_details?.isEffectiveTo || latestDoc.edited_details?.isEffectiveTo);
+
+      console.log('[Reports] isEffectiveTo value:', isEffectiveTo);
+
+
+      return (
+        <div className="space-y-1">
+          <div className="text-[10px] text-slate-500">Source: <span className="font-medium text-slate-700">{requirement.sourceTable || '-'}</span></div>
+          <div className="text-[10px] text-slate-500">Link: <span className="font-medium text-slate-700">{requirement.linkingVariable || '-'}</span></div>
+          <div className="text-[10px] text-slate-500">Effective To: <span className="font-medium text-slate-700">{isEffectiveTo || '-'}</span></div>
+        </div>
+      );
+    }
+
     if (col.type === 'current_stage_officer') {
       const applicableStages = [...stages]
         .filter(stage => checkStageApplicableForTask(stage, task))
@@ -1416,6 +1473,8 @@ export default function ReportsPage() {
     const groups: any[] = [];
     const taskCols = filteredColumns.filter(c => c.type === 'task');
     if (taskCols.length) groups.push({ id: 'task_info', label: 'Task Details', span: taskCols.length, applicable: true });
+    const referenceReqCols = filteredColumns.filter(c => c.type === 'reference_requirement');
+    if (referenceReqCols.length) groups.push({ id: 'reference_requirements', label: 'Document Requirements', span: referenceReqCols.length, applicable: true });
     const trackingCols = filteredColumns.filter(c => c.type === 'current_stage_age' || c.type === 'total_process_age');
     if (trackingCols.length) groups.push({ id: 'time_tracking', label: 'Time Tracking', span: trackingCols.length, applicable: true });
 
@@ -1548,8 +1607,29 @@ export default function ReportsPage() {
                     <label htmlFor={`col-${col.id}`} className="text-sm cursor-pointer flex-1 truncate">{col.label}</label>
                   </div>
                 ))}
-                <div className="font-semibold text-xs text-slate-500 uppercase tracking-wider pb-1 border-b pt-2">Time Tracking</div>
-                {columns.filter(c => c.type === 'current_stage_age' || c.type === 'total_process_age' || c.type === 'current_stage_officer').map(col => (
+                <div className="font-semibold text-xs text-slate-500 uppercase tracking-wider pb-1 border-b pt-2 flex items-center justify-between">
+                  <span>Time Tracking</span>
+                  <Checkbox
+                    id="toggle-time-tracking"
+                    checked={showTimeTrackingColumns}
+                    onCheckedChange={(checked) => {
+                      setShowTimeTrackingColumns(checked as boolean);
+                      const timeTrackingCols = columns.filter(c =>
+                        c.type === 'current_stage_age' ||
+                        c.type === 'total_process_age' ||
+                        c.type === 'current_stage_officer' ||
+                        c.type === 'stage_gap'
+                      ).map(c => c.id);
+                      setVisibleColumnIds(prev => {
+                        if (checked) {
+                          return [...new Set([...prev, ...timeTrackingCols])];
+                        }
+                        return prev.filter(id => !timeTrackingCols.includes(id));
+                      });
+                    }}
+                  />
+                </div>
+                {showTimeTrackingColumns && columns.filter(c => c.type === 'current_stage_age' || c.type === 'total_process_age' || c.type === 'current_stage_officer').map(col => (
                   <div key={col.id} className="flex items-center gap-2">
                     <Checkbox
                       id={`col-${col.id}`}

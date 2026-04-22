@@ -61,10 +61,8 @@ const navItems = [
       { title: "Departments", href: "/dashboard/departments/departments" },
       { title: "Stages", href: "/dashboard/departments/stages" },
       { title: "Rates", href: "/dashboard/departments/rates" },
-      { title: "Webdata", href: "/dashboard/departments/webdata" },
-      { title: "GOVT Upload Req", href: "/dashboard/departments/upload-requirements" },
+      { title: "Upload Requirements", href: "/dashboard/departments/upload-requirements" },
       { title: "Guidelines", href: "/dashboard/departments/guidelines" },
-      { title: "Job Specific Questions", href: "/dashboard/departments/job-specific-questions" },
       { title: "Documents + Fields", href: "/dashboard/departments/documents+fields" },
       { title: "Automations", href: "/dashboard/departments/automation" }
     ],

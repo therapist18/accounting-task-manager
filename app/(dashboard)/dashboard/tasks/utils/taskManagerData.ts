@@ -39,6 +39,8 @@ export interface Task {
   department?: any;
   subdepartment?: any;
   current_stage?: any;
+  requirements?: any[];
+  referenceDocuments?: Record<string, any[]>;
 }
 
 export interface Department {
@@ -80,6 +82,8 @@ const transformKycFields = (fields: any[]): any[] => {
       fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
       parentField: field.parentField,
       isArray: isArray,
+      isEffectiveTo: field.isEffectiveTo,
+      isEffectiveFrom: field.isEffectiveFrom,
     }
 
     if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
@@ -147,12 +151,91 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
 
     if (error) throw error;
 
+    // Fetch all requirements from tm_class_requirements
+    const { data: requirementsData, error: requirementsError } = await supabase
+      .from('tm_class_requirements')
+      .select('*');
+
+    if (requirementsError) {
+      console.error('Error fetching requirements:', requirementsError);
+    }
+
     // Process the data to ensure consistent structure
     const processedTasks = (data || []).map(task => {
       const jobLevel = task.job_level || {};
       const officer = task.participants_details?.find((p: any) => p.role?.includes('officer'));
       const taskManager = task.participants_details?.find((p: any) => p.role?.includes('task_manager'));
       const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
+
+      // Find matching requirements based on job_level with inheritance support
+      // Collect all requirements that match at any level of the hierarchy
+      const matchingRequirements = requirementsData?.filter((req: any) => {
+        const reqJobLevel = req.job_level || {};
+
+        // Exact match (most specific)
+        if (String(reqJobLevel.department_id) === String(jobLevel.department_id) &&
+          String(reqJobLevel.subdepartment_id) === String(jobLevel.subdepartment_id) &&
+          String(reqJobLevel.class_id || 'null') === String(jobLevel.class_id || 'null') &&
+          String(reqJobLevel.subclass_id || 'null') === String(jobLevel.subclass_id || 'null')) {
+          return true;
+        }
+
+        // Match at class level (if task has subclass but requirement is at class level)
+        if (jobLevel.subclass_id && !reqJobLevel.subclass_id &&
+          String(reqJobLevel.department_id) === String(jobLevel.department_id) &&
+          String(reqJobLevel.subdepartment_id) === String(jobLevel.subdepartment_id) &&
+          String(reqJobLevel.class_id || 'null') === String(jobLevel.class_id || 'null')) {
+          return true;
+        }
+
+        // Match at subdepartment level (if task has class but requirement is at subdepartment level)
+        if (jobLevel.class_id && !reqJobLevel.class_id &&
+          String(reqJobLevel.department_id) === String(jobLevel.department_id) &&
+          String(reqJobLevel.subdepartment_id) === String(jobLevel.subdepartment_id)) {
+          return true;
+        }
+
+        // Match at department level (if task has subdepartment but requirement is at department level)
+        if (jobLevel.subdepartment_id && !reqJobLevel.subdepartment_id &&
+          String(reqJobLevel.department_id) === String(jobLevel.department_id)) {
+          return true;
+        }
+
+        return false;
+      });
+
+      // Merge all requirements from matching levels, with inheritance for reference requirements
+      const allRequirements: any[] = [];
+      matchingRequirements?.forEach((req: any) => {
+        if (req.requirements) {
+          allRequirements.push(...req.requirements);
+        }
+      });
+
+      // For reference requirements, also collect from parent levels and deduplicate
+      const referenceRequirements: any[] = [];
+      matchingRequirements?.forEach((req: any) => {
+        if (req.requirements) {
+          req.requirements.forEach((r: any) => {
+            if (r.category === 'reference') {
+              referenceRequirements.push(r);
+            }
+          });
+        }
+      });
+
+      // Merge reference requirements (deduplicate by id)
+      const mergedReferenceRequirements = referenceRequirements.filter((req, index, self) =>
+        index === self.findIndex(r => r.id === req.id)
+      );
+
+      // Remove reference requirements from allRequirements and add merged ones
+      const nonReferenceRequirements = allRequirements.filter((r: any) => r.category !== 'reference');
+      const finalRequirements = [...nonReferenceRequirements, ...mergedReferenceRequirements];
+
+      const taskRequirements = {
+        requirements: finalRequirements
+      };
 
       const processedTask: Task = {
         ...task,
@@ -180,12 +263,91 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
           name: taskManager.name,
           email: taskManager.email || '',
           phone: taskManager.phone || ''
-        } : undefined
+        } : undefined,
+        requirements: taskRequirements?.requirements || [],
+        referenceDocuments: {}
       };
       return processedTask;
     });
 
-    return processedTasks;
+    // Fetch reference documents for tasks with reference requirements
+    const tasksWithRefDocs = await Promise.all(processedTasks.map(async (task) => {
+      const referenceRequirements = task.requirements?.filter((req: any) => req.category === 'reference') || [];
+
+      if (task.id === 1259) {
+        console.log('[fetchTasks] Task 1259 structure:', { id: task.id, individual_id: task.individual_id, company_id: task.company_id, director_id: task.director_id, officer_ids: task.officer_ids });
+        console.log('[fetchTasks] Task 1259 reference requirements:', referenceRequirements);
+      }
+
+      if (referenceRequirements.length === 0) {
+        return task;
+      }
+
+      const referenceDocs: Record<string, any[]> = {};
+
+      for (const req of referenceRequirements) {
+
+        if (task.id === 1259) {
+          console.log('[fetchTasks] Task 1259 - Processing req:', req.name, 'entityTypes:', req.entityTypes, 'linkingVariable:', req.linkingVariable);
+        }
+
+        if (!req.sourceTable || !req.linkingVariable) {
+          if (task.id === 1259) {
+            console.log('[fetchTasks] Task 1259 - Skipping', req.name, '- missing sourceTable or linkingVariable');
+          }
+          continue;
+        }
+
+        const linkingValue = task[req.linkingVariable] || (req.linkingVariable === 'director_id' ? task.individual_id : undefined);
+
+        if (task.id === 1259) {
+          console.log('[fetchTasks] Task 1259 - Linking value for', req.name, ':', linkingValue, '(original field:', req.linkingVariable, ')');
+        }
+
+        if (!linkingValue) {
+          if (task.id === 1259) {
+            console.log('[fetchTasks] Task 1259 - Skipping', req.name, '- linking value is null/undefined');
+          }
+          continue;
+        }
+
+        try {
+          const { data, error } = await supabase
+            .from(req.sourceTable)
+            .select('*')
+            .eq(req.linkingVariable, linkingValue);
+
+          if (task.id === 1259) {
+            console.log('[fetchTasks] Task 1259 - Fetched documents for', req.name, ':', data);
+          }
+
+          if (!error && data) {
+            // Filter by document_ids if specified in the requirement
+            const filteredData = req.document_ids && req.document_ids.length > 0
+              ? data.filter((doc: any) => req.document_ids.includes(doc.document_id))
+              : data;
+
+            if (task.id === 1259) {
+              console.log('[fetchTasks] Task 1259 - Filtered documents for', req.name, ':', filteredData);
+            }
+
+            referenceDocs[req.id || req.name] = filteredData;
+          } else if (error) {
+            console.error(`Error fetching reference documents for ${req.name}:`, error);
+          }
+        } catch (error) {
+          console.error(`Error fetching reference documents for ${req.name}:`, error);
+        }
+      }
+
+      if (task.id === 1259) {
+        console.log('[fetchTasks] Task 1259 final referenceDocs:', referenceDocs);
+      }
+
+      return { ...task, referenceDocuments: referenceDocs };
+    }));
+
+    return tasksWithRefDocs;
   } catch (error) {
     console.error('Error fetching tasks:', error);
     toast({

@@ -1,11 +1,11 @@
 export type EntityType = 'company' | 'principal' | 'director' | 'shareholder' | 'dependant' | 'employee' | 'understudy' | 'sponsor';
 
 export const ENTITY_TYPES: { value: EntityType; label: string }[] = [
-  { value: 'company', label: 'Company' }, 
+  { value: 'company', label: 'Company' },
   { value: 'principal', label: 'Principal' },
-  { value: 'director', label: 'Director' }, 
+  { value: 'director', label: 'Director' },
   { value: 'shareholder', label: 'Shareholder' },
-  { value: 'dependant', label: 'Dependant' }, 
+  { value: 'dependant', label: 'Dependant' },
   { value: 'employee', label: 'Employee' },
   { value: 'understudy', label: 'Understudy' },
   { value: 'sponsor', label: 'Sponsor' }
@@ -50,13 +50,14 @@ export const AGE_RANGE_TYPES: { value: AgeRangeType; label: string }[] = [
   { value: 'adult', label: 'Adult (18+)' },
 ];
 
-export type RequirementCategory = 'general' | 'processing' | 'issuance' | 'job-specific';
+export type RequirementCategory = 'general' | 'processing' | 'issuance' | 'job-specific' | 'reference';
 
 export const REQUIREMENT_CATEGORIES: { value: RequirementCategory; label: string; description?: string }[] = [
   { value: 'general', label: 'General', description: 'General document requirements' },
   { value: 'processing', label: 'Processing', description: 'Documents needed for processing' },
   { value: 'issuance', label: 'Issuance', description: 'Documents for issuance purposes' },
-  { value: 'job-specific', label: 'Job Specific', description: 'Job-specific document requirements' }
+  { value: 'job-specific', label: 'Job Specific', description: 'Job-specific document requirements' },
+  { value: 'reference', label: 'Reference', description: 'Mandatory reference documents (e.g., TCCs, tax compliance)' }
 ];
 
 export type DirectorType = 'all' | 'primary';

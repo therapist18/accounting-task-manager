@@ -130,6 +130,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
   const [processingReqs, setProcessingReqs] = useState<RequirementForm[]>([DEFAULT_REQUIREMENT('processing')])
   const [issuanceReqs, setIssuanceReqs] = useState<RequirementForm[]>([DEFAULT_REQUIREMENT('issuance')])
   const [jobSpecificReqs, setJobSpecificReqs] = useState<RequirementForm[]>([DEFAULT_REQUIREMENT('job-specific')])
+  const [referenceReqs, setReferenceReqs] = useState<RequirementForm[]>([DEFAULT_REQUIREMENT('reference')])
 
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
@@ -139,6 +140,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
   const [processingBulkInput, setProcessingBulkInput] = useState('')
   const [issuanceBulkInput, setIssuanceBulkInput] = useState('')
   const [jobSpecificBulkInput, setJobSpecificBulkInput] = useState('')
+  const [referenceBulkInput, setReferenceBulkInput] = useState('')
 
   const [automationTypes, setAutomationTypes] = useState<any[]>([])
   const [masterFields, setMasterFields] = useState<any[]>([])
@@ -218,11 +220,11 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
   useEffect(() => {
     if (!isOpen) return;
 
-    const allDocIds = [...generalReqs, ...processingReqs, ...issuanceReqs, ...jobSpecificReqs]
+    const allDocIds = [...generalReqs, ...processingReqs, ...issuanceReqs, ...jobSpecificReqs, ...referenceReqs]
       .filter(req => req.hasTemplate && req.documentIds.length > 0)
       .flatMap(req => req.documentIds);
 
-    const allEntityTypes = [...generalReqs, ...processingReqs, ...issuanceReqs, ...jobSpecificReqs]
+    const allEntityTypes = [...generalReqs, ...processingReqs, ...issuanceReqs, ...jobSpecificReqs, ...referenceReqs]
       .filter(req => req.hasTemplate)
       .flatMap(req => req.entityTypes || ['principal']);
 
@@ -231,7 +233,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
     } else {
       setTemplates([]);
     }
-  }, [isOpen, generalReqs, processingReqs, issuanceReqs, jobSpecificReqs]);
+  }, [isOpen, generalReqs, processingReqs, issuanceReqs, jobSpecificReqs, referenceReqs]);
 
   const handleSubmit = async () => {
     if (!context) return;
@@ -242,6 +244,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
       case 'processing': source = processingReqs; break;
       case 'issuance': source = issuanceReqs; break;
       case 'job-specific': source = jobSpecificReqs; break;
+      case 'reference': source = referenceReqs; break;
       default: source = [];
     }
 
@@ -395,11 +398,13 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
       setProcessingReqs([DEFAULT_REQUIREMENT('processing')])
       setIssuanceReqs([DEFAULT_REQUIREMENT('issuance')])
       setJobSpecificReqs([DEFAULT_REQUIREMENT('job-specific')])
+      setReferenceReqs([DEFAULT_REQUIREMENT('reference')])
 
       setGeneralBulkInput('')
       setProcessingBulkInput('')
       setIssuanceBulkInput('')
       setJobSpecificBulkInput('')
+      setReferenceBulkInput('')
 
       setActiveSection('processing')
     }
@@ -424,6 +429,10 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
       const updated = [...jobSpecificReqs];
       updated[idx] = { ...updated[idx], ...fields };
       setJobSpecificReqs(updated);
+    } else if (activeSection === 'reference') {
+      const updated = [...referenceReqs];
+      updated[idx] = { ...updated[idx], ...fields };
+      setReferenceReqs(updated);
     }
   }
 
@@ -455,6 +464,12 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
           setJobSpecificReqs(lines.map(l => ({ ...DEFAULT_REQUIREMENT('job-specific'), name: l.trim() })))
         }
         break
+      case 'reference':
+        setReferenceBulkInput(value)
+        if (lines.length > 0) {
+          setReferenceReqs(lines.map(l => ({ ...DEFAULT_REQUIREMENT('reference'), name: l.trim() })))
+        }
+        break
     }
   }
 
@@ -464,6 +479,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
       case 'processing': return processingBulkInput
       case 'issuance': return issuanceBulkInput
       case 'job-specific': return jobSpecificBulkInput
+      case 'reference': return referenceBulkInput
       default: return ''
     }
   }
@@ -478,6 +494,8 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
         return "Enter issuance requirements line by line (e.g. Work Permit, Certificate of Incorporation, Tax Compliance)"
       case 'job-specific':
         return "e.g. Arrival Method\nSelect Airline\nFlight Number"
+      case 'reference':
+        return "Enter reference documents line by line (e.g. Individual TCC, Company TCC)"
       default:
         return "Enter requirements line by line"
     }
@@ -489,9 +507,10 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
       case 'processing': return processingReqs;
       case 'issuance': return issuanceReqs;
       case 'job-specific': return jobSpecificReqs;
+      case 'reference': return referenceReqs;
       default: return [];
     }
-  }, [activeSection, generalReqs, processingReqs, issuanceReqs, jobSpecificReqs]);
+  }, [activeSection, generalReqs, processingReqs, issuanceReqs, jobSpecificReqs, referenceReqs]);
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open ? handleClose() : onOpenChange(true)}>
@@ -505,7 +524,7 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
 
         <div className="flex-1 overflow-auto flex flex-col px-6 space-y-4 pt-4">
           <div className="bg-slate-200/50 p-1 rounded-xl sticky top-0 z-20 backdrop-blur-md flex gap-1">
-            {REQUIREMENT_CATEGORIES.map(cat => cat.value).filter(sec => context?.departmentId === 1 || sec === 'general' || sec === 'job-specific').map((sec) => (
+            {REQUIREMENT_CATEGORIES.map(cat => cat.value).filter(sec => context?.departmentId === 1 || sec === 'general' || sec === 'job-specific' || sec === 'reference').map((sec) => (
               <Button key={sec} variant={activeSection === sec ? 'default' : 'ghost'} className={cn("flex-1 h-8 text-xs capitalize rounded-lg transition-all", activeSection === sec && "shadow-sm")} onClick={() => setActiveSection(sec as RequirementCategory)}>
                 {sec.replace('-', ' ')}
               </Button>
@@ -546,7 +565,8 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                       if (activeSection === 'general') setGeneralReqs(updated);
                       else if (activeSection === 'processing') setProcessingReqs(updated);
                       else if (activeSection === 'issuance') setIssuanceReqs(updated);
-                      else setJobSpecificReqs(updated);
+                      else if (activeSection === 'job-specific') setJobSpecificReqs(updated);
+                      else if (activeSection === 'reference') setReferenceReqs(updated);
                     }}
                   >
                     <Trash2 className="h-4 w-4" />
