@@ -167,6 +167,7 @@ export default function ReportsPage() {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedOfficers, setSelectedOfficers] = useState<string[]>([]);
   const [activeOfficerTab, setActiveOfficerTab] = useState<string>("all");
+  const [officerFilterMode, setOfficerFilterMode] = useState<'current' | 'history'>('current');
   const [allOfficers, setAllOfficers] = useState<any[]>([]);
   const [availableOfficers, setAvailableOfficers] = useState<any[]>([]);
   const [isOfficerDropdownOpen, setIsOfficerDropdownOpen] = useState(false);
@@ -206,22 +207,6 @@ export default function ReportsPage() {
 
     return userIdStr;
   }, [tmUsers, unifiedOfficers, unifiedManagers, unifiedAssistants]);
-
-  const getStaffFromParticipants = useCallback((task: any, role: string): string | null => {
-    if (!task?.participants_details || !Array.isArray(task.participants_details)) {
-      return null;
-    }
-
-    const staff = task.participants_details.find((p: any) =>
-      p.role && Array.isArray(p.role) ? p.role.includes(role) : p.role === role
-    );
-
-    if (staff && staff.id !== null) {
-      return getStaffName(staff.id);
-    }
-
-    return null;
-  }, [getStaffName]);
 
   const getTaskHierarchy = useCallback((task: any) => {
     if (!task || !departments.length) return null;
@@ -458,6 +443,36 @@ export default function ReportsPage() {
     return Array.from(ids);
   }, [activeOfficerTab, selectedOfficers]);
 
+  const getCurrentStageTracking = useCallback((task: any) => {
+    const applicableStages = [...stages]
+      .filter(stage => isStageApplicableToTask(stage, task, departments))
+      .sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
+
+    let latest: { stage: any; handledAt: Date } | null = null;
+
+    applicableStages.forEach(stage => {
+      const stageData = task?.stages?.[stage?.id];
+      if (!stageData) return;
+
+      const directDate = parseDate(
+        stageData.completedAt ||
+        stageData.skippedAt ||
+        stageData.date_completed ||
+        stageData.date ||
+        stageData.lastUpdated ||
+        null
+      );
+
+      if (directDate) {
+        if (!latest || directDate.getTime() > latest.handledAt.getTime()) {
+          latest = { stage, handledAt: directDate };
+        }
+      }
+    });
+
+    return latest;
+  }, [stages, departments]);
+
   const tasksByFilters = useMemo(() => {
     return tasks.filter(task => {
       if (activeDeptId && task.department_id?.toString() !== activeDeptId) return false;
@@ -466,32 +481,28 @@ export default function ReportsPage() {
       if (activeSubClassId !== 'all' && task.subclass_id?.toString() !== activeSubClassId) return false;
 
       if (effectiveOfficerIds.length > 0) {
-        const officer = task.participants_details?.find((p: any) =>
-          p.role && Array.isArray(p.role) ? p.role.includes('officer') : p.role === 'officer'
-        );
-        const oid = officer?.id?.toString();
-        if (!oid || !effectiveOfficerIds.includes(oid)) return false;
-      }
-
-      if (selectedManagers.length > 0) {
-        const manager = task.participants_details?.find((p: any) =>
-          p.role && Array.isArray(p.role) ? p.role.includes('task_manager') : p.role === 'task_manager'
-        );
-        const mid = manager?.id?.toString();
-        if (!mid || !selectedManagers.includes(mid)) return false;
-      }
-
-      if (selectedAssistants.length > 0) {
-        const assistant = task.participants_details?.find((p: any) =>
-          p.role && Array.isArray(p.role) ? p.role.includes('task_assistant') : p.role === 'task_assistant'
-        );
-        const aid = assistant?.id?.toString();
-        if (!aid || !selectedAssistants.includes(aid)) return false;
+        if (officerFilterMode === 'current') {
+          // Filter by current stage officer (tasks in officer's basket)
+          const tracking = getCurrentStageTracking(task);
+          if (!tracking) return false;
+          const stageData = task.stages?.[tracking.stage.id];
+          const officerIds = stageData?.officer_ids || [];
+          const hasOfficer = officerIds.some((id: string) => effectiveOfficerIds.includes(id.toString()));
+          if (!hasOfficer) return false;
+        } else {
+          // Filter by history - check if officer handled any stage
+          const hasOfficer = stages.some(stage => {
+            const stageData = task.stages?.[stage.id];
+            const officerIds = stageData?.officer_ids || [];
+            return officerIds.some((id: string) => effectiveOfficerIds.includes(id.toString()));
+          });
+          if (!hasOfficer) return false;
+        }
       }
 
       return true;
     });
-  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, effectiveOfficerIds, selectedManagers, selectedAssistants]);
+  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, effectiveOfficerIds, officerFilterMode, stages]);
 
   const allTasksCount = useMemo(() => tasksByFilters.length, [tasksByFilters]);
   const wipTasksCount = useMemo(() => {
@@ -515,27 +526,23 @@ export default function ReportsPage() {
       if (activeSubClassId !== 'all' && task.subclass_id?.toString() !== activeSubClassId) return false;
 
       if (effectiveOfficerIds.length > 0) {
-        const officer = task.participants_details?.find((p: any) =>
-          p.role && Array.isArray(p.role) ? p.role.includes('officer') : p.role === 'officer'
-        );
-        const oid = officer?.id?.toString();
-        if (!oid || !effectiveOfficerIds.includes(oid)) return false;
-      }
-
-      if (selectedManagers.length > 0) {
-        const manager = task.participants_details?.find((p: any) =>
-          p.role && Array.isArray(p.role) ? p.role.includes('task_manager') : p.role === 'task_manager'
-        );
-        const mid = manager?.id?.toString();
-        if (!mid || !selectedManagers.includes(mid)) return false;
-      }
-
-      if (selectedAssistants.length > 0) {
-        const assistant = task.participants_details?.find((p: any) =>
-          p.role && Array.isArray(p.role) ? p.role.includes('task_assistant') : p.role === 'task_assistant'
-        );
-        const aid = assistant?.id?.toString();
-        if (!aid || !selectedAssistants.includes(aid)) return false;
+        if (officerFilterMode === 'current') {
+          // Filter by current stage officer (tasks in officer's basket)
+          const tracking = getCurrentStageTracking(task);
+          if (!tracking) return false;
+          const stageData = task.stages?.[tracking.stage.id];
+          const officerIds = stageData?.officer_ids || [];
+          const hasOfficer = officerIds.some((id: string) => effectiveOfficerIds.includes(id.toString()));
+          if (!hasOfficer) return false;
+        } else {
+          // Filter by history - check if officer handled any stage
+          const hasOfficer = stages.some(stage => {
+            const stageData = task.stages?.[stage.id];
+            const officerIds = stageData?.officer_ids || [];
+            return officerIds.some((id: string) => effectiveOfficerIds.includes(id.toString()));
+          });
+          if (!hasOfficer) return false;
+        }
       }
 
       const isWriteUp = task.status === 'write_up_completed';
@@ -550,7 +557,7 @@ export default function ReportsPage() {
       if (activeStatus === 'cancelled' && !isCancelled) return false;
       return true;
     });
-  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, activeStatus, effectiveOfficerIds, selectedManagers, selectedAssistants]);
+  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, activeStatus, effectiveOfficerIds, officerFilterMode, stages]);
 
   const searchedTasks = useMemo(() => {
     if (!searchQuery) return filteredTasks;
@@ -620,24 +627,6 @@ export default function ReportsPage() {
     const completionDateStr = calculateStageDate(stage, stageData, primaryDoc, docFields, null, false);
     return parseDate(completionDateStr);
   }, [getDocumentForTaskStage, isDocumentApplicable, kycDocuments]);
-
-  const getCurrentStageTracking = useCallback((task: any) => {
-    const applicableStages = [...stages]
-      .filter(stage => checkStageApplicableForTask(stage, task))
-      .sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-
-    let latest: { stage: any; handledAt: Date } | null = null;
-
-    applicableStages.forEach(stage => {
-      const handledAt = getStageHandledDate(task, stage);
-      if (!handledAt) return;
-      if (!latest || handledAt.getTime() > latest.handledAt.getTime()) {
-        latest = { stage, handledAt };
-      }
-    });
-
-    return latest;
-  }, [stages, getStageHandledDate]);
 
   function checkStageApplicableForTask(stage: any, task: any): boolean {
     return isStageApplicableToTask(stage, task, departments);
@@ -763,6 +752,12 @@ export default function ReportsPage() {
       type: 'total_process_age'
     });
 
+    cols.push({
+      id: 'current_stage_officer',
+      label: 'Current Stage Officer',
+      type: 'current_stage_officer'
+    });
+
     const activeStageIds = Object.keys(activeReport.configuration?.stages || {});
     const sortedStages = stages
       .filter(s => activeStageIds.includes(s.id))
@@ -774,6 +769,23 @@ export default function ReportsPage() {
       const isSpecialStage = SPECIAL_STAGE_IDS.includes(stage.id);
       const hasDocuments = config.documents && Object.keys(config.documents).length > 0;
       const shouldShowDateColumn = config.isStageDateSelected || hasDocuments;
+      const isOfficerStage = stage.follow_up?.toLowerCase() === 'officer';
+
+      // Add officer column for stages that require officer follow-up
+      if (isOfficerStage) {
+        const officerColId = `stage_${stage.id}_officers`;
+        if (!cols.some(c => c.id === officerColId)) {
+          cols.push({
+            id: officerColId,
+            label: `${stage.name} (Officers)`,
+            type: 'stage_officers',
+            stageId: stage.id,
+            stageName: stage.name,
+            filterApplicable: isStageApplicableToCurrentFilter(stage.id)
+          });
+        }
+      }
+
       if (shouldShowDateColumn) {
         const dateColId = `stage_${stage.id}_date`;
         if (!cols.some(c => c.id === dateColId)) {
@@ -876,11 +888,12 @@ export default function ReportsPage() {
     }
   }, [columns]);
 
-  const filteredColumns = useMemo(() =>
-    columns.filter(c => visibleColumnIds.includes(c.id)),
-    [columns, visibleColumnIds]);
+  const filteredColumns = useMemo(() => {
+    return columns.filter(c => visibleColumnIds.includes(c.id));
+  }, [columns, visibleColumnIds]);
 
   const renderCellValue = useCallback((task: any, col: any) => {
+
     if (col.type === 'current_stage_age') {
       const tracking = getCurrentStageTracking(task);
       const elapsedMinutes = getElapsedMinutes(tracking?.handledAt || null);
@@ -1176,6 +1189,76 @@ export default function ReportsPage() {
       );
     }
 
+    if (col.type === 'current_stage_officer') {
+      const applicableStages = [...stages]
+        .filter(stage => checkStageApplicableForTask(stage, task))
+        .sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
+
+      const currentStage = applicableStages.find(stage => {
+        const stageData = task.stages?.[stage.id];
+        return stageData && stageData.status !== 'completed' && stageData.status !== 'skipped';
+      });
+
+      if (!currentStage) {
+        return <span className="text-sm text-slate-400">—</span>;
+      }
+
+      const stageData = task.stages?.[currentStage.id];
+      const officerIds = stageData?.officer_ids || [];
+
+
+      if (!officerIds || officerIds.length === 0) {
+        return <span className="text-sm text-slate-400 italic">None assigned</span>;
+      }
+
+      const officerNames = officerIds.map((id: string) => {
+        const officer = unifiedOfficers.find((o: any) => o.id.toString() === id.toString());
+        return officer ? getOfficerDisplayName(officer) : 'Unknown';
+      }).filter(Boolean);
+
+      if (officerNames.length === 0) {
+        return <span className="text-sm text-slate-400 italic">None assigned</span>;
+      }
+
+      return (
+        <div className="flex flex-wrap gap-1">
+          {officerNames.map((name: string, idx: number) => (
+            <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-50 text-blue-700 border-blue-200">
+              {name}
+            </Badge>
+          ))}
+        </div>
+      );
+    }
+
+    if (col.type === 'stage_officers') {
+      const stageData = task.stages?.[col.stageId];
+      const officerIds = stageData?.officer_ids || [];
+
+      if (!officerIds || officerIds.length === 0) {
+        return <span className="text-sm text-slate-400 italic">None assigned</span>;
+      }
+
+      const officerNames = officerIds.map((id: string) => {
+        const officer = unifiedOfficers.find((o: any) => o.id.toString() === id.toString());
+        return officer ? getOfficerDisplayName(officer) : 'Unknown';
+      }).filter(Boolean);
+
+      if (officerNames.length === 0) {
+        return <span className="text-sm text-slate-400 italic">None assigned</span>;
+      }
+
+      return (
+        <div className="flex flex-wrap gap-1">
+          {officerNames.map((name: string, idx: number) => (
+            <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0 bg-violet-50 text-violet-700 border-violet-200">
+              {name}
+            </Badge>
+          ))}
+        </div>
+      );
+    }
+
     return <span className="text-sm text-slate-400">—</span>;
   }, [
     stages, departments, kycDocuments, allDocuments, companies,
@@ -1439,15 +1522,77 @@ export default function ReportsPage() {
             ))}
           </div>
         )}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setAreTabsVisible(!areTabsVisible)}
-          className={`ml-auto transition-all ${!areTabsVisible ? 'bg-slate-100' : ''}`}
-        >
-          {areTabsVisible ? <PanelLeftClose className="h-4 w-4 mr-2" /> : <PanelLeftOpen className="h-4 w-4 mr-2" />}
-          {areTabsVisible ? 'Hide Navigation' : 'Show Navigation'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="flex items-center gap-2">
+                <TableProperties className="h-4 w-4" />
+                Columns
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-56 max-h-96 overflow-y-auto" align="end">
+              <div className="p-2 space-y-2">
+                <div className="font-semibold text-xs text-slate-500 uppercase tracking-wider pb-1 border-b">Task Details</div>
+                {columns.filter(c => c.type === 'task').map(col => (
+                  <div key={col.id} className="flex items-center gap-2">
+                    <Checkbox
+                      id={`col-${col.id}`}
+                      checked={visibleColumnIds.includes(col.id)}
+                      onCheckedChange={(checked) => {
+                        setVisibleColumnIds(prev => {
+                          if (checked) return [...prev, col.id];
+                          return prev.filter(id => id !== col.id);
+                        });
+                      }}
+                    />
+                    <label htmlFor={`col-${col.id}`} className="text-sm cursor-pointer flex-1 truncate">{col.label}</label>
+                  </div>
+                ))}
+                <div className="font-semibold text-xs text-slate-500 uppercase tracking-wider pb-1 border-b pt-2">Time Tracking</div>
+                {columns.filter(c => c.type === 'current_stage_age' || c.type === 'total_process_age' || c.type === 'current_stage_officer').map(col => (
+                  <div key={col.id} className="flex items-center gap-2">
+                    <Checkbox
+                      id={`col-${col.id}`}
+                      checked={visibleColumnIds.includes(col.id)}
+                      onCheckedChange={(checked) => {
+                        setVisibleColumnIds(prev => {
+                          if (checked) return [...prev, col.id];
+                          return prev.filter(id => id !== col.id);
+                        });
+                      }}
+                    />
+                    <label htmlFor={`col-${col.id}`} className="text-sm cursor-pointer flex-1 truncate">{col.label}</label>
+                  </div>
+                ))}
+                <div className="font-semibold text-xs text-slate-500 uppercase tracking-wider pb-1 border-b pt-2">Stages</div>
+                {columns.filter(c => c.stageId && (c.type === 'stage_date' || c.type === 'stage_officers')).map(col => (
+                  <div key={col.id} className="flex items-center gap-2">
+                    <Checkbox
+                      id={`col-${col.id}`}
+                      checked={visibleColumnIds.includes(col.id)}
+                      onCheckedChange={(checked) => {
+                        setVisibleColumnIds(prev => {
+                          if (checked) return [...prev, col.id];
+                          return prev.filter(id => id !== col.id);
+                        });
+                      }}
+                    />
+                    <label htmlFor={`col-${col.id}`} className="text-sm cursor-pointer flex-1 truncate">{col.label}</label>
+                  </div>
+                ))}
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setAreTabsVisible(!areTabsVisible)}
+            className={`transition-all ${!areTabsVisible ? 'bg-slate-100' : ''}`}
+          >
+            {areTabsVisible ? <PanelLeftClose className="h-4 w-4 mr-2" /> : <PanelLeftOpen className="h-4 w-4 mr-2" />}
+            {areTabsVisible ? 'Hide Navigation' : 'Show Navigation'}
+          </Button>
+        </div>
       </div>
 
       {/* ── Tabs Navigation exactly like DepartmentTasksManager ── */}
@@ -1506,18 +1651,32 @@ export default function ReportsPage() {
                 {areTabsVisible && (
                   <>
                     {availableOfficers.length > 0 && (
-                      <Tabs value={activeOfficerTab} onValueChange={setActiveOfficerTab} className="w-full">
-                        <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 h-auto">
-                          <TabsTrigger value="all" className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                            All Officers
-                          </TabsTrigger>
-                          {availableOfficers.map(officer => (
-                            <TabsTrigger key={officer.id} value={officer.id} className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                              {officer.full_name || officer.name || officer.displayName || `Officer ${officer.id}`}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Officer Filter Mode</span>
+                          <Select value={officerFilterMode} onValueChange={(value: 'current' | 'history') => setOfficerFilterMode(value)}>
+                            <SelectTrigger className="w-40 h-8 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="current">Current Stage</SelectItem>
+                              <SelectItem value="history">History (All Stages)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <Tabs value={activeOfficerTab} onValueChange={setActiveOfficerTab} className="w-full">
+                          <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 h-auto">
+                            <TabsTrigger value="all" className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
+                              All Officers
                             </TabsTrigger>
-                          ))}
-                        </TabsList>
-                      </Tabs>
+                            {availableOfficers.map(officer => (
+                              <TabsTrigger key={officer.id} value={officer.id} className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
+                                {officer.full_name || officer.name || officer.displayName || `Officer ${officer.id}`}
+                              </TabsTrigger>
+                            ))}
+                          </TabsList>
+                        </Tabs>
+                      </div>
                     )}
                   </>
                 )}
@@ -1783,7 +1942,6 @@ export default function ReportsPage() {
                           }}
                           departments={departments}
                           stages={stages}
-                          getStaffFromParticipants={getStaffFromParticipants}
                         />
                       ) : (
                         <TransposedReportView
@@ -1801,7 +1959,6 @@ export default function ReportsPage() {
                             allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants]
                           }}
                           departments={departments}
-                          getStaffFromParticipants={getStaffFromParticipants}
                         />
                       )}
                     </div>
@@ -1829,3 +1986,8 @@ export default function ReportsPage() {
     </div>
   );
 }
+
+
+
+
+

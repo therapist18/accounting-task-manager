@@ -268,7 +268,6 @@ interface TransposedReportViewProps {
     allUsers: any[];
   };
   departments?: any[];
-  getStaffFromParticipants?: (task: any, role: string) => string | null;
 }
 
 export function TransposedReportView({
@@ -283,8 +282,7 @@ export function TransposedReportView({
   error = null,
   initialColumnsPerPage = 10,
   userData = { officers: [], managers: [], assistants: [], allUsers: [] },
-  departments = [],
-  getStaffFromParticipants
+  departments = []
 }: TransposedReportViewProps) {
 
   // Column pagination state
@@ -325,12 +323,13 @@ export function TransposedReportView({
   // Helper to detect role columns and render appropriately
   const isRoleColumn = (col: any) => {
     const colId = col.id?.toLowerCase() || col.field?.toLowerCase() || '';
-    return colId.includes('officer') || colId.includes('manager') || colId.includes('assistant');
+    // Officer handling removed - now uses stages JSON
+    return colId.includes('manager') || colId.includes('assistant');
   };
 
   const getRoleFromColumn = (col: any) => {
     const colId = col.id?.toLowerCase() || col.field?.toLowerCase() || '';
-    if (colId.includes('officer')) return 'officer';
+    // Officer handling removed - now uses stages JSON
     if (colId.includes('manager')) return 'task_manager';
     if (colId.includes('assistant')) return 'task_assistant';
     return null;
@@ -338,20 +337,7 @@ export function TransposedReportView({
 
   // Enhanced render function that handles role columns
   const enhancedRenderCellValue = (task: any, col: any) => {
-    const role = getRoleFromColumn(col);
-
-    if (!role || !getStaffFromParticipants) {
-      return safeRender(renderCellValue(task, col));
-    }
-
-    // Use getStaffFromParticipants to extract staff name from participants_details
-    const staffName = getStaffFromParticipants(task, role);
-
-    if (!staffName) {
-      return <span className="text-sm text-slate-400 italic">None assigned</span>;
-    }
-
-    return <span className="text-sm text-slate-700">{staffName}</span>;
+    return safeRender(renderCellValue(task, col));
   };
 
   return (

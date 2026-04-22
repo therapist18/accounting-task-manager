@@ -2,6 +2,7 @@ import type React from "react"
 import { Navbar } from "../../components/navbar"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { AppSidebar } from "@/components/sidebar"
+import { Toaster } from "@/components/ui/toaster"
 
 export default function DashboardLayout({
   children,
@@ -19,6 +20,7 @@ export default function DashboardLayout({
           </main>
         </SidebarInset>
       </div>
+      <Toaster />
     </SidebarProvider>
   )
 }
