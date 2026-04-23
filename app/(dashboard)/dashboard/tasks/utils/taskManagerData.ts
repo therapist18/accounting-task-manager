@@ -124,7 +124,7 @@ export const fetchCompanies = async (): Promise<Map<number, string>> => {
 /**
  * Fetch tasks with related data
  */
-export const fetchTasks = async (departmentId?: string, subdepartmentId?: string): Promise<Task[]> => {
+export const fetchTasks = async (departmentId?: string, subdepartmentId?: string, companies?: Map<number, string>): Promise<Task[]> => {
   try {
     let query = supabase
       .from('tm_tasks')
@@ -240,7 +240,7 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
       const processedTask: Task = {
         ...task,
         applicant_name: task.applicant_details?.name || task.applicant_name || '',
-        company_name: company?.name || '',
+        company_name: company?.name || (company?.id && companies ? companies.get(Number(company.id)) : '') || '',
         department_id: jobLevel.department_id,
         subdepartment_id: jobLevel.subdepartment_id,
         class_id: jobLevel.class_id,
@@ -271,81 +271,89 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
     });
 
     // Fetch reference documents for tasks with reference requirements
-    const tasksWithRefDocs = await Promise.all(processedTasks.map(async (task) => {
+    // Optimize by grouping fetches by sourceTable and linkingVariable
+    const fetchGroups = new Map<string, { sourceTable: string, linkingVariable: string, linkingValues: any[], tasks: any[] }>();
+
+    processedTasks.forEach(task => {
       const referenceRequirements = task.requirements?.filter((req: any) => req.category === 'reference') || [];
+      if (referenceRequirements.length === 0) return;
 
-      if (task.id === 1259) {
-        console.log('[fetchTasks] Task 1259 structure:', { id: task.id, individual_id: task.individual_id, company_id: task.company_id, director_id: task.director_id, officer_ids: task.officer_ids });
-        console.log('[fetchTasks] Task 1259 reference requirements:', referenceRequirements);
-      }
+      referenceRequirements.forEach(req => {
+        if (!req.sourceTable || !req.linkingVariable) return;
 
-      if (referenceRequirements.length === 0) {
-        return task;
+        const linkingValue = task[req.linkingVariable] || (req.linkingVariable === 'director_id' ? task.individual_id : undefined);
+        if (!linkingValue) return;
+
+        const groupKey = `${req.sourceTable}|${req.linkingVariable}`;
+        if (!fetchGroups.has(groupKey)) {
+          fetchGroups.set(groupKey, {
+            sourceTable: req.sourceTable,
+            linkingVariable: req.linkingVariable,
+            linkingValues: [],
+            tasks: []
+          });
+        }
+        const group = fetchGroups.get(groupKey)!;
+        if (!group.linkingValues.includes(linkingValue)) {
+          group.linkingValues.push(linkingValue);
+        }
+        group.tasks.push({ task, req, linkingValue });
+      });
+    });
+
+    // Batch fetch all documents for each group
+    const fetchPromises = Array.from(fetchGroups.values()).map(async (group) => {
+      try {
+        const { data, error } = await supabase
+          .from(group.sourceTable)
+          .select('*')
+          .in(group.linkingVariable, group.linkingValues);
+
+        if (error) throw error;
+        return { group, data: data || [] };
+      } catch (error) {
+        console.error(`Error fetching reference documents for ${group.sourceTable}:`, error);
+        return { group, data: [] };
       }
+    });
+
+    const fetchResults = await Promise.all(fetchPromises);
+
+    // Create a map of (sourceTable + linkingVariable + linkingValue) -> documents
+    const docsMap = new Map<string, any[]>();
+    fetchResults.forEach(({ group, data }) => {
+      group.linkingValues.forEach(linkingValue => {
+        const key = `${group.sourceTable}|${group.linkingVariable}|${linkingValue}`;
+        docsMap.set(key, data.filter((doc: any) => doc[group.linkingVariable] === linkingValue));
+      });
+    });
+
+    // Match documents back to tasks
+    const tasksWithRefDocs = processedTasks.map(task => {
+      const referenceRequirements = task.requirements?.filter((req: any) => req.category === 'reference') || [];
+      if (referenceRequirements.length === 0) return task;
 
       const referenceDocs: Record<string, any[]> = {};
 
-      for (const req of referenceRequirements) {
-
-        if (task.id === 1259) {
-          console.log('[fetchTasks] Task 1259 - Processing req:', req.name, 'entityTypes:', req.entityTypes, 'linkingVariable:', req.linkingVariable);
-        }
-
-        if (!req.sourceTable || !req.linkingVariable) {
-          if (task.id === 1259) {
-            console.log('[fetchTasks] Task 1259 - Skipping', req.name, '- missing sourceTable or linkingVariable');
-          }
-          continue;
-        }
+      referenceRequirements.forEach(req => {
+        if (!req.sourceTable || !req.linkingVariable) return;
 
         const linkingValue = task[req.linkingVariable] || (req.linkingVariable === 'director_id' ? task.individual_id : undefined);
+        if (!linkingValue) return;
 
-        if (task.id === 1259) {
-          console.log('[fetchTasks] Task 1259 - Linking value for', req.name, ':', linkingValue, '(original field:', req.linkingVariable, ')');
-        }
+        const key = `${req.sourceTable}|${req.linkingVariable}|${linkingValue}`;
+        const documents = docsMap.get(key) || [];
 
-        if (!linkingValue) {
-          if (task.id === 1259) {
-            console.log('[fetchTasks] Task 1259 - Skipping', req.name, '- linking value is null/undefined');
-          }
-          continue;
-        }
+        // Filter by document_ids if specified in the requirement
+        const filteredData = req.document_ids && req.document_ids.length > 0
+          ? documents.filter((doc: any) => req.document_ids.includes(doc.document_id))
+          : documents;
 
-        try {
-          const { data, error } = await supabase
-            .from(req.sourceTable)
-            .select('*')
-            .eq(req.linkingVariable, linkingValue);
-
-          if (task.id === 1259) {
-            console.log('[fetchTasks] Task 1259 - Fetched documents for', req.name, ':', data);
-          }
-
-          if (!error && data) {
-            // Filter by document_ids if specified in the requirement
-            const filteredData = req.document_ids && req.document_ids.length > 0
-              ? data.filter((doc: any) => req.document_ids.includes(doc.document_id))
-              : data;
-
-            if (task.id === 1259) {
-              console.log('[fetchTasks] Task 1259 - Filtered documents for', req.name, ':', filteredData);
-            }
-
-            referenceDocs[req.id || req.name] = filteredData;
-          } else if (error) {
-            console.error(`Error fetching reference documents for ${req.name}:`, error);
-          }
-        } catch (error) {
-          console.error(`Error fetching reference documents for ${req.name}:`, error);
-        }
-      }
-
-      if (task.id === 1259) {
-        console.log('[fetchTasks] Task 1259 final referenceDocs:', referenceDocs);
-      }
+        referenceDocs[req.id || req.name] = filteredData;
+      });
 
       return { ...task, referenceDocuments: referenceDocs };
-    }));
+    });
 
     return tasksWithRefDocs;
   } catch (error) {

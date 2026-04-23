@@ -333,16 +333,27 @@ export const getJobLevelDisplay = (task: any, departments: any[]): string => {
   return 'N/A';
 };
 
-export const getCompanyNameFromParticipants = (task: any): string => {
+export const getCompanyNameFromParticipants = (task: any, companies?: Map<number, string>): string => {
   if (!task?.participants_details || !Array.isArray(task.participants_details)) {
     return 'N/A';
   }
 
   const company = task.participants_details.find((p: any) =>
+    (Array.isArray(p.role) && (p.role.includes('company') || p.role.includes('sponsor'))) ||
     p.role === 'company' || p.role === 'sponsor'
   );
 
-  return company?.name || 'N/A';
+  // If company has a name, use it
+  if (company?.name) {
+    return company.name;
+  }
+
+  // Otherwise, look up the name from the companies map using the company id
+  if (company?.id && companies instanceof Map) {
+    return companies.get(Number(company.id)) || 'N/A';
+  }
+
+  return 'N/A';
 };
 
 export const getStaffFromParticipants = (
@@ -501,13 +512,13 @@ export const getOfficersForCurrentStage = (
 };
 
 export const getCompanyName = (task: any, companies: Map<number, string>): string => {
-  // First try participants_details
-  const participantsName = getCompanyNameFromParticipants(task);
+  // First try participants_details with companies map for lookup
+  const participantsName = getCompanyNameFromParticipants(task, companies);
   if (participantsName !== 'N/A') {
     return participantsName;
   }
 
-  // Fallback to companies map
+  // Fallback to companies map using company_id
   if (companies instanceof Map) {
     return companies.get(task.company_id) || 'N/A';
   }
@@ -1017,7 +1028,7 @@ export const getCellContent = (
     immigration_days_to_go: formatImmigrationDaysToGo(task, getEnhancedStatus),
     current_stage_name: getStageStatus(task).stageName || 'N/A',
     current_stage_follow_up: getCurrentStageFollowUp(task, getStageStatus),
-    company_name: getCompanyNameFromParticipants(task),
+    company_name: getCompanyNameFromParticipants(task, companies),
     sub_department: getSubDepartmentDisplay(task, departments),
     job_level: getJobLevelDisplay(task, departments),
     job_description: task.job_description || 'N/A',
@@ -1103,7 +1114,7 @@ export const getRawCellValue = (
     current_stage_name: getStageStatus(task).stageName || 'N/A',
     current_stage_status_value: getStageStatus(task).stageStatus || 'N/A',
     current_stage_follow_up: getCurrentStageFollowUp(task, getStageStatus),
-    company_name: getCompanyNameFromParticipants(task),
+    company_name: getCompanyNameFromParticipants(task, companies),
     sub_department: getSubDepartmentDisplay(task, departments),
     job_level: getJobLevelDisplay(task, departments),
     job_description: task.job_description || 'N/A',

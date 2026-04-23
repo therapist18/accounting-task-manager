@@ -292,7 +292,7 @@ export default function ReportsPage() {
 
       const deptId = activeReport.department_id?.toString();
       const [tasksData, stagesData] = await Promise.all([
-        fetchTasks(deptId),
+        fetchTasks(deptId, undefined, comps),
         deptId ? fetchStages(deptId, depts) : Promise.resolve([])
       ]);
 
@@ -769,7 +769,7 @@ export default function ReportsPage() {
       const config = activeReport.configuration.stages[stage.id];
       const isSpecialStage = SPECIAL_STAGE_IDS.includes(stage.id);
       const hasDocuments = config.documents && Object.keys(config.documents).length > 0;
-      const shouldShowDateColumn = config.isStageDateSelected || hasDocuments;
+      const shouldShowDateColumn = config.isStageDateSelected;
       const isOfficerStage = stage.follow_up?.toLowerCase() === 'officer';
 
       // Add officer column for stages that require officer follow-up
@@ -805,7 +805,7 @@ export default function ReportsPage() {
         if (index < sortedStages.length - 1) {
           const nextStage = sortedStages[index + 1];
           const nextConfig = activeReport.configuration.stages[nextStage.id];
-          const nextShouldShowDateColumn = nextConfig.isStageDateSelected || (nextConfig.documents && Object.keys(nextConfig.documents).length > 0);
+          const nextShouldShowDateColumn = nextConfig.isStageDateSelected;
 
           if (nextShouldShowDateColumn && showTimeTrackingColumns) {
             cols.push({
@@ -822,7 +822,7 @@ export default function ReportsPage() {
         }
       }
 
-      if (hasDocuments && expandedStageColumns.has(stage.id)) {
+      if (hasDocuments) {
         if (isSpecialStage) {
           let wefAdded = false, toAdded = false;
           for (const [kycId] of Object.entries(config.documents)) {
@@ -863,7 +863,8 @@ export default function ReportsPage() {
           Object.entries(config.documents).forEach(([kycId, docConfig]: [string, any]) => {
             const kycDoc = kycDocuments.get(kycId);
             if (!kycDoc) return;
-            (docConfig.fields || []).forEach((fieldId: any) => {
+            (docConfig.fields || []).forEach((fieldConfig: any) => {
+              const fieldId = typeof fieldConfig === 'string' ? fieldConfig : fieldConfig.id;
               const field = kycDoc.fields?.find((f: any) => f.id === fieldId);
               if (field) {
                 const colId = `stage_${stage.id}_${kycId}_${fieldId}`;
@@ -1205,11 +1206,7 @@ export default function ReportsPage() {
 
       if (referenceDocs.length === 0) {
         return (
-          <div className="space-y-1">
-            <div className="text-[10px] text-slate-500">Source: <span className="font-medium text-slate-700">{requirement.sourceTable || '-'}</span></div>
-            <div className="text-[10px] text-slate-500">Link: <span className="font-medium text-slate-700">{requirement.linkingVariable || '-'}</span></div>
-            <div className="text-[10px] text-slate-400 italic">No documents found</div>
-          </div>
+          <div className="text-slate-400 italic">No documents found</div>
         );
       }
 
@@ -1218,31 +1215,19 @@ export default function ReportsPage() {
         new Date(curr.created_at) > new Date(prev.created_at) ? curr : prev
       );
 
-      console.log('[Reports] latestDoc:', latestDoc);
-      console.log('[Reports] kycDocuments keys:', Array.from(kycDocuments.keys()));
-
       // Find the field with isEffectiveTo: true from the KYC metadata
       const docId = latestDoc.document_id || latestDoc.kyc_document_id;
-      console.log('[Reports] docId:', docId);
       const kycMetadata = kycDocuments.get(docId);
-      console.log('[Reports] kycMetadata:', kycMetadata);
       const effectiveToField = kycMetadata?.fields?.find((field: any) => field.isEffectiveTo === true);
-      console.log('[Reports] effectiveToField:', effectiveToField);
 
       // Extract the value from the field with isEffectiveTo: true
       const isEffectiveTo = effectiveToField
         ? (latestDoc.extracted_details?.[effectiveToField.fieldName] || latestDoc.edited_details?.[effectiveToField.fieldName])
         : (latestDoc.extracted_details?.isEffectiveTo || latestDoc.edited_details?.isEffectiveTo);
 
-      console.log('[Reports] isEffectiveTo value:', isEffectiveTo);
-
 
       return (
-        <div className="space-y-1">
-          <div className="text-[10px] text-slate-500">Source: <span className="font-medium text-slate-700">{requirement.sourceTable || '-'}</span></div>
-          <div className="text-[10px] text-slate-500">Link: <span className="font-medium text-slate-700">{requirement.linkingVariable || '-'}</span></div>
-          <div className="text-[10px] text-slate-500">Effective To: <span className="font-medium text-slate-700">{isEffectiveTo || '-'}</span></div>
-        </div>
+        <div className="text-slate-500"><span className="font-medium text-slate-700">{isEffectiveTo || '-'}</span></div>
       );
     }
 

@@ -81,7 +81,7 @@ export default function TasksPage() {
   const loadTasksAndStages = useCallback(async (departmentId: string, subdepartmentId?: string) => {
     if (!departmentId || departments.length === 0) return;
     try {
-      const tasksData = await fetchTasks(departmentId, subdepartmentId);
+      const tasksData = await fetchTasks(departmentId, subdepartmentId, undefined);
       const stagesData = await fetchStages(departmentId, departments);
       setTasks(tasksData);
       setStages(stagesData);

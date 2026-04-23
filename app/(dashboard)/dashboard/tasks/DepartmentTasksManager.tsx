@@ -458,7 +458,7 @@ export default function DepartmentTasksManager({
 
     try {
       const [tasksData, stagesData] = await Promise.all([
-        fetchTasks(departmentId, subdepartmentId),
+        fetchTasks(departmentId, subdepartmentId, companies),
         fetchStages(departmentId, departments)
       ])
 
