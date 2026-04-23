@@ -109,7 +109,7 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boo
 };
 
 export default function ReportsPage() {
-  const [areTabsVisible, setAreTabsVisible] = useState(true);
+  const [areJobLevelTabsVisible, setAreJobLevelTabsVisible] = useState(true);
   const [activeReport, setActiveReport] = useState<any | null>(null);
   const [availableReports, setAvailableReports] = useState<any[]>([]);
   const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
@@ -140,6 +140,27 @@ export default function ReportsPage() {
   const [allOfficers, setAllOfficers] = useState<any[]>([]);
   const [availableOfficers, setAvailableOfficers] = useState<any[]>([]);
   const [isOfficerDropdownOpen, setIsOfficerDropdownOpen] = useState(false);
+
+  // Task Managers tab state
+  const [selectedTaskManagers, setSelectedTaskManagers] = useState<string[]>([]);
+  const [activeTaskManagerTab, setActiveTaskManagerTab] = useState<string>("all");
+  const [taskManagerFilterMode, setTaskManagerFilterMode] = useState<'current' | 'history'>('current');
+  const [availableTaskManagers, setAvailableTaskManagers] = useState<any[]>([]);
+  const [isTaskManagerDropdownOpen, setIsTaskManagerDropdownOpen] = useState(false);
+
+  // Clients (Companies/Sponsors) tab state
+  const [selectedClients, setSelectedClients] = useState<string[]>([]);
+  const [activeClientTab, setActiveClientTab] = useState<string>("all");
+  const [clientFilterMode, setClientFilterMode] = useState<'current' | 'history'>('current');
+  const [availableClients, setAvailableClients] = useState<any[]>([]);
+  const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
+
+  // BCL (Assistants) tab state
+  const [selectedBCLs, setSelectedBCLs] = useState<string[]>([]);
+  const [activeBCLTab, setActiveBCLTab] = useState<string>("all");
+  const [bclFilterMode, setBCLFilterMode] = useState<'current' | 'history'>('current');
+  const [availableBCLs, setAvailableBCLs] = useState<any[]>([]);
+  const [isBCLDropdownOpen, setIsBCLDropdownOpen] = useState(false);
   const [isFiltersDropdownOpen, setIsFiltersDropdownOpen] = useState(false);
   const [selectedManagers, setSelectedManagers] = useState<string[]>([]);
   const [allManagers, setAllManagers] = useState<any[]>([]);
@@ -407,11 +428,63 @@ export default function ReportsPage() {
     setSelectedAssistants(prev => prev.filter(id => final.some(a => a.id === id)));
   }, [activeDeptId, activeSubDeptId, unifiedAssistants, activeSubDepartments]);
 
+  // Populate availableTaskManagers (same as availableManagers)
+  useEffect(() => {
+    setAvailableTaskManagers(availableManagers);
+    setSelectedTaskManagers(prev => prev.filter(id => availableManagers.some(m => m.id === id)));
+    setActiveTaskManagerTab(prev => (prev === 'all' || availableManagers.some(m => m.id === prev) ? prev : 'all'));
+  }, [availableManagers]);
+
+  // Populate availableClients (extract unique companies/sponsors from tasks)
+  useEffect(() => {
+    const clientsMap = new Map<string, any>();
+    tasks.forEach(task => {
+      const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
+      if (company && company.name) {
+        const clientId = company.name;
+        if (!clientsMap.has(clientId)) {
+          clientsMap.set(clientId, {
+            id: clientId,
+            name: company.name,
+            full_name: company.name,
+            displayName: company.name
+          });
+        }
+      }
+    });
+    setAvailableClients(Array.from(clientsMap.values()));
+  }, [tasks]);
+
+  // Populate availableBCLs (same as availableAssistants)
+  useEffect(() => {
+    setAvailableBCLs(availableAssistants);
+    setSelectedBCLs(prev => prev.filter(id => availableAssistants.some(a => a.id === id)));
+    setActiveBCLTab(prev => (prev === 'all' || availableAssistants.some(a => a.id === prev) ? prev : 'all'));
+  }, [availableAssistants]);
+
   const effectiveOfficerIds = useMemo(() => {
     const ids = new Set(selectedOfficers);
     if (activeOfficerTab !== 'all') ids.add(activeOfficerTab);
     return Array.from(ids);
   }, [activeOfficerTab, selectedOfficers]);
+
+  const effectiveTaskManagerIds = useMemo(() => {
+    const ids = new Set(selectedTaskManagers);
+    if (activeTaskManagerTab !== 'all') ids.add(activeTaskManagerTab);
+    return Array.from(ids);
+  }, [activeTaskManagerTab, selectedTaskManagers]);
+
+  const effectiveClientIds = useMemo(() => {
+    const ids = new Set(selectedClients);
+    if (activeClientTab !== 'all') ids.add(activeClientTab);
+    return Array.from(ids);
+  }, [activeClientTab, selectedClients]);
+
+  const effectiveBCLIds = useMemo(() => {
+    const ids = new Set(selectedBCLs);
+    if (activeBCLTab !== 'all') ids.add(activeBCLTab);
+    return Array.from(ids);
+  }, [activeBCLTab, selectedBCLs]);
 
   const getCurrentStageTracking = useCallback((task: any) => {
     const applicableStages = [...stages]
@@ -450,29 +523,65 @@ export default function ReportsPage() {
       if (activeClassId !== 'all' && task.class_id?.toString() !== activeClassId) return false;
       if (activeSubClassId !== 'all' && task.subclass_id?.toString() !== activeSubClassId) return false;
 
+      // Officer filtering
       if (effectiveOfficerIds.length > 0) {
-        if (officerFilterMode === 'current') {
-          // Filter by current stage officer (tasks in officer's basket)
+        // Filter by task's officer (from participants_details)
+        const officer = task.officer;
+        if (!officer || !officer.id) return false;
+        const hasOfficer = effectiveOfficerIds.includes(officer.id.toString());
+        if (!hasOfficer) return false;
+      }
+
+      if (effectiveTaskManagerIds.length > 0) {
+        // Filter by task's task_manager (from participants_details)
+        const taskManager = task.task_manager;
+        if (!taskManager || !taskManager.id) return false;
+        const hasTaskManager = effectiveTaskManagerIds.includes(taskManager.id.toString());
+        if (!hasTaskManager) return false;
+      }
+
+      if (effectiveClientIds.length > 0) {
+        if (clientFilterMode === 'current') {
+          // Filter by current stage client (company/sponsor)
           const tracking = getCurrentStageTracking(task);
           if (!tracking) return false;
           const stageData = task.stages?.[tracking.stage.id];
-          const officerIds = stageData?.officer_ids || [];
-          const hasOfficer = officerIds.some((id: string) => effectiveOfficerIds.includes(id.toString()));
-          if (!hasOfficer) return false;
+          const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
+          if (!company || !company.name) return false;
+          const hasClient = effectiveClientIds.includes(company.name);
+          if (!hasClient) return false;
         } else {
-          // Filter by history - check if officer handled any stage
-          const hasOfficer = stages.some(stage => {
+          // Filter by history - check if client appears in task
+          const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
+          if (!company || !company.name) return false;
+          const hasClient = effectiveClientIds.includes(company.name);
+          if (!hasClient) return false;
+        }
+      }
+
+      if (effectiveBCLIds.length > 0) {
+        if (bclFilterMode === 'current') {
+          // Filter by current stage BCL (tasks in BCL's basket)
+          const tracking = getCurrentStageTracking(task);
+          if (!tracking) return false;
+          const stageData = task.stages?.[tracking.stage.id];
+          const assistantIds = stageData?.assistant_ids || [];
+          const hasBCL = assistantIds.some((id: string) => effectiveBCLIds.includes(id.toString()));
+          if (!hasBCL) return false;
+        } else {
+          // Filter by history - check if BCL handled any stage
+          const hasBCL = stages.some(stage => {
             const stageData = task.stages?.[stage.id];
-            const officerIds = stageData?.officer_ids || [];
-            return officerIds.some((id: string) => effectiveOfficerIds.includes(id.toString()));
+            const assistantIds = stageData?.assistant_ids || [];
+            return assistantIds.some((id: string) => effectiveBCLIds.includes(id.toString()));
           });
-          if (!hasOfficer) return false;
+          if (!hasBCL) return false;
         }
       }
 
       return true;
     });
-  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, effectiveOfficerIds, officerFilterMode, stages]);
+  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, effectiveOfficerIds, officerFilterMode, effectiveTaskManagerIds, taskManagerFilterMode, effectiveClientIds, clientFilterMode, effectiveBCLIds, bclFilterMode, stages]);
 
   const allTasksCount = useMemo(() => tasksByFilters.length, [tasksByFilters]);
   const wipTasksCount = useMemo(() => {
@@ -495,39 +604,79 @@ export default function ReportsPage() {
       if (activeClassId !== 'all' && task.class_id?.toString() !== activeClassId) return false;
       if (activeSubClassId !== 'all' && task.subclass_id?.toString() !== activeSubClassId) return false;
 
+      // Status filtering
+      if (activeStatus === 'wip') {
+        const isWriteUp = task.status === 'write_up_completed';
+        const isEndorsed = task.status === 'endorsed';
+        const isCancelled = task.status === 'cancel';
+        const isCompleted = isWriteUp || isEndorsed || ['completed', 'archived'].includes(task.status);
+        if (isCompleted || isCancelled) return false;
+      } else if (activeStatus === 'write_up_completed') {
+        if (task.status !== 'write_up_completed') return false;
+      } else if (activeStatus === 'endorsed') {
+        if (task.status !== 'endorsed') return false;
+      } else if (activeStatus === 'cancelled') {
+        if (task.status !== 'cancel') return false;
+      }
+
+      // Officer filtering
       if (effectiveOfficerIds.length > 0) {
-        if (officerFilterMode === 'current') {
-          // Filter by current stage officer (tasks in officer's basket)
+        // Filter by task's officer (from participants_details)
+        const officer = task.officer;
+        if (!officer || !officer.id) return false;
+        const hasOfficer = effectiveOfficerIds.includes(officer.id.toString());
+        if (!hasOfficer) return false;
+      }
+
+      // Task Manager filtering
+      if (effectiveTaskManagerIds.length > 0) {
+        // Filter by task's task_manager (from participants_details)
+        const taskManager = task.task_manager;
+        if (!taskManager || !taskManager.id) return false;
+        const hasTaskManager = effectiveTaskManagerIds.includes(taskManager.id.toString());
+        if (!hasTaskManager) return false;
+      }
+
+      // Client filtering
+      if (effectiveClientIds.length > 0) {
+        if (clientFilterMode === 'current') {
           const tracking = getCurrentStageTracking(task);
           if (!tracking) return false;
           const stageData = task.stages?.[tracking.stage.id];
-          const officerIds = stageData?.officer_ids || [];
-          const hasOfficer = officerIds.some((id: string) => effectiveOfficerIds.includes(id.toString()));
-          if (!hasOfficer) return false;
+          const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
+          if (!company || !company.name) return false;
+          const hasClient = effectiveClientIds.includes(company.name);
+          if (!hasClient) return false;
         } else {
-          // Filter by history - check if officer handled any stage
-          const hasOfficer = stages.some(stage => {
-            const stageData = task.stages?.[stage.id];
-            const officerIds = stageData?.officer_ids || [];
-            return officerIds.some((id: string) => effectiveOfficerIds.includes(id.toString()));
-          });
-          if (!hasOfficer) return false;
+          const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
+          if (!company || !company.name) return false;
+          const hasClient = effectiveClientIds.includes(company.name);
+          if (!hasClient) return false;
         }
       }
 
-      const isWriteUp = task.status === 'write_up_completed';
-      const isEndorsed = task.status === 'endorsed';
-      const isCancelled = task.status === 'cancel';
-      const isCompleted = isWriteUp || isEndorsed || ['completed', 'archived'].includes(task.status);
+      // BCL filtering
+      if (effectiveBCLIds.length > 0) {
+        if (bclFilterMode === 'current') {
+          const tracking = getCurrentStageTracking(task);
+          if (!tracking) return false;
+          const stageData = task.stages?.[tracking.stage.id];
+          const assistantIds = stageData?.assistant_ids || [];
+          const hasBCL = assistantIds.some((id: string) => effectiveBCLIds.includes(id.toString()));
+          if (!hasBCL) return false;
+        } else {
+          const hasBCL = stages.some(stage => {
+            const stageData = task.stages?.[stage.id];
+            const assistantIds = stageData?.assistant_ids || [];
+            return assistantIds.some((id: string) => effectiveBCLIds.includes(id.toString()));
+          });
+          if (!hasBCL) return false;
+        }
+      }
 
-      if (activeStatus === 'all') return true;
-      if (activeStatus === 'wip' && (isCompleted || isCancelled)) return false;
-      if (activeStatus === 'write_up_completed' && !isWriteUp) return false;
-      if (activeStatus === 'endorsed' && !isEndorsed) return false;
-      if (activeStatus === 'cancelled' && !isCancelled) return false;
       return true;
     });
-  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, activeStatus, effectiveOfficerIds, officerFilterMode, stages]);
+  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, activeStatus, effectiveOfficerIds, officerFilterMode, effectiveTaskManagerIds, taskManagerFilterMode, effectiveClientIds, clientFilterMode, effectiveBCLIds, bclFilterMode, stages, getCurrentStageTracking]);
 
   const searchedTasks = useMemo(() => {
     if (!searchQuery) return filteredTasks;
@@ -702,10 +851,28 @@ export default function ReportsPage() {
     };
 
     const cols: any[] = [];
-    const fieldsToDisplay = activeReport.sessionIncludedFields ||
-      activeReport.configuration?.taskFields?.map((f: any) => f.id) || [];
+    // Use taskFields array directly to preserve custom order, fallback to sessionIncludedFields
+    const taskFieldsConfig = activeReport.configuration?.taskFields || [];
+    const fieldsToDisplay = activeReport.sessionIncludedFields?.length > 0
+      ? activeReport.sessionIncludedFields
+      : taskFieldsConfig.map((f: any) => f.id);
 
-    fieldsToDisplay.forEach((fieldId: string) => {
+    // If using sessionIncludedFields, we need to sort them based on the taskFields order
+    const orderedFieldsToDisplay = activeReport.sessionIncludedFields?.length > 0
+      ? [...activeReport.sessionIncludedFields].sort((a, b) => {
+        const indexA = taskFieldsConfig.findIndex((f: any) => f.id === a);
+        const indexB = taskFieldsConfig.findIndex((f: any) => f.id === b);
+        // If both are in taskFields, sort by their order
+        if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+        // If only one is in taskFields, it comes first
+        if (indexA !== -1) return -1;
+        if (indexB !== -1) return 1;
+        // If neither is in taskFields, maintain original order
+        return 0;
+      })
+      : fieldsToDisplay;
+
+    orderedFieldsToDisplay.forEach((fieldId: string) => {
       if (!fieldId) return;
       cols.push({ id: `task_${fieldId}`, label: getLabel(fieldId), type: 'task', field: fieldId });
     });
@@ -991,7 +1158,7 @@ export default function ReportsPage() {
       if (!stage) return <span className="text-sm text-slate-400">—</span>;
 
       if (!checkStageApplicableForTask(stage, task)) {
-        return <span className="text-sm text-slate-400">N/A</span>;
+        return <span className="text-sm text-red-500">Missing</span>;
       }
 
       const stageData = task.stages?.[col.stageId];
@@ -1142,7 +1309,7 @@ export default function ReportsPage() {
       if (!stage) return <span className="text-sm text-slate-400">—</span>;
 
       if (!checkStageApplicableForTask(stage, task)) {
-        return <span className="text-sm text-slate-400">N/A</span>;
+        return <span className="text-sm text-red-500">missing</span>;
       }
 
       if (col.isAutoAdded) {
@@ -1164,7 +1331,7 @@ export default function ReportsPage() {
 
       const stageDocInfo = stage?.documents?.find((d: any) => d.kycId === col.kycId);
       if (!stageDocInfo) return <span className="text-sm text-slate-400">—</span>;
-      if (!isDocumentApplicable(stageDocInfo, task)) return <span className="text-sm text-slate-400">N/A</span>;
+      if (!isDocumentApplicable(stageDocInfo, task)) return <span className="text-sm text-red-500">missing</span>;
 
       const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
       if (!linked) return <span className="text-sm text-red-500">Missing</span>;
@@ -1333,7 +1500,7 @@ export default function ReportsPage() {
     if (col.type === 'stage_date') {
       const stage = stages.find(s => s.id === col.stageId);
       if (!stage) return '-';
-      if (!checkStageApplicableForTask(stage, task)) return 'N/A';
+      if (!checkStageApplicableForTask(stage, task)) return 'Missing';
 
       const stageData = task.stages?.[col.stageId];
       if (stageData?.status === 'skipped') return `Skipped: ${stageData.reason || ''}`;
@@ -1356,7 +1523,7 @@ export default function ReportsPage() {
     if (col.type === 'extracted_field') {
       const stage = stages.find(s => s.id === col.stageId);
       if (!stage) return '-';
-      if (!checkStageApplicableForTask(stage, task)) return 'N/A';
+      if (!checkStageApplicableForTask(stage, task)) return 'Missing';
 
       let foundValue = null, foundDoc = null;
       const docsToSearch = col.isAutoAdded
@@ -1555,7 +1722,7 @@ export default function ReportsPage() {
             {activeReport ? "Change Report" : "Select Report"}
           </Button>
         </div>
-        {!areTabsVisible && (
+        {!areJobLevelTabsVisible && (
           <div className="text-sm text-slate-600 font-medium flex items-center gap-2 flex-wrap">
             <span className="font-bold text-slate-800">Viewing:</span>
             {breadcrumbParts.map((part, index) => (
@@ -1651,18 +1818,18 @@ export default function ReportsPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setAreTabsVisible(!areTabsVisible)}
-            className={`transition-all ${!areTabsVisible ? 'bg-slate-100' : ''}`}
+            onClick={() => setAreJobLevelTabsVisible(!areJobLevelTabsVisible)}
+            className={`transition-all ${!areJobLevelTabsVisible ? 'bg-slate-100' : ''}`}
           >
-            {areTabsVisible ? <PanelLeftClose className="h-4 w-4 mr-2" /> : <PanelLeftOpen className="h-4 w-4 mr-2" />}
-            {areTabsVisible ? 'Hide Navigation' : 'Show Navigation'}
+            {areJobLevelTabsVisible ? <PanelLeftClose className="h-4 w-4 mr-2" /> : <PanelLeftOpen className="h-4 w-4 mr-2" />}
+            {areJobLevelTabsVisible ? 'Hide Navigation' : 'Show Navigation'}
           </Button>
         </div>
       </div>
 
       {/* ── Tabs Navigation exactly like DepartmentTasksManager ── */}
       <Tabs value={activeDeptId} onValueChange={(val) => { setActiveDeptId(val); setActiveSubDeptId('all'); }} className="space-y-2">
-        {areTabsVisible && departments.length > 0 && (
+        {areJobLevelTabsVisible && departments.length > 0 && (
           <TabsList className="grid w-full rounded-lg p-1 shadow-sm bg-gradient-to-r from-slate-50 to-slate-100 border border-slate-200" style={{ gridTemplateColumns: `repeat(${departments.length}, 1fr)` }}>
             {departments.map(dept => (
               <TabsTrigger key={dept.id} value={dept.id.toString()} className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600 data-[state=active]:to-indigo-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
@@ -1675,7 +1842,7 @@ export default function ReportsPage() {
         {activeDepartment && (
           <TabsContent value={activeDeptId} className="space-y-4 m-0">
             {/* Subdepartments Tab */}
-            {areTabsVisible && activeSubDepartments.length > 0 && (
+            {areJobLevelTabsVisible && activeSubDepartments.length > 0 && (
               <Tabs value={activeSubDeptId} onValueChange={(v) => { setActiveSubDeptId(v); }}>
                 <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-gray-50 to-gray-100 border border-gray-200 h-auto">
                   <TabsTrigger value="all" className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-teal-600 data-[state=active]:to-teal-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
@@ -1692,7 +1859,7 @@ export default function ReportsPage() {
 
             {/* Statuses Tab */}
             <Tabs value={activeStatus} onValueChange={(v) => { setActiveStatus(v); }}>
-              {areTabsVisible && (
+              {areJobLevelTabsVisible && (
                 <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-slate-50 to-slate-100 border border-slate-200">
                   <TabsTrigger value="all" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-slate-600 data-[state=active]:to-slate-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
                     All Statuses <Badge variant="secondary" className="bg-slate-100 text-slate-800">{allTasksCount}</Badge>
@@ -1713,37 +1880,82 @@ export default function ReportsPage() {
               )}
 
               <TabsContent value={activeStatus} className="mt-4">
-                {areTabsVisible && (
-                  <>
-                    {availableOfficers.length > 0 && (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Officer Filter Mode</span>
-                          <Select value={officerFilterMode} onValueChange={(value: 'current' | 'history') => setOfficerFilterMode(value)}>
-                            <SelectTrigger className="w-40 h-8 text-xs">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="current">Current Stage</SelectItem>
-                              <SelectItem value="history">History (All Stages)</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <Tabs value={activeOfficerTab} onValueChange={setActiveOfficerTab} className="w-full">
-                          <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 h-auto">
-                            <TabsTrigger value="all" className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                              All Officers
+                {/* Officer tabs - always visible regardless of job level tabs visibility */}
+                {availableOfficers.length > 0 && (
+                  <div className="space-y-1">
+                    <Tabs value={activeOfficerTab} onValueChange={setActiveOfficerTab} className="w-full">
+                      <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 h-auto">
+                        <TabsTrigger value="all" className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
+                          All Officers
+                        </TabsTrigger>
+                        {availableOfficers.map(officer => (
+                          <TabsTrigger key={officer.id} value={officer.id} className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
+                            {officer.full_name || officer.name || officer.displayName || `Officer ${officer.id}`}
+                          </TabsTrigger>
+                        ))}
+                      </TabsList>
+                    </Tabs>
+                  </div>
+                )}
+
+                {/* Task Managers tabs - always visible regardless of job level tabs visibility */}
+                {availableTaskManagers.length > 0 && (
+                  <div className="space-y-1">
+                    <Tabs value={activeTaskManagerTab} onValueChange={setActiveTaskManagerTab} className="w-full">
+                      <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 h-auto">
+                        <TabsTrigger value="all" className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
+                          All Task Managers
+                        </TabsTrigger>
+                        {availableTaskManagers.map(taskManager => (
+                          <TabsTrigger key={taskManager.id} value={taskManager.id} className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
+                            {taskManager.full_name || taskManager.name || taskManager.displayName || `Task Manager ${taskManager.id}`}
+                          </TabsTrigger>
+                        ))}
+                      </TabsList>
+                    </Tabs>
+                  </div>
+                )}
+
+                {/* Clients tabs - always visible regardless of job level tabs visibility */}
+                {availableClients.length > 0 && (
+                  <div className="space-y-1">
+                    <Tabs value={activeClientTab} onValueChange={setActiveClientTab} className="w-full">
+                      <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-orange-50 to-orange-100 border border-orange-200 h-auto">
+                        <TabsTrigger value="all" className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-orange-600 data-[state=active]:to-orange-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
+                          All Clients
+                        </TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  </div>
+                )}
+
+                {/* BCL tabs - always visible regardless of job level tabs visibility */}
+                {availableBCLs.length > 0 && (
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Tabs value={activeBCLTab} onValueChange={setActiveBCLTab} className="flex-1">
+                        <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-teal-50 to-teal-100 border border-teal-200 h-auto">
+                          <TabsTrigger value="all" className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-teal-600 data-[state=active]:to-teal-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
+                            All BCLs
+                          </TabsTrigger>
+                          {availableBCLs.map(bcl => (
+                            <TabsTrigger key={bcl.id} value={bcl.id} className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-teal-600 data-[state=active]:to-teal-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
+                              {bcl.full_name || bcl.name || bcl.displayName || `BCL ${bcl.id}`}
                             </TabsTrigger>
-                            {availableOfficers.map(officer => (
-                              <TabsTrigger key={officer.id} value={officer.id} className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                                {officer.full_name || officer.name || officer.displayName || `Officer ${officer.id}`}
-                              </TabsTrigger>
-                            ))}
-                          </TabsList>
-                        </Tabs>
-                      </div>
-                    )}
-                  </>
+                          ))}
+                        </TabsList>
+                      </Tabs>
+                      <Select value={bclFilterMode} onValueChange={(value: 'current' | 'history') => setBCLFilterMode(value)}>
+                        <SelectTrigger className="w-32 h-7 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="current">Current</SelectItem>
+                          <SelectItem value="history">History</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
                 )}
 
                 {/* Wrapper Card */}
@@ -1808,7 +2020,7 @@ export default function ReportsPage() {
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
-                        {areTabsVisible && (
+                        {areJobLevelTabsVisible && (
                           <div className="flex justify-between">
                             <DropdownMenu open={isFiltersDropdownOpen} onOpenChange={setIsFiltersDropdownOpen}>
                               <DropdownMenuTrigger asChild>
@@ -2031,9 +2243,10 @@ export default function ReportsPage() {
                 </Card>
               </TabsContent>
             </Tabs>
-          </TabsContent>
-        )}
-      </Tabs>
+          </TabsContent >
+        )
+        }
+      </Tabs >
 
       <MemorizedReportDialog
         open={isReportDialogOpen}
@@ -2048,7 +2261,7 @@ export default function ReportsPage() {
         subdepartments={departments.flatMap(d => d.tm_subdepartments || [])}
         classes={departments.flatMap(d => (d.tm_subdepartments || []).flatMap((s: any) => s.classes || []))}
       />
-    </div>
+    </div >
   );
 }
 

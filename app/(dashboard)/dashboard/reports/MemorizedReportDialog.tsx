@@ -17,7 +17,7 @@ import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/lib/hooks/use-toast"
 import {
   Loader2, Plus, Minus, Edit, Trash2, X, Save, Star, Filter,
-  Table as TableIcon, ChevronsUpDown, ChevronUp,
+  Table as TableIcon, ChevronsUpDown, ChevronUp, ChevronDown,
   CheckSquare, AlertCircle
 } from "lucide-react"
 import type { Department, KycDocument } from "../utils/taskManagerData"
@@ -224,7 +224,10 @@ const TableRowItem = React.memo(({
   isSessionOnly = false,
   className = "",
   icon = null,
-  readOnly = false
+  readOnly = false,
+  onMoveUp,
+  onMoveDown,
+  showMoveControls = false
 }: {
   label: React.ReactNode;
   isIncluded?: boolean;
@@ -236,16 +239,43 @@ const TableRowItem = React.memo(({
   className?: string;
   icon?: React.ReactNode;
   readOnly?: boolean;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
+  showMoveControls?: boolean;
 }) => (
   <div className={cn("grid grid-cols-12 gap-0 border-b border-slate-100 items-stretch text-sm transition-colors bg-white hover:bg-slate-50", className)}>
     <div className="col-span-8 flex items-center border-r border-slate-100 py-2">
       <div style={{ width: `${depth * 24}px` }} className="shrink-0 h-full border-r border-dashed border-slate-100 mr-2 opacity-50" />
-      <div className="flex items-center gap-2 px-2 min-w-0">
+      <div className="flex items-center gap-2 px-2 min-w-0 flex-1">
         {icon}
         <span className={cn("truncate font-medium", isSessionOnly ? "text-blue-600" : "text-slate-700")}>
           {label}
           {isSessionOnly && <span className="text-xs text-blue-500 font-normal ml-1">(Session Only)</span>}
         </span>
+        {showMoveControls && !readOnly && (
+          <div className="flex items-center gap-1 ml-2 shrink-0">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0 hover:bg-slate-200"
+              onClick={onMoveUp}
+              disabled={!onMoveUp}
+              title="Move up"
+            >
+              <ChevronUp className="h-3 w-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0 hover:bg-slate-200"
+              onClick={onMoveDown}
+              disabled={!onMoveDown}
+              title="Move down"
+            >
+              <ChevronDown className="h-3 w-3" />
+            </Button>
+          </div>
+        )}
       </div>
     </div>
     <div className="col-span-2 flex items-center justify-center border-r border-slate-100 bg-slate-50/30 py-2">
@@ -343,6 +373,7 @@ interface ReportEditorProps {
   isTaskFieldIncluded: (fieldId: string) => boolean;
   toggleTaskFieldInclude: (fieldId: string) => void;
   toggleTaskFieldDefault: (fieldId: string) => void;
+  moveTaskField: (fieldId: string, direction: 'up' | 'down') => void;
   toggleStageDateInclude: (stageId: string) => void;
   toggleStageDateDefault: (stageId: string) => void;
   toggleDocument: (stageId: string, kycId: string) => void;
@@ -385,6 +416,7 @@ const ReportEditor = React.memo(({
   isTaskFieldIncluded,
   toggleTaskFieldInclude,
   toggleTaskFieldDefault,
+  moveTaskField,
   toggleStageDateInclude,
   toggleStageDateDefault,
   toggleDocument,
@@ -396,7 +428,25 @@ const ReportEditor = React.memo(({
 }: ReportEditorProps) => {
   const selectedCount = countSelectedFields();
 
-  const filteredTaskFields = tableHeaders.filter(field =>
+  // Use the order from taskFields if available, otherwise use tableHeaders order
+  const orderedTaskFields = useMemo(() => {
+    const configuredFields = reportConfig.taskFields || [];
+    const allFields = tableHeaders;
+
+    if (configuredFields.length === 0) return allFields;
+
+    // Create a map of field ID to index in the configuration
+    const fieldOrder = new Map(configuredFields.map((f, i) => [f.id, i]));
+
+    // Sort all fields by their order in the configuration, with unconfigured fields at the end
+    return [...allFields].sort((a, b) => {
+      const orderA = fieldOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+      const orderB = fieldOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+      return orderA - orderB;
+    });
+  }, [reportConfig.taskFields, tableHeaders]);
+
+  const filteredTaskFields = orderedTaskFields.filter(field =>
     showSelectedOnly ? includedFields.has(field.id) : true
   );
 
@@ -534,10 +584,13 @@ const ReportEditor = React.memo(({
             {/* Task Details */}
             {filteredTaskFields.length > 0 && (
               <ExpandableRow title="Task Details" getSectionId={getSectionId} nonApplicableStageIds={nonApplicableStageIds}>
-                {filteredTaskFields.map(field => {
+                {filteredTaskFields.map((field, index) => {
                   const isIncluded = isTaskFieldIncluded(field.id);
                   const config = reportConfig.taskFields?.find(f => f.id === field.id);
                   const isSessionOnly = isIncluded && !config?.isDefault;
+                  const fieldIndex = reportConfig.taskFields?.findIndex(f => f.id === field.id) ?? -1;
+                  const canMoveUp = fieldIndex > 0;
+                  const canMoveDown = fieldIndex >= 0 && fieldIndex < (reportConfig.taskFields?.length ?? 0) - 1;
                   return (
                     <TableRowItem
                       key={field.id}
@@ -548,6 +601,9 @@ const ReportEditor = React.memo(({
                       onToggleDefault={() => toggleTaskFieldDefault(field.id)}
                       depth={1}
                       isSessionOnly={isSessionOnly}
+                      onMoveUp={canMoveUp ? () => moveTaskField(field.id, 'up') : undefined}
+                      onMoveDown={canMoveDown ? () => moveTaskField(field.id, 'down') : undefined}
+                      showMoveControls={true}
                     />
                   );
                 })}
@@ -884,12 +940,9 @@ export function MemorizedReportDialog({
   };
 
   const getFinalConfiguration = (config: ReportConfiguration): ReportConfiguration => {
-    const orderedTaskFields = tableHeaders
-      .filter(header => config.taskFields.find(f => f.id === header.id)?.isDefault)
-      .map(header => {
-        const field = config.taskFields.find(f => f.id === header.id)!;
-        return { id: field.id, isDefault: field.isDefault };
-      });
+    const orderedTaskFields = config.taskFields
+      .filter(f => f.isDefault)
+      .map(f => ({ id: f.id, isDefault: f.isDefault }));
 
     const newStages: ReportConfiguration['stages'] = {};
     stages.forEach(stage => {
@@ -981,36 +1034,6 @@ export function MemorizedReportDialog({
     });
   }, []);
 
-  const toggleTaskFieldDefault = useCallback((fieldId: string) => {
-    setReportConfig(prev => {
-      const current = prev.taskFields || [];
-      const exists = current.find(f => f.id === fieldId);
-      const newFields = exists
-        ? current.map(f => f.id === fieldId ? { ...f, isDefault: !f.isDefault } : f)
-        : [...current, { id: fieldId, isDefault: true }];
-      return { ...prev, taskFields: newFields };
-    });
-    setIncludedFields(prev => {
-      if (!prev.has(fieldId)) { const n = new Set(prev); n.add(fieldId); return n; }
-      return prev;
-    });
-  }, []);
-
-  const toggleStageDateInclude = (stageId: string) => {
-    setReportConfig(prev => {
-      const newStages = { ...prev.stages };
-      if (!newStages[stageId]) {
-        newStages[stageId] = { isStageDateSelected: true, isStageDateDefault: false, documents: {} };
-      } else {
-        newStages[stageId].isStageDateSelected = !newStages[stageId].isStageDateSelected;
-        if (!newStages[stageId].isStageDateSelected && Object.keys(newStages[stageId].documents).length === 0) {
-          delete newStages[stageId];
-        }
-      }
-      return { ...prev, stages: newStages };
-    });
-  };
-
   const toggleStageDateDefault = (stageId: string) => {
     setReportConfig(prev => {
       const newStages = { ...prev.stages };
@@ -1019,6 +1042,18 @@ export function MemorizedReportDialog({
       } else {
         newStages[stageId].isStageDateDefault = !newStages[stageId].isStageDateDefault;
         if (newStages[stageId].isStageDateDefault) newStages[stageId].isStageDateSelected = true;
+      }
+      return { ...prev, stages: newStages };
+    });
+  };
+
+  const toggleStageDateInclude = (stageId: string) => {
+    setReportConfig(prev => {
+      const newStages = { ...prev.stages };
+      if (!newStages[stageId]) {
+        newStages[stageId] = { isStageDateSelected: true, isStageDateDefault: false, documents: {} };
+      } else {
+        newStages[stageId].isStageDateSelected = !newStages[stageId].isStageDateSelected;
       }
       return { ...prev, stages: newStages };
     });
@@ -1068,7 +1103,36 @@ export function MemorizedReportDialog({
     });
   };
 
-  // ─── Select All helpers ───────────────────────────────────────────────────
+  const toggleTaskFieldDefault = useCallback((fieldId: string) => {
+    setReportConfig(prev => {
+      const current = prev.taskFields || [];
+      const exists = current.find(f => f.id === fieldId);
+      const newFields = exists
+        ? current.map(f => f.id === fieldId ? { ...f, isDefault: !f.isDefault } : f)
+        : [...current, { id: fieldId, isDefault: true }];
+      return { ...prev, taskFields: newFields };
+    });
+    setIncludedFields(prev => {
+      if (!prev.has(fieldId)) { const n = new Set(prev); n.add(fieldId); return n; }
+      return prev;
+    });
+  }, []);
+
+  const moveTaskField = useCallback((fieldId: string, direction: 'up' | 'down') => {
+    setReportConfig(prev => {
+      const current = prev.taskFields || [];
+      const index = current.findIndex(f => f.id === fieldId);
+      if (index === -1) return prev;
+
+      const newIndex = direction === 'up' ? index - 1 : index + 1;
+      if (newIndex < 0 || newIndex >= current.length) return prev;
+
+      const newFields = [...current];
+      [newFields[index], newFields[newIndex]] = [newFields[newIndex], newFields[index]];
+
+      return { ...prev, taskFields: newFields };
+    });
+  }, []);
 
   const handleSelectAllDefault = useCallback(() => {
     const allTaskFieldIds = tableHeaders.map(f => f.id);
@@ -1362,6 +1426,7 @@ export function MemorizedReportDialog({
                 isTaskFieldIncluded={isTaskFieldIncluded}
                 toggleTaskFieldInclude={toggleTaskFieldInclude}
                 toggleTaskFieldDefault={toggleTaskFieldDefault}
+                moveTaskField={moveTaskField}
                 toggleStageDateInclude={toggleStageDateInclude}
                 toggleStageDateDefault={toggleStageDateDefault}
                 toggleDocument={toggleDocument}
