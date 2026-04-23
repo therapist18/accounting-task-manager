@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Settings, Search, X, TableProperties, RotateCcw, Edit, AlertCircle, Plus, Minus, Download, Trash2, ChevronDown, Send, DownloadCloud, Eye, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, EyeOff, CheckCircle2, XCircle, Briefcase, Loader2 } from "lucide-react"
+import { Settings, Search, X, TableProperties, RotateCcw, Edit, AlertCircle, Plus, Minus, Download, Trash2, ChevronDown, Send, DownloadCloud, Eye, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, EyeOff, CheckCircle2, XCircle, Briefcase, Loader2, LinkIcon, RefreshCw, UserPlus } from "lucide-react"
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog"
 import { CancelConfirmationDialog } from "./components/CancelConfirmationDialog"
 import { EnquiryDialog } from "./components/EnquiryDialog"
@@ -2425,28 +2425,56 @@ export default function DepartmentTasksManager({
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => handleTaskEdit(task)}
+          onClick={() => { setLinkingTask(task); setIsLinkDialogOpen(true); }}
           className="h-8 w-8 text-blue-600 hover:bg-blue-100"
+          title="Link source documents"
+        >
+          <LinkIcon className="h-4 w-4" />
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setAssignOfficersDialogOpen(true)}
+          className="h-8 w-8 text-purple-600 hover:bg-purple-100"
+          title="Assign officers"
+        >
+          <UserPlus className="h-4 w-4" />
+        </Button>
+
+        {task.status === 'cancel' ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => { setTaskToUncancel(task); setUncancelDialogOpen(true); }}
+            className="h-8 w-8 text-green-600 hover:bg-green-100"
+            title="Reactivate task"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+        ) : (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => { setTaskToCancel(task); setCancelDialogOpen(true); }}
+            className="h-8 w-8 text-orange-600 hover:bg-orange-100"
+            title="Cancel task"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        )}
+
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => handleTaskEdit(task)}
+          className="h-8 w-8 text-slate-600 hover:bg-slate-100"
           title="Edit Task"
         >
           <Edit className="h-4 w-4" />
         </Button>
 
         <DeleteButton task={task} />
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-slate-600 hover:bg-slate-100"
-              title="More Actions"
-            >
-              <ChevronDown className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <ActionMenuItems task={task} />
-        </DropdownMenu>
       </div>
     );
   };

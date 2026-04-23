@@ -2,7 +2,7 @@
 "use client"
 
 import { format, isAfter, isEqual, isValid, parse, startOfToday } from 'date-fns';
-import { Plus, Minus, LinkIcon, X, RefreshCw, Edit } from "lucide-react";
+import { Plus, Minus, LinkIcon, X, RefreshCw, Edit, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import React, { useMemo, useCallback, useEffect, useState } from "react";
@@ -1058,28 +1058,32 @@ export const getCellContent = (
           {taskDeps.length > 0 && (
             <ExpandButton isExpanded={isExpanded} onClick={() => toggleDependants(task.id.toString())} className="text-white hover:bg-green-100 flex-shrink-0" />
           )}
-          <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-blue-100 flex-shrink-0" title="Link source documents" onClick={() => { setLinkingTask(task); setIsLinkDialogOpen(true); }}>
-            <LinkIcon className="h-4 w-4" />
-          </Button>
-          {onEditOfficers && (
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-purple-100 flex-shrink-0" title="Assign officers" onClick={(e) => { e.stopPropagation(); onEditOfficers(task); }}>
-              <Edit className="h-4 w-4" />
-            </Button>
-          )}
-          {task.status === 'cancel' ? (
-            onUncancelTask && setTaskToUncancel && setUncancelDialogOpen && (
-              <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-green-100 flex-shrink-0" title="Reactivate task" onClick={(e) => { e.stopPropagation(); setTaskToUncancel(task); setUncancelDialogOpen(true); }}>
-                <RefreshCw className="h-4 w-4" />
-              </Button>
-            )
-          ) : (
-            onCancelTask && setTaskToCancel && setCancelDialogOpen && (
-              <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-orange-100 flex-shrink-0" title="Cancel task" onClick={(e) => { e.stopPropagation(); setTaskToCancel(task); setCancelDialogOpen(true); }}>
-                <X className="h-4 w-4" />
-              </Button>
-            )
-          )}
         </div>
+      </div>
+    ),
+    actions: (
+      <div className="flex gap-1 justify-center">
+        <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-blue-100 flex-shrink-0" title="Link source documents" onClick={() => { setLinkingTask(task); setIsLinkDialogOpen(true); }}>
+          <LinkIcon className="h-4 w-4" />
+        </Button>
+        {onEditOfficers && (
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-purple-100 flex-shrink-0" title="Assign officers" onClick={(e) => { e.stopPropagation(); onEditOfficers(task); }}>
+            <UserPlus className="h-4 w-4" />
+          </Button>
+        )}
+        {task.status === 'cancel' ? (
+          onUncancelTask && setTaskToUncancel && setUncancelDialogOpen && (
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-green-100 flex-shrink-0" title="Reactivate task" onClick={(e) => { e.stopPropagation(); setTaskToUncancel(task); setUncancelDialogOpen(true); }}>
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+          )
+        ) : (
+          onCancelTask && setTaskToCancel && setCancelDialogOpen && (
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-orange-100 flex-shrink-0" title="Cancel task" onClick={(e) => { e.stopPropagation(); setTaskToCancel(task); setCancelDialogOpen(true); }}>
+              <X className="h-4 w-4" />
+            </Button>
+          )
+        )}
       </div>
     ),
     officer: (stages ? getOfficersForCurrentStage(task, stages, getStaffName) : null) || getStaffFromParticipants(task, 'officer', getStaffName, departments, officers) || 'Unallocated',

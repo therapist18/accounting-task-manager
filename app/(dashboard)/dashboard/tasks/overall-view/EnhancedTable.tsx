@@ -228,7 +228,7 @@ const MemoizedTableRow = React.memo(({
     const Icon = row.icon;
     return (
       <TableRow className="bg-slate-200 border-y-2 border-slate-400 hover:bg-slate-200">
-        <TableCell colSpan={paginatedHeaderStructure.length * 2 + 2} className="p-0">
+        <TableCell colSpan={2} className="p-0 sticky left-0 z-10">
           <div className="flex items-center justify-between px-3 py-2">
             <div className="flex items-center gap-3">
               <Icon className="h-5 w-5 text-slate-600" />
@@ -239,17 +239,23 @@ const MemoizedTableRow = React.memo(({
             </Button>
           </div>
         </TableCell>
+        <TableCell colSpan={paginatedHeaderStructure.length * 2 + 2}></TableCell>
       </TableRow>
     );
   }
 
   return (
     <TableRow className={`${rowBg} ${hoverBg} group border-b border-slate-200`}>
-      <TableCell className={`sticky left-0 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 text-center w-14 min-w-14 max-w-14`}>
-        {safeRender(row.stageOrder) || (row.type !== 'stage' && row.type !== 'document' && row.type !== 'field' && row.type !== 'actions' ? (rowIndex + 1) : '')}
-      </TableCell>
+      {row.type !== 'actions' && (
+        <TableCell className={`sticky left-0 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 text-center w-14 min-w-14 max-w-14`}>
+          {safeRender(row.stageOrder) || (row.type !== 'stage' && row.type !== 'document' && row.type !== 'field' && row.type !== 'actions' ? (rowIndex + 1) : '')}
+        </TableCell>
+      )}
 
-      <TableCell className={`sticky left-14 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 w-[280px] min-w-[280px] max-w-[280px]`}>
+      <TableCell
+        colSpan={row.type === 'actions' ? 2 : 1}
+        className={`sticky ${row.type === 'actions' ? 'left-0' : 'left-14'} z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 ${row.type === 'actions' ? 'w-[294px] min-w-[294px] max-w-[294px]' : 'w-[280px] min-w-[280px] max-w-[280px]'}`}
+      >
         <div className="flex items-center gap-2 justify-between">
           <div style={{ paddingLeft: row.isSubSubRow ? '32px' : row.isSubRow ? '16px' : '0px' }} className="flex items-center gap-2">
             <span className={row.type === 'stage' ? 'font-semibold' : ''}>{safeRender(row.label)}</span>
@@ -278,18 +284,21 @@ const MemoizedTableRow = React.memo(({
 
       {paginatedHeaderStructure.map((item, colIndex) => (
         <React.Fragment key={`${row.key}-${colIndex}`}>
-          <TableCell
-            className={`text-center text-sm py-1 px-2 align-middle border-l-4 border-t border-b border-gray-100 w-[150px] ${item.type === 'dependant' ? 'bg-orange-50/50' : ''}`}
-          >
-            {item.type === 'principal' ? (
-              safeRender(renderCellContent(row, item.task, 'date'))
-            ) : (
-              <span className="text-sm text-gray-400">-</span>
-            )}
-          </TableCell>
+          {row.type !== 'actions' && (
+            <TableCell
+              className={`text-center text-sm py-1 px-2 align-middle border-l-4 border-t border-b border-gray-100 w-[150px] ${item.type === 'dependant' ? 'bg-orange-50/50' : ''}`}
+            >
+              {item.type === 'principal' ? (
+                safeRender(renderCellContent(row, item.task, 'date'))
+              ) : (
+                <span className="text-sm text-gray-400">-</span>
+              )}
+            </TableCell>
+          )}
 
           <TableCell
-            className={`text-center text-sm py-1 px-2 align-middle border-r-4 border-t border-b border-gray-100 w-[120px] ${item.type === 'dependant' ? 'bg-orange-50/50' : ''}`}
+            colSpan={row.type === 'actions' ? 2 : 1}
+            className={`text-center text-sm py-1 px-2 align-middle border-r-4 border-t border-b border-gray-100 ${row.type === 'actions' ? 'w-[270px] min-w-[270px] max-w-[270px]' : 'w-[120px] min-w-[120px] max-w-[120px]'} ${item.type === 'dependant' ? 'bg-orange-50/50' : ''}`}
           >
             {item.type === 'principal' ? (
               safeRender(renderCellContent(row, item.task, 'actions'))

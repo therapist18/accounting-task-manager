@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Input } from "@/components/ui/input"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import {
   Users,
   Check,
@@ -60,10 +61,10 @@ export function AssignOfficersDialog({
   useEffect(() => {
     if (open) {
       setLocalAssignments(initialStageAssignments || {});
-      // Default to "All Available" (null) or first stage
-      setSelectedStageId(null);
+      // Default to first stage
+      setSelectedStageId(officerFollowUpStages[0]?.id || null);
     }
-  }, [open, initialStageAssignments]);
+  }, [open, initialStageAssignments, officerFollowUpStages]);
 
   // 3. Filtering Logic: Identify which officers are "Qualified" for which stage
   const stageQualificationMap = useMemo(() => {
@@ -147,7 +148,7 @@ export function AssignOfficersDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-6xl p-0 flex flex-col h-[85vh] max-h-[900px] overflow-hidden">
+      <DialogContent className="sm:max-w-[75vw] p-0 flex flex-col h-[90vh] max-h-[95vh] overflow-hidden">
 
         {/* HEADER */}
         <div className="p-6 border-b bg-white shrink-0">
@@ -171,30 +172,14 @@ export function AssignOfficersDialog({
           </div>
         </div>
 
-        <div className="flex-1 flex overflow-hidden">
+        <ResizablePanelGroup direction="horizontal" className="flex-1">
           {/* LEFT COLUMN: Sidebar Navigation */}
-          <div className="w-[320px] border-r bg-slate-50/50 flex flex-col shrink-0">
-            <div className="p-4">
+          <ResizablePanel defaultSize={25} minSize={20} maxSize={40} className="border-r bg-slate-50/50 flex flex-col overflow-hidden">
+            <div className="p-4 overflow-y-auto flex-1">
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-4 px-2">
                 Workflow Stages
               </p>
               <div className="space-y-1">
-                <button
-                  onClick={() => setSelectedStageId(null)}
-                  className={cn(
-                    "w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm transition-all",
-                    !selectedStageId
-                      ? "bg-white border-slate-200 border shadow-sm text-blue-600 font-bold"
-                      : "text-slate-600 hover:bg-slate-100 border border-transparent"
-                  )}
-                >
-                  <Layers className={cn("h-4 w-4", !selectedStageId ? "text-blue-600" : "text-slate-400")} />
-                  All Available Officers
-                  {!selectedStageId && <CheckCircle2 className="h-4 w-4 ml-auto" />}
-                </button>
-
-                <Separator className="my-4 opacity-50" />
-
                 {officerFollowUpStages.map((s) => {
                   const count = (localAssignments[s.id] || []).length;
                   const isActive = selectedStageId === s.id;
@@ -238,10 +223,12 @@ export function AssignOfficersDialog({
                 </p>
               </div>
             </div>
-          </div>
+          </ResizablePanel>
+
+          <ResizableHandle withHandle />
 
           {/* RIGHT COLUMN: Officer List */}
-          <div className="flex-1 flex flex-col bg-white">
+          <ResizablePanel defaultSize={75} minSize={60} className="flex flex-col bg-white overflow-hidden">
             <div className="p-6 border-b">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -342,8 +329,8 @@ export function AssignOfficersDialog({
                 </div>
               </ScrollArea>
             </div>
-          </div>
-        </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
 
         {/* FOOTER */}
         <DialogFooter className="p-4 border-t bg-white shrink-0 gap-2">

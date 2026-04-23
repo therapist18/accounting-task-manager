@@ -1789,28 +1789,30 @@ export function EnquiryDialog({
                                         </CardTitle>
                                     </CardHeader>
                                     <CardContent className="p-6 space-y-0">
-                                        <TableRow label="Assigned Officer">
-                                            <div className="space-y-2">
-                                                <SearchableSelect
-                                                    value={formData.officer_id}
-                                                    onValueChange={id => setFormData(prev => ({ ...prev, officer_id: id }))}
-                                                    options={officerOptions}
-                                                    placeholder={officerPlaceholder}
-                                                    disabled={isOfficerDisabled}
-                                                    emptyMessage="No officers found."
-                                                    searchPlaceholder="Search officer..."
-                                                    buttonClassName="h-11 bg-white border-slate-200"
-                                                    popoverClassName="w-[--radix-popover-trigger-width]"
-                                                    allowClear={true}
-                                                />
-                                                {formData.officer_id && formData.subdepartment_id && (
-                                                    <div className="flex items-center gap-2 text-xs text-amber-600">
-                                                        <Shield className="h-3 w-3" />
-                                                        <span>Officer inherited from department hierarchy</span>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </TableRow>
+                                        {formData.department_id !== '1' && (
+                                            <TableRow label="Assigned Officer">
+                                                <div className="space-y-2">
+                                                    <SearchableSelect
+                                                        value={formData.officer_id}
+                                                        onValueChange={id => setFormData(prev => ({ ...prev, officer_id: id }))}
+                                                        options={officerOptions}
+                                                        placeholder={officerPlaceholder}
+                                                        disabled={isOfficerDisabled}
+                                                        emptyMessage="No officers found."
+                                                        searchPlaceholder="Search officer..."
+                                                        buttonClassName="h-11 bg-white border-slate-200"
+                                                        popoverClassName="w-[--radix-popover-trigger-width]"
+                                                        allowClear={true}
+                                                    />
+                                                    {formData.officer_id && formData.subdepartment_id && (
+                                                        <div className="flex items-center gap-2 text-xs text-amber-600">
+                                                            <Shield className="h-3 w-3" />
+                                                            <span>Officer inherited from department hierarchy</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </TableRow>
+                                        )}
 
                                         <TableRow label="Task Manager">
                                             <SearchableSelect

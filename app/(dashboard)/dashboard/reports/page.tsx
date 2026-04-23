@@ -27,6 +27,7 @@ import { calculateStageDate, findDateInObject } from "../tasks/utils/dateUtils";
 import { cn } from "@/lib/utils";
 import { StandardReportView } from "./components/StandardReportView";
 import { TransposedReportView } from "./components/TransposedReportView";
+import { ReportColumnVisibilityDialog } from "./components/ReportColumnVisibilityDialog";
 
 const SPECIAL_STAGE_IDS = [
   '072b9710-45df-4a05-ba65-01b4ef29d61d',
@@ -1779,119 +1780,15 @@ export default function ReportsPage() {
           </div>
         )}
         <div className="flex items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="flex items-center gap-2">
-                <TableProperties className="h-4 w-4" />
-                Columns
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-56 max-h-96 overflow-y-auto" align="end">
-              <div className="p-2 space-y-2">
-                <div className="font-semibold text-xs text-slate-500 uppercase tracking-wider pb-1 border-b">Task Details</div>
-                {columns.filter(c => c.type === 'task').map(col => (
-                  <div key={col.id} className="flex items-center gap-2">
-                    <Checkbox
-                      id={`col-${col.id}`}
-                      checked={visibleColumnIds.includes(col.id)}
-                      onCheckedChange={(checked) => {
-                        setVisibleColumnIds(prev => {
-                          if (checked) return [...prev, col.id];
-                          return prev.filter(id => id !== col.id);
-                        });
-                      }}
-                    />
-                    <label htmlFor={`col-${col.id}`} className="text-sm cursor-pointer flex-1 truncate">{col.label}</label>
-                  </div>
-                ))}
-                <div className="font-semibold text-xs text-slate-500 uppercase tracking-wider pb-1 border-b pt-2 flex items-center justify-between">
-                  <span>Time Tracking</span>
-                  <Checkbox
-                    id="toggle-time-tracking"
-                    checked={showTimeTrackingColumns}
-                    onCheckedChange={(checked) => {
-                      setShowTimeTrackingColumns(checked as boolean);
-                      const timeTrackingCols = columns.filter(c =>
-                        c.type === 'current_stage_age' ||
-                        c.type === 'total_process_age' ||
-                        c.type === 'current_stage_officer' ||
-                        c.type === 'stage_gap'
-                      ).map(c => c.id);
-                      setVisibleColumnIds(prev => {
-                        if (checked) {
-                          return [...new Set([...prev, ...timeTrackingCols])];
-                        }
-                        return prev.filter(id => !timeTrackingCols.includes(id));
-                      });
-                    }}
-                  />
-                </div>
-                {showTimeTrackingColumns && columns.filter(c => c.type === 'current_stage_age' || c.type === 'total_process_age' || c.type === 'current_stage_officer').map(col => (
-                  <div key={col.id} className="flex items-center gap-2">
-                    <Checkbox
-                      id={`col-${col.id}`}
-                      checked={visibleColumnIds.includes(col.id)}
-                      onCheckedChange={(checked) => {
-                        setVisibleColumnIds(prev => {
-                          if (checked) return [...prev, col.id];
-                          return prev.filter(id => id !== col.id);
-                        });
-                      }}
-                    />
-                    <label htmlFor={`col-${col.id}`} className="text-sm cursor-pointer flex-1 truncate">{col.label}</label>
-                  </div>
-                ))}
-                <div className="font-semibold text-xs text-slate-500 uppercase tracking-wider pb-1 border-b pt-2 flex items-center justify-between">
-                  <span>Document Requirements</span>
-                  <Checkbox
-                    id="toggle-doc-requirements"
-                    checked={showDocRequirementsColumns}
-                    onCheckedChange={(checked) => {
-                      setShowDocRequirementsColumns(checked as boolean);
-                      const docReqCols = columns.filter(c => c.type === 'reference_requirement').map(c => c.id);
-                      setVisibleColumnIds(prev => {
-                        if (checked) {
-                          return [...new Set([...prev, ...docReqCols])];
-                        }
-                        return prev.filter(id => !docReqCols.includes(id));
-                      });
-                    }}
-                  />
-                </div>
-                {showDocRequirementsColumns && columns.filter(c => c.type === 'reference_requirement').map(col => (
-                  <div key={col.id} className="flex items-center gap-2">
-                    <Checkbox
-                      id={`col-${col.id}`}
-                      checked={visibleColumnIds.includes(col.id)}
-                      onCheckedChange={(checked) => {
-                        setVisibleColumnIds(prev => {
-                          if (checked) return [...prev, col.id];
-                          return prev.filter(id => id !== col.id);
-                        });
-                      }}
-                    />
-                    <label htmlFor={`col-${col.id}`} className="text-sm cursor-pointer flex-1 truncate">{col.label}</label>
-                  </div>
-                ))}
-                <div className="font-semibold text-xs text-slate-500 uppercase tracking-wider pb-1 border-b pt-2">Stages</div>
-                {columns.filter(c => c.stageId && (c.type === 'stage_date' || c.type === 'stage_officers')).map(col => (
-                  <div key={col.id} className="flex items-center gap-2">
-                    <Checkbox
-                      id={`col-${col.id}`}
-                      checked={visibleColumnIds.includes(col.id)}
-                      onCheckedChange={(checked) => {
-                        setVisibleColumnIds(prev => {
-                          if (checked) return [...prev, col.id];
-                          return prev.filter(id => id !== col.id);
-                        });
-                      }}
-                    />
-                    <label htmlFor={`col-${col.id}`} className="text-sm cursor-pointer flex-1 truncate">{col.label}</label>
-                  </div>
-                ))}
-              </div>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <ReportColumnVisibilityDialog
+            columns={columns}
+            visibleColumnIds={visibleColumnIds}
+            setVisibleColumnIds={setVisibleColumnIds}
+            showTimeTrackingColumns={showTimeTrackingColumns}
+            setShowTimeTrackingColumns={setShowTimeTrackingColumns}
+            showDocRequirementsColumns={showDocRequirementsColumns}
+            setShowDocRequirementsColumns={setShowDocRequirementsColumns}
+          />
           <Button
             variant="outline"
             size="sm"
