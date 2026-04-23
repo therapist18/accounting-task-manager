@@ -425,7 +425,14 @@ export function StandardReportView({
                   colSpan={group.span}
                   className={cn(
                     "text-center font-bold border-r border-slate-300 last:border-r-0 py-2 text-sm text-slate-700",
-                    !group.applicable ? 'bg-amber-50/80 text-amber-800' : 'bg-slate-200'
+                    group.id === 'reference_requirements' && !group.applicable ? 'bg-amber-50/80 text-amber-800 border-l-4 border-l-amber-400' : '',
+                    group.id === 'reference_requirements' && group.applicable ? 'bg-emerald-100 text-emerald-900 border-l-4 border-l-emerald-500' : '',
+                    (group.id !== 'task_info' && group.id !== 'reference_requirements' && group.id !== 'time_tracking') && !group.applicable ? 'bg-amber-50/80 text-amber-800 border-l-4 border-l-purple-400' : '',
+                    (group.id !== 'task_info' && group.id !== 'reference_requirements' && group.id !== 'time_tracking') && group.applicable ? 'bg-purple-100 text-purple-900 border-l-4 border-l-purple-500' : '',
+                    group.id === 'task_info' && !group.applicable ? 'bg-amber-50/80 text-amber-800' : '',
+                    group.id === 'task_info' && group.applicable ? 'bg-slate-200' : '',
+                    group.id === 'time_tracking' && !group.applicable ? 'bg-amber-50/80 text-amber-800' : '',
+                    group.id === 'time_tracking' && group.applicable ? 'bg-slate-200' : ''
                   )}
                 >
                   <div className="flex items-center justify-center gap-2">
@@ -572,13 +579,17 @@ export function StandardReportView({
                   {filteredColumns.map(col => {
                     const isSticky = stickyColumnIds.has(col.id);
                     const leftOffset = isSticky ? stickyColumnOffsets[col.id] : undefined;
+                    const isDocReq = col.type === 'reference_requirement';
+                    const isStage = col.stageId && col.type !== 'task' && col.type !== 'current_stage_age' && col.type !== 'total_process_age';
 
                     return (
                       <TableCell
                         key={col.id}
                         className={cn(
                           `${COLUMN_WIDTH_CLASS} border-r border-b border-slate-200 px-3 py-2.5 text-sm text-slate-700 align-middle`,
-                          isSticky && `sticky left-[${leftOffset}px] z-20 ${baseBgClass} group-hover:bg-blue-50/50`
+                          isSticky && `sticky left-[${leftOffset}px] z-20 ${baseBgClass} group-hover:bg-blue-50/50`,
+                          isDocReq && 'bg-emerald-50/50',
+                          isStage && 'bg-purple-50/50'
                         )}
                         style={isSticky ? { left: `${leftOffset}px` } : undefined}
                       >

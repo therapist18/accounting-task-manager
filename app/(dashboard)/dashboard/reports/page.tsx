@@ -176,6 +176,7 @@ export default function ReportsPage() {
   const [showTimeStatuses, setShowTimeStatuses] = useState(false);
   const [showNARows, setShowNARows] = useState(true);
   const [showTimeTrackingColumns, setShowTimeTrackingColumns] = useState(false);
+  const [showDocRequirementsColumns, setShowDocRequirementsColumns] = useState(false);
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>([]);
   const [expandedStageColumns, setExpandedStageColumns] = useState<Set<string>>(new Set());
   const getStaffName = useCallback((userId: any) => {
@@ -525,33 +526,54 @@ export default function ReportsPage() {
 
       // Officer filtering
       if (effectiveOfficerIds.length > 0) {
-        // Filter by task's officer (from participants_details)
-        const officer = task.officer;
-        if (!officer || !officer.id) return false;
-        const hasOfficer = effectiveOfficerIds.includes(officer.id.toString());
-        if (!hasOfficer) return false;
+        if (officerFilterMode === 'current') {
+          // Filter by task's officer (from participants_details)
+          const officer = task.officer;
+          if (!officer || !officer.id) return false;
+          const hasOfficer = effectiveOfficerIds.includes(officer.id.toString());
+          if (!hasOfficer) return false;
+        } else {
+          // History mode - filter by task's officer (same as current since officer is task-level)
+          const officer = task.officer;
+          if (!officer || !officer.id) return false;
+          const hasOfficer = effectiveOfficerIds.includes(officer.id.toString());
+          if (!hasOfficer) return false;
+        }
       }
 
+      // Task Manager filtering - only applies if current stage's follow_up is BCL
       if (effectiveTaskManagerIds.length > 0) {
-        // Filter by task's task_manager (from participants_details)
-        const taskManager = task.task_manager;
-        if (!taskManager || !taskManager.id) return false;
-        const hasTaskManager = effectiveTaskManagerIds.includes(taskManager.id.toString());
-        if (!hasTaskManager) return false;
+        const tracking = getCurrentStageTracking(task);
+        if (!tracking) return false;
+        const stage = tracking.stage;
+        if (stage.follow_up !== 'BCL') return false;
+
+        if (taskManagerFilterMode === 'current') {
+          const taskManager = task.task_manager;
+          if (!taskManager || !taskManager.id) return false;
+          const hasTaskManager = effectiveTaskManagerIds.includes(taskManager.id.toString());
+          if (!hasTaskManager) return false;
+        } else {
+          const taskManager = task.task_manager;
+          if (!taskManager || !taskManager.id) return false;
+          const hasTaskManager = effectiveTaskManagerIds.includes(taskManager.id.toString());
+          if (!hasTaskManager) return false;
+        }
       }
 
+      // Client filtering - only applies if current stage's follow_up is Client
       if (effectiveClientIds.length > 0) {
+        const tracking = getCurrentStageTracking(task);
+        if (!tracking) return false;
+        const stage = tracking.stage;
+        if (stage.follow_up !== 'Client') return false;
+
         if (clientFilterMode === 'current') {
-          // Filter by current stage client (company/sponsor)
-          const tracking = getCurrentStageTracking(task);
-          if (!tracking) return false;
-          const stageData = task.stages?.[tracking.stage.id];
           const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
           if (!company || !company.name) return false;
           const hasClient = effectiveClientIds.includes(company.name);
           if (!hasClient) return false;
         } else {
-          // Filter by history - check if client appears in task
           const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
           if (!company || !company.name) return false;
           const hasClient = effectiveClientIds.includes(company.name);
@@ -621,28 +643,49 @@ export default function ReportsPage() {
 
       // Officer filtering
       if (effectiveOfficerIds.length > 0) {
-        // Filter by task's officer (from participants_details)
-        const officer = task.officer;
-        if (!officer || !officer.id) return false;
-        const hasOfficer = effectiveOfficerIds.includes(officer.id.toString());
-        if (!hasOfficer) return false;
+        if (officerFilterMode === 'current') {
+          // Filter by task's officer (from participants_details)
+          const officer = task.officer;
+          if (!officer || !officer.id) return false;
+          const hasOfficer = effectiveOfficerIds.includes(officer.id.toString());
+          if (!hasOfficer) return false;
+        } else {
+          // History mode - filter by task's officer (same as current since officer is task-level)
+          const officer = task.officer;
+          if (!officer || !officer.id) return false;
+          const hasOfficer = effectiveOfficerIds.includes(officer.id.toString());
+          if (!hasOfficer) return false;
+        }
       }
 
-      // Task Manager filtering
+      // Task Manager filtering - only applies if current stage's follow_up is BCL
       if (effectiveTaskManagerIds.length > 0) {
-        // Filter by task's task_manager (from participants_details)
-        const taskManager = task.task_manager;
-        if (!taskManager || !taskManager.id) return false;
-        const hasTaskManager = effectiveTaskManagerIds.includes(taskManager.id.toString());
-        if (!hasTaskManager) return false;
+        const tracking = getCurrentStageTracking(task);
+        if (!tracking) return false;
+        const stage = tracking.stage;
+        if (stage.follow_up !== 'BCL') return false;
+
+        if (taskManagerFilterMode === 'current') {
+          const taskManager = task.task_manager;
+          if (!taskManager || !taskManager.id) return false;
+          const hasTaskManager = effectiveTaskManagerIds.includes(taskManager.id.toString());
+          if (!hasTaskManager) return false;
+        } else {
+          const taskManager = task.task_manager;
+          if (!taskManager || !taskManager.id) return false;
+          const hasTaskManager = effectiveTaskManagerIds.includes(taskManager.id.toString());
+          if (!hasTaskManager) return false;
+        }
       }
 
-      // Client filtering
+      // Client filtering - only applies if current stage's follow_up is Client
       if (effectiveClientIds.length > 0) {
+        const tracking = getCurrentStageTracking(task);
+        if (!tracking) return false;
+        const stage = tracking.stage;
+        if (stage.follow_up !== 'Client') return false;
+
         if (clientFilterMode === 'current') {
-          const tracking = getCurrentStageTracking(task);
-          if (!tracking) return false;
-          const stageData = task.stages?.[tracking.stage.id];
           const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
           if (!company || !company.name) return false;
           const hasClient = effectiveClientIds.includes(company.name);
@@ -878,33 +921,35 @@ export default function ReportsPage() {
     });
 
     // Add columns for Document Requirements (displayed before time tracking and stage columns)
-    // Collect Document Requirements from all tasks
-    const referenceRequirements = new Map<string, any>();
-    tasks.forEach(task => {
-      if (task.requirements && Array.isArray(task.requirements)) {
-        task.requirements.forEach((req: any) => {
-          if (req.category === 'reference') {
-            const reqId = `req_${req.id || req.name}`;
-            if (!referenceRequirements.has(reqId)) {
-              referenceRequirements.set(reqId, req);
+    if (showDocRequirementsColumns) {
+      // Collect Document Requirements from all tasks
+      const referenceRequirements = new Map<string, any>();
+      tasks.forEach(task => {
+        if (task.requirements && Array.isArray(task.requirements)) {
+          task.requirements.forEach((req: any) => {
+            if (req.category === 'reference') {
+              const reqId = `req_${req.id || req.name}`;
+              if (!referenceRequirements.has(reqId)) {
+                referenceRequirements.set(reqId, req);
+              }
             }
-          }
-        });
-      }
-    });
-
-    // Add columns for each unique reference requirement
-    referenceRequirements.forEach((req, reqId) => {
-      cols.push({
-        id: reqId,
-        label: req.name || 'Reference Requirement',
-        type: 'reference_requirement',
-        requirementId: req.id,
-        requirementName: req.name,
-        sourceTable: req.sourceTable,
-        linkingVariable: req.linkingVariable
+          });
+        }
       });
-    });
+
+      // Add columns for each unique reference requirement
+      referenceRequirements.forEach((req, reqId) => {
+        cols.push({
+          id: reqId,
+          label: req.name || 'Reference Requirement',
+          type: 'reference_requirement',
+          requirementId: req.id,
+          requirementName: req.name,
+          sourceTable: req.sourceTable,
+          linkingVariable: req.linkingVariable
+        });
+      });
+    }
 
     if (showTimeTrackingColumns) {
       cols.push({
@@ -1046,7 +1091,7 @@ export default function ReportsPage() {
     });
 
     return cols;
-  }, [activeReport, stages, kycDocuments, isStageApplicableToCurrentFilter, expandedStageColumns, showTimeTrackingColumns, tasks]);
+  }, [activeReport, stages, kycDocuments, isStageApplicableToCurrentFilter, expandedStageColumns, showTimeTrackingColumns, showDocRequirementsColumns, tasks]);
 
   useEffect(() => {
     if (columns.length > 0) {
@@ -1796,6 +1841,38 @@ export default function ReportsPage() {
                     <label htmlFor={`col-${col.id}`} className="text-sm cursor-pointer flex-1 truncate">{col.label}</label>
                   </div>
                 ))}
+                <div className="font-semibold text-xs text-slate-500 uppercase tracking-wider pb-1 border-b pt-2 flex items-center justify-between">
+                  <span>Document Requirements</span>
+                  <Checkbox
+                    id="toggle-doc-requirements"
+                    checked={showDocRequirementsColumns}
+                    onCheckedChange={(checked) => {
+                      setShowDocRequirementsColumns(checked as boolean);
+                      const docReqCols = columns.filter(c => c.type === 'reference_requirement').map(c => c.id);
+                      setVisibleColumnIds(prev => {
+                        if (checked) {
+                          return [...new Set([...prev, ...docReqCols])];
+                        }
+                        return prev.filter(id => !docReqCols.includes(id));
+                      });
+                    }}
+                  />
+                </div>
+                {showDocRequirementsColumns && columns.filter(c => c.type === 'reference_requirement').map(col => (
+                  <div key={col.id} className="flex items-center gap-2">
+                    <Checkbox
+                      id={`col-${col.id}`}
+                      checked={visibleColumnIds.includes(col.id)}
+                      onCheckedChange={(checked) => {
+                        setVisibleColumnIds(prev => {
+                          if (checked) return [...prev, col.id];
+                          return prev.filter(id => id !== col.id);
+                        });
+                      }}
+                    />
+                    <label htmlFor={`col-${col.id}`} className="text-sm cursor-pointer flex-1 truncate">{col.label}</label>
+                  </div>
+                ))}
                 <div className="font-semibold text-xs text-slate-500 uppercase tracking-wider pb-1 border-b pt-2">Stages</div>
                 {columns.filter(c => c.stageId && (c.type === 'stage_date' || c.type === 'stage_officers')).map(col => (
                   <div key={col.id} className="flex items-center gap-2">
@@ -1883,49 +1960,91 @@ export default function ReportsPage() {
                 {/* Officer tabs - always visible regardless of job level tabs visibility */}
                 {availableOfficers.length > 0 && (
                   <div className="space-y-1">
-                    <Tabs value={activeOfficerTab} onValueChange={setActiveOfficerTab} className="w-full">
-                      <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 h-auto">
-                        <TabsTrigger value="all" className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                          All Officers
-                        </TabsTrigger>
-                        {availableOfficers.map(officer => (
-                          <TabsTrigger key={officer.id} value={officer.id} className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                            {officer.full_name || officer.name || officer.displayName || `Officer ${officer.id}`}
+                    <div className="flex items-center gap-2">
+                      <Tabs value={activeOfficerTab} onValueChange={setActiveOfficerTab} className="flex-1">
+                        <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 h-auto">
+                          <TabsTrigger value="all" className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
+                            All Officers
                           </TabsTrigger>
-                        ))}
-                      </TabsList>
-                    </Tabs>
+                          {availableOfficers.map(officer => (
+                            <TabsTrigger key={officer.id} value={officer.id} className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
+                              {officer.full_name || officer.name || officer.displayName || `Officer ${officer.id}`}
+                            </TabsTrigger>
+                          ))}
+                        </TabsList>
+                      </Tabs>
+                      <Select value={officerFilterMode} onValueChange={(value: 'current' | 'history') => setOfficerFilterMode(value)}>
+                        <SelectTrigger className="w-32 h-7 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="current">Current</SelectItem>
+                          <SelectItem value="history">History</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 )}
 
                 {/* Task Managers tabs - always visible regardless of job level tabs visibility */}
                 {availableTaskManagers.length > 0 && (
                   <div className="space-y-1">
-                    <Tabs value={activeTaskManagerTab} onValueChange={setActiveTaskManagerTab} className="w-full">
-                      <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 h-auto">
-                        <TabsTrigger value="all" className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                          All Task Managers
-                        </TabsTrigger>
-                        {availableTaskManagers.map(taskManager => (
-                          <TabsTrigger key={taskManager.id} value={taskManager.id} className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                            {taskManager.full_name || taskManager.name || taskManager.displayName || `Task Manager ${taskManager.id}`}
+                    <div className="flex items-center gap-2">
+                      <Tabs value={activeTaskManagerTab} onValueChange={setActiveTaskManagerTab} className="flex-1">
+                        <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 h-auto">
+                          <TabsTrigger value="all" className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
+                            All Task Managers
                           </TabsTrigger>
-                        ))}
-                      </TabsList>
-                    </Tabs>
+                          {availableTaskManagers.map(taskManager => (
+                            <TabsTrigger key={taskManager.id} value={taskManager.id} className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
+                              {taskManager.full_name || taskManager.name || taskManager.displayName || `Task Manager ${taskManager.id}`}
+                            </TabsTrigger>
+                          ))}
+                        </TabsList>
+                      </Tabs>
+                      <Select value={taskManagerFilterMode} onValueChange={(value: 'current' | 'history') => setTaskManagerFilterMode(value)}>
+                        <SelectTrigger className="w-32 h-7 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="current">Current</SelectItem>
+                          <SelectItem value="history">History</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 )}
 
-                {/* Clients tabs - always visible regardless of job level tabs visibility */}
+                {/* Clients filter - simple toggle button with mode select */}
                 {availableClients.length > 0 && (
                   <div className="space-y-1">
-                    <Tabs value={activeClientTab} onValueChange={setActiveClientTab} className="w-full">
-                      <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-orange-50 to-orange-100 border border-orange-200 h-auto">
-                        <TabsTrigger value="all" className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-orange-600 data-[state=active]:to-orange-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                          All Clients
-                        </TabsTrigger>
-                      </TabsList>
-                    </Tabs>
+                    <div className="flex justify-between gap-2">
+                      <div>
+                        <Button
+                          variant={selectedClients.length > 0 ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => {
+                            if (selectedClients.length > 0) {
+                              setSelectedClients([]);
+                            } else {
+                              setSelectedClients(availableClients.map(c => c.id));
+                            }
+                          }}
+                          className="flex-1 h-8 text-xs font-semibold bg-gradient-to-r from-orange-50 to-orange-100 border border-orange-200 text-slate-700 hover:from-orange-600 hover:to-orange-700 hover:text-white hover:border-orange-600 transition-all duration-200"
+                        >
+                          {selectedClients.length > 0 ? `Filtering ${selectedClients.length} Clients` : "Filter All Clients"}
+                        </Button>
+                      </div>
+                      <Select value={clientFilterMode} onValueChange={(value: 'current' | 'history') => setClientFilterMode(value)}>
+                        <SelectTrigger className="w-32 h-7 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="current">Current</SelectItem>
+                          <SelectItem value="history">History</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 )}
 

@@ -502,14 +502,30 @@ export function TransposedReportView({
               if (row.type === 'section_header') {
                 const Icon = row.icon || Briefcase;
                 const isFilterNA = row.filterApplicable === false;
+                const isDocReq = row.id === 'reference_requirements';
+                const isStage = row.id !== 'task_info' && row.id !== 'reference_requirements' && row.id !== 'time_tracking';
 
                 return (
-                  <TableRow key={row.id} className="bg-slate-200 border-y-2 border-slate-400 hover:bg-slate-200">
+                  <TableRow key={row.id} className={cn(
+                    "border-y-2 border-slate-400 hover:bg-slate-200",
+                    isDocReq && isFilterNA ? 'bg-amber-50/80' : '',
+                    isDocReq && !isFilterNA ? 'bg-emerald-100' : '',
+                    isStage && isFilterNA ? 'bg-amber-50/80' : '',
+                    isStage && !isFilterNA ? 'bg-purple-100' : '',
+                    !isDocReq && !isStage && isFilterNA ? 'bg-amber-50/80' : '',
+                    !isDocReq && !isStage && !isFilterNA ? 'bg-slate-200' : ''
+                  )}>
                     <TableCell colSpan={paginatedColumns.length + 2} className="p-0">
-                      <div className="flex items-center justify-between px-3 py-2 sticky left-0 w-max min-w-full">
+                      <div className={cn(
+                        "flex items-center justify-between px-3 py-2 sticky left-0 w-max min-w-full border-l-4",
+                        isDocReq && isFilterNA ? 'border-l-amber-400' : '',
+                        isDocReq && !isFilterNA ? 'border-l-emerald-500' : '',
+                        isStage && isFilterNA ? 'border-l-purple-400' : '',
+                        isStage && !isFilterNA ? 'border-l-purple-500' : ''
+                      )}>
                         <div className="flex items-center gap-3">
                           <Icon className={cn("h-5 w-5", isFilterNA ? "text-amber-600" : "text-slate-600")} />
-                          <span className="font-bold text-slate-700 text-lg">{row.label}</span>
+                          <span className={cn("font-bold text-lg", isDocReq ? 'text-emerald-900' : isStage ? 'text-purple-900' : 'text-slate-700')}>{row.label}</span>
                           {isFilterNA && (
                             <Badge variant="secondary" className="bg-amber-500 text-white hover:bg-amber-600 text-xs py-0 h-5">
                               FILTER N/A
@@ -529,6 +545,8 @@ export function TransposedReportView({
               const rowBg = row.isSubSubRow ? 'bg-slate-100/50' : row.isSubRow ? 'bg-slate-50/60' : 'bg-white';
               const hoverBg = 'hover:bg-blue-50/50';
               const baseBgClass = rowBg.split('/')[0]; // Isolate base class for sticky cells
+              const isDocReq = row.type === 'reference_requirement';
+              const isStage = row.stageId && row.type !== 'task' && row.type !== 'current_stage_age' && row.type !== 'total_process_age';
 
               const currentIndex = dataRowCounter++;
 
@@ -548,7 +566,13 @@ export function TransposedReportView({
                   </TableCell>
 
                   {paginatedColumns.map(task => (
-                    <TableCell key={`${row.id}-${task.id}`} className={`text-center text-sm py-1 px-2 align-middle border-l-4 border-t border-b border-gray-100 ${DATA_COLUMN_WIDTH} ${task.type === 'dependant' ? 'bg-orange-50/50' : ''}`}>
+                    <TableCell key={`${row.id}-${task.id}`} className={cn(
+                      "text-center text-sm py-1 px-2 align-middle border-l-4 border-t border-b border-gray-100",
+                      DATA_COLUMN_WIDTH,
+                      task.type === 'dependant' ? 'bg-orange-50/50' : '',
+                      isDocReq && 'bg-emerald-50/50',
+                      isStage && 'bg-purple-50/50'
+                    )}>
                       <div className="w-full mx-auto flex items-center justify-center min-h-[24px]">
                         {safeRender(enhancedRenderCellValue(task, row))}
                       </div>
