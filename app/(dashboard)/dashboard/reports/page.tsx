@@ -620,6 +620,69 @@ export default function ReportsPage() {
   const endorsedCount = useMemo(() => tasksByFilters.filter(t => t.status === 'endorsed').length, [tasksByFilters]);
   const cancelledCount = useMemo(() => tasksByFilters.filter(t => t.status === 'cancel').length, [tasksByFilters]);
 
+  // Count tasks per officer based on filter mode
+  const officerTaskCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: 0 };
+    availableOfficers.forEach(officer => {
+      counts[officer.id] = 0;
+    });
+
+    tasksByFilters.forEach(task => {
+      counts.all++;
+      const officer = task.officer;
+      if (officer && officer.id && counts[officer.id.toString()] !== undefined) {
+        counts[officer.id.toString()]++;
+      }
+    });
+
+    return counts;
+  }, [tasksByFilters, availableOfficers]);
+
+  // Count tasks per task manager based on filter mode
+  const taskManagerTaskCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: 0 };
+    availableTaskManagers.forEach(tm => {
+      counts[tm.id] = 0;
+    });
+
+    tasksByFilters.forEach(task => {
+      const tracking = getCurrentStageTracking(task);
+      if (tracking && tracking.stage.follow_up === 'BCL') {
+        counts.all++;
+        const taskManager = task.task_manager;
+        if (taskManager && taskManager.id && counts[taskManager.id.toString()] !== undefined) {
+          counts[taskManager.id.toString()]++;
+        }
+      }
+    });
+
+    return counts;
+  }, [tasksByFilters, availableTaskManagers, getCurrentStageTracking]);
+
+  // Count tasks per client based on filter mode
+  const clientTaskCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: 0 };
+    availableClients.forEach(client => {
+      counts[client.id] = 0;
+    });
+
+    tasksByFilters.forEach(task => {
+      const tracking = getCurrentStageTracking(task);
+      if (tracking && tracking.stage.follow_up === 'Client') {
+        counts.all++;
+        const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
+        if (company && company.name) {
+          const client = availableClients.find(c => c.id === company.name);
+          if (client && counts[client.id] !== undefined) {
+            counts[client.id]++;
+          }
+        }
+      }
+    });
+
+    return counts;
+  }, [tasksByFilters, availableClients, getCurrentStageTracking]);
+
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
       if (activeDeptId && task.department_id?.toString() !== activeDeptId) return false;
@@ -1861,11 +1924,11 @@ export default function ReportsPage() {
                       <Tabs value={activeOfficerTab} onValueChange={setActiveOfficerTab} className="flex-1">
                         <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 h-auto">
                           <TabsTrigger value="all" className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                            All Officers
+                            All Officers ({officerTaskCounts.all || 0})
                           </TabsTrigger>
                           {availableOfficers.map(officer => (
                             <TabsTrigger key={officer.id} value={officer.id} className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                              {officer.full_name || officer.name || officer.displayName || `Officer ${officer.id}`}
+                              {officer.full_name || officer.name || officer.displayName || `Officer ${officer.id}`} ({officerTaskCounts[officer.id] || 0})
                             </TabsTrigger>
                           ))}
                         </TabsList>
@@ -1890,11 +1953,11 @@ export default function ReportsPage() {
                       <Tabs value={activeTaskManagerTab} onValueChange={setActiveTaskManagerTab} className="flex-1">
                         <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 h-auto">
                           <TabsTrigger value="all" className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                            All Task Managers
+                            All Task Managers ({taskManagerTaskCounts.all || 0})
                           </TabsTrigger>
                           {availableTaskManagers.map(taskManager => (
                             <TabsTrigger key={taskManager.id} value={taskManager.id} className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                              {taskManager.full_name || taskManager.name || taskManager.displayName || `Task Manager ${taskManager.id}`}
+                              {taskManager.full_name || taskManager.name || taskManager.displayName || `Task Manager ${taskManager.id}`} ({taskManagerTaskCounts[taskManager.id] || 0})
                             </TabsTrigger>
                           ))}
                         </TabsList>
@@ -1929,7 +1992,7 @@ export default function ReportsPage() {
                           }}
                           className="flex-1 h-8 text-xs font-semibold bg-gradient-to-r from-orange-50 to-orange-100 border border-orange-200 text-slate-700 hover:from-orange-600 hover:to-orange-700 hover:text-white hover:border-orange-600 transition-all duration-200"
                         >
-                          {selectedClients.length > 0 ? `Filtering ${selectedClients.length} Clients` : "Filter All Clients"}
+                          {selectedClients.length > 0 ? `Filtering ${selectedClients.length} Clients` : `Filter All Clients (${clientTaskCounts.all || 0})`}
                         </Button>
                       </div>
                       <Select value={clientFilterMode} onValueChange={(value: 'current' | 'history') => setClientFilterMode(value)}>
