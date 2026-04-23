@@ -13,7 +13,7 @@ import {
 import {
   Upload, Calendar, Check, X, Clock, Eye, AlertTriangle, Zap,
   Loader2, SkipForward, Clock3, MoreHorizontal, CheckCircle2,
-  Timer, AlertCircle
+  Timer, AlertCircle, User, UserPlus
 } from "lucide-react"
 import { toast } from "@/lib/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
@@ -21,6 +21,7 @@ import { format, parse, isValid } from "date-fns"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { formatDuration, getTimeStatus, isDocumentApplicable, parseDate } from "../overall-view/tableUtils"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { calculateStageDate } from "../utils/dateUtils"
 
 interface EditableStageCellProps {
@@ -42,6 +43,8 @@ interface EditableStageCellProps {
   taskName?: string
   clientName?: string
   onFetchData?: () => Promise<void>;
+  officers?: any[]
+  onOfficerChange?: (taskId: string, officerId: string | null) => Promise<void>
 }
 
 // Memoized child components to prevent unnecessary re-renders
@@ -106,7 +109,9 @@ export default function EditableStageCell({
   taskName,
   clientName,
   getKycFields,
-  onFetchData
+  onFetchData,
+  officers = [],
+  onOfficerChange
 }: EditableStageCellProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
@@ -122,6 +127,7 @@ export default function EditableStageCell({
   const inputRef = useRef<HTMLInputElement>(null);
   const [documentFields, setDocumentFields] = useState<any[]>([]);
   const [isLoadingFields, setIsLoadingFields] = useState(false);
+  const [isOfficerSelectOpen, setIsOfficerSelectOpen] = useState(false);
 
   const currentAutomationConfig = useMemo(() => {
     const jl = task?.job_level;
@@ -849,6 +855,29 @@ export default function EditableStageCell({
     }
   }, [onSave, previewDocuments, currentPreviewIndex, stage.id, task.id, onFetchData]);
 
+  const handleOfficerChange = async (officerId: string) => {
+    if (!onOfficerChange) return;
+    setIsLoading(true);
+    console.log('[EditableStageCell handleOfficerChange] Task ID:', task.id, 'Stage ID:', stage.id, 'Stage Name:', stage.name, 'Officer ID:', officerId);
+    try {
+      await onOfficerChange(task.id, officerId || null, stage.id);
+      setIsOfficerSelectOpen(false);
+      toast({
+        title: "Success",
+        description: "Officer updated successfully",
+      });
+    } catch (error) {
+      console.error('Error updating officer:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update officer",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const renderCellContent = () => {
     if (!isStageApplicable) return <span className="text-sm text-gray-400 italic">N/A</span>;
     if (renderMode === 'date') {
@@ -1170,6 +1199,53 @@ export default function EditableStageCell({
 
       return (
         <div className="flex items-center justify-center gap-1">
+          {/* Officer Selection - only for stages with officer follow-up */}
+          {onOfficerChange && officers.length > 0 && stage.follow_up?.toLowerCase() === 'officer' && (() => {
+            // Filter officers based on stage allocation
+            const stageOfficerIds = new Set<string>();
+            if (Array.isArray(stage.officer_ids)) {
+              stage.officer_ids.forEach((id: any) => stageOfficerIds.add(id.toString()));
+            } else if (stage.officer_id) {
+              stageOfficerIds.add(stage.officer_id.toString());
+            }
+            const stageOfficers = officers.filter(o => stageOfficerIds.has(o.id.toString()));
+
+            if (stageOfficers.length === 0) return null;
+
+            // Get currently assigned officer for this stage
+            const taskStageData = task.stages?.[stage.id];
+            const assignedOfficerId = taskStageData?.officer_ids?.[0] || taskStageData?.officer_id;
+
+            // Debug logging
+            if (assignedOfficerId) {
+              console.log('[EditableStageCell] Stage:', stage.id, 'Assigned Officer ID:', assignedOfficerId);
+              console.log('[EditableStageCell] Available officers:', officers.map(o => ({ id: o.id, name: o.displayName || o.name })));
+            }
+
+            const assignedOfficer = assignedOfficerId ? officers.find(o => o.id === assignedOfficerId || o.id?.toString() === assignedOfficerId?.toString()) : null;
+
+            return (
+              <Select
+                value={assignedOfficerId || "unassigned"}
+                onValueChange={(val) => handleOfficerChange(val === "unassigned" ? null : val)}
+                open={isOfficerSelectOpen}
+                onOpenChange={setIsOfficerSelectOpen}
+              >
+                <SelectTrigger className="h-7 w-7 p-0 border-0 bg-transparent hover:bg-slate-100" title={assignedOfficer ? `Assigned: ${assignedOfficer.displayName || assignedOfficer.name}` : "Assign officer"}>
+                  <User className={`h-3.5 w-3.5 ${assignedOfficer ? 'text-green-600' : 'text-slate-600'}`} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                  {stageOfficers.map(officer => (
+                    <SelectItem key={officer.id} value={officer.id}>
+                      {officer.displayName || officer.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            );
+          })()}
+
           {/* View Document */}
           {linkedDocument && (
             <Dialog>

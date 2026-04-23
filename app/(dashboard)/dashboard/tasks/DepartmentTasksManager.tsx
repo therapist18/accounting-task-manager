@@ -1479,6 +1479,7 @@ export default function DepartmentTasksManager({
       toast({
         title: "Success",
         description: "Officers updated successfully",
+        variant: "success"
       });
 
       await loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
@@ -1540,6 +1541,7 @@ export default function DepartmentTasksManager({
       toast({
         title: "Success",
         description: "All stage officers updated successfully",
+        variant: "success"
       });
 
       await loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
@@ -1548,6 +1550,80 @@ export default function DepartmentTasksManager({
       toast({
         title: "Error",
         description: `Failed to update officers: ${error.message}`,
+        variant: "destructive"
+      });
+    }
+  }, [loadTasksData, activeDepartmentTab, activeSubdepartmentTab]);
+
+  const updateTaskOfficer = useCallback(async (taskId: string, officerId: string | null, stageId: string) => {
+    if (!taskId || !stageId) {
+      toast({
+        title: "Error",
+        description: "Task ID and Stage ID are required to update officer",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    console.log('[updateTaskOfficer] Task ID:', taskId, 'Stage ID:', stageId, 'Officer ID:', officerId);
+
+    try {
+      const { data: currentTask } = await supabase
+        .from('tm_tasks')
+        .select('stages')
+        .eq('id', taskId)
+        .single();
+
+      if (!currentTask) throw new Error('Task not found');
+
+      const existingStages = currentTask.stages || {};
+      const timestamp = new Date().toISOString();
+
+      const updatedStages = { ...existingStages };
+
+      console.log('[updateTaskOfficer] Existing stages keys:', Object.keys(existingStages));
+      console.log('[updateTaskOfficer] Updating stage:', stageId, 'Current data:', existingStages[stageId]);
+
+      // Update the specific stage's officer_ids
+      if (officerId) {
+        updatedStages[stageId] = {
+          ...existingStages[stageId],
+          officer_ids: [officerId],
+          updatedAt: timestamp
+        };
+      } else {
+        // Remove officer assignment
+        updatedStages[stageId] = {
+          ...existingStages[stageId],
+          officer_ids: [],
+          updatedAt: timestamp
+        };
+      }
+
+      console.log('[updateTaskOfficer] Updated stage data:', updatedStages[stageId]);
+
+      const { error } = await supabase
+        .from('tm_tasks')
+        .update({
+          stages: updatedStages,
+          updated_at: timestamp
+        })
+        .eq('id', taskId);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Officer updated successfully",
+        variant: "success"
+      });
+
+      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
+    } catch (error: any) {
+      console.error('Error updating task officer:', error);
+      toast({
+        title: "Error",
+        description: `Failed to update officer: ${error.message}`,
         variant: "destructive"
       });
     }
@@ -2375,7 +2451,7 @@ export default function DepartmentTasksManager({
       <EditableStageCell
         key={`${row.stage.id}-${renderMode}`}
         stage={row.stage}
-        stages={stages} // <--- ADDED: Pass the full stages array
+        stages={stages}
         task={task}
         value={cellValue}
         onSave={enhancedHandleStageStatusSave}
@@ -2390,6 +2466,8 @@ export default function DepartmentTasksManager({
         taskName={task.name}
         clientName={task.client_name || task.clientName}
         onFetchData={() => loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true)}
+        officers={realOfficers}
+        onOfficerChange={updateTaskOfficer}
       />
     );
   };
