@@ -1212,15 +1212,9 @@ export default function EditableStageCell({
 
             if (stageOfficers.length === 0) return null;
 
-            // Get currently assigned officer for this stage
+            // Get currently assigned officer for this stage - match by stage ID
             const taskStageData = task.stages?.[stage.id];
             const assignedOfficerId = taskStageData?.officer_ids?.[0] || taskStageData?.officer_id;
-
-            // Debug logging
-            if (assignedOfficerId) {
-              console.log('[EditableStageCell] Stage:', stage.id, 'Assigned Officer ID:', assignedOfficerId);
-              console.log('[EditableStageCell] Available officers:', officers.map(o => ({ id: o.id, name: o.displayName || o.name })));
-            }
 
             const assignedOfficer = assignedOfficerId ? officers.find(o => o.id === assignedOfficerId || o.id?.toString() === assignedOfficerId?.toString()) : null;
 
@@ -1231,8 +1225,8 @@ export default function EditableStageCell({
                 open={isOfficerSelectOpen}
                 onOpenChange={setIsOfficerSelectOpen}
               >
-                <SelectTrigger className="h-7 w-7 p-0 border-0 bg-transparent hover:bg-slate-100" title={assignedOfficer ? `Assigned: ${assignedOfficer.displayName || assignedOfficer.name}` : "Assign officer"}>
-                  <User className={`h-3.5 w-3.5 ${assignedOfficer ? 'text-green-600' : 'text-slate-600'}`} />
+                <SelectTrigger className={`h-10 w-10 p-2 border-0 ${assignedOfficer ? 'bg-green-100 hover:bg-green-200' : 'bg-transparent hover:bg-slate-100'}`} title={assignedOfficer ? `Assigned: ${assignedOfficer.displayName || assignedOfficer.name}` : "Assign officer"}>
+                  <User className={`h-6 w-6 ${assignedOfficer ? 'text-green-700' : 'text-slate-600'}`} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="unassigned">Unassigned</SelectItem>

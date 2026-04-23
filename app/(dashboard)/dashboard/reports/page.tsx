@@ -1916,16 +1916,16 @@ export default function ReportsPage() {
               <TabsContent value={activeStatus} className="mt-4">
                 {/* Officer tabs - always visible regardless of job level tabs visibility */}
                 {availableOfficers.length > 0 && (
-                  <div className="space-y-1">
+                  <div className="space-y-2">
                     <div className="flex items-center gap-2">
                       <Tabs value={activeOfficerTab} onValueChange={setActiveOfficerTab} className="flex-1">
-                        <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 h-auto">
+                        <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-slate-50 to-slate-100 border border-slate-200 h-auto">
                           <TabsTrigger value="all" className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                            All Officers <Badge variant="secondary" className="ml-1 text-xs h-5 px-2">{officerTaskCounts.all || 0}</Badge>
+                            All Officers <Badge className={`ml-1 text-xs h-5 px-2 ${(officerTaskCounts.all || 0) > 0 ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-700 border border-slate-200'}`}>{officerTaskCounts.all || 0}</Badge>
                           </TabsTrigger>
                           {availableOfficers.map(officer => (
                             <TabsTrigger key={officer.id} value={officer.id} className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                              {officer.full_name || officer.name || officer.displayName || `Officer ${officer.id}`} <Badge variant="secondary" className="ml-1 text-xs h-5 px-2">{officerTaskCounts[officer.id] || 0}</Badge>
+                              {officer.full_name || officer.name || officer.displayName || `Officer ${officer.id}`} <Badge className={`ml-1 text-xs h-5 px-2 ${(officerTaskCounts[officer.id] || 0) > 0 ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-700 border border-slate-200'}`}>{officerTaskCounts[officer.id] || 0}</Badge>
                             </TabsTrigger>
                           ))}
                         </TabsList>
@@ -1945,16 +1945,16 @@ export default function ReportsPage() {
 
                 {/* Task Managers tabs - always visible regardless of job level tabs visibility */}
                 {availableTaskManagers.length > 0 && (
-                  <div className="space-y-1">
+                  <div className="space-y-2">
                     <div className="flex items-center gap-2">
                       <Tabs value={activeTaskManagerTab} onValueChange={setActiveTaskManagerTab} className="flex-1">
                         <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 h-auto">
                           <TabsTrigger value="all" className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                            All Task Managers <Badge variant="secondary" className="ml-1 text-xs h-5 px-2">{taskManagerTaskCounts.all || 0}</Badge>
+                            All Task Managers <Badge className={`ml-1 text-xs h-5 px-2 ${(taskManagerTaskCounts.all || 0) > 0 ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-700 border border-slate-200'}`}>{taskManagerTaskCounts.all || 0}</Badge>
                           </TabsTrigger>
                           {availableTaskManagers.map(taskManager => (
                             <TabsTrigger key={taskManager.id} value={taskManager.id} className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                              {taskManager.full_name || taskManager.name || taskManager.displayName || `Task Manager ${taskManager.id}`} <Badge variant="secondary" className="ml-1 text-xs h-5 px-2">{taskManagerTaskCounts[taskManager.id] || 0}</Badge>
+                              {taskManager.full_name || taskManager.name || taskManager.displayName || `Task Manager ${taskManager.id}`} <Badge className={`ml-1 text-xs h-5 px-2 ${(taskManagerTaskCounts[taskManager.id] || 0) > 0 ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-700 border border-slate-200'}`}>{taskManagerTaskCounts[taskManager.id] || 0}</Badge>
                             </TabsTrigger>
                           ))}
                         </TabsList>
@@ -1974,7 +1974,7 @@ export default function ReportsPage() {
 
                 {/* Clients filter - simple toggle button with mode select */}
                 {availableClients.length > 0 && (
-                  <div className="space-y-1">
+                  <div className="space-y-2">
                     <div className="flex justify-between gap-2">
                       <div>
                         <Button
@@ -2015,7 +2015,7 @@ export default function ReportsPage() {
 
                 {/* BCL tabs - always visible regardless of job level tabs visibility */}
                 {availableBCLs.length > 0 && (
-                  <div className="space-y-1">
+                  <div className="space-y-2">
                     <div className="flex items-center gap-2">
                       <Tabs value={activeBCLTab} onValueChange={setActiveBCLTab} className="flex-1">
                         <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-teal-50 to-teal-100 border border-teal-200 h-auto">

@@ -64,6 +64,8 @@ export const ENHANCED_TABLE_HEADERS_IMMIGRATION: TableHeader[] = [
   { id: 'sub_department', label: 'Sub Department', default: true, width: 'w-32' }, // New column
   { id: 'job_level', label: 'Class', default: true, width: 'w-32' },
   { id: 'renewal_new', label: 'Renewal/New', default: true, width: 'w-28' },
+  { id: 'passport_number', label: 'Passport Number', default: false, width: 'w-32' },
+  { id: 'duration', label: 'Duration', default: false, width: 'w-32' },
   { id: 'immigration_document_type', label: 'Current Immigration Document Type', default: false, width: 'w-48' },
   { id: 'immigration_expiry_date', label: 'Current Immigration Expiry Date', default: false, width: 'w-40' },
   { id: 'immigration_days_to_go', label: 'Days Remaining', default: false, width: 'w-32' }, // New Column
@@ -770,13 +772,21 @@ export const createEnhancedTaskData = (
 
   tasks.forEach(task => {
     const applicantData = applicantsMap.get(task.individual_id);
+
+    // Extract duration and renewal/new from job_specific_answers
+    const jobSpecificAnswers = task.job_specific_answers || {};
+    const duration = jobSpecificAnswers['1769582847128'] || null;
+    const renewalNew = jobSpecificAnswers['1769582847129'] || null;
+
     enhancedTasksMap.set(task.id.toString(), {
       ...task,
       applicant_data: applicantData,
       full_name: applicantData?.full_name || task.full_name,
       nationality: applicantData?.nationality || task.nationality,
       age: applicantData?.age,
-      r_number: applicantData?.r_number
+      r_number: applicantData?.r_number,
+      duration: duration,
+      renewal_new: renewalNew
     });
 
     if (task.dependant_member && Array.isArray(task.dependant_member)) {
@@ -1032,7 +1042,9 @@ export const getCellContent = (
     sub_department: getSubDepartmentDisplay(task, departments),
     job_level: getJobLevelDisplay(task, departments),
     job_description: task.job_description || 'N/A',
-    renewal_new: task.renewal_status || 'New',
+    renewal_new: enhancedTask.renewal_new || task.renewal_status || 'New',
+    passport_number: enhancedTask.passport_number || task.passport_number || 'N/A',
+    duration: enhancedTask.duration || task.duration || 'N/A',
     nationality: enhancedTask.nationality || 'N/A',
     full_name: enhancedTask.full_name || 'N/A',
     age: enhancedTask.age?.toString() || 'N/A',
@@ -1041,7 +1053,8 @@ export const getCellContent = (
     task_assistant: getStaffFromParticipants(task, 'task_assistant', getStaffName, departments, officers) || <span className="text-red-500 font-semibold">Unallocated</span>,
     cancellation_reason: task.cancellation_details?.reason || 'N/A',
     cancellation_date: task.cancellation_details?.cancelled_at ? format(new Date(task.cancellation_details.cancelled_at), 'dd MMM yyyy HH:mm') : 'N/A',
-    cancelled_by: task.participants_details?.cancelled_by || 'N/A'
+    cancelled_by: task.participants_details?.cancelled_by || 'N/A',
+    officer: getStaffFromParticipants(task, 'officer', getStaffName, departments, officers) || 'Unallocated'
   };
 
   if (headerId in simpleCellMap) return simpleCellMap[headerId];
@@ -1122,7 +1135,9 @@ export const getRawCellValue = (
     sub_department: getSubDepartmentDisplay(task, departments),
     job_level: getJobLevelDisplay(task, departments),
     job_description: task.job_description || 'N/A',
-    renewal_new: task.renewal_status || 'New',
+    renewal_new: enhancedTask.renewal_new || task.renewal_status || 'New',
+    passport_number: enhancedTask.passport_number || task.passport_number || 'N/A',
+    duration: enhancedTask.duration || task.duration || 'N/A',
     nationality: enhancedTask.nationality || 'N/A',
     full_name: enhancedTask.full_name || 'N/A',
     age: enhancedTask.age?.toString() || 'N/A',
