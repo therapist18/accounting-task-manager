@@ -1493,6 +1493,15 @@ export default function DepartmentTasksManager({
   }, [loadTasksData, activeDepartmentTab, activeSubdepartmentTab]);
 
   const updateAllTaskStageOfficers = useCallback(async (taskId: string, stageAssignments: Record<string, string[]>) => {
+    if (!taskId) {
+      toast({
+        title: "Error",
+        description: "Task ID is required to update officers",
+        variant: "destructive"
+      });
+      return;
+    }
+
     try {
       const { data: currentTask } = await supabase
         .from('tm_tasks')
@@ -2435,7 +2444,11 @@ export default function DepartmentTasksManager({
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => setAssignOfficersDialogOpen(true)}
+          onClick={() => {
+            setSelectedTaskForOfficers(task);
+            setSelectedStageForOfficers(determineCurrentStage(task, stages));
+            setAssignOfficersDialogOpen(true);
+          }}
           className="h-8 w-8 text-purple-600 hover:bg-purple-100"
           title="Assign officers"
         >

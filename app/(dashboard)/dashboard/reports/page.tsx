@@ -667,21 +667,18 @@ export default function ReportsPage() {
     });
 
     tasksByFilters.forEach(task => {
-      const tracking = getCurrentStageTracking(task);
-      if (tracking && tracking.stage.follow_up === 'Client') {
-        counts.all++;
-        const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
-        if (company && company.name) {
-          const client = availableClients.find(c => c.id === company.name);
-          if (client && counts[client.id] !== undefined) {
-            counts[client.id]++;
-          }
+      counts.all++;
+      const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
+      if (company && company.name) {
+        const client = availableClients.find(c => c.id === company.name);
+        if (client && counts[client.id] !== undefined) {
+          counts[client.id]++;
         }
       }
     });
 
     return counts;
-  }, [tasksByFilters, availableClients, getCurrentStageTracking]);
+  }, [tasksByFilters, availableClients]);
 
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
@@ -1924,11 +1921,11 @@ export default function ReportsPage() {
                       <Tabs value={activeOfficerTab} onValueChange={setActiveOfficerTab} className="flex-1">
                         <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 h-auto">
                           <TabsTrigger value="all" className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                            All Officers ({officerTaskCounts.all || 0})
+                            All Officers <Badge variant="secondary" className="ml-1 text-xs h-5 px-2">{officerTaskCounts.all || 0}</Badge>
                           </TabsTrigger>
                           {availableOfficers.map(officer => (
                             <TabsTrigger key={officer.id} value={officer.id} className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                              {officer.full_name || officer.name || officer.displayName || `Officer ${officer.id}`} ({officerTaskCounts[officer.id] || 0})
+                              {officer.full_name || officer.name || officer.displayName || `Officer ${officer.id}`} <Badge variant="secondary" className="ml-1 text-xs h-5 px-2">{officerTaskCounts[officer.id] || 0}</Badge>
                             </TabsTrigger>
                           ))}
                         </TabsList>
@@ -1953,11 +1950,11 @@ export default function ReportsPage() {
                       <Tabs value={activeTaskManagerTab} onValueChange={setActiveTaskManagerTab} className="flex-1">
                         <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 h-auto">
                           <TabsTrigger value="all" className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                            All Task Managers ({taskManagerTaskCounts.all || 0})
+                            All Task Managers <Badge variant="secondary" className="ml-1 text-xs h-5 px-2">{taskManagerTaskCounts.all || 0}</Badge>
                           </TabsTrigger>
                           {availableTaskManagers.map(taskManager => (
                             <TabsTrigger key={taskManager.id} value={taskManager.id} className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                              {taskManager.full_name || taskManager.name || taskManager.displayName || `Task Manager ${taskManager.id}`} ({taskManagerTaskCounts[taskManager.id] || 0})
+                              {taskManager.full_name || taskManager.name || taskManager.displayName || `Task Manager ${taskManager.id}`} <Badge variant="secondary" className="ml-1 text-xs h-5 px-2">{taskManagerTaskCounts[taskManager.id] || 0}</Badge>
                             </TabsTrigger>
                           ))}
                         </TabsList>
@@ -1992,7 +1989,15 @@ export default function ReportsPage() {
                           }}
                           className="flex-1 h-8 text-xs font-semibold bg-gradient-to-r from-orange-50 to-orange-100 border border-orange-200 text-slate-700 hover:from-orange-600 hover:to-orange-700 hover:text-white hover:border-orange-600 transition-all duration-200"
                         >
-                          {selectedClients.length > 0 ? `Filtering ${selectedClients.length} Clients` : `Filter All Clients (${clientTaskCounts.all || 0})`}
+                          {selectedClients.length > 0 ? (
+                            <>
+                              Filtering {selectedClients.length} Clients
+                            </>
+                          ) : (
+                            <>
+                              Filter All Clients <Badge variant="secondary" className="ml-1 text-xs h-5 px-2">{clientTaskCounts.all || 0}</Badge>
+                            </>
+                          )}
                         </Button>
                       </div>
                       <Select value={clientFilterMode} onValueChange={(value: 'current' | 'history') => setClientFilterMode(value)}>

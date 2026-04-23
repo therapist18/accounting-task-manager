@@ -140,6 +140,31 @@ export function AssignOfficersDialog({
     onOpenChange(false);
   };
 
+  // Get current stage for display
+  const currentStage = useMemo(() => {
+    if (!task?.stages) return null;
+    const stages = Object.entries(task.stages);
+    // Find the most recent stage with a status
+    const completedStages = stages.filter(([_, data]: [string, any]) =>
+      data.status === 'completed' || data.status === 'Completed'
+    );
+    if (completedStages.length > 0) {
+      // Return the last completed stage
+      const lastCompleted = completedStages[completedStages.length - 1];
+      return lastCompleted[0]; // stage ID
+    }
+    // If no completed stages, return the first stage
+    return stages[0]?.[0] || null;
+  }, [task]);
+
+  const currentStageName = useMemo(() => {
+    if (!currentStage || !stages) return null;
+    const stage = stages.find((s: any) => s.id === currentStage);
+    if (!stage) return null;
+    const orderNum = stage.order_num || stage.order || '';
+    return orderNum ? `${orderNum}. ${stage.name}` : stage.name;
+  }, [currentStage, stages]);
+
   const totalDistinctOfficers = useMemo(() => {
     const allIds = new Set<string>();
     Object.values(localAssignments).forEach(ids => ids.forEach(id => allIds.add(id)));
@@ -158,9 +183,19 @@ export function AssignOfficersDialog({
                 <Users className="h-6 w-6 text-white" />
               </div>
               <div>
-                <DialogTitle className="text-xl font-bold">Assign Team Members</DialogTitle>
-                <DialogDescription className="text-slate-500 font-medium">
-                  Task #{task?.id} &bull; {task?.title || 'Workflow Assignment'}
+                <DialogTitle className="text-xl font-bold">Assign Officers</DialogTitle>
+                <DialogDescription className="text-slate-500 font-medium text-base">
+                  Task #{task?.id} &bull; <span className="text-slate-700 font-semibold">{task?.applicant_name || task?.applicant_details?.name || 'Unknown Applicant'}</span>
+                  {currentStageName && (
+                    <span className="ml-2 text-blue-600 font-medium text-sm">
+                      &bull; Current Stage: {currentStageName}
+                    </span>
+                  )}
+                  {task?.job_level && (
+                    <span className="ml-2 text-slate-400 text-sm">
+                      &bull; {task.job_level.department?.name || ''} {task.job_level.subdepartment?.name ? `/ ${task.job_level.subdepartment.name}` : ''} {task.job_level.class?.name ? `/ ${task.job_level.class.name}` : ''}
+                    </span>
+                  )}
                 </DialogDescription>
               </div>
             </div>
@@ -183,6 +218,7 @@ export function AssignOfficersDialog({
                 {officerFollowUpStages.map((s) => {
                   const count = (localAssignments[s.id] || []).length;
                   const isActive = selectedStageId === s.id;
+                  const orderNum = s.order_num || s.order || '';
 
                   return (
                     <button
@@ -199,7 +235,10 @@ export function AssignOfficersDialog({
                         "h-2 w-2 rounded-full",
                         isActive ? "bg-blue-600" : "bg-slate-300"
                       )} />
-                      <span className="truncate flex-1 text-left">{s.name}</span>
+                      <span className="truncate flex-1 text-left">
+                        {orderNum && <span className="text-slate-400 mr-1">{orderNum}.</span>}
+                        {s.name}
+                      </span>
                       {count > 0 && (
                         <Badge className={cn(
                           "ml-auto text-[10px] px-1.5 h-5 min-w-[20px] flex items-center justify-center",
