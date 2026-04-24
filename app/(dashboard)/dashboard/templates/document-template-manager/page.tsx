@@ -192,7 +192,7 @@ export function DocumentTemplateManager({
                 if (fileName) {
                   const { data: fileData, error: downloadError } = await supabase.storage
                     .from('templates')
-                    .download(fileName);
+                    .download(template.file_path);
 
                   if (downloadError) {
                     // Handle 404 (file not found) gracefully
@@ -262,7 +262,7 @@ export function DocumentTemplateManager({
       const extractedPlaceholders = await extractPlaceholders({ type: 'file', content: file }, masterFields);
 
       const newTemplate: DocumentTemplate = {
-        id: `template_${Date.now()}`,
+        id: crypto.randomUUID(),
         document_id: document.id,
         name: file.name.replace('.docx', ''),
         file_name: file.name,
@@ -293,7 +293,7 @@ export function DocumentTemplateManager({
 
   const handleAddTextTemplate = () => {
     const newTemplate: DocumentTemplate = {
-      id: `template_${Date.now()}`,
+      id: crypto.randomUUID(),
       document_id: document.id,
       name: `Text Template ${templates.length + 1}`,
       content: '',
@@ -464,7 +464,7 @@ export function DocumentTemplateManager({
   const handleAddPlaceholder = () => {
     if (currentTemplateIndex === null) return;
     const newPlaceholder: Placeholder = {
-      id: `ph_${Date.now()}`,
+      id: crypto.randomUUID(),
       name: '',
       type: 'text',
       required: true,
@@ -603,10 +603,10 @@ export function DocumentTemplateManager({
     }
   };
 
-  const currentPlaceholder = editingPlaceholderIndex !== null && currentTemplate 
-    ? currentTemplate.placeholders?.[editingPlaceholderIndex] 
+  const currentPlaceholder = editingPlaceholderIndex !== null && currentTemplate
+    ? currentTemplate.placeholders?.[editingPlaceholderIndex]
     : {
-        id: `ph_${Date.now()}`,
+        id: crypto.randomUUID(),
         name: '',
         type: 'text' as const,
         required: true,

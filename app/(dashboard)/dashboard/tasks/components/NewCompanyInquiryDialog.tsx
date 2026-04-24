@@ -21,6 +21,7 @@ import { format } from "date-fns"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { fetchUserAssignmentData, fetchOfficers, hasJobLevelAccess, getOfficerDisplayName, FilteredUserData, userService } from "@/lib/shared-user-assignment-service"
+import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, formatWorkflowRestrictionReason, taskBundleService } from "../utils/workflowBundleHelpers"
 
 // Photo document IDs
 const COMPANY_LOGO_ID = 'f7a75607-bff9-4995-8bde-0256e86da435';
@@ -92,6 +93,10 @@ export function NewCompanyInquiryDialog({
     const [jobQuestions, setJobQuestions] = useState<any[]>([])
     const [jobAnswers, setJobAnswers] = useState<Record<string, any>>({})
     const [loadingQuestions, setLoadingQuestions] = useState(false)
+
+    // Workflow restriction state
+    const [workflowRestrictionSummary, setWorkflowRestrictionSummary] = useState<any | null>(null)
+    const [checkingWorkflow, setCheckingWorkflow] = useState(false)
 
     const [formData, setFormData] = useState({
         job_description: '',
@@ -645,6 +650,55 @@ export function NewCompanyInquiryDialog({
         }
     }, [open, userData, localUsers.length, localOfficers.length, loadStaffData]);
 
+    useEffect(() => {
+        let cancelled = false;
+
+        const checkWorkflowState = async () => {
+            if (!open || !selectedCompany?.id) {
+                setWorkflowRestrictionSummary(null);
+                return;
+            }
+
+            setCheckingWorkflow(true);
+            try {
+                const workflowSummary = await detectExistingWorkflowForIndividual(selectedCompany.id);
+                if (!cancelled) {
+                    if (!formData.department_id) {
+                        setWorkflowRestrictionSummary(null);
+                        return;
+                    }
+
+                    const selectedJobLevel = {
+                        level: formData.class_id ? 3 : formData.subdepartment_id ? 2 : 1,
+                        department_id: formData.department_id ? Number(formData.department_id) : null,
+                        subdepartment_id: formData.subdepartment_id ? Number(formData.subdepartment_id) : null,
+                        class_id: formData.class_id ? Number(formData.class_id) : null,
+                        subclass_id: null,
+                    };
+
+                    const bundle = await taskBundleService.fetchForJobLevel(selectedJobLevel);
+                    const restrictionSummary = evaluateWorkflowRestrictionsForBundle(workflowSummary?.workflowLogs || [], bundle);
+
+                    if (!cancelled) {
+                        setWorkflowRestrictionSummary(restrictionSummary);
+                    }
+                }
+            } catch (error) {
+                console.error("[NewCompanyInquiryDialog] workflow check failed", error);
+                if (!cancelled) {
+                    setWorkflowRestrictionSummary(null);
+                }
+            } finally {
+                if (!cancelled) setCheckingWorkflow(false);
+            }
+        };
+
+        checkWorkflowState();
+        return () => {
+            cancelled = true;
+        };
+    }, [open, selectedCompany?.id, formData.department_id, formData.subdepartment_id, formData.class_id]);
+
 
     const handleOfficialSelection = (officialId: number) => {
         setSelectedOfficialIds(prev => {
@@ -666,6 +720,15 @@ export function NewCompanyInquiryDialog({
         if (!selectedCompany || selectedOfficialIds.size === 0) {
             toast({ title: "Validation Error", description: "Missing company or officials.", variant: "destructive" });
             return;
+        }
+
+        if (!isEditMode && workflowRestrictionSummary?.hasBlockingWorkflow) {
+            toast({
+                title: "Workflow restriction detected",
+                description: "The related document workflow is in a blocking state for this job level.",
+                variant: "destructive"
+            })
+            return
         }
 
         setLoading(true);
@@ -1151,7 +1214,7 @@ export function NewCompanyInquiryDialog({
                             </Card>
 
                             {/* INTERNAL PROCESSING SECTION */}
-                            <Card className="border-indigo-100 shadow-sm overflow-hidden bg-white mb-4">
+                            <Card className={`border-indigo-100 shadow-sm overflow-hidden bg-white mb-4 ${workflowRestrictionSummary?.hasBlockingWorkflow && !isEditMode ? 'opacity-50 pointer-events-none' : ''}`}>
                                 <CardHeader className="bg-indigo-50/50 py-3 px-6 border-b border-indigo-100">
                                     <CardTitle className="text-sm font-black text-indigo-800 uppercase tracking-wider flex items-center gap-2">
                                         <Shield className="h-4 w-4" />
@@ -1165,7 +1228,7 @@ export function NewCompanyInquiryDialog({
                                             onValueChange={(v) => setFormData(p => ({ ...p, officer_id: v }))}
                                             options={officerOptions}
                                             placeholder={!formData.department_id ? "Select job level first" : "Select Officer"}
-                                            disabled={isOfficerDisabled}
+                                            disabled={isOfficerDisabled || (workflowRestrictionSummary?.hasBlockingWorkflow && !isEditMode)}
                                             emptyMessage="No officers found."
                                             searchPlaceholder="Search officer..."
                                             buttonClassName="h-11 bg-white border-slate-200"
@@ -1180,7 +1243,7 @@ export function NewCompanyInquiryDialog({
                                             onValueChange={(v) => setFormData(p => ({ ...p, task_manager_id: v }))}
                                             options={managerOptions}
                                             placeholder={!formData.department_id ? "Select job level first" : "Select Manager"}
-                                            disabled={isManagerDisabled}
+                                            disabled={isManagerDisabled || (workflowRestrictionSummary?.hasBlockingWorkflow && !isEditMode)}
                                             emptyMessage="No managers found."
                                             searchPlaceholder="Search manager..."
                                             buttonClassName="h-11 bg-white border-slate-200"
@@ -1195,7 +1258,7 @@ export function NewCompanyInquiryDialog({
                                             onValueChange={(v) => setFormData(p => ({ ...p, task_assistant_id: v }))}
                                             options={assistantOptions}
                                             placeholder={!formData.department_id ? "Select job level first" : "Select Assistant"}
-                                            disabled={isAssistantDisabled}
+                                            disabled={isAssistantDisabled || (workflowRestrictionSummary?.hasBlockingWorkflow && !isEditMode)}
                                             emptyMessage="No assistants found."
                                             searchPlaceholder="Search assistant..."
                                             buttonClassName="h-11 bg-white border-slate-200"
@@ -1209,6 +1272,7 @@ export function NewCompanyInquiryDialog({
                                             <Input
                                                 type="date"
                                                 value={formData.enquiry_date}
+                                                disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !isEditMode}
                                                 onChange={(e) => setFormData(p => ({ ...p, enquiry_date: e.target.value }))}
                                                 className="pl-10 h-11 border-slate-200 bg-white"
                                                 required
@@ -1222,7 +1286,7 @@ export function NewCompanyInquiryDialog({
 
                         <div className="col-span-1">
                             {/* JOB SPECIFIC QUESTIONS SECTION */}
-                            <Card className="border-indigo-100 shadow-sm overflow-hidden bg-white mb-4">
+                            <Card className={`border-indigo-100 shadow-sm overflow-hidden bg-white mb-4 ${workflowRestrictionSummary?.hasBlockingWorkflow && !isEditMode ? 'opacity-50 pointer-events-none' : ''}`}>
                                 <CardHeader className="bg-indigo-50/50 px-6 border-b border-indigo-100">
                                     <CardTitle className="text-sm font-black text-indigo-800 uppercase tracking-wider flex items-center gap-2">
                                         <HelpCircle className="h-4 w-4" />
@@ -1245,6 +1309,7 @@ export function NewCompanyInquiryDialog({
                                                                     <Input
                                                                         value={jobAnswers[q.id] || ''}
                                                                         onChange={e => setJobAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
+                                                                        disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !isEditMode}
                                                                         className="h-11 bg-white border-slate-200"
                                                                     />
                                                                 )}
@@ -1253,6 +1318,7 @@ export function NewCompanyInquiryDialog({
                                                                     <RadioGroup
                                                                         value={jobAnswers[q.id] === undefined ? "" : String(jobAnswers[q.id])}
                                                                         onValueChange={v => setJobAnswers(prev => ({ ...prev, [q.id]: v === 'true' }))}
+                                                                        disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !isEditMode}
                                                                         className="flex gap-4"
                                                                     >
                                                                         <div className="flex items-center space-x-2 bg-slate-50 px-4 py-2 rounded-md border border-slate-200">
@@ -1271,7 +1337,7 @@ export function NewCompanyInquiryDialog({
                                                                         <div className="flex gap-2">
                                                                             <Popover>
                                                                                 <PopoverTrigger asChild>
-                                                                                    <Button variant="outline" className="flex-1 justify-between h-11 bg-white border-slate-200">
+                                                                                    <Button variant="outline" className="flex-1 justify-between h-11 bg-white border-slate-200" disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !isEditMode}>
                                                                                         <span className="truncate">
                                                                                             {q.type === 'multiselect'
                                                                                                 ? (Array.isArray(jobAnswers[q.id]) && jobAnswers[q.id].length > 0 ? `${jobAnswers[q.id].length} Selected` : "Choose multiple...")
@@ -1465,7 +1531,7 @@ export function NewCompanyInquiryDialog({
                             </Card>
 
                             {/* ADDITIONAL REMARKS SECTION */}
-                            <Card className="border-indigo-100 shadow-sm overflow-hidden bg-white mb-4">
+                            <Card className={`border-indigo-100 shadow-sm overflow-hidden bg-white mb-4 ${workflowRestrictionSummary?.hasBlockingWorkflow && !isEditMode ? 'opacity-50 pointer-events-none' : ''}`}>
                                 <CardHeader className="bg-indigo-50/50 py-3 px-6 border-b border-indigo-100">
                                     <CardTitle className="text-sm font-black text-indigo-800 uppercase tracking-wider flex items-center gap-2">
                                         <FileText className="h-4 w-4" />
@@ -1476,6 +1542,7 @@ export function NewCompanyInquiryDialog({
                                     <Textarea
                                         value={formData.job_description}
                                         onChange={(e) => setFormData(p => ({ ...p, job_description: e.target.value }))}
+                                        disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !isEditMode}
                                         placeholder="Specify the services requested or the scope of work..."
                                         className="min-h-[120px] bg-white border-slate-200 p-4"
                                         required
@@ -1508,7 +1575,7 @@ export function NewCompanyInquiryDialog({
                             <Button
                                 type="submit"
                                 form="company-enquiry-form"
-                                disabled={loading || !selectedCompany || selectedOfficialIds.size === 0}
+                                disabled={loading || !selectedCompany || selectedOfficialIds.size === 0 || (workflowRestrictionSummary?.hasBlockingWorkflow && !isEditMode)}
                                 className="px-10 bg-indigo-600 hover:bg-indigo-700 h-11 text-white font-bold uppercase text-xs tracking-wide transition-all"
                             >
                                 {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}

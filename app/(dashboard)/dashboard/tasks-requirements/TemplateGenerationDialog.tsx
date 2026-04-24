@@ -47,7 +47,7 @@ const EDITOR_PREVIEW_STYLES = `
   [&_th]:border [&_th]:border-border [&_th]:bg-muted/50 [&_th]:p-2 [&_th]:text-left
   [&_td]:border [&_td]:border-border [&_td]:p-2 relative
 `.replace(/\s+/g, ' ').trim();
-// Around line 43
+
 const formatWhitespace = (val) => {
     if (val === null || val === undefined) return '';
     return String(val)
@@ -55,6 +55,27 @@ const formatWhitespace = (val) => {
         .replace(/  +/g, (match) => '&nbsp;'.repeat(match.length))
         // Ensure literal newlines are converted to HTML breaks
         .replace(/\n/g, '<br />');
+};
+
+const applyFormat = (val, format) => {
+    if (!val || typeof val !== 'string') return val;
+    const str = String(val);
+
+    switch (format?.toLowerCase()) {
+        case 'upper':
+        case 'uppercase':
+            return str.toUpperCase();
+        case 'lower':
+        case 'lowercase':
+            return str.toLowerCase();
+        case 'capital':
+        case 'capitalize':
+            return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+        case 'title':
+            return str.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+        default:
+            return str;
+    }
 };
 
 const isDate = (str) => {
@@ -1438,7 +1459,43 @@ export default function TemplateGenerationDialog({
     const [headerContent, setHeaderContent] = useState('');
     const [footerContent, setFooterContent] = useState('');
     const docxTemplateBuffer = useRef(null);
+    const loadedTemplateId = useRef<string | null>(null);
     const isWordTemplate = selectedTemplate?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+    // Centralized function to fetch template buffer with caching
+    const fetchTemplateBuffer = useCallback(async (templateId: string, filePath: string): Promise<ArrayBuffer | null> => {
+        // Return cached buffer if it's the same template
+        if (loadedTemplateId.current === templateId && docxTemplateBuffer.current) {
+            return docxTemplateBuffer.current;
+        }
+
+        try {
+            let publicUrl: string;
+            if (filePath.startsWith('kyc-templates/')) {
+                const { data, error } = await supabase.storage
+                    .from('templates')
+                    .createSignedUrl(filePath, 3600);
+                if (error || !data?.signedUrl) throw new Error('Could not create signed URL for template');
+                publicUrl = data.signedUrl;
+            } else {
+                publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${filePath}`;
+            }
+
+            const res = await fetch(publicUrl);
+            if (!res.ok) throw new Error(`Failed to fetch template: ${res.statusText}`);
+            const arrayBuffer = await res.arrayBuffer();
+
+            // Cache the buffer and template ID
+            docxTemplateBuffer.current = arrayBuffer;
+            loadedTemplateId.current = templateId;
+
+            return arrayBuffer;
+        } catch (error) {
+            console.error('Error fetching template buffer:', error);
+            return null;
+        }
+    }, []);
+
     const [loadedDraft, setLoadedDraft] = useState(null);
     const [isLoadingDraft, setIsLoadingDraft] = useState(false);
     const [dataConflicts, setDataConflicts] = useState([]);
@@ -1499,7 +1556,7 @@ export default function TemplateGenerationDialog({
                 }
 
                 if (placeholder.image_height) {
-                    // Extract numeric value from "150px" format  
+                    // Extract numeric value from "150px" format
                     const heightValue = parseInt(placeholder.image_height.replace('px', ''));
                     if (!isNaN(heightValue)) {
                         style.imageHeight = heightValue;
@@ -1517,6 +1574,14 @@ export default function TemplateGenerationDialog({
             setImageStyles(prev => ({ ...prev, ...defaultStyles }));
         }
     }, [selectedTemplate]);
+
+    // Clear buffer when template changes
+    useEffect(() => {
+        if (selectedTemplate?.id && loadedTemplateId.current !== selectedTemplate.id) {
+            docxTemplateBuffer.current = null;
+            loadedTemplateId.current = null;
+        }
+    }, [selectedTemplate?.id]);
 
     const groupedPlaceholders = useMemo(() => {
         if (!selectedTemplate?.placeholders) return { topLevel: [], blocks: {} };
@@ -2472,13 +2537,13 @@ export default function TemplateGenerationDialog({
         };
 
         loadAndResolve();
-    }, [isOpen, selectedTemplate?.id, fetchMissingDataSources]);
+    }, [isOpen, selectedTemplate?.id]);
 
     useEffect(() => {
         if (isOpen && selectedTemplate?.id && masterFields) {
             resolveComputedFields(combinedCache);
         }
-    }, [isOpen, selectedTemplate?.id, masterFields, resolveComputedFields]);
+    }, [isOpen, selectedTemplate?.id, masterFields]);
 
     useEffect(() => {
         if (!isOpen || !selectedTemplate) return;
@@ -3096,8 +3161,10 @@ export default function TemplateGenerationDialog({
                         let rowHtml = innerTemplate;
                         block.children.forEach(child => {
                             const rawValue = row?.[child.name];
-                            const childFormatSuffix = child.format || '';
-                            const childRegex = new RegExp(`\\{+\\s*%?\\s*${child.name}${childFormatSuffix ? '\\s*\\/\\s*' + childFormatSuffix : ''}\\s*\\}+`, 'g');
+                            const cleanChildName = child.name.replace(/[{}]/g, '').trim();
+
+                            // Handle dynamic format suffixes from template syntax for block children
+                            const childFormatRegex = new RegExp(`\\{+\\s*%?\\s*${cleanChildName}\\s*(?:\\/\\s*([a-zA-Z0-9_]+))?\\s*\\}+`, 'g');
 
                             if (child.type === 'image') {
                                 const value = typeof rawValue === 'string' ? rawValue : extractDisplayValue(rawValue);
@@ -3122,14 +3189,20 @@ export default function TemplateGenerationDialog({
                                         ❌ Failed to load: ${value.substring(0, 50)}...
                                     </div>
                                 </div>`;
-                                    rowHtml = rowHtml.replace(childRegex, imageHtml);
+                                    rowHtml = rowHtml.replace(childFormatRegex, imageHtml);
                                 } else {
-                                    rowHtml = rowHtml.replace(childRegex, `<span style="color:#ccc; font-size: 8px;">[Empty Image: ${child.display_value || child.name}]</span>`);
+                                    rowHtml = rowHtml.replace(childFormatRegex, `<span style="color:#ccc; font-size: 8px;">[Empty Image: ${child.display_value || child.name}]</span>`);
                                 }
                             } else {
-                                // Standard text inside block
+                                // Standard text inside block with format suffix support
                                 const value = extractDisplayValue(rawValue);
-                                rowHtml = rowHtml.replace(childRegex, String(value || ''));
+                                rowHtml = rowHtml.replace(childFormatRegex, (match, formatSuffix) => {
+                                    let formattedValue = value;
+                                    if (formatSuffix) {
+                                        formattedValue = applyFormat(value, formatSuffix);
+                                    }
+                                    return String(formattedValue || '');
+                                });
                             }
                         });
                         return rowHtml;
@@ -3191,13 +3264,23 @@ export default function TemplateGenerationDialog({
                 }
             } else {
                 const value = extractDisplayValue(rawValue);
-                // Apply formatting to the data being injected
-                const formattedValue = formatWhitespace(value);
 
-                const replacement = formattedValue ||
-                    `<span style="background-color: #fef9c3; color: #854d0e; padding: 0 2px; border-radius: 2px;">[${placeholder.display_value || placeholder.name}]</span>`;
+                // Handle dynamic format suffixes from template syntax (e.g., /upper, /capital, /lower)
+                // Match placeholder with any format suffix
+                const formatRegex = new RegExp(`\\{+\\s*%?\\s*${cleanName}\\s*(?:\\/\\s*([a-zA-Z0-9_]+))?\\s*\\}+`, 'gi');
 
-                universalReplace(regex, replacement);
+                universalReplace(formatRegex, (match, formatSuffix) => {
+                    let formattedValue = value;
+                    // Apply case formatting if format suffix is present
+                    if (formatSuffix) {
+                        formattedValue = applyFormat(value, formatSuffix);
+                    }
+                    // Apply whitespace formatting
+                    formattedValue = formatWhitespace(formattedValue);
+
+                    return formattedValue ||
+                        `<span style="background-color: #fef9c3; color: #854d0e; padding: 0 2px; border-radius: 2px;">[${placeholder.display_value || placeholder.name}]</span>`;
+                });
             }
         });
 
@@ -3443,9 +3526,10 @@ export default function TemplateGenerationDialog({
                     setDocPreviewUrl(`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(publicUrl)}`);
 
                     try {
-                        const res = await fetch(publicUrl);
-                        if (!res.ok) throw new Error(`Failed to fetch template: ${res.statusText}`);
-                        const arrayBuffer = await res.arrayBuffer();
+                        const arrayBuffer = await fetchTemplateBuffer(current.id, current.file_path);
+                        if (!arrayBuffer) {
+                            throw new Error('Failed to fetch template buffer');
+                        }
                         docxTemplateBuffer.current = arrayBuffer;
 
                         // Update preview after loading
@@ -3480,7 +3564,7 @@ export default function TemplateGenerationDialog({
         };
 
         updatePreview();
-    }, [isOpen, selectedTemplate?.id, formData, imageStyles]); // Added dependencies to refresh on change
+    }, [isOpen, selectedTemplate?.id, formData, imageStyles, fetchTemplateBuffer]); // Added dependencies to refresh on change
 
     useEffect(() => {
         if (isOpen && (headerContent || footerContent) && formData) {
@@ -4059,14 +4143,10 @@ export default function TemplateGenerationDialog({
             let templateBuffer = docxTemplateBuffer.current;
             // If buffer is missing and it's a Word template, try fetching it now
             if (!templateBuffer && isWordTemplate) {
-                const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${selectedTemplate.file_path}`;
-                const res = await fetch(publicUrl);
-
-                if (!res.ok) {
+                templateBuffer = await fetchTemplateBuffer(selectedTemplate.id, selectedTemplate.file_path);
+                if (!templateBuffer) {
                     throw new Error("Failed to fetch template source from storage");
                 }
-
-                templateBuffer = await res.arrayBuffer();
                 docxTemplateBuffer.current = templateBuffer; // Cache it for next time
             }
 
@@ -4232,20 +4312,10 @@ export default function TemplateGenerationDialog({
                     const filePath = selectedTemplate?.file_path;
                     if (!filePath) throw new Error('No template file path available');
 
-                    let publicUrl: string;
-                    if (filePath.startsWith('kyc-templates/')) {
-                        const { data, error } = await supabase.storage
-                            .from('templates')
-                            .createSignedUrl(filePath, 3600);
-                        if (error || !data?.signedUrl) throw new Error('Could not create signed URL for template');
-                        publicUrl = data.signedUrl;
-                    } else {
-                        publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${filePath}`;
+                    templateBuffer = await fetchTemplateBuffer(selectedTemplate.id, filePath);
+                    if (!templateBuffer) {
+                        throw new Error('Failed to fetch template buffer');
                     }
-
-                    const res = await fetch(publicUrl);
-                    if (!res.ok) throw new Error(`Failed to fetch template: ${res.statusText}`);
-                    templateBuffer = await res.arrayBuffer();
                     docxTemplateBuffer.current = templateBuffer;   // cache for next time
                 }
 
