@@ -47,6 +47,7 @@ interface JobQuestion {
   input_count?: number
   sub_questions?: SubQuestion[] // New field
   order: number
+  linkedToColumn?: 'duration' | 'renewal_status' | null // Links question answer to direct task column
   depends_on?: {
     id: string
     operator: LogicOperator
@@ -492,6 +493,28 @@ export function EditJobQuestionDialog({
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="space-y-2 pt-4 border-t">
+            <Label className="flex items-center gap-2 text-[10px] font-bold uppercase text-purple-600">
+              <Split className="h-3 w-3" /> Link to Task Column
+            </Label>
+            <Select
+              value={formData.linkedToColumn || 'none'}
+              onValueChange={(v) => updateField('linkedToColumn', v === 'none' ? null : v as 'duration' | 'renewal_status')}
+            >
+              <SelectTrigger className="bg-purple-50 border-purple-200">
+                <SelectValue placeholder="No column linked" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">-- No Column Linked --</SelectItem>
+                <SelectItem value="duration">Duration (e.g., 1 year, 6 months)</SelectItem>
+                <SelectItem value="renewal_status">Renewal Status (New/Renewal)</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-[9px] text-purple-600 italic">
+              Link this question's answer to a direct task column. The answer will be automatically synced when the enquiry is saved.
+            </p>
           </div>
 
           <div className="flex items-center space-x-2 bg-slate-100 p-4 rounded-lg border border-slate-200">

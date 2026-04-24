@@ -507,7 +507,17 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   }, []);
 
   // Render logic
-  if (!tasks.length && !loading) {
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center p-16 bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
+        <Loader2 className="h-12 w-12 animate-spin text-blue-600" />
+        <p className="mt-4 font-semibold text-slate-700">Loading...</p>
+        <p className="text-sm text-slate-500">Please wait while we fetch the data.</p>
+      </div>
+    );
+  }
+
+  if (!tasks.length) {
     return (
       <div className="flex flex-col items-center justify-center p-16 bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
         <FileText className="h-12 w-12 text-slate-400" />

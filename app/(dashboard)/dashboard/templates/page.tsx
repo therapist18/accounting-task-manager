@@ -38,7 +38,7 @@ import { ENTITY_TYPES, type EntityType } from "@/lib/constants/entity-types"
 
 import { DepartmentSidebar } from "../departments/main-shared-components/department-sidebar"
 import { fetchDepartments } from "../departments/departments/database"
-import DocumentTemplateManager from "./document-template-manager"
+import { DocumentTemplateManager } from "./document-template-manager/page"
 
 // --- Main Page Component ---
 export default function LettersPage() {

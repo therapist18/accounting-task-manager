@@ -70,6 +70,7 @@ export interface RequirementForm {
   dependsOnQuestionId?: string
   dependsOnOperator?: LogicOperator
   dependsOnValue?: string
+  linkedToColumn?: 'duration' | 'renewal_status' | null // Links question answer to direct task column
 }
 
 const DEFAULT_REQUIREMENT = (category: RequirementCategory): RequirementForm => ({
@@ -100,7 +101,8 @@ const DEFAULT_REQUIREMENT = (category: RequirementCategory): RequirementForm => 
   category_name: '',
   dependsOnQuestionId: undefined,
   dependsOnOperator: 'equals',
-  dependsOnValue: ''
+  dependsOnValue: '',
+  linkedToColumn: null
 })
 
 interface AddRequirementsDialogProps {
@@ -659,6 +661,28 @@ export function AddRequirementsDialog({ isOpen, onOpenChange, onSubmit, isSubmit
                             <span className="text-xs">Required</span>
                           </div>
                         </div>
+                      </div>
+
+                      <div className="space-y-2 pt-2 border-t">
+                        <Label className="flex items-center gap-2 text-[10px] font-bold uppercase text-purple-600">
+                          <Split className="h-3 w-3" /> Link to Task Column
+                        </Label>
+                        <Select
+                          value={req.linkedToColumn || 'none'}
+                          onValueChange={(v) => updateCurrentReq(idx, { linkedToColumn: v === 'none' ? null : v as 'duration' | 'renewal_status' })}
+                        >
+                          <SelectTrigger className="bg-purple-50 border-purple-200 h-9">
+                            <SelectValue placeholder="No column linked" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">-- No Column Linked --</SelectItem>
+                            <SelectItem value="duration">Duration (e.g., 1 year, 6 months)</SelectItem>
+                            <SelectItem value="renewal_status">Renewal Status (New/Renewal)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-[9px] text-purple-600 italic">
+                          Link this question's answer to a direct task column. The answer will be automatically synced when the enquiry is saved.
+                        </p>
                       </div>
 
                       {(req.inputType === 'select' || req.inputType === 'multiselect') && (

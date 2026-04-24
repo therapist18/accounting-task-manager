@@ -70,6 +70,7 @@ export default function DepartmentTasksManager({
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null)
   const [isPushingCase, setIsPushingCase] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
+  const [isLoadingTasks, setIsLoadingTasks] = useState(false)
   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('')
   const [currentTableHeaders, setCurrentTableHeaders] = useState(ENHANCED_TABLE_HEADERS)
   const [visibleHeaders, setVisibleHeaders] = useState<Set<string>>(new Set(ENHANCED_TABLE_HEADERS.filter(h => h.default).map(h => h.id)))
@@ -457,6 +458,7 @@ export default function DepartmentTasksManager({
     }
 
     try {
+      setIsLoadingTasks(true);
       const [tasksData, stagesData] = await Promise.all([
         fetchTasks(departmentId, subdepartmentId, companies),
         fetchStages(departmentId, departments)
@@ -482,8 +484,10 @@ export default function DepartmentTasksManager({
         variant: "destructive"
       })
       return null
+    } finally {
+      setIsLoadingTasks(false);
     }
-  }, [departments])
+  }, [departments, companies])
 
   const refreshAllData = useCallback(async () => {
     try {
@@ -3582,7 +3586,7 @@ export default function DepartmentTasksManager({
                         expandedSections={expandedSections}
                         companies={companies}
                         tableRows={tableRows}
-                        loading={false}
+                        loading={isLoadingTasks}
                         error={error}
                         kycDocuments={kycDocuments}
                         enhancedTasksData={enhancedTasksData}
@@ -3668,6 +3672,7 @@ export default function DepartmentTasksManager({
                         kycDocuments={kycDocuments}
                         allDocuments={allDocuments}
                         sortConfig={sortConfig}
+                        dataLoading={{ tasks: isLoadingTasks }}
                         error={error}
                         isPushingCase={isPushingCase}
                         isDownloading={isDownloading}

@@ -221,13 +221,16 @@ function RoleAssignmentDisplay({ userIds, users, officers, departments, role, em
 // --- Safe Rendering Function (Matching EnhancedTable) ---
 const safeRender = (content: any) => {
   if (React.isValidElement(content)) return content;
-  if (typeof content === 'string' || typeof content === 'number') {
+  if (typeof content === 'string') {
     // Handle special styling for 'Undedicated' status
-    if (typeof content === 'string' && content === 'Undedicated') {
+    if (content === 'Undedicated') {
       return <span className="text-red-600 font-medium">{content}</span>;
     }
+    // Replace "N/A" with "Missing" in red text
+    if (content === 'N/A') return <span className="text-red-500">Missing</span>;
     return content;
   }
+  if (typeof content === 'number') return content;
   if (content === null || content === undefined) return null;
   if (Array.isArray(content)) {
     return content.map((c, i) => <React.Fragment key={i}>{safeRender(c)}</React.Fragment>);
@@ -239,6 +242,7 @@ const safeRender = (content: any) => {
         if (status === 'Undedicated') {
           return <span className="text-red-600 font-medium">{status}</span>;
         }
+        if (status === 'N/A') return <span className="text-red-500">Missing</span>;
         return status;
       }
       if (React.isValidElement(status)) return status;
@@ -471,7 +475,7 @@ export function TransposedReportView({
                   <TableCell key={`fallback-${task.id}`} className={`text-center text-sm py-1 px-2 align-middle bg-blue-500 text-white border border-gray-100 ${DATA_COLUMN_WIDTH} ${task.type === 'dependant' ? 'bg-orange-500' : ''}`}>
                     <div className="flex flex-col items-center justify-center gap-1 p-1">
                       <span className="font-semibold text-center" title={task.applicant_name}>
-                        {task.applicant_name || 'N/A'}
+                        {task.applicant_name || <span className="text-red-300">Missing</span>}
                       </span>
                       <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-4 ${task.type === 'dependant' ? 'bg-orange-600/50 border-orange-400 text-white' : 'bg-blue-600/50 border-blue-400 text-white'}`}>
                         ID: {task.id}

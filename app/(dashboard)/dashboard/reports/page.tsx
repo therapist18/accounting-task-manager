@@ -17,7 +17,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { toast } from "@/lib/hooks/use-toast";
 import { supabase } from "@/lib/supabase/client";
 import ExcelJS from 'exceljs';
-import { getCurrentStageStatus, getCellContent, getEnhancedImmigrationStatus, renderImmigrationStatusCell, renderCurrentStageStatusCell, ENHANCED_TABLE_HEADERS_IMMIGRATION, enhanceTasksWithIndividualData, getRawCellValue, getTimeStatus, formatDuration, parseDate } from "../tasks/overall-view/tableUtils";
+import { getCurrentStageStatus, getCellContent, getEnhancedImmigrationStatus, renderImmigrationStatusCell, renderCurrentStageStatusCell, ENHANCED_TABLE_HEADERS_IMMIGRATION, enhanceTasksWithIndividualData, getRawCellValue, getTimeStatus, formatDuration } from "../tasks/overall-view/tableUtils";
+import { parseDate } from "@/app/generic-functions/dateUtils";
 import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields } from "../tasks/utils/taskManagerData";
 import { getOfficerDisplayName } from "@/lib/shared-user-assignment-service";
 import { fetchDepartments } from "../departments/departments/database";
@@ -60,13 +61,21 @@ const getElapsedMinutes = (from: Date | null, to: Date = new Date()): number | n
 
 const safeRender = (content: any) => {
   if (React.isValidElement(content)) return content;
-  if (typeof content === 'string' || typeof content === 'number') return content;
+  if (typeof content === 'string') {
+    // Replace "N/A" with "Missing" in red text
+    if (content === 'N/A') return <span className="text-red-500">Missing</span>;
+    return content;
+  }
+  if (typeof content === 'number') return content;
   if (content === null || content === undefined) return <span className="text-[11px] font-bold text-slate-300 uppercase tracking-widest">—</span>;
   if (Array.isArray(content)) return content.map((c, i) => <React.Fragment key={i}>{safeRender(c)}</React.Fragment>);
   if (typeof content === 'object') {
     if ('status' in content) {
       const s = content.status;
-      if (typeof s === 'string' || typeof s === 'number') return s;
+      if (typeof s === 'string' || typeof s === 'number') {
+        if (s === 'N/A') return <span className="text-red-500">Missing</span>;
+        return s;
+      }
       if (React.isValidElement(s)) return s;
       if (!s) return null;
       return JSON.stringify(s);
@@ -1415,7 +1424,7 @@ export default function ReportsPage() {
       if (!stage) return <span className="text-sm text-slate-400">—</span>;
 
       if (!checkStageApplicableForTask(stage, task)) {
-        return <span className="text-sm text-red-500">missing</span>;
+        return <span className="text-sm text-red-500">Missing</span>;
       }
 
       if (col.isAutoAdded) {
@@ -1437,7 +1446,7 @@ export default function ReportsPage() {
 
       const stageDocInfo = stage?.documents?.find((d: any) => d.kycId === col.kycId);
       if (!stageDocInfo) return <span className="text-sm text-slate-400">—</span>;
-      if (!isDocumentApplicable(stageDocInfo, task)) return <span className="text-sm text-red-500">missing</span>;
+      if (!isDocumentApplicable(stageDocInfo, task)) return <span className="text-sm text-red-500">Missing</span>;
 
       const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
       if (!linked) return <span className="text-sm text-red-500">Missing</span>;

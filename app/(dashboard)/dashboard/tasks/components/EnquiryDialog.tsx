@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import { useState, useCallback, useMemo, useEffect } from "react"
+import { useState, useCallback, useMemo, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -24,6 +24,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, formatWorkflowRestrictionReason, taskBundleService } from "../utils/workflowBundleHelpers"
 import { getInheritedOfficer, getDepartmentOfficerIds, getSubdepartmentOfficerIds } from "../../departments/departments/database"
 import { fetchOfficers, fetchTaskManagers, fetchTaskAssistants, fetchAllUsers, hasJobLevelAccess, buildSelectOptions, FilteredUserData, userService, DisplayUser } from "@/lib/shared-user-assignment-service"
+import { parseDateWithMonthName } from "@/app/generic-functions/dateUtils"
 
 const CLASS_D_ID = '1750687058159';
 const SPONSOR_SUBDEPT_ID = '26';
@@ -32,6 +33,7 @@ const CLIENT_CATEGORIES = ['ACC', 'IMM', 'Sheria', 'Audit'];
 // Photo document IDs
 const PASSPORT_PHOTO_ID = '48f48255-e5db-4944-8864-6f35b3af4696';
 const CLEAR_PHOTO_ID = 'fa74ff82-09ce-418d-8985-174158d73316';
+const PASSPORT_DOCUMENT_ID = 'f52872ce-20b4-404a-8491-9096cd54947f';
 
 interface JobQuestion {
     id: string
@@ -155,6 +157,9 @@ export function EnquiryDialog({
     const [selectedJobLevelBundle, setSelectedJobLevelBundle] = useState<any | null>(null)
     const [workflowRestrictionSummary, setWorkflowRestrictionSummary] = useState<any | null>(null)
 
+    // Ref to track if edit data has been loaded
+    const editDataLoadedRef = useRef(false)
+
     // Selection State
     const [applicantType, setApplicantType] = useState<'principal' | 'dependant'>('principal')
     const [selectedIndividual, setSelectedIndividual] = useState<Individual | null>(null)
@@ -182,6 +187,9 @@ export function EnquiryDialog({
         task_manager_id: '',
         task_assistant_id: '',
         enquiry_date: new Date().toISOString().split('T')[0],
+        passport_number: '',
+        duration: '',
+        renewal_status: 'New',
         job_level: {
             level: 1,
             department_id: null,
@@ -451,6 +459,46 @@ export function EnquiryDialog({
         }
     }, [getSupabaseImageUrl]);
 
+    // Fetch passport number from document
+    const fetchPassportNumber = useCallback(async (individualId: number) => {
+        try {
+            const { data: passportDocs } = await supabase
+                .from('acc_portal_directors_documents')
+                .select('extracted_details')
+                .eq('director_id', individualId)
+                .eq('document_id', PASSPORT_DOCUMENT_ID);
+
+            if (passportDocs && passportDocs.length > 0) {
+                // Helper function to get date_of_expiry in various formats
+                const getExpiryDate = (details: any) => {
+                    if (!details) return null;
+                    // Check various key formats
+                    return details.date_of_expiry ||
+                        details.Date_of_expiry ||
+                        details.Date_of_Expiry ||
+                        details.dateOfExpiry ||
+                        details.dateofexpiry ||
+                        details['Date of Expiry'] ||
+                        details['date of expiry'];
+                };
+
+                // Sort by date_of_expiry to get the latest passport
+                const sortedDocs = [...passportDocs].sort((a, b) => {
+                    const dateA = parseDateWithMonthName(getExpiryDate(a.extracted_details));
+                    const dateB = parseDateWithMonthName(getExpiryDate(b.extracted_details));
+                    if (!dateA || !dateB) return 0;
+                    return dateB.getTime() - dateA.getTime(); // Descending order
+                });
+
+                if (sortedDocs[0]?.extracted_details?.passport_number) {
+                    setFormData(prev => ({ ...prev, passport_number: sortedDocs[0].extracted_details.passport_number }));
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching passport number:', error);
+        }
+    }, []);
+
     const resetForm = useCallback(() => {
         setFormData({
             job_description: '',
@@ -461,6 +509,9 @@ export function EnquiryDialog({
             task_manager_id: '',
             task_assistant_id: '',
             enquiry_date: new Date().toISOString().split('T')[0],
+            passport_number: '',
+            duration: '',
+            renewal_status: 'New',
             job_level: {
                 level: 1,
                 department_id: null,
@@ -488,99 +539,114 @@ export function EnquiryDialog({
     }, [])
 
     useEffect(() => {
-        if (open && taskToEdit) {
-            if (taskToEdit.participants_details) {
-                const existingOfficers = [...availableOfficers];
-                const existingManagers = [...managersData];
-                const existingAssistants = [...assistantsData];
+        // Reset ref when dialog closes or task changes
+        if (!open || !taskToEdit) {
+            editDataLoadedRef.current = false;
+            if (open && !taskToEdit) {
+                resetForm();
+            }
+            return;
+        }
 
-                taskToEdit.participants_details.forEach(participant => {
-                    const role = participant.role?.includes('officer') ? 'officer' :
-                        participant.role?.includes('task_manager') ? 'manager' :
-                            participant.role?.includes('task_assistant') ? 'assistant' : null;
+        // Only load edit data once per task opening
+        if (editDataLoadedRef.current || loadingStaff) {
+            return;
+        }
 
-                    const normalizedParticipant = {
-                        id: participant.id,
-                        full_name: participant.name,
-                        name: participant.name,
-                        assignments: role ? [{
-                            role: role,
-                            department_id: taskToEdit.job_level?.department_id || null,
-                            subdepartment_id: taskToEdit.job_level?.subdepartment_id || null,
-                            class_id: taskToEdit.job_level?.class_id || null,
-                            subclass_id: taskToEdit.job_level?.subclass_id || null
-                        }] : []
-                    };
+        if (taskToEdit.participants_details) {
+            const existingOfficers = [...availableOfficers];
+            const existingManagers = [...managersData];
+            const existingAssistants = [...assistantsData];
 
-                    if (participant.role?.includes('officer')) {
-                        if (!existingOfficers.find(o => o.id.toString() === (participant.id?.toString() || ''))) {
-                            existingOfficers.push(normalizedParticipant);
-                        }
-                    } else if (participant.role?.includes('task_manager')) {
-                        if (!existingManagers.find(m => m.id.toString() === (participant.id?.toString() || ''))) {
-                            existingManagers.push(normalizedParticipant);
-                        }
-                    } else if (participant.role?.includes('task_assistant')) {
-                        if (!existingAssistants.find(a => a.id.toString() === (participant.id?.toString() || ''))) {
-                            existingAssistants.push(normalizedParticipant);
+            taskToEdit.participants_details.forEach(participant => {
+                const role = participant.role?.includes('officer') ? 'officer' :
+                    participant.role?.includes('task_manager') ? 'manager' :
+                        participant.role?.includes('task_assistant') ? 'assistant' : null;
+
+                const normalizedParticipant = {
+                    id: participant.id,
+                    full_name: participant.name,
+                    name: participant.name,
+                    assignments: role ? [{
+                        role: role,
+                        department_id: taskToEdit.job_level?.department_id || null,
+                        subdepartment_id: taskToEdit.job_level?.subdepartment_id || null,
+                        class_id: taskToEdit.job_level?.class_id || null,
+                        subclass_id: taskToEdit.job_level?.subclass_id || null
+                    }] : []
+                };
+
+                if (participant.role?.includes('officer')) {
+                    if (!existingOfficers.find(o => o.id.toString() === (participant.id?.toString() || ''))) {
+                        existingOfficers.push(normalizedParticipant);
+                    }
+                } else if (participant.role?.includes('task_manager')) {
+                    if (!existingManagers.find(m => m.id.toString() === (participant.id?.toString() || ''))) {
+                        existingManagers.push(normalizedParticipant);
+                    }
+                } else if (participant.role?.includes('task_assistant')) {
+                    if (!existingAssistants.find(a => a.id.toString() === (participant.id?.toString() || ''))) {
+                        existingAssistants.push(normalizedParticipant);
+                    }
+                }
+            });
+
+            setAvailableOfficers(existingOfficers);
+            setManagersData(existingManagers);
+            setAssistantsData(existingAssistants);
+        }
+
+        // 1. Basic Form Data
+        setFormData({
+            job_description: taskToEdit.job_description || '',
+            department_id: String(taskToEdit.job_level?.department_id || ''),
+            subdepartment_id: String(taskToEdit.job_level?.subdepartment_id || ''),
+            class_id: String(taskToEdit.job_level?.class_id || ''),
+            enquiry_date: taskToEdit.date_initiated ? taskToEdit.date_initiated.split('T')[0] : new Date().toISOString().split('T')[0],
+            passport_number: taskToEdit.passport_number || '',
+            duration: taskToEdit.duration || '',
+            renewal_status: taskToEdit.renewal_status || 'New',
+            // Participants extracted below
+            officer_id: taskToEdit.participants_details?.find(p => p.role?.includes('officer'))?.id?.toString() || '',
+            task_manager_id: taskToEdit.participants_details?.find(p => p.role?.includes('task_manager'))?.id?.toString() || '',
+            task_assistant_id: taskToEdit.participants_details?.find(p => p.role?.includes('task_assistant'))?.id?.toString() || '',
+        });
+
+        // 2. Job Specific Answers
+        setJobAnswers(taskToEdit.job_specific_answers || {});
+
+        // 3. Resolve Applicant Type
+        setApplicantType(taskToEdit.applicant_details?.role || 'principal');
+
+        // 4. Load the individual and trigger related data (Companies/Understudies)
+        if (taskToEdit.individual_id) {
+            supabase.from('registry_individuals')
+                .select('*')
+                .eq('id', taskToEdit.individual_id)
+                .single()
+                .then(({ data }) => {
+                    if (data) {
+                        handleIndividualSelect(data); // This triggers company/understudy fetch
+                        if (taskToEdit.company_id) {
+                            setSelectedCompany(String(taskToEdit.company_id));
+                            fetchUnderstudies(String(taskToEdit.company_id)).then(() => {
+                                const understudyPart = taskToEdit.participants_details?.find(p => p.role?.includes('understudy'));
+                                if (understudyPart) setSelectedUnderstudy(String(understudyPart.id));
+                            });
                         }
                     }
                 });
-
-                setAvailableOfficers(existingOfficers);
-                setManagersData(existingManagers);
-                setAssistantsData(existingAssistants);
-            }
-
-            // 1. Basic Form Data
-            setFormData({
-                job_description: taskToEdit.job_description || '',
-                department_id: String(taskToEdit.job_level?.department_id || ''),
-                subdepartment_id: String(taskToEdit.job_level?.subdepartment_id || ''),
-                class_id: String(taskToEdit.job_level?.class_id || ''),
-                enquiry_date: taskToEdit.date_initiated ? taskToEdit.date_initiated.split('T')[0] : new Date().toISOString().split('T')[0],
-                // Participants extracted below
-                officer_id: taskToEdit.participants_details?.find(p => p.role?.includes('officer'))?.id?.toString() || '',
-                task_manager_id: taskToEdit.participants_details?.find(p => p.role?.includes('task_manager'))?.id?.toString() || '',
-                task_assistant_id: taskToEdit.participants_details?.find(p => p.role?.includes('task_assistant'))?.id?.toString() || '',
-            });
-
-            // 2. Job Specific Answers
-            setJobAnswers(taskToEdit.job_specific_answers || {});
-
-            // 3. Resolve Applicant Type
-            setApplicantType(taskToEdit.applicant_details?.role || 'principal');
-
-            // 4. Load the individual and trigger related data (Companies/Understudies)
-            if (taskToEdit.individual_id) {
-                supabase.from('registry_individuals')
-                    .select('*')
-                    .eq('id', taskToEdit.individual_id)
-                    .single()
-                    .then(({ data }) => {
-                        if (data) {
-                            handleIndividualSelect(data); // This triggers company/understudy fetch
-                            if (taskToEdit.company_id) {
-                                setSelectedCompany(String(taskToEdit.company_id));
-                                fetchUnderstudies(String(taskToEdit.company_id)).then(() => {
-                                    const understudyPart = taskToEdit.participants_details?.find(p => p.role?.includes('understudy'));
-                                    if (understudyPart) setSelectedUnderstudy(String(understudyPart.id));
-                                });
-                            }
-                        }
-                    });
-            }
-
-            // 5. Handle Sponsor if applicable
-            const sponsorPart = taskToEdit.participants_details?.find(p => p.role?.includes('sponsor'));
-            if (sponsorPart) {
-                setSelectedSponsor({ id: sponsorPart.id, full_name: sponsorPart.name });
-            }
-        } else if (open && !taskToEdit) {
-            // Reset to clean state for new enquiry
-            resetForm();
         }
-    }, [open, taskToEdit]);
+
+        // 5. Handle Sponsor if applicable
+        const sponsorPart = taskToEdit.participants_details?.find(p => p.role?.includes('sponsor'));
+        if (sponsorPart) {
+            setSelectedSponsor({ id: sponsorPart.id, full_name: sponsorPart.name });
+        }
+
+        // Mark as loaded
+        editDataLoadedRef.current = true;
+    }, [open, taskToEdit, loadingStaff]);
 
     const checkVisibility = useCallback((q: JobQuestion) => {
         if (!q.depends_on || !q.depends_on.id) return true;
@@ -682,19 +748,26 @@ export function EnquiryDialog({
 
             if (data?.job_specific_questions) {
                 setJobQuestions(data.job_specific_questions as JobQuestion[])
-                // Set defaults
-                const initial: any = {}
-                data.job_specific_questions.forEach((q: any) => {
-                    if (q.default_value) initial[q.id] = q.default_value
+                // Set defaults only if not in edit mode (preserve existing answers)
+                setJobAnswers(prevAnswers => {
+                    if (taskToEdit && Object.keys(prevAnswers).length > 0) {
+                        // In edit mode with existing answers, preserve them
+                        return prevAnswers;
+                    }
+                    // Set defaults for new enquiry
+                    const initial: any = {}
+                    data.job_specific_questions.forEach((q: any) => {
+                        if (q.default_value) initial[q.id] = q.default_value
+                    })
+                    return initial;
                 })
-                setJobAnswers(initial)
             } else {
                 setJobQuestions([])
             }
         } finally {
             setLoadingQuestions(false)
         }
-    }, [])
+    }, [taskToEdit])
 
     useEffect(() => {
         if (!formData.department_id) return
@@ -862,6 +935,7 @@ export function EnquiryDialog({
         setAvailableReferences([]); setSelectedReferences([]); setIncludeReferences(false)
         setPrincipalForDependant(null)
         fetchApplicantPhoto(ind.id);
+        fetchPassportNumber(ind.id);
 
         const promises = []
         promises.push(
@@ -1264,6 +1338,20 @@ export function EnquiryDialog({
             const normalizedEnquiryDate = normalizeEnquiryDateForStorage(formData.enquiry_date);
             const participants: any[] = []
 
+            // Sync linked question answers to direct columns
+            let syncedDuration = formData.duration;
+            let syncedRenewalStatus = formData.renewal_status;
+
+            jobQuestions.forEach(q => {
+                if (q.linkedToColumn && jobAnswers[q.id]) {
+                    if (q.linkedToColumn === 'duration') {
+                        syncedDuration = jobAnswers[q.id];
+                    } else if (q.linkedToColumn === 'renewal_status') {
+                        syncedRenewalStatus = jobAnswers[q.id];
+                    }
+                }
+            });
+
             // Extract Participant Details
             if (selectedCompany) {
                 const c = companies.find(x => x.id.toString() === selectedCompany)
@@ -1315,6 +1403,9 @@ export function EnquiryDialog({
                 job_description: formData.job_description,
                 individual_id: selectedIndividual.id,
                 company_id: selectedCompany ? Number(selectedCompany) : null,
+                passport_number: formData.passport_number,
+                duration: syncedDuration,
+                renewal_status: syncedRenewalStatus,
                 applicant_details: {
                     id: selectedIndividual.id,
                     name: selectedIndividual.full_name,
@@ -1781,7 +1872,7 @@ export function EnquiryDialog({
                                 </Card>
 
                                 {/* INTERNAL PROCESSING SECTION */}
-                                <Card className="border-blue-100 shadow-sm overflow-hidden bg-white mb-4">
+                                <Card className={`border-blue-100 shadow-sm overflow-hidden bg-white mb-4 ${workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit ? 'opacity-50 pointer-events-none' : ''}`}>
                                     <CardHeader className="bg-blue-50/50 py-3 px-6 border-b border-blue-100">
                                         <CardTitle className="text-sm font-black text-blue-800 uppercase tracking-wider flex items-center gap-2">
                                             <UserCheck className="h-4 w-4" />
@@ -1797,7 +1888,7 @@ export function EnquiryDialog({
                                                         onValueChange={id => setFormData(prev => ({ ...prev, officer_id: id }))}
                                                         options={officerOptions}
                                                         placeholder={officerPlaceholder}
-                                                        disabled={isOfficerDisabled}
+                                                        disabled={isOfficerDisabled || (workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit)}
                                                         emptyMessage="No officers found."
                                                         searchPlaceholder="Search officer..."
                                                         buttonClassName="h-11 bg-white border-slate-200"
@@ -1820,7 +1911,7 @@ export function EnquiryDialog({
                                                 onValueChange={id => setFormData(prev => ({ ...prev, task_manager_id: id }))}
                                                 options={managerOpts}
                                                 placeholder="Select Manager"
-                                                disabled={isManagerDisabled}
+                                                disabled={isManagerDisabled || (workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit)}
                                                 emptyMessage="No managers found."
                                                 searchPlaceholder="Search manager..."
                                                 buttonClassName="h-11 bg-white border-slate-200"
@@ -1833,7 +1924,7 @@ export function EnquiryDialog({
                                                 onValueChange={id => setFormData(prev => ({ ...prev, task_assistant_id: id }))}
                                                 options={assistantOpts}
                                                 placeholder="Select Assistant"
-                                                disabled={isAssistantDisabled}
+                                                disabled={isAssistantDisabled || (workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit)}
                                                 emptyMessage="No assistants found."
                                                 searchPlaceholder="Search assistant..."
                                                 buttonClassName="h-11 bg-white border-slate-200"
@@ -1846,10 +1937,22 @@ export function EnquiryDialog({
                                                     type="date"
                                                     value={formData.enquiry_date}
                                                     onChange={e => setFormData(prev => ({ ...prev, enquiry_date: e.target.value }))}
+                                                    disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit}
                                                     className="pl-10 h-11 border-slate-200 bg-white"
                                                 />
                                                 <Calendar className="absolute left-3 top-3.5 h-4 w-4 text-slate-400" />
                                             </div>
+                                        </TableRow>
+
+                                        <TableRow label="Passport Number">
+                                            <Input
+                                                type="text"
+                                                value={formData.passport_number}
+                                                disabled
+                                                onChange={e => setFormData(prev => ({ ...prev, passport_number: e.target.value }))}
+                                                placeholder="Enter passport number"
+                                                className="h-11 border-slate-200 bg-white"
+                                            />
                                         </TableRow>
                                     </CardContent>
                                 </Card>
@@ -1857,7 +1960,7 @@ export function EnquiryDialog({
 
                             <div className="col-span-1">
                                 {/* REQUIREMENT INTELLIGENCE SECTION */}
-                                <Card className="border-blue-100 shadow-sm overflow-hidden bg-white mb-4">
+                                <Card className={`border-blue-100 shadow-sm overflow-hidden bg-white mb-4 ${workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit ? 'opacity-50 pointer-events-none' : ''}`}>
                                     <CardHeader className="bg-blue-50/50 px-6 border-b border-blue-100">
                                         <CardTitle className="text-sm font-black text-blue-800 uppercase tracking-wider flex items-center gap-2">
                                             <HelpCircle className="h-4 w-4" />
@@ -1880,6 +1983,7 @@ export function EnquiryDialog({
                                                                         <Input
                                                                             value={jobAnswers[q.id] || ''}
                                                                             onChange={e => setJobAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
+                                                                            disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit}
                                                                             className="h-11 bg-white border-slate-200"
                                                                         />
                                                                     )}
@@ -1888,6 +1992,7 @@ export function EnquiryDialog({
                                                                         <RadioGroup
                                                                             value={jobAnswers[q.id] === undefined ? "" : String(jobAnswers[q.id])}
                                                                             onValueChange={v => setJobAnswers(prev => ({ ...prev, [q.id]: v === 'true' }))}
+                                                                            disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit}
                                                                             className="flex gap-4"
                                                                         >
                                                                             <div className="flex items-center space-x-2 bg-slate-50 px-4 py-2 rounded-md border border-slate-200">
@@ -1905,7 +2010,7 @@ export function EnquiryDialog({
                                                                         <div className="space-y-2">
                                                                             <Popover>
                                                                                 <PopoverTrigger asChild>
-                                                                                    <Button variant="outline" className="w-full justify-between h-11 bg-white border-slate-200">
+                                                                                    <Button variant="outline" className="w-full justify-between h-11 bg-white border-slate-200" disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit}>
                                                                                         <span className="truncate">
                                                                                             {q.type === 'multiselect'
                                                                                                 ? (jobAnswers[q.id]?.length > 0 ? `${jobAnswers[q.id].length} Selected` : "Choose multiple...")
@@ -1982,7 +2087,7 @@ export function EnquiryDialog({
                                 </Card>
 
                                 {/* ADDITIONAL REMARKS SECTION */}
-                                <Card className="border-blue-100 shadow-sm overflow-hidden bg-white mb-4">
+                                <Card className={`border-blue-100 shadow-sm overflow-hidden bg-white mb-4 ${workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit ? 'opacity-50 pointer-events-none' : ''}`}>
                                     <CardHeader className="bg-blue-50/50 py-3 px-6 border-b border-blue-100">
                                         <CardTitle className="text-sm font-black text-blue-800 uppercase tracking-wider flex items-center gap-2">
                                             <FileText className="h-4 w-4" />
@@ -1993,6 +2098,7 @@ export function EnquiryDialog({
                                         <Textarea
                                             value={formData.job_description}
                                             onChange={e => setFormData(prev => ({ ...prev, job_description: e.target.value }))}
+                                            disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit}
                                             placeholder="Capture additional client context here..."
                                             className="min-h-[120px] bg-white border-slate-200 p-4"
                                         />
@@ -2022,7 +2128,7 @@ export function EnquiryDialog({
                                 </Button>
                                 <Button
                                     onClick={handleSubmit}
-                                    disabled={loading || !selectedIndividual || !formData.department_id}
+                                    disabled={loading || !selectedIndividual || !formData.department_id || (workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit)}
                                     className="px-10 bg-blue-600 hover:bg-blue-700 h-11 text-white font-bold uppercase text-xs tracking-wide transition-all"
                                 >
                                     {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}

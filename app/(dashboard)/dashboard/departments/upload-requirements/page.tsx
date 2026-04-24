@@ -102,6 +102,7 @@ interface JobQuestion {
   entityTypes?: EntityType[]
   default_value?: string // Matches DB column name
   order: number
+  linkedToColumn?: 'duration' | 'renewal_status' | null // Links question answer to direct task column
 }
 
 interface ApiRequirement {
@@ -570,6 +571,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                 <TableHead className="border-r">Default Value</TableHead>
                 <TableHead className="border-r">Required</TableHead>
                 <TableHead className="border-r">Applies To</TableHead>
+                <TableHead className="border-r">Linked Column</TableHead>
                 <TableHead className="border-r">Configuration</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -577,7 +579,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
             <TableBody>
               {Object.entries(grouped).map(([category, items]) => (
                 <React.Fragment key={category}>
-                  <TableRow className="bg-slate-50 border-y"><TableCell colSpan={8} className="py-2 px-4 font-bold text-xs uppercase text-slate-500">{category}</TableCell></TableRow>
+                  <TableRow className="bg-slate-50 border-y"><TableCell colSpan={9} className="py-2 px-4 font-bold text-xs uppercase text-slate-500">{category}</TableCell></TableRow>
                   {items.map((q, idx) => {
                     const linkedMasterField = q.linked_field_id
                       ? masterFields.find(mf => String(mf.id) === String(q.linked_field_id))
@@ -611,6 +613,16 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                               );
                             }) : <span className="text-xs text-slate-400">All</span>}
                           </div>
+                        </TableCell>
+                        <TableCell className="border-r">
+                          {q.linkedToColumn ? (
+                            <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
+                              <Split className="h-3 w-3 mr-1" />
+                              {q.linkedToColumn}
+                            </Badge>
+                          ) : (
+                            <span className="text-xs text-slate-400">-</span>
+                          )}
                         </TableCell>
                         <TableCell className="border-r text-xs">
                           {linkedMasterField ? (
@@ -855,9 +867,9 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                 </TableRow>
               )}
             </TableBody>
-          </Table >
-        </div >
-      </div >
+          </Table>
+        </div>
+      </div>
     )
   }
 

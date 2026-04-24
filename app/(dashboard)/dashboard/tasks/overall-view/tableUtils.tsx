@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import React, { useMemo, useCallback, useEffect, useState } from "react";
 import supabase from '@/lib/supabase/client';
+import { parseDate, DATE_FORMATS, DATE_FIELDS, findDatesInObject } from '@/app/generic-functions/dateUtils';
 
 // Types
 interface TableHeader {
@@ -42,20 +43,6 @@ export interface TimeStatus {
 }
 
 // Constants
-const DATE_FORMATS = [
-  'dd/MM/yyyy HH:mm:ss',
-  'dd/MM/yyyy',
-  'yyyy-MM-dd',
-  'dd-MM-yyyy',
-  'MM/dd/yyyy',
-  'yyyy/MM/dd'
-] as const;
-
-const DATE_FIELDS = [
-  'expiry', 'valid', 'date', 'until', 'effective',
-  'expiration', 'expiry_date', 'valid_to', 'valid_until', 'up_to',
-  'effective_date', 'effective_from', 'effective_to', 'with_effect_from'
-] as const;
 
 export const ENHANCED_TABLE_HEADERS_IMMIGRATION: TableHeader[] = [
   { id: 'id', label: 'Task Reference', default: true, width: 'w-20' },
@@ -63,7 +50,7 @@ export const ENHANCED_TABLE_HEADERS_IMMIGRATION: TableHeader[] = [
   { id: 'company_name', label: 'Company Name', default: true, width: 'w-48' },
   { id: 'sub_department', label: 'Sub Department', default: true, width: 'w-32' }, // New column
   { id: 'job_level', label: 'Class', default: true, width: 'w-32' },
-  { id: 'renewal_new', label: 'Renewal/New', default: true, width: 'w-28' },
+  { id: 'renewal_status', label: 'Renewal/New', default: true, width: 'w-28' },
   { id: 'passport_number', label: 'Passport Number', default: false, width: 'w-32' },
   { id: 'duration', label: 'Duration', default: false, width: 'w-32' },
   { id: 'immigration_document_type', label: 'Current Immigration Document Type', default: false, width: 'w-48' },
@@ -103,66 +90,6 @@ export const STATS_HEADERS = [
   { id: 'stats_pending', label: 'Pending Stages', default: true },
   { id: 'stats_na', label: 'N/A Stages', default: false },
 ];
-
-export const parseDate = (dateStr: string | Date): Date | null => {
-  if (!dateStr) return null;
-
-  // If it's already a Date object
-  if (dateStr instanceof Date) {
-    return isValid(dateStr) ? dateStr : null;
-  }
-
-  // If it's already in dd/MM/yyyy format, parse it directly
-  const dateRegex = /^(\d{2})\/(\d{2})\/(\d{4})$/;
-  const match = dateStr.match(dateRegex);
-
-  if (match) {
-    const [_, day, month, year] = match;
-    const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-    return isValid(date) ? date : null;
-  }
-
-  // Try other date formats
-  for (const fmt of DATE_FORMATS) {
-    const parsed = parse(dateStr, fmt, new Date());
-    if (isValid(parsed)) {
-      return parsed;
-    }
-  }
-
-  // Last resort: try native Date parsing
-  const parsed = new Date(dateStr);
-  return isValid(parsed) ? parsed : null;
-};
-
-const findDatesInObject = (obj: any, dateFields: readonly string[]): Date[] => {
-  if (!obj) return [];
-
-  if (Array.isArray(obj)) {
-    return obj.flatMap(item => findDatesInObject(item, dateFields));
-  }
-
-  if (typeof obj !== 'object') return [];
-
-  return Object.entries(obj).reduce<Date[]>((dates, [key, value]) => {
-    const isDateField = dateFields.some(field =>
-      key.toLowerCase().includes(field.toLowerCase())
-    );
-
-    if (isDateField && value) {
-      const parsedDate = typeof value === 'string' ? parseDate(value) : null;
-      if (parsedDate) {
-        dates.push(parsedDate);
-      }
-    }
-
-    if (value && typeof value === 'object') {
-      dates.push(...findDatesInObject(value, dateFields));
-    }
-
-    return dates;
-  }, []);
-};
 
 export const calculateAge = (dateOfBirth: string | null): number | null => {
   if (!dateOfBirth) return null;
@@ -786,7 +713,7 @@ export const createEnhancedTaskData = (
       age: applicantData?.age,
       r_number: applicantData?.r_number,
       duration: duration,
-      renewal_new: renewalNew
+      renewal_status: renewalNew
     });
 
     if (task.dependant_member && Array.isArray(task.dependant_member)) {
@@ -1042,7 +969,7 @@ export const getCellContent = (
     sub_department: getSubDepartmentDisplay(task, departments),
     job_level: getJobLevelDisplay(task, departments),
     job_description: task.job_description || 'N/A',
-    renewal_new: enhancedTask.renewal_new || task.renewal_status || 'New',
+    renewal_status: enhancedTask.renewal_status || task.renewal_status || 'New',
     passport_number: enhancedTask.passport_number || task.passport_number || 'N/A',
     duration: enhancedTask.duration || task.duration || 'N/A',
     nationality: enhancedTask.nationality || 'N/A',
@@ -1135,7 +1062,7 @@ export const getRawCellValue = (
     sub_department: getSubDepartmentDisplay(task, departments),
     job_level: getJobLevelDisplay(task, departments),
     job_description: task.job_description || 'N/A',
-    renewal_new: enhancedTask.renewal_new || task.renewal_status || 'New',
+    renewal_status: enhancedTask.renewal_status || task.renewal_status || 'New',
     passport_number: enhancedTask.passport_number || task.passport_number || 'N/A',
     duration: enhancedTask.duration || task.duration || 'N/A',
     nationality: enhancedTask.nationality || 'N/A',
