@@ -35,9 +35,9 @@ interface TemplateEditorProps {
   initialContent?: string;
   headerContent?: string;
   footerContent?: string;
-  onChange?: (content: { 
-    html: string; 
-    header?: string; 
+  onChange?: (content: {
+    html: string;
+    header?: string;
     footer?: string;
     placeholders?: string[];
   }) => void;
@@ -52,11 +52,10 @@ const ToolbarButton = ({ onClick, isActive, tooltip, children, className = "" })
       <button
         type="button"
         onClick={onClick}
-        className={`p-2 rounded-md transition-colors ${
-          isActive 
-            ? 'bg-accent text-accent-foreground' 
+        className={`p-2 rounded-md transition-colors ${isActive
+            ? 'bg-accent text-accent-foreground'
             : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-        } ${className}`}
+          } ${className}`}
       >
         {children}
       </button>
@@ -70,12 +69,12 @@ const sanitizeClassName = (cls: string | undefined): string => {
   return String(cls).replace(/\s+/g, ' ').trim();
 };
 
-export default function TemplateEditor({ 
+export default function TemplateEditor({
   initialContent = '',
   headerContent: initialHeader = '',
   footerContent: initialFooter = '',
-  onChange, 
-  onBlur, 
+  onChange,
+  onBlur,
   className = '',
   showHeaderFooterControls = true
 }: TemplateEditorProps) {
@@ -84,7 +83,7 @@ export default function TemplateEditor({
   const [headerContent, setHeaderContent] = useState(initialHeader);
   const [footerContent, setFooterContent] = useState(initialFooter);
   const editorClassName = `template-editor border rounded-md flex flex-col h-full overflow-hidden min-h-[400px] ${sanitizeClassName(className)}`.trim();
-  
+
   // Initialize header/footer from initial props
   useEffect(() => {
     if (initialHeader) setHeaderContent(initialHeader);
@@ -116,7 +115,7 @@ export default function TemplateEditor({
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       Highlight.configure({ multicolor: true }),
       Placeholder.configure({ placeholder: 'Start writing your letter template here…' }),
-      
+
       // Configure Image if resolved
       ImageExt ? ImageExt.configure({
         inline: true,
@@ -129,7 +128,7 @@ export default function TemplateEditor({
         resizable: true,
         HTMLAttributes: { class: 'border-collapse table-auto w-full' },
       }) : undefined,
-      
+
       TableRowExt,
       TableHeaderExt,
       TableCellExt,
@@ -184,7 +183,7 @@ export default function TemplateEditor({
     editorProps: {
       attributes: {
         class: `
-          prose prose-sm sm:prose-base dark:prose-invert max-w-full focus:outline-none p-4 min-h-[200px]
+          prose prose-sm sm:prose-base dark:prose-invert max-w-full focus:outline-none px-4 pt-0 pb-4 min-h-[200px]
           [&_table]:border-collapse [&_table]:border [&_table]:border-border [&_table]:w-full [&_table]:my-4
           [&_th]:border [&_th]:border-border [&_th]:bg-muted/50 [&_th]:p-2 [&_th]:text-left
           [&_td]:border [&_td]:border-border [&_td]:p-2 relative
@@ -204,11 +203,11 @@ export default function TemplateEditor({
 
   const insertTable = useCallback(() => {
     if (!editor) return;
-    
+
     // CRITICAL FIX: Check if the command exists inside the editor commands object
     // "insertTable" will be undefined if the extension failed to load
     const canInsert = editor.commands.insertTable;
-    
+
     if (!canInsert) {
       alert("Table functionality is not available. Please check if @tiptap/extension-table is installed.");
       console.error("Missing Table extension command. Installed extensions:", editor.extensionManager.extensions.map(e => e.name));
@@ -262,17 +261,17 @@ export default function TemplateEditor({
 
   const toolbarItems = [
     ...(showHeaderFooterControls ? [
-      { 
-        name: 'header', 
-        tooltip: showHeader ? 'Hide Header' : 'Show Header', 
-        icon: <span className="font-bold">H</span>, 
+      {
+        name: 'header',
+        tooltip: showHeader ? 'Hide Header' : 'Show Header',
+        icon: <span className="font-bold">H</span>,
         action: toggleHeader,
         isActive: showHeader
       },
-      { 
-        name: 'footer', 
-        tooltip: showFooter ? 'Hide Footer' : 'Show Footer', 
-        icon: <span className="font-bold">F</span>, 
+      {
+        name: 'footer',
+        tooltip: showFooter ? 'Hide Footer' : 'Show Footer',
+        icon: <span className="font-bold">F</span>,
         action: toggleFooter,
         isActive: showFooter
       },
@@ -308,8 +307,8 @@ export default function TemplateEditor({
             if (item.type === 'divider') {
               return <div key={`divider-${index}`} className="w-px h-8 bg-border mx-1" />;
             }
-            
-            const isActive = item.name === 'heading' 
+
+            const isActive = item.name === 'heading'
               ? editor.isActive('heading', { level: item.level })
               : item.name === 'header' || item.name === 'footer'
                 ? item.isActive
@@ -358,9 +357,9 @@ export default function TemplateEditor({
             <ToolbarButton onClick={() => editor.chain().focus().splitCell().run()} tooltip="Split Cell">
               <Split className="h-3 w-3" />
             </ToolbarButton>
-            <ToolbarButton 
-              onClick={() => editor.chain().focus().deleteTable().run()} 
-              tooltip="Delete Table" 
+            <ToolbarButton
+              onClick={() => editor.chain().focus().deleteTable().run()}
+              tooltip="Delete Table"
               className="text-red-500 hover:text-red-600"
             >
               <Trash2 className="h-3 w-3" />
@@ -374,7 +373,7 @@ export default function TemplateEditor({
               <div className="text-xs text-muted-foreground px-4 py-1 bg-muted/30">
                 Header
               </div>
-              <div 
+              <div
                 className="p-2 min-h-[60px] max-h-[200px] overflow-auto"
                 dangerouslySetInnerHTML={{ __html: headerContent }}
                 onClick={() => {
@@ -387,17 +386,17 @@ export default function TemplateEditor({
               />
             </div>
           )}
-          
+
           <div className="flex-1 overflow-auto">
             <EditorContent editor={editor} className="h-full" />
           </div>
-          
+
           {showFooter && (
             <div className="border-t border-border">
               <div className="text-xs text-muted-foreground px-4 py-1 bg-muted/30 text-right">
                 Footer
               </div>
-              <div 
+              <div
                 className="p-2 min-h-[60px] max-h-[200px] overflow-auto"
                 dangerouslySetInnerHTML={{ __html: footerContent }}
                 onClick={() => {

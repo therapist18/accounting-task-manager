@@ -206,7 +206,14 @@ export function RequirementsTable({
       }
     });
 
-    const validIds = Array.from(uniqueIds).filter(Boolean);
+    const validIds = Array.from(uniqueIds).filter(id => {
+      // Filter out UUID strings - only keep numeric IDs for director_id (bigint column)
+      if (typeof id === 'string') {
+        // Check if it's a UUID format (contains hyphens and is not a number)
+        return !id.includes('-') && !isNaN(Number(id));
+      }
+      return Boolean(id);
+    });
     if (validIds.length === 0 || requiredKycIds.length === 0) {
       return;
     }
@@ -427,7 +434,13 @@ export function RequirementsTable({
           if (task.applicant_details?.type === 'company' && task.applicant_details?.id) allCompanyIds.add(task.applicant_details.id);
         });
 
-        const indIds = Array.from(allIndividualIds);
+        const indIds = Array.from(allIndividualIds).filter(id => {
+          // Filter out UUID strings - only keep numeric IDs for director_id (bigint column)
+          if (typeof id === 'string') {
+            return !id.includes('-') && !isNaN(Number(id));
+          }
+          return Boolean(id);
+        });
         const coIds = Array.from(allCompanyIds);
         const kycIds = Array.from(requiredKycIds);
 

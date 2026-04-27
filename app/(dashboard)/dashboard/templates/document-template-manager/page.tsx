@@ -128,123 +128,30 @@ export function DocumentTemplateManager({
   }, [panelsVisible]);
 
   // Fetch existing templates for the document when dialog opens
+  // Only fetch if we're creating a new template (initialTemplates is empty)
   useEffect(() => {
     const fetchExistingTemplates = async () => {
       if (!isOpen || !document?.id) return;
-
-      setIsLoadingTemplates(true);
-      try {
-        const { data: existingTemplates, error } = await supabase
-          .from('acc_portal_templates')
-          .select('*')
-          .eq('document_id', document.id);
-
-        if (error) throw error;
-
-        if (existingTemplates && existingTemplates.length > 0) {
-          // Filter templates to only include those matching the current job_level
-          const filteredTemplates = existingTemplates.filter(template => {
-            // If no job_level is set, show templates with empty job_level array
-            if (!jobLevel) {
-              return !template.job_level || template.job_level.length === 0;
-            }
-            // Otherwise, show templates that match the current job_level
-            return template.job_level && template.job_level.some(jl => 
-              jl.level === jobLevel.level &&
-              jl.department_id === jobLevel.department_id &&
-              jl.subdepartment_id === jobLevel.subdepartment_id &&
-              jl.class_id === jobLevel.class_id &&
-              jl.subclass_id === jobLevel.subclass_id
-            );
-          });
-
-          // Map templates to ensure name is populated from file_name if needed
-          const mappedTemplates = filteredTemplates.map(t => ({
-            ...t,
-            name: t.name || t.file_name,
-            entity_types: Array.isArray(t.entity_types) ? t.entity_types : []
-          }));
-          
-          setTemplates(mappedTemplates);
-          if (initialTemplates.length === 0 && mappedTemplates.length > 0) {
-            setCurrentTemplateIndex(0);
-          }
-
-          // Fetch template files from storage for templates with file_path
-          const newFiles = new Map(templateFiles);
-          for (const template of mappedTemplates) {
-            if (template.file_path && !newFiles.has(template.id)) {
-              try {
-                // Extract filename from file_path (handle both full URLs and relative paths)
-                let fileName = template.file_path;
-                
-                // If it's a full URL, extract the filename part
-                if (fileName.startsWith('http')) {
-                  const urlParts = fileName.split('/');
-                  fileName = urlParts[urlParts.length - 1];
-                  // Decode URL-encoded filename
-                  fileName = decodeURIComponent(fileName);
-                } else {
-                  // If it's a relative path, get the last part
-                  fileName = fileName.split('/').pop() || fileName;
-                }
-
-                if (fileName) {
-                  const { data: fileData, error: downloadError } = await supabase.storage
-                    .from('templates')
-                    .download(template.file_path);
-
-                  if (downloadError) {
-                    // Handle 404 (file not found) gracefully
-                    if (downloadError.statusCode === 404 || downloadError.message?.includes('not_found')) {
-                      console.warn(`File not found in storage for template ${template.id} (${template.name}): ${fileName}`);
-                      // Mark template as having missing file by setting a flag
-                      template._fileMissing = true;
-                      continue;
-                    }
-                    
-                    console.warn(`Could not download file for template ${template.id}:`, downloadError);
-                    // Try to fetch directly from URL as fallback
-                    try {
-                      const response = await fetch(template.file_path);
-                      if (response.ok) {
-                        const blob = await response.blob();
-                        const file = new File([blob], template.file_name || fileName, {
-                          type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-                        });
-                        newFiles.set(template.id, file);
-                      } else if (response.status === 404) {
-                        console.warn(`File not found at URL for template ${template.id}: ${template.file_path}`);
-                        template._fileMissing = true;
-                      }
-                    } catch (fetchErr) {
-                      console.warn(`Fallback fetch also failed for template ${template.id}:`, fetchErr);
-                    }
-                    continue;
-                  }
-
-                  const file = new File([fileData], template.file_name || fileName, {
-                    type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-                  });
-                  newFiles.set(template.id, file);
-                }
-              } catch (err) {
-                console.warn(`Error fetching file for template ${template.id}:`, err);
-              }
-            }
-          }
-          setTemplateFiles(newFiles);
-        }
-      } catch (error) {
-        console.error('Error fetching existing templates:', error);
-        toast({ title: 'Error loading templates', description: 'Could not load existing templates', variant: 'destructive' });
-      } finally {
-        setIsLoadingTemplates(false);
+      
+      // If initialTemplates is provided, use it instead of fetching all templates
+      if (initialTemplates.length > 0) {
+        const mappedTemplates = initialTemplates.map(t => ({
+          ...t,
+          name: t.name || t.file_name,
+          entity_types: Array.isArray(t.entity_types) ? t.entity_types : []
+        }));
+        setTemplates(mappedTemplates);
+        setCurrentTemplateIndex(0);
+        return;
       }
+
+      // When creating a new template, start with empty templates
+      setTemplates([]);
+      setCurrentTemplateIndex(null);
     };
 
     fetchExistingTemplates();
-  }, [isOpen, document?.id]);
+  }, [isOpen, document?.id, initialTemplates]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

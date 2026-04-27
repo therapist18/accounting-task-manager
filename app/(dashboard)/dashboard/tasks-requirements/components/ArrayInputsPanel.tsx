@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PlaceholderInput } from './PlaceholderInput';
+import { extractDisplayValue } from '../utils/templateUtils';
 
 interface ArrayInputsPanelProps {
   blockName: string;
@@ -50,6 +51,81 @@ export const ArrayInputsPanel = ({
   const rows = Array.isArray(formData[blockName]) ? formData[blockName] : [];
   const config = blockData.config || {};
   const isTransposed = config.array_direction === 'transposed';
+  const isHorizontal = config.array_direction === 'horizontal';
+
+  // --- HORIZONTAL LAYOUT (Digit-splitting style) ---
+  if (isHorizontal) {
+    const entityLabel = config.entity_type?.[0] || config.entity_type || blockName;
+
+    return (
+      <div className="space-y-4 mt-2 border-l-2 border-blue-200 pl-4 py-2 bg-blue-50/20 rounded-r-lg">
+        <div className="flex items-center justify-between">
+          <Badge className="bg-orange-600 uppercase text-[9px] tracking-tighter">
+            {blockName} (Horizontal)
+          </Badge>
+          <div className="flex gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 text-[10px] px-2 text-blue-600 border-blue-200"
+              onClick={() => {
+                const emptyRow = children.reduce((acc: any, child: any) => ({ ...acc, [child.name]: '' }), {});
+                onArrayInputChange(blockName, rows.length, '', { ...emptyRow, _isNewRow: true });
+              }}
+            >
+              + Add Item
+            </Button>
+          </div>
+        </div>
+
+        {rows.length === 0 ? (
+          <div className="p-3 bg-white border rounded shadow-sm italic text-xs text-muted-foreground">
+            No items in {blockName}
+          </div>
+        ) : (
+          rows.map((row: any, idx: number) => (
+            <div key={idx} className="p-3 bg-white border rounded shadow-sm space-y-3">
+              {children.map((child: any) => {
+                let resolvedOptions: any[] = [];
+                if (child.master_field_ids?.length > 0) {
+                  const mf = masterFields.get(parseInt(child.master_field_ids[0]));
+                  if (mf?.type === 'select') resolvedOptions = getDependentDropdownOptions(child, mf, row);
+                }
+                return (
+                  <PlaceholderInput
+                    key={child.id}
+                    placeholder={child}
+                    value={row[child.name]}
+                    originalValue={originalFormData[blockName]?.[idx]?.[child.name]}
+                    onChange={(val) => onArrayInputChange(blockName, idx, child.name, val)}
+                    onSaveToDb={saveFieldToDatabase}
+                    resolvedOptions={resolvedOptions}
+                    onFileChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        const r = new FileReader();
+                        r.onloadend = () => onArrayInputChange(blockName, idx, child.name, r.result);
+                        r.readAsDataURL(file);
+                      }
+                    }}
+                    masterFields={masterFields}
+                    imageStyles={imageStyles}
+                    onImageStyleChange={handleImageStyleChange}
+                    isArrayItem={true}
+                    arrayIndex={idx}
+                    blockName={blockName}
+                    showLabel={true}
+                    resolveSourceValue={resolveSpecificSourceValue}
+                    isSaving={isSavingProfile}
+                  />
+                );
+              })}
+            </div>
+          ))
+        )}
+      </div>
+    );
+  }
 
   // --- VERTICAL TABLE LAYOUT ---
   // Standard: Each row is an entity, columns are fields

@@ -5,12 +5,15 @@
 import supabase from "@/lib/supabase/client";
 
 const EDITOR_PREVIEW_STYLES = `
-  prose prose-sm sm:prose-base dark:prose-invert max-w-full focus:outline-none 
+  prose prose-sm sm:prose-base dark:prose-invert max-w-full focus:outline-none
   font-serif
   [&_*]:whitespace-pre-wrap
   [&_p]:min-h-[1em]
-  [&_p]:my-0 
+  [&_p]:my-0
+  [&_p]:mt-0
+  [&_p]:pt-0
   [&_first-child]:mt-0
+  [&_first-child]:pt-0
   [&_last-child]:mb-0
   [&_table]:border-collapse [&_table]:border [&_table]:border-border [&_table]:w-full [&_table]:my-4
   [&_th]:border [&_th]:border-border [&_th]:bg-muted/50 [&_th]:p-2 [&_th]:text-left

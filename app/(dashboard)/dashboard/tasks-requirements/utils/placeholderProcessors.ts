@@ -608,12 +608,26 @@ export const processPlaceholderValue = (
   const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData);
   const targetId = targetEntity ? String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id) : null;
 
+  // Check for current date fields first (don't require targetEntity)
+  if (placeholder.master_field_ids?.length > 0) {
+    for (const mid of placeholder.master_field_ids) {
+      const mf = masterFields.get(parseInt(mid, 10));
+      if (mf?.date_config?.useCurrentDate) {
+        const result = processCurrentDateField({ ...placeholder, master_field_ids: [mid] }, masterFields);
+        if (isValidValue(result.value, placeholder.type)) {
+          return result;
+        }
+      }
+    }
+  }
+
   if (placeholder.master_field_ids?.length > 0 && targetEntity) {
     for (const mid of placeholder.master_field_ids) {
       let result: { value: any; source: string | null } = { value: '', source: null };
       const mf = masterFields.get(parseInt(mid, 10));
       if (mf?.date_config?.useCurrentDate) {
-        result = processCurrentDateField({ ...placeholder, master_field_ids: [mid] }, masterFields);
+        // Already handled above, skip
+        continue;
       } else {
         if (placeholder.type === 'ordinal') {
           result = processOrdinalField(placeholder, arrayIndex);

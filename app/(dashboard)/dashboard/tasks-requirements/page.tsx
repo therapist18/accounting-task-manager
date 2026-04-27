@@ -34,7 +34,7 @@ import { RequirementsTable } from "./RequirementsTable"
 import { EnquiryTable } from "../tasks/components/EnquiryTable"
 import { StageUploadDialog } from "../tasks/components/StageUploadDialog"
 import { fetchDepartments } from "../departments/departments/database"
-import { fetchUserAssignmentData } from "@/lib/shared-user-assignment-service"
+import { userService } from "@/lib/shared-user-assignment-service"
 import { Badge } from "@/components/ui/badge"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { cn } from "@/lib/utils"
@@ -53,6 +53,7 @@ export default function TasksPage() {
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
   const [newTaskDialogOpen, setNewTaskDialogOpen] = useState(false);
   const [enquiryDialogOpen, setEnquiryDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [taskToDelete, setTaskToDelete] = useState<UtilTask | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -120,7 +121,7 @@ export default function TasksPage() {
       console.group('🔹 [Parent Component] Fetching Staff Data');
       try {
         console.log('🔹 [Parent] Using unified service to fetch user assignment data...');
-        const userAssignmentData = await fetchUserAssignmentData({ payrollAccess: true });
+        const userAssignmentData = await userService.getAllUserData({ payrollAccess: true }, departments);
 
         console.log('🔹 [Parent] Unified service fetch result:', {
           officersCount: userAssignmentData.officers?.length || 0,
@@ -148,7 +149,7 @@ export default function TasksPage() {
       console.groupEnd();
     };
     fetchStaff();
-  }, []);
+  }, [departments]);
 
   // --- Filtering and Memoization ---
   const getFilteredTasks = useCallback((status?: string | string[]) => {
@@ -235,7 +236,7 @@ export default function TasksPage() {
       if (currentDept?.entity_types?.includes('company')) {
         setCompanyInquiryDialogOpen(true);
       } else {
-        setEnquiryDialogOpen(true);
+        setEditDialogOpen(true);
       }
     } else if (action === 'refresh') {
       // Refresh tasks and stages
@@ -612,17 +613,17 @@ export default function TasksPage() {
       <EnquiryDialog
         open={enquiryDialogOpen}
         onOpenChange={setEnquiryDialogOpen}
-        taskToEdit={taskToEdit} // PASS STATE HERE
-        onEnquiryCreated={(updatedTask) => {
-          handleEnquiryCreated(updatedTask, !!taskToEdit);
-        }}
+        onEnquiryCreated={handleEnquiryCreated}
         departments={departments}
         userData={userData}
-        selectedDepartment={selectedDepartment}
-        selectedSubdepartment={selectedSubdepartment}
-        selectedClass={selectedClass}
-        selectedSubclass={selectedSubclass}
-        key={`enquiry-dialog-${selectedDepartment}-${selectedSubdepartment}-${selectedClass}`}
+      />
+      <EnquiryDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        taskToEdit={taskToEdit}
+        departments={departments}
+        userData={userData}
+        onEnquiryCreated={handleEnquiryCreated}
       />
     </div>
   );

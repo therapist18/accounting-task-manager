@@ -8,11 +8,11 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { SearchableSelect } from '@/components/ui/searchable-select';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { AlignLeft, AlignCenter, AlignRight, Expand, CheckCircle2, X, Database, HelpCircle, Edit3, Save, Layers, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ImagePlaceholderControls } from './ImagePlaceholderControls';
-import { isValidValue, getDisplayLabel } from '../utils/templateUtils';
+import { isValidValue, getDisplayLabel, processDigitSplit } from '../utils/templateUtils';
 
 interface PlaceholderInputProps {
   resolveSourceValue?: (type: string, id: string, placeholder: any, arrayIndex: number | null) => string;
@@ -35,26 +35,9 @@ interface PlaceholderInputProps {
   masterFields?: Map<number, any>;
   showLabel?: boolean;
   formData?: Record<string, any>;
+  requirementJobQuestions?: any;
+  task?: any;
 }
-
-const processDigitSplit = (value: string, digitCount = 8) => {
-  if (!value) return [];
-
-  const strValue = String(value);
-  const isDateStr = /^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/.test(strValue) ||
-    /^\d{4}[\/\-]\d{2}[\/\-]\d{2}$/.test(strValue) ||
-    /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(strValue);
-
-  const chars = isDateStr
-    ? strValue.replace(/\D/g, '').split('')
-    : strValue.split('');
-
-  const result = [];
-  for (let i = 1; i <= digitCount; i++) {
-    result.push(chars[i - 1] || '');
-  }
-  return result;
-};
 
 export const PlaceholderInput = ({
   resolveSourceValue, placeholder, value, originalValue, onChange, onSaveToDb, isSaving, onFileChange, imageStyles, onImageStyleChange, autoPopulated, isArrayItem = false, arrayIndex = null, blockName = null, onAIRefine, isAIRefining, resolvedOptions = [], masterFields, showLabel = true
@@ -312,38 +295,34 @@ export const PlaceholderInput = ({
 
   if (placeholder.type === 'select' || resolvedOptions.length > 0) {
     return (
-      <div className="space-y-2">
+      <div className="">
         <FieldHeader />
-        <SearchableSelect
-          value={String(value || '')}
-          onValueChange={(val) => {
-            const selected = options.find((o: any) => String(o.value) === val);
-            onChange(selected ? selected.label : val);
-          }}
-          options={options}
-          placeholder="Select an option..."
-          searchPlaceholder="Search options..."
-          emptyMessage="No options found"
-          buttonClassName={cn(
-            "h-9 text-xs border-slate-200 bg-white hover:bg-slate-50 transition-colors",
-            hasChanged && canSave ? "border-amber-400 ring-2 ring-amber-50" : ""
-          )}
-        />
+        <Select value={String(value || '')} onValueChange={(val) => {
+          const selected = options.find((o: any) => String(o.value) === val);
+          onChange(selected ? selected.label : val);
+        }}>
+          <SelectTrigger className={cn("w-full bg-white h-8 text-xs", hasChanged && canSave ? "border-amber-400 ring-2 ring-amber-50" : "")}>
+            <SelectValue>{getDisplayLabel(value, options)}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {options.map((o: any, i: number) => <SelectItem key={i} value={String(o.value)}>{o.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
     );
   }
 
   return (
-    <div className="space-y-2">
+    <div className="">
       <FieldHeader />
       <div className="relative">
         <Input
           ref={inputRef}
           value={value || ''}
           onChange={(e) => onChange(e.target.value)}
-          className={cn("bg-white h-9 text-xs border-slate-200 rounded-md transition-all pr-8", hasChanged && canSave ? "border-amber-400 ring-2 ring-amber-50" : "focus:border-blue-400 focus:ring-2 focus:ring-blue-100")}
+          className={cn("bg-white h-8 text-xs transition-all pr-8", hasChanged && canSave ? "border-amber-400 ring-2 ring-amber-50" : "focus:border-blue-400")}
         />
-        {hasChanged && canSave && <div className="absolute right-2.5 top-1/2 -translate-y-1/2 h-2 w-2 rounded-full bg-amber-500 animate-pulse" />}
+        {hasChanged && canSave && <div className="absolute right-2.5 top-1/2 -translate-y-1/2 h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />}
       </div>
     </div>
   );

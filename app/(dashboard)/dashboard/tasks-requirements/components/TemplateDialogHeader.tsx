@@ -148,7 +148,7 @@ export const TemplateDialogHeader = ({
               </svg>
             </div>
             <div className="flex-1">
-              <h4 className="text-sm font-semibold text-late-900 mb-1">
+              <h4 className="text-sm font-semibold text-amber-900 mb-1">
                 ⚠️ Data Changes Detected
               </h4>
               <p className="text-xs text-amber-800 mb-2">

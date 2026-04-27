@@ -10,8 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp, Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles, View, MousePointer2, Layout, Code, ChevronDown, Database, Layers, Edit3 } from "lucide-react";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { AlignCenter, AlignLeft, AlignRight, Download, FileText, FileUp, Loader2, Wand2, Expand, CheckCircle2, X, Image as ImageIcon, Save, Sparkles, View, MousePointer2, Layout, Code, ChevronDown, Layers } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { saveAs } from 'file-saver';
@@ -25,6 +24,14 @@ import { EntityType, ENTITY_TYPES, DEPENDANT_RELATIONSHIPS } from "@/lib/constan
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { executeComputedField } from '../tasks/utils/automationComputedFunctions';
+import { formatWhitespace, isDate, processDigitSplit, formatDate, base64Parser, toBase64, fetchImageAsBase64, parseJsonValue, normalizeString, findPrimaryDirector, getOrdinalNumber, getOrdinalWord, parseImageDimension, checkDocumentStatus, generateDocumentChecklist, EDITOR_PREVIEW_STYLES, extractDisplayValue } from './utils/templateUtils';
+import { getTargetEntity, processPlaceholderValue, processTextField, isValidValue, resolveArrayData } from './utils/placeholderProcessors';
+import { extractHeadersFooters, convertWordXmlToHtml, fetchTemplateBuffer as fetchTemplateBufferUtil } from './utils/wordDocumentUtils';
+import { TemplateDialogHeader } from './components/TemplateDialogHeader';
+import { TemplateSourcePanel } from './components/TemplateSourcePanel';
+import { PreviewPanel } from './components/PreviewPanel';
+import { PlaceholderInput } from './components/PlaceholderInput';
+import { ArrayInputsPanel } from './components/ArrayInputsPanel';
 
 // Common docxtemplater format functions
 const formatFunctions = new Set([
@@ -34,28 +41,6 @@ const formatFunctions = new Set([
 ]);
 
 const formatRegex = /\{\{\s*([a-zA-Z0-9_]+)\s*(\/([a-zA-Z0-9_]+))?\s*\}\}/g;
-
-const EDITOR_PREVIEW_STYLES = `
-  prose prose-sm sm:prose-base dark:prose-invert max-w-full focus:outline-none 
-  font-serif
-  [&_*]:whitespace-pre-wrap
-  [&_p]:min-h-[1em]
-  [&_p]:my-0 
-  [&_first-child]:mt-0
-  [&_last-child]:mb-0
-  [&_table]:border-collapse [&_table]:border [&_table]:border-border [&_table]:w-full [&_table]:my-4
-  [&_th]:border [&_th]:border-border [&_th]:bg-muted/50 [&_th]:p-2 [&_th]:text-left
-  [&_td]:border [&_td]:border-border [&_td]:p-2 relative
-`.replace(/\s+/g, ' ').trim();
-
-const formatWhitespace = (val) => {
-    if (val === null || val === undefined) return '';
-    return String(val)
-        // Convert 2 or more spaces to non-breaking spaces (&nbsp;)
-        .replace(/  +/g, (match) => '&nbsp;'.repeat(match.length))
-        // Ensure literal newlines are converted to HTML breaks
-        .replace(/\n/g, '<br />');
-};
 
 const applyFormat = (val, format) => {
     if (!val || typeof val !== 'string') return val;
@@ -73,1345 +58,25 @@ const applyFormat = (val, format) => {
             return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
         case 'title':
             return str.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+        case 'prettify':
+            return JSON.stringify(val, null, 2);
+        case 'escape':
+            return escape(str);
+        case 'unescape':
+            return unescape(str);
+        case 'html':
+            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        case 'raw':
+            return str.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+        case 'json':
+            return JSON.stringify(val);
+        case 'parse':
+            return JSON.parse(val);
+        case 'stringify':
+            return JSON.stringify(val, null, 2);
         default:
             return str;
     }
-};
-
-const isDate = (str) => {
-    if (!str || typeof str !== 'string') return false;
-
-    const datePatterns = [
-        /^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/,
-        /^\d{4}[\/\-]\d{2}[\/\-]\d{2}$/,
-        /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/,
-    ];
-
-    return datePatterns.some(pattern => pattern.test(str.trim()));
-};
-
-const processDigitSplit = (value, digitCount = 8) => {
-    if (!value) return [];
-
-    const strValue = String(value);
-    const chars = isDate(strValue)
-        ? strValue.replace(/\D/g, '').split('')
-        : strValue.split('');
-
-    const result = [];
-    for (let i = 1; i <= digitCount; i++) {
-        result.push(chars[i - 1] || '');
-    }
-    return result;
-};
-
-const formatDate = (date, formatStr) => {
-    if (!date) return '';
-    const d = new Date(date);
-    if (isNaN(d.getTime())) return '';
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-
-    if (!formatStr) return `${year}-${month}-${day}`;
-
-    return formatStr
-        .replace('YYYY', year)
-        .replace('MM', month)
-        .replace('DD', day);
-};
-
-const base64Parser = async (dataURL) => {
-    try {
-        if (!dataURL) return null;
-
-        if (typeof dataURL === 'string' && dataURL.startsWith('data:')) {
-            const matches = dataURL.match(/^data:(image\/[^;]+);base64,(.*)$/);
-            if (!matches) return null;
-
-            const mimeType = matches[1];
-            const base64 = matches[2];
-            const binaryStr = atob(base64);
-            const len = binaryStr.length;
-            const bytes = new Uint8Array(len);
-            for (let i = 0; i < len; i++) {
-                bytes[i] = binaryStr.charCodeAt(i);
-            }
-            return bytes.buffer;
-        }
-
-        if (typeof dataURL === 'string' && (dataURL.startsWith('http') || dataURL.startsWith('blob:'))) {
-            const response = await fetch(dataURL);
-            if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
-            const blob = await response.blob();
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result);
-                reader.onerror = reject;
-                reader.readAsArrayBuffer(blob);
-            });
-        }
-
-        return null;
-    } catch (error) {
-        console.error('Error in base64Parser:', error);
-        return null;
-    }
-};
-
-const toBase64 = (file) => new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = error => reject(error);
-});
-
-const fetchImageAsBase64 = async (url) => {
-    try {
-        // If private, use Supabase to get a temporary authorized URL
-        const path = url.split('/public/kyc-documents/')[1];
-        const { data, error } = await supabase.storage
-            .from('kyc-documents')
-            .createSignedUrl(path, 60);
-
-        const finalUrl = data?.signedUrl || url;
-        const response = await fetch(finalUrl, { mode: 'cors' });
-        if (!response.ok) return null;
-        const blob = await response.blob();
-        return await toBase64(blob);
-    } catch (error) {
-        return null;
-    }
-};
-
-const parseJsonValue = (data, path) => {
-    if (!path || !data) return '';
-    try {
-        let currentValue = data;
-        const normalizedPath = path.replace(/->>/g, '->').replace(/'/g, '');
-
-        const parts = normalizedPath.split(/->|\./);
-
-        for (let i = 0; i < parts.length; i++) {
-            const key = parts[i].trim();
-            if (!key) continue;
-            if (currentValue && currentValue.current !== undefined && key === 'current') {
-                currentValue = currentValue.current;
-            }
-
-            if (Array.isArray(currentValue)) {
-                currentValue = currentValue[0];
-            }
-
-            if (currentValue && typeof currentValue === 'object') {
-                if (currentValue[key] !== undefined) {
-                    currentValue = currentValue[key];
-                } else {
-                    const lowerKey = key.toLowerCase();
-                    const foundKey = Object.keys(currentValue).find(k => k.toLowerCase() === lowerKey);
-                    if (foundKey) {
-                        currentValue = currentValue[foundKey];
-                    } else {
-                        currentValue = undefined;
-                    }
-                }
-            } else if (i < parts.length - 1) {
-                return '';
-            }
-        }
-
-        const finalValue = currentValue !== undefined && currentValue !== null ? String(currentValue) : '';
-        return finalValue;
-    } catch (error) {
-        return '';
-    }
-};
-
-const normalizeString = (str) => !str ? '' : str.toLowerCase().replace(/[_\s-]/g, '');
-
-const findPrimaryDirector = (relationshipData) => {
-    if (!relationshipData?.directors?.length) return null;
-    const directors = Array.isArray(relationshipData.directors)
-        ? relationshipData.directors
-        : [relationshipData.directors];
-    return directors.find(d => d.is_primary) || directors[0];
-};
-
-const getOrdinalNumber = (index: number): string => {
-    const num = index + 1;
-
-    if (num % 100 >= 11 && num % 100 <= 13) {
-        return `${num}th`;
-    }
-
-    switch (num % 10) {
-        case 1: return `${num}st`;
-        case 2: return `${num}nd`;
-        case 3: return `${num}rd`;
-        default: return `${num}th`;
-    }
-};
-
-const getOrdinalWord = (index: number): string => {
-    const words = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth'];
-    return words[index] || getOrdinalNumber(index);
-};
-
-const parseImageDimension = (dimension: string | undefined): number | null => {
-    if (!dimension) return null;
-
-    const cleaned = dimension.toString().trim();
-    const numericValue = parseFloat(cleaned);
-
-    if (isNaN(numericValue)) return null;
-
-    return numericValue;
-};
-
-const checkDocumentStatus = (
-    documentId: string,
-    entityId: string,
-    entityType: string,
-    sourceDataCache: Record<string, Record<number, any>>,
-    dataSourceConfig?: {
-        table: string;
-        linking_variable: string;
-        document_id_field: string;
-    }
-): boolean => {
-    // Use provided config or fallback to defaults
-    const config = dataSourceConfig || {
-        table: 'acc_portal_kyc_uploads',
-        linking_variable: entityType === 'company' ? 'company_id' : 'individual_id',
-        document_id_field: 'document_id'
-    };
-    const uploads = sourceDataCache[config.table] || {};
-    const documentFound = Object.values(uploads).some(upload => {
-        const uploadDocId = upload[config.document_id_field];
-        const uploadEntityId = upload[config.linking_variable];
-        return uploadDocId === documentId && uploadEntityId === entityId;
-        return String(upload[config.linking_variable]) === String(entityId);
-    });
-    return documentFound;
-};
-
-const generateDocumentChecklist = (
-    placeholder: any,
-    entityId: string,
-    entityType: string,
-    sourceDataCache: Record<string, Record<number, any>>,
-    availableDocuments: Array<{ id: string; display_name: string; name: string }>
-): string => {
-    const linkedDocs = placeholder.linked_document_ids || [];
-    const format = placeholder.checklist_display_format || 'checkboxes';
-    const dataSourceConfig = placeholder.checklist_data_source;
-    if (linkedDocs.length === 0) {
-        return '';
-    }
-    const checklist = linkedDocs.map(docId => {
-        const doc = availableDocuments.find(d => d.id === docId);
-        const isFound = checkDocumentStatus(
-            docId,
-            entityId,
-            entityType,
-            sourceDataCache,
-            dataSourceConfig
-        );
-
-        const docName = doc?.display_name || doc?.name || 'Unknown Document';
-        const symbol = isFound ? '✓' : '';
-
-        switch (format) {
-            case 'bullets':
-                return `• ${docName}${isFound ? ' ✓' : ''}`;
-            case 'table':
-                return `| ${symbol} | ${docName} | ${isFound ? 'Submitted' : 'Pending'} |`;
-            default: // checkboxes
-                return `${symbol}`;
-        }
-    });
-
-    if (format === 'table') {
-        return `| Status | Document | Notes |\n|--------|----------|-------|\n${checklist.join('\n')}`;
-    }
-
-    return checklist.join('\n');
-};
-
-const getTargetEntity = (placeholder, relationshipData, arrayIndex = null, sourceArray = null, entityIdMap = null, combinedCache = null, extractedData = null, companyData = null) => {
-    if (sourceArray && arrayIndex !== null && sourceArray[arrayIndex]) {
-        return sourceArray[arrayIndex];
-    }
-
-    let entityType = 'company';
-    if (Array.isArray(placeholder.entity_type)) {
-        entityType = placeholder.entity_type[0];
-    } else if (placeholder.entity_type) {
-        entityType = placeholder.entity_type;
-    }
-    const normType = entityType?.toLowerCase()?.trim();
-    if (entityIdMap) {
-        if (normType === 'director' && entityIdMap.director) {
-            const dirId = entityIdMap.director;
-            return relationshipData?.directors?.find(d => String(d.id) === String(dirId)) ||
-                combinedCache?.['registry_individuals']?.[dirId];
-        }
-        if (normType === 'principal' && entityIdMap.principal) {
-            return relationshipData?.principal || extractedData;
-        }
-    }
-    if (normType === 'principal') {
-        return relationshipData?.principal || extractedData || personData;
-    }
-
-    if (normType === 'sponsor') {
-        if (entityIdMap?.sponsor) {
-            if (relationshipData?.sponsor && String(relationshipData.sponsor.id) === String(entityIdMap.sponsor)) {
-                return relationshipData.sponsor;
-            }
-        }
-        const sponsorResult = relationshipData?.sponsor || null;
-        return sponsorResult;
-    }
-
-    if (['dependant', 'dependant', 'spouse', 'child'].includes(normType)) {
-        if (placeholder.dependant_relationship?.[0]) {
-            const targetRel = placeholder.dependant_relationship[0].toLowerCase();
-            return relationshipData?.dependants?.find(d => d.relationship?.toLowerCase() === targetRel);
-        }
-        return relationshipData?.dependants?.[0];
-    }
-
-    if (normType === 'director') {
-        const dir = placeholder.director_type === 'primary'
-            ? relationshipData?.directors?.find(d => d.is_primary)
-            : relationshipData?.directors?.[0];
-        return dir || null;
-    }
-
-    if (normType === 'company') {
-        return relationshipData?.company || companyData || extractedData;
-    }
-
-    return null;
-};
-
-const processOrdinalField = (placeholder, arrayIndex) => {
-    const ordinalFormat = placeholder.ordinal_format || 'number';
-
-    if (ordinalFormat === 'word') {
-        return {
-            value: getOrdinalWord(arrayIndex),
-            source: 'Ordinal Generator'
-        };
-    } else if (ordinalFormat === 'custom') {
-        const customFormat = placeholder.custom_ordinal_format || '.';
-        const num = arrayIndex + 1;
-        return {
-            value: `${num}${customFormat}`,
-            source: 'Custom Ordinal Generator'
-        };
-    } else {
-        return {
-            value: getOrdinalNumber(arrayIndex),
-            source: 'Ordinal Generator'
-        };
-    }
-};
-
-const processCurrentDateField = (placeholder, masterFields) => {
-    if (!placeholder.master_field_ids?.length || !masterFields) {
-        return { value: '', source: null };
-    }
-
-    for (const id of placeholder.master_field_ids) {
-        const mf = masterFields.get(parseInt(id, 10));
-        if (mf?.date_config?.useCurrentDate) {
-            return {
-                value: formatDate(new Date(), mf.date_config.format || 'DD/MM/YYYY'),
-                source: 'System Date'
-            };
-        }
-    }
-
-    return { value: '', source: null };
-};
-
-const processConditionalField = (placeholder, targetEntity, combinedCache, masterFields, computedFieldCache) => {
-    if (!placeholder.conditions || !targetEntity) return { value: '', source: null };
-
-    const targetId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id);
-
-    for (const condition of placeholder.conditions) {
-        if (condition.comparison) {
-            const { field, operator, value: compareValue } = condition.comparison;
-
-            if (!field) continue;
-
-            let fieldValue = null;
-
-            if (condition.master_field_id) {
-                const mf = masterFields.get(parseInt(condition.master_field_id, 10));
-                if (mf?.sources) {
-                    for (const source of mf.sources) {
-                        // Handle computed fields
-                        if (source.is_computed && computedFieldCache) {
-                            const extractionMode = 'latest';
-                            const cacheKey = `${mf.id}_${targetId}_${extractionMode}`;
-                            const computedVal = computedFieldCache[cacheKey];
-
-                            if (computedVal !== undefined && computedVal !== null && computedVal !== '' &&
-                                !['Document Not Found', 'Missing Document', 'Field Not Found', 'Missing', 'No Source'].includes(computedVal)) {
-                                fieldValue = computedVal;
-                                break;
-                            }
-                            continue;
-                        }
-
-                        // Handle regular database fields
-                        const tableData = combinedCache[source.table];
-                        if (!tableData) continue;
-
-                        const linkingVar = source.linking_variable || 'id';
-                        const record = Object.values(tableData).find(rec =>
-                            String(rec[linkingVar] || rec.id) === targetId
-                        );
-
-                        if (record) {
-                            fieldValue = source.path
-                                ? parseJsonValue(record, source.path)
-                                : record[field || mf.field_key];
-
-                            if (fieldValue && typeof fieldValue === 'object') {
-                                fieldValue = fieldValue.number || fieldValue.value || fieldValue.name || String(fieldValue);
-                            }
-                            break;
-                        }
-                    }
-                }
-            } else {
-                fieldValue = targetEntity[field];
-            }
-
-            if (fieldValue === null || fieldValue === undefined) continue;
-
-            const strFieldValue = String(fieldValue).trim().toLowerCase();
-            const strCompareValue = String(compareValue || '').trim().toLowerCase();
-
-            let conditionMet = false;
-            switch (operator) {
-                case 'equals':
-                    conditionMet = strFieldValue === strCompareValue;
-                    break;
-                case 'not_equals':
-                    conditionMet = strFieldValue !== strCompareValue;
-                    break;
-                case 'contains':
-                    conditionMet = strFieldValue.includes(strCompareValue);
-                    break;
-                default:
-                    conditionMet = Boolean(fieldValue);
-            }
-
-            if (conditionMet) {
-                return {
-                    value: `${condition.label || ''}${fieldValue}`,
-                    source: 'Conditional Match'
-                };
-            }
-        } else if (condition.master_field_id) {
-            const mf = masterFields.get(parseInt(condition.master_field_id, 10));
-            if (!mf?.sources) continue;
-
-            for (const source of mf.sources) {
-                // Handle computed fields
-                if (source.is_computed && computedFieldCache) {
-                    const extractionMode = 'latest';
-                    const cacheKey = `${mf.id}_${targetId}_${extractionMode}`;
-                    const computedVal = computedFieldCache[cacheKey];
-
-                    if (computedVal !== undefined && computedVal !== null && computedVal !== '' &&
-                        !['Document Not Found', 'Missing Document', 'Field Not Found', 'Missing', 'No Source'].includes(computedVal)) {
-                        return {
-                            value: `${condition.label || ''}${computedVal}`,
-                            source: `Conditional: ${mf.label || 'Computed'}`
-                        };
-                    }
-                    continue;
-                }
-
-                // Handle regular database fields
-                const tableData = combinedCache[source.table];
-                if (!tableData) continue;
-
-                const linkingVar = source.linking_variable || 'id';
-                const record = Object.values(tableData).find(rec =>
-                    String(rec[linkingVar] || rec.id) === targetId
-                );
-
-                if (record) {
-                    let rawVal = source.path
-                        ? parseJsonValue(record, source.path)
-                        : record[condition.tag || mf.field_key];
-
-                    if (rawVal && typeof rawVal === 'object') {
-                        rawVal = rawVal.number || rawVal.value || rawVal.name || JSON.stringify(rawVal);
-                    }
-
-                    if (rawVal && String(rawVal).trim() !== '' && String(rawVal) !== '[object Object]') {
-                        return {
-                            value: `${condition.label || ''}${rawVal}`,
-                            source: `Conditional: ${mf.label || source.table}`
-                        };
-                    }
-                }
-            }
-        }
-    }
-    return { value: '', source: null };
-};
-
-const processBooleanField = (placeholder, targetEntity, combinedCache, masterFields, task) => {
-    if (!placeholder.boolean_conditions) return { value: [], source: null };
-
-    const targetId = targetEntity ? String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id) : null;
-    const taskRecord = (combinedCache?.['tm_tasks'] && Object.values(combinedCache['tm_tasks'])[0]) || task;
-    const jobAnswers = taskRecord?.job_specific_answers || {};
-
-    const results = placeholder.boolean_conditions.map(condition => {
-        let isChecked = false;
-
-        // 1. Job Questions (Keep existing)
-        const qId = condition.linked_job_question_id || placeholder.linked_job_question_id;
-        if (qId && jobAnswers[qId]) {
-            const actualAnswer = String(jobAnswers[qId]).trim().toLowerCase();
-            const targetValue = String(condition.comparison?.value || '').trim().toLowerCase();
-            if (condition.comparison?.operator === 'equals') isChecked = actualAnswer === targetValue;
-            else if (condition.comparison?.operator === 'contains') isChecked = actualAnswer.includes(targetValue);
-        }
-        // 2. Master Field Logic
-        else if (condition.master_field_id && targetId) {
-            const mf = masterFields.get(parseInt(condition.master_field_id, 10));
-            if (mf?.sources) {
-                for (const source of mf.sources) {
-                    const tableData = combinedCache[source.table];
-                    if (!tableData) continue;
-
-                    // Improved record lookup
-                    const record = Object.values(tableData).find(r =>
-                        String(r[source.linking_variable || 'id']) === targetId ||
-                        String(r.id) === targetId ||
-                        String(r.individual_id) === targetId
-                    );
-
-                    if (record) {
-                        const fieldValue = source.path
-                            ? parseJsonValue(record, source.path)
-                            : record[condition.comparison?.field || mf.field_key || condition.tag];
-
-                        if (fieldValue !== undefined && fieldValue !== null) {
-                            if (condition.comparison) {
-                                const { operator, value } = condition.comparison;
-                                const strFieldValue = String(fieldValue).trim().toLowerCase();
-                                const compareValue = String(value || '').trim().toLowerCase();
-
-                                switch (operator) {
-                                    case 'equals': isChecked = strFieldValue === compareValue; break;
-                                    case 'not_equals': isChecked = strFieldValue !== compareValue; break;
-                                    case 'contains': isChecked = strFieldValue.includes(compareValue); break;
-                                    default: isChecked = Boolean(fieldValue);
-                                }
-                            } else {
-                                isChecked = Boolean(fieldValue);
-                            }
-                        }
-                        if (isChecked) break;
-                    }
-                }
-            }
-        }
-
-        return {
-            ...condition,
-            checked: isChecked,
-            hasDbLink: !!(qId || condition.master_field_id)
-        };
-    });
-
-    return {
-        value: results,
-        source: results.some(r => r.checked) ? 'Logic Resolved' : null
-    };
-};
-
-const processDocumentChecklistField = (placeholder, targetEntity, combinedCache) => {
-    const checklistDataSources = placeholder.checklist_data_sources || [];
-    const displayFormat = placeholder.checklist_display_format || 'bullets';
-    const successLabel = placeholder.checklist_success_label || '✔';
-    const notFoundLabel = placeholder.checklist_not_found_label || '✗';
-
-    if (checklistDataSources.length === 0) {
-        return { value: '', source: null };
-    }
-
-    const searchId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id);
-    const checklistResults = [];
-    for (const dataSource of checklistDataSources) {
-        const { table, linking_variable, linked_document_ids = [], execution_mode = 'latest', label } = dataSource;
-        const tableData = combinedCache[table];
-        if (!tableData) {
-            const itemLabel = label || placeholder.display_value || placeholder.name;
-            checklistResults.push(`${notFoundLabel} ${itemLabel}`);
-            continue;
-        }
-        let matches = Object.values(tableData).filter(d => {
-            const entityIdMatch = String(d[linking_variable] || d.id) === searchId;
-            if (!entityIdMatch) return false;
-
-            if (linked_document_ids.length > 0) {
-                return linked_document_ids.includes(d.document_id);
-            }
-
-            return true;
-        });
-        if (execution_mode === 'latest' && matches.length > 0) {
-            matches = matches.sort((a, b) => {
-                const aDate = a.issue_date ? new Date(a.issue_date).getTime() : 0;
-                const bDate = b.issue_date ? new Date(b.issue_date).getTime() : 0;
-                return bDate - aDate;
-            });
-            matches = [matches[0]];
-        }
-
-        // Use label from data source or placeholder display_value as fallback
-        const itemLabel = label || placeholder.display_value || placeholder.name;
-
-        if (matches.length > 0) {
-            checklistResults.push(`${successLabel} ${itemLabel}`);
-        } else {
-            checklistResults.push(`${notFoundLabel} ${itemLabel}`);
-        }
-    }
-
-    if (checklistResults.length === 0) {
-        return { value: '', source: null };
-    }
-
-    // Join all checklist items with newlines
-    return {
-        value: checklistResults.join('\n'),
-        source: 'Document Checklist'
-    };
-};
-
-const processImageField = (placeholder, targetEntity, combinedCache, masterFields) => {
-    const sourceTable = placeholder.source_table;
-    const linkingVariable = placeholder.linking_variable;
-    const documentTypeIds = placeholder.document_type_ids || [];
-    const computedFunction = placeholder.computed_function || 'none';
-    const executionMode = placeholder.execution_mode || 'latest';
-
-    if (!sourceTable || !linkingVariable) {
-        return { value: '', source: null };
-    }
-
-    const tableData = combinedCache[sourceTable];
-    if (!tableData) {
-        return { value: '', source: null };
-    }
-
-    const searchId = String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id);
-
-    let matches = Object.values(tableData).filter(d => {
-        const entityIdMatch = String(d[linkingVariable] || d.id) === searchId;
-        if (!entityIdMatch) return false;
-
-        if (documentTypeIds.length > 0) {
-            return documentTypeIds.includes(d.document_id);
-        }
-
-        return true;
-    });
-
-    if (matches.length === 0) {
-        return { value: '', source: null };
-    }
-
-    if (executionMode === 'latest' || computedFunction.includes('Latest')) {
-        matches = matches.sort((a, b) => {
-            const aDate = a.issue_date ? new Date(a.issue_date).getTime() : 0;
-            const bDate = b.issue_date ? new Date(b.issue_date).getTime() : 0;
-            return bDate - aDate;
-        });
-    }
-
-    const match = matches[0];
-    if (match?.file_path) {
-        const imageUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${match.file_path}`;
-        return {
-            value: imageUrl,
-            source: `Image: ${sourceTable}`
-        };
-    }
-
-    return { value: '', source: null };
-};
-
-const processTextField = (
-    placeholder: any,
-    targetEntity: any,
-    combinedCache: Record<string, any>,
-    masterFields: Map<number, any>,
-    computedFieldCache: Record<string, any> | null,
-) => {
-    if (!placeholder.master_field_ids?.length) {
-        return { value: '', source: null };
-    }
-
-    const candidateIds = [
-        targetEntity?.id,
-        targetEntity?.director_id,
-        targetEntity?.individual_id,
-        targetEntity?.company_id,
-    ]
-        .filter(Boolean)
-        .map(String)
-        .filter((v, i, arr) => arr.indexOf(v) === i);
-
-    if (candidateIds.length === 0) {
-        return { value: '', source: null };
-    }
-
-    const allValues: string[] = [];
-    const allSources: string[] = [];
-
-    for (const id of placeholder.master_field_ids) {
-        const mf = masterFields.get(parseInt(id, 10));
-        if (!mf?.sources) continue;
-
-        // Sort by priority ascending so lower number = higher priority
-        const sortedSources = [...mf.sources].sort(
-            (a, b) => (a.priority ?? 999) - (b.priority ?? 999)
-        );
-
-        for (const source of sortedSources) {
-
-            // ── COMPUTED SOURCE ──────────────────────────────────────────────
-            if (source.is_computed) {
-                if (!computedFieldCache) continue;
-
-                const extractionMode = 'latest';
-                let computedVal: any;
-
-                for (const candidateId of candidateIds) {
-                    const ck = `${mf.id}_${candidateId}_${extractionMode}`;
-                    if (computedFieldCache[ck] !== undefined) {
-                        computedVal = computedFieldCache[ck];
-                        break;
-                    }
-                }
-
-                if (computedVal === undefined) continue; // still loading
-
-                const errorStrings = [
-                    'Document Not Found', 'Missing Document', 'No Document Specified',
-                    'Field Not Found', 'Number Not Found', 'Missing', 'No Source',
-                ];
-
-                if (computedVal !== null && !errorStrings.includes(computedVal)) {
-                    let finalVal = computedVal;
-
-                    if (typeof computedVal === 'object' && computedVal !== null && source.path) {
-                        const pathMatch = source.path.match(/['"]([\w_]+)['"]$/);
-                        const fieldName = pathMatch ? pathMatch[1] : null;
-                        if (fieldName && computedVal[fieldName]) {
-                            finalVal = String(computedVal[fieldName]);
-                        } else {
-                            finalVal = computedVal.en || computedVal.name || computedVal.title ||
-                                String(Object.values(computedVal)[0] || '');
-                        }
-                    }
-
-                    if (finalVal && String(finalVal).trim() !== '') {
-                        allValues.push(String(finalVal));
-                        allSources.push(`Computed: ${mf.label || source.table}`);
-                        break; // found for this master field — stop trying sources
-                    }
-                }
-                continue; // computed error → try next priority source
-            }
-
-            // ── STANDARD DB SOURCE ───────────────────────────────────────────
-            const tableData = combinedCache[source.table];
-            if (!tableData) continue;
-
-            const linkingVar = source.linking_variable || 'id';
-
-            // Document-scoped sources (source_type === 'document' or has document_id[])
-            // are cached under a composite key: doc_<docId>_<entityId>
-            const docIds: string[] = Array.isArray(source.document_id)
-                ? source.document_id
-                : (source.document_id ? [source.document_id] : []);
-
-            let record: any = null;
-
-            if (docIds.length > 0) {
-                // Try composite key first: doc_<documentId>_<entityId>
-                for (const docId of docIds) {
-                    for (const candidateId of candidateIds) {
-                        const compositeKey = `doc_${docId}_${candidateId}`;
-                        if (tableData[compositeKey]) {
-                            record = tableData[compositeKey];
-                            break;
-                        }
-                    }
-                    if (record) break;
-                }
-
-                // Fallback: scan table rows matching both entity ID and document_id
-                if (!record) {
-                    const allRows = Object.values(tableData);
-                    for (const candidateId of candidateIds) {
-                        record = allRows.find((r: any) =>
-                            String(r[linkingVar]) === candidateId &&
-                            docIds.includes(r.document_id)
-                        ) || null;
-                        if (record) break;
-                    }
-                }
-            } else {
-                // Standard entity-ID lookup
-                for (const candidateId of candidateIds) {
-                    record = Object.values(tableData).find((r: any) =>
-                        String((r as any)[linkingVar]) === candidateId
-                    ) || null;
-                    if (record) break;
-                }
-            }
-
-            if (record) {
-                let val = source.path
-                    ? parseJsonValue(record, source.path)
-                    : ((record as any)[mf.field_key] || (record as any)[placeholder.name]);
-
-                if (val && String(val).trim() !== '') {
-                    allValues.push(String(val));
-                    allSources.push(`DB(p${source.priority ?? '?'}): ${source.table}`);
-                    break; // found a value at this priority — stop trying lower priorities
-                }
-                // value was empty → fall through to next priority source
-            }
-            // record not found → fall through to next priority source
-        }
-    }
-
-    if (allValues.length > 0) {
-        return { value: allValues.join(' '), source: allSources[0] };
-    }
-
-    return { value: '', source: null };
-};
-
-const isValidValue = (val: any, placeholderType?: string): boolean => {
-    if (val === null || val === undefined) return false;
-
-    // FIX: For booleans, an array of options is only valid if one is checked
-    if (placeholderType === 'boolean' && Array.isArray(val)) {
-        return val.some(opt => opt && opt.checked === true);
-    }
-
-    if (Array.isArray(val)) {
-        return val.length > 0;
-    }
-    if (typeof val === 'string') {
-        if (val === '') return false;
-        const errorStrings = ['Missing', 'Missing Config', 'No Source', 'Computing...', 'Document Not Found', 'Field Not Found'];
-        return !errorStrings.includes(val);
-    }
-    return Boolean(val);
-};
-
-const processPlaceholderValue = (placeholder, relationshipData, combinedCache, masterFields, entityIdMap = null, extractedData, companyData, arrayIndex = null, sourceArray = null, task = null, computedFieldCache = null) => {
-    const logic = placeholder.source_logic || 'priority';
-    const collectedValues: string[] = [];
-    const sourceMetadata: string[] = [];
-    const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCache, extractedData, companyData);
-    const targetId = targetEntity ? String(targetEntity.id || targetEntity.director_id || targetEntity.individual_id || targetEntity.company_id) : null;
-    if (placeholder.master_field_ids?.length > 0 && targetEntity) {
-        for (const mid of placeholder.master_field_ids) {
-            let result = { value: '', source: null };
-            const mf = masterFields.get(parseInt(mid, 10));
-            if (mf?.date_config?.useCurrentDate) {
-                result = processCurrentDateField({ ...placeholder, master_field_ids: [mid] }, masterFields);
-            } else {
-                if (placeholder.type === 'ordinal') {
-                    result = processOrdinalField(placeholder, arrayIndex);
-                } else if (placeholder.type === 'image') {
-                    result = processImageField(placeholder, targetEntity, combinedCache, masterFields);
-                } else if (placeholder.type === 'boolean') {
-                    result = processBooleanField({ ...placeholder, master_field_ids: [mid] }, targetEntity, combinedCache, masterFields);
-                } else {
-                    result = processTextField({ ...placeholder, master_field_ids: [mid] }, targetEntity, combinedCache, masterFields, computedFieldCache);
-                }
-            }
-            if (isValidValue(result.value, placeholder.type)) {
-                if (logic === 'priority') {
-                    console.groupEnd();
-                    return result;
-                }
-                collectedValues.push(String(result.value));
-                sourceMetadata.push(result.source || 'DB');
-            }
-        }
-    }
-    if (placeholder.type === 'boolean' && placeholder.boolean_conditions?.length > 0 && targetEntity) {
-        const result = processBooleanField(placeholder, targetEntity, combinedCache, masterFields, task);
-        if (isValidValue(result.value, placeholder.type)) {
-            const matchedLabel = result.value.find(v => v.checked)?.label;
-            if (logic === 'priority') { console.groupEnd(); return result; }
-            collectedValues.push(result.value);
-            sourceMetadata.push(result.source || 'Boolean (DB)');
-        }
-    }
-
-    if (placeholder.type === 'conditional' && placeholder.conditions?.length > 0 && targetEntity) {
-        const result = processConditionalField(placeholder, targetEntity, combinedCache, masterFields, computedFieldCache);
-        if (isValidValue(result.value)) {
-            if (logic === 'priority') { console.groupEnd(); return result; }
-            collectedValues.push(String(result.value));
-            sourceMetadata.push(result.source || 'Conditional (DB)');
-        }
-    }
-
-    if (placeholder.type === 'document_checklist' && placeholder.checklist_data_sources?.length > 0 && targetEntity) {
-        const result = processDocumentChecklistField(placeholder, targetEntity, combinedCache);
-        if (isValidValue(result.value)) {
-            if (logic === 'priority') { console.groupEnd(); return result; }
-            collectedValues.push(String(result.value));
-            sourceMetadata.push(result.source || 'Document Checklist');
-        }
-    }
-
-    if (placeholder.type === 'image' && placeholder.source_table && placeholder.linking_variable && targetEntity) {
-        const result = processImageField(placeholder, targetEntity, combinedCache, masterFields);
-        if (isValidValue(result.value)) {
-            if (logic === 'priority') { console.groupEnd(); return result; }
-            collectedValues.push(String(result.value));
-            sourceMetadata.push(result.source || 'Image');
-        }
-    }
-
-    const qIds = placeholder.linked_job_question_ids || (placeholder.linked_job_question_id ? [placeholder.linked_job_question_id] : []);
-    if (qIds.length > 0) {
-        const taskRecord = (combinedCache?.['tm_tasks'] && Object.values(combinedCache['tm_tasks'])[0]) || task;
-        const answers = taskRecord?.job_specific_answers || {};
-
-        for (const qId of qIds) {
-            const answer = answers[String(qId)] ?? answers[Number(qId)];
-            if (isValidValue(answer)) {
-                if (logic === 'priority') return { value: String(answer), source: 'Job Question' };
-                collectedValues.push(String(answer));
-                sourceMetadata.push('Job Question');
-            }
-        }
-    }
-    const reqIds = placeholder.linked_requirement_ids || [];
-    if (reqIds.length > 0 && targetId) {
-        for (const rId of reqIds) {
-            const isFound = checkDocumentStatus(rId, targetId, placeholder.entity_type?.[0] || 'company', combinedCache);
-            if (isFound) {
-                const val = "✓ Submitted";
-                if (logic === 'priority') return { value: val, source: 'Requirement' };
-                collectedValues.push(val);
-                sourceMetadata.push('Requirement');
-            }
-        }
-    }
-    if (logic === 'all' && collectedValues.length > 0) {
-        const finalResult = {
-            value: collectedValues.join(' '),
-            source: `Merged (${sourceMetadata[0]})`
-        };
-        return finalResult;
-    }
-    if (placeholder.default_value) {
-        const defaultResult = { value: placeholder.default_value, source: 'Default' };
-        return defaultResult;
-    }
-
-    const emptyResult = { value: '', source: null };
-    return emptyResult;
-};
-
-const extractDisplayValue = (value) => {
-    if (value === null || value === undefined) return '';
-
-    if (Array.isArray(value)) {
-        const checkedItems = value.filter(opt => opt && opt.checked);
-
-        if (checkedItems.length > 0) {
-            return checkedItems.map(opt => {
-                return opt.label || opt.tag || opt.value || '';
-            }).join(', ');
-        }
-        return '';
-    }
-
-    if (typeof value === 'object') {
-        return value.value !== undefined ? String(value.value) : '';
-    }
-
-    return String(value);
-};
-
-const ImagePlaceholderControls = ({ styles, onStyleChange }) => {
-    const sizeMap = { small: '25%', medium: '50%', large: '75%', 'full-width': '100%' };
-    const currentSizeKey = Object.keys(sizeMap).find(key => sizeMap[key] === styles.maxWidth) || 'full-width';
-
-    return (
-        <div className="space-y-3 pt-2 border-t mt-2">
-            <div className="flex items-center gap-2">
-                <ToggleGroup
-                    type="single"
-                    value={styles.textAlign || 'center'}
-                    onValueChange={(align) => align && onStyleChange('textAlign', align)}
-                    className="bg-background rounded-md border h-8"
-                >
-                    <ToggleGroupItem value="left" className="px-2"><AlignLeft className="h-3 w-3" /></ToggleGroupItem>
-                    <ToggleGroupItem value="center" className="px-2"><AlignCenter className="h-3 w-3" /></ToggleGroupItem>
-                    <ToggleGroupItem value="right" className="px-2"><AlignRight className="h-3 w-3" /></ToggleGroupItem>
-                </ToggleGroup>
-                <Select value={currentSizeKey} onValueChange={(size) => onStyleChange('maxWidth', sizeMap[size])}>
-                    <SelectTrigger className="w-14 h-8"><SelectValue><Expand className="h-3 w-3" /></SelectValue></SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="small">25%</SelectItem>
-                        <SelectItem value="medium">50%</SelectItem>
-                        <SelectItem value="large">75%</SelectItem>
-                        <SelectItem value="full-width">100%</SelectItem>
-                    </SelectContent>
-                </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-                <div>
-                    <Label className="text-[10px]">Width (px)</Label>
-                    <Input
-                        type="number"
-                        min="50"
-                        max="600"
-                        value={styles.imageWidth || 300}
-                        onChange={(e) => onStyleChange('imageWidth', parseInt(e.target.value) || 300)}
-                        className="h-7 text-xs"
-                    />
-                </div>
-                <div>
-                    <Label className="text-[10px]">Height (px)</Label>
-                    <Input
-                        type="number"
-                        min="50"
-                        max="600"
-                        value={styles.imageHeight || 200}
-                        onChange={(e) => onStyleChange('imageHeight', parseInt(e.target.value) || 200)}
-                        className="h-7 text-xs"
-                    />
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const getDisplayLabel = (value, options) => {
-    if (!options || !Array.isArray(options)) return value;
-    const option = options.find(o =>
-        String(o.value) === String(value) ||
-        o.label === value ||
-        o.value === value
-    );
-    return option ? option.label : value;
-};
-
-const PlaceholderInput = ({
-    resolveSourceValue, placeholder, value, originalValue, onChange, onSaveToDb, isSaving, onFileChange, imageStyles, onImageStyleChange, autoPopulated, isArrayItem = false, arrayIndex = null, blockName = null, onAIRefine, isAIRefining, resolvedOptions = [], masterFields, showLabel = true
-}) => {
-    const fieldKey = isArrayItem ? `${blockName}_${arrayIndex}_${placeholder.name}` : placeholder.name;
-
-    // tracks which specific source (Table/ID) is being edited inline
-    const [editingSource, setEditingSource] = useState(null);
-    const [editValue, setEditValue] = useState("");
-    const [isPopoverOpen, setIsPopoverOpen] = useState(false);
-    const hasChanged = JSON.stringify(value) !== JSON.stringify(originalValue);
-    const canSave = (placeholder.master_field_ids?.length > 0) || (placeholder.linked_job_question_ids?.length > 0);
-
-    const mIds = placeholder.master_field_ids || [];
-    const qIds = placeholder.linked_job_question_ids || (placeholder.linked_job_question_id ? [placeholder.linked_job_question_id] : []);
-    const totalSources = mIds.length + qIds.length;
-
-    const options = resolvedOptions.length > 0
-        ? resolvedOptions
-        : (placeholder.options || []).map(o => typeof o === 'string' ? { label: o, value: o } : o);
-
-    const handleStartEdit = (val, type, id, label) => {
-        setEditValue(val || '');
-        setEditingSource({ type, id, label });
-        setIsPopoverOpen(false);
-    };
-
-    const handleCancelEdit = () => {
-        setEditingSource(null);
-        setEditValue("");
-    };
-
-    const handleSaveEdit = async () => {
-        await onSaveToDb(placeholder, editValue, editingSource, arrayIndex);
-        setEditingSource(null);
-    };
-    const inputRef = useRef(null);
-
-    // --- STATE A: INLINE EDITING MODE (Triggered by Pencil) ---
-    if (editingSource) {
-        return (
-            <div className="space-y-1 animate-in fade-in zoom-in-95 duration-200">
-                {showLabel && (
-                    <Label className="text-[10px] font-bold text-blue-600 uppercase tracking-tight flex items-center gap-1">
-                        <Edit3 className="h-2.5 w-2.5" /> Editing {editingSource.label}
-                    </Label>
-                )}
-                <div className="flex items-center gap-2">
-                    <Input
-                        autoFocus
-                        value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleSaveEdit();
-                            if (e.key === 'Escape') handleCancelEdit();
-                        }}
-                        className="h-8 text-xs border-blue-400 ring-2 ring-blue-50"
-                    />
-                    <Button size="icon" onClick={handleSaveEdit} className="h-8 w-8 bg-green-600 hover:bg-green-700 shrink-0">
-                        <CheckCircle2 className="h-4 w-4" />
-                    </Button>
-                    <Button size="icon" variant="ghost" onClick={handleCancelEdit} className="h-8 w-8 text-red-500 shrink-0">
-                        <X className="h-4 w-4" />
-                    </Button>
-                </div>
-            </div>
-        );
-    }
-
-    // --- STATE B: MULTI-SOURCE VIEW (Popover) ---
-    if (totalSources > 1 && placeholder.type !== 'image' && placeholder.type !== 'boolean') {
-        return (
-            <div className="space-y-1">
-                {showLabel && <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">{placeholder.display_value || placeholder.name.replace(/_/g, ' ')}</Label>}
-                <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
-                    <PopoverTrigger asChild>
-                        <div className={cn(
-                            "text-xs h-8 flex items-center px-2 rounded cursor-pointer border border-dashed border-blue-200 bg-blue-50/20 hover:bg-blue-50 transition-colors",
-                            !isValidValue(value) ? "text-red-500 italic" : "text-slate-900 font-medium"
-                        )}>
-                            <span className="truncate flex-1">{isValidValue(value) ? value : 'Missing'}</span>
-                            <div className="flex items-center gap-1.5 ml-2">
-                                <Badge variant="outline" className="text-[8px] h-4 px-1 uppercase bg-white border-blue-200 text-blue-600 font-bold">
-                                    {placeholder.source_logic || 'priority'}
-                                </Badge>
-                                <ChevronDown className="h-3 w-3 text-blue-400 shrink-0" />
-                            </div>
-                        </div>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-80 p-0 shadow-xl border-blue-100" align="end">
-                        <div className="p-2 bg-slate-50 border-b flex justify-between items-center">
-                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">Select Source to Edit</span>
-                            <Layers className="h-3 w-3 text-slate-400" />
-                        </div>
-
-                        <div className="p-1 space-y-1 max-h-[300px] overflow-y-auto bg-white">
-                            {mIds.map((mid, idx) => {
-                                const mf = masterFields?.get ? masterFields.get(parseInt(mid)) : null;
-                                const sourceValue = resolveSourceValue ? resolveSourceValue('db', mid, placeholder, arrayIndex) : '';
-                                return (
-                                    <div key={`m-${mid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-200 group transition-all">
-                                        <div className="flex flex-col min-w-0 pr-2">
-                                            <span className="text-[9px] font-bold text-blue-600 flex items-center gap-1 uppercase">
-                                                <Database className="h-2.5 w-2.5" /> DB FIELD {idx + 1}
-                                            </span>
-                                            <span className="text-xs font-medium truncate text-slate-700 mt-0.5">{mf?.label || `Field #${mid}`}</span>
-                                            <span className="text-[10px] text-slate-400 italic truncate">{isValidValue(sourceValue) ? sourceValue : 'Empty'}</span>
-                                        </div>
-                                        <Button
-                                            size="sm" variant="ghost"
-                                            className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                                            onClick={() => handleStartEdit(sourceValue, 'db', mid, mf?.label || `Field #${mid}`)}
-                                        >
-                                            <Edit3 className="h-4 w-4 text-blue-500" />
-                                        </Button>
-                                    </div>
-                                );
-                            })}
-
-                            {qIds.map((qid, idx) => {
-                                const sourceValue = resolveSourceValue ? resolveSourceValue('job', qid, placeholder, arrayIndex) : '';
-                                return (
-                                    <div key={`q-${qid}`} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-200 group transition-all">
-                                        <div className="flex flex-col min-w-0 pr-2">
-                                            <span className="text-[9px] font-bold text-purple-600 flex items-center gap-1 uppercase">
-                                                <HelpCircle className="h-2.5 w-2.5" /> QUESTION
-                                            </span>
-                                            <span className="text-xs font-medium truncate text-slate-700 mt-0.5">ID: {qid}</span>
-                                            <span className="text-[10px] text-slate-400 italic truncate">{isValidValue(sourceValue) ? sourceValue : 'Empty'}</span>
-                                        </div>
-                                        <Button
-                                            size="sm" variant="ghost"
-                                            className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                                            onClick={() => handleStartEdit(sourceValue, 'job', qid, `Question ${qid}`)}
-                                        >
-                                            <Edit3 className="h-4 w-4 text-purple-500" />
-                                        </Button>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </PopoverContent>
-                </Popover>
-            </div>
-        );
-    }
-
-    // --- STATE C: SINGLE SOURCE VIEW (Direct Input) ---
-    const FieldHeader = () => {
-        const hasDefault = placeholder.default_value && placeholder.default_value.trim() !== '';
-        return (
-            <div className="flex items-center justify-between mb-1.5">
-                {showLabel && (
-                    <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">
-                        {placeholder.display_value || placeholder.name.replace(/_/g, ' ')}
-                    </Label>
-                )}
-                <div className="flex items-center gap-2 ml-auto">
-                    {canSave && hasChanged && (
-                        <Button
-                            size="sm" variant="ghost"
-                            className="h-6 px-2 text-green-600 hover:text-green-700 hover:bg-green-50 border border-green-200"
-                            onClick={() => onSaveToDb(placeholder, value, null, arrayIndex)}
-                            disabled={isSaving}
-                        >
-                            <Save className="h-3 w-3 mr-1" />
-                            <span className="text-[9px] font-bold">SAVE TO PROFILE</span>
-                        </Button>
-                    )}
-                </div>
-            </div>
-        );
-    };
-
-    if (placeholder.is_digit_split) {
-        const chars = processDigitSplit(value || '', placeholder.digit_count || 8);
-        return (
-            <div className="">
-                <FieldHeader />
-                <div className={cn("flex flex-wrap gap-1 p-1 rounded", hasChanged && canSave ? "bg-amber-50 border border-amber-200" : "")}>
-                    {Array.from({ length: placeholder.digit_count || 8 }).map((_, idx) => (
-                        <input key={idx} maxLength={1} value={chars[idx] || ''} onChange={(e) => {
-                            const char = e.target.value.slice(-1);
-                            let str = (value || '').padEnd(placeholder.digit_count, ' ');
-                            const newStr = str.substring(0, idx) + char + str.substring(idx + 1);
-                            onChange(newStr.trimEnd());
-                        }} className="w-7 h-8 text-center border rounded font-mono font-bold text-sm bg-white" />
-                    ))}
-                </div>
-            </div>
-        );
-    }
-
-    if (placeholder.type === 'image') {
-        const style = imageStyles[fieldKey] || {};
-        const defaultWidth = placeholder.image_width ? parseInt(placeholder.image_width) : 300;
-        const defaultHeight = placeholder.image_height ? parseInt(placeholder.image_height) : 200;
-        const imageWidth = style.imageWidth || defaultWidth;
-        const imageHeight = style.imageHeight || defaultHeight;
-
-        return (
-            <div className="">
-                <FieldHeader />
-                {value ? (
-                    <div className={cn("relative border rounded overflow-hidden flex items-center justify-center bg-white", hasChanged && canSave ? "border-amber-400" : "")} style={{ maxWidth: `${imageWidth}px`, height: `${imageHeight}px` }}>
-                        <img src={value} className="max-h-full object-contain" style={{ textAlign: style.textAlign || 'center', maxWidth: style.maxWidth || '100%', width: `${imageWidth}px`, height: `${imageHeight}px` }} />
-                        <div className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                            <Button size="sm" variant="secondary" className="h-7 text-[10px]" onClick={() => document.getElementById(`file-${fieldKey}`).click()}>Replace</Button>
-                            <Button size="sm" variant="destructive" className="h-7 text-[10px]" onClick={() => onChange('')}>Remove</Button>
-                        </div>
-                    </div>
-                ) : <div className="text-xs italic border-2 border-dashed rounded p-4 text-center">Upload {placeholder.display_value || placeholder.name}</div>}
-                <input id={`file-${fieldKey}`} type="file" className="hidden" accept="image/jpeg,image/jpg,image/png" onChange={onFileChange} />
-                {value && onImageStyleChange && (
-                    <ImagePlaceholderControls
-                        styles={style}
-                        onStyleChange={(key, val) => onImageStyleChange(fieldKey, key, val)}
-                    />
-                )}
-            </div>
-        );
-    }
-
-    if (placeholder.type === 'boolean') {
-        const opts = Array.isArray(value) ? value : (placeholder.boolean_conditions || []);
-        return (
-            <div className="">
-                <FieldHeader />
-                <div className={cn("space-y-2 p-2 rounded border", hasChanged && canSave ? "bg-amber-50 border-amber-300" : "bg-slate-50")}>
-                    {opts.map((opt, idx) => (
-                        <div key={idx} className="flex items-center gap-2 p-2 border rounded bg-white shadow-sm">
-                            <Checkbox checked={opt.checked || false} disabled={opt.hasDbLink} onCheckedChange={(checked) => {
-                                const newOpts = [...opts];
-                                if (placeholder.boolean_type === 'single') {
-                                    newOpts.forEach((o, i) => { if (!o.hasDbLink) o.checked = i === idx ? checked : false; });
-                                } else { if (!newOpts[idx].hasDbLink) newOpts[idx].checked = checked; }
-                                onChange(newOpts);
-                            }} />
-                            <Label className="text-xs flex-1">
-                                {opt.label && opt.label !== '✔' ? opt.label :
-                                    opt.comparison?.value ? opt.comparison.value :
-                                        opt.tag ? opt.tag.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) :
-                                            'Option'}
-                            </Label>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        );
-    }
-
-    if (placeholder.type === 'select' || resolvedOptions.length > 0) {
-        return (
-            <div className="">
-                <FieldHeader />
-                <Select value={String(value || '')} onValueChange={(val) => {
-                    const selected = options.find(o => String(o.value) === val);
-                    onChange(selected ? selected.label : val);
-                }}>
-                    <SelectTrigger className={cn("w-full bg-white h-8 text-xs", hasChanged && canSave ? "border-amber-400 ring-2 ring-amber-50" : "")}>
-                        <SelectValue>{getDisplayLabel(value, options)}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                        {options.map((o, i) => <SelectItem key={i} value={String(o.value)}>{o.label}</SelectItem>)}
-                    </SelectContent>
-                </Select>
-            </div>
-        );
-    }
-
-    return (
-        <div className="">
-            <FieldHeader />
-            <div className="relative">
-                <Input
-                    ref={inputRef}
-                    value={value || ''}
-                    onChange={(e) => onChange(e.target.value)}
-                    className={cn("bg-white h-8 text-xs transition-all pr-8", hasChanged && canSave ? "border-amber-400 ring-2 ring-amber-50" : "focus:border-blue-400")}
-                />
-                {hasChanged && canSave && <div className="absolute right-2.5 top-1/2 -translate-y-1/2 h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />}
-            </div>
-        </div>
-    );
 };
 
 export default function TemplateGenerationDialog({
@@ -1464,36 +129,15 @@ export default function TemplateGenerationDialog({
 
     // Centralized function to fetch template buffer with caching
     const fetchTemplateBuffer = useCallback(async (templateId: string, filePath: string): Promise<ArrayBuffer | null> => {
-        // Return cached buffer if it's the same template
-        if (loadedTemplateId.current === templateId && docxTemplateBuffer.current) {
-            return docxTemplateBuffer.current;
-        }
+        const buffer = await fetchTemplateBufferUtil(templateId, filePath, docxTemplateBuffer.current, loadedTemplateId.current);
 
-        try {
-            let publicUrl: string;
-            if (filePath.startsWith('kyc-templates/')) {
-                const { data, error } = await supabase.storage
-                    .from('templates')
-                    .createSignedUrl(filePath, 3600);
-                if (error || !data?.signedUrl) throw new Error('Could not create signed URL for template');
-                publicUrl = data.signedUrl;
-            } else {
-                publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${filePath}`;
-            }
-
-            const res = await fetch(publicUrl);
-            if (!res.ok) throw new Error(`Failed to fetch template: ${res.statusText}`);
-            const arrayBuffer = await res.arrayBuffer();
-
-            // Cache the buffer and template ID
-            docxTemplateBuffer.current = arrayBuffer;
+        // Cache the buffer and template ID if successful
+        if (buffer) {
+            docxTemplateBuffer.current = buffer;
             loadedTemplateId.current = templateId;
-
-            return arrayBuffer;
-        } catch (error) {
-            console.error('Error fetching template buffer:', error);
-            return null;
         }
+
+        return buffer;
     }, []);
 
     const [loadedDraft, setLoadedDraft] = useState(null);
@@ -2881,250 +1525,86 @@ export default function TemplateGenerationDialog({
         setManuallyEditedFields(prev => new Set(prev).add(`${blockName}[${index}].${fieldName}`));
     };
 
-    const extractHeadersFooters = async (templateBuffer) => {
-        const zip = new PizZip(templateBuffer);
-        const headers = [];
-        const footers = [];
-        for (let i = 1; i <= 3; i++) {
-            const headerFile = zip.file(`word/header${i}.xml`);
-            if (headerFile) {
-                const headerXml = headerFile.asText();
-                headers.push({
-                    index: i,
-                    xml: headerXml,
-                    html: await convertWordXmlToHtml(headerXml)
-                });
-            }
-        }
-        for (let i = 1; i <= 3; i++) {
-            const footerFile = zip.file(`word/footer${i}.xml`);
-            if (footerFile) {
-                const footerXml = footerFile.asText();
-                footers.push({
-                    index: i,
-                    xml: footerXml,
-                    html: await convertWordXmlToHtml(footerXml)
-                });
-            }
-        }
-
-        return { headers, footers };
-    };
-
-    const convertWordXmlToHtml = async (xml) => {
-        const tempZip = new PizZip();
-        tempZip.file('word/document.xml', xml);
-        tempZip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-            <Default Extension="xml" ContentType="application/xml"/>
-            <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-            <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-        </Types>`);
-
-        const arrayBuffer = tempZip.generate({ type: 'arraybuffer' });
-
-        // Convert using Mammoth
-        const result = await mammoth.convertToHtml({ arrayBuffer });
-        return result.value;
-    };
-
-    const renderArrayInputs = (blockName, blockData) => {
-        const rows = Array.isArray(formData[blockName]) ? formData[blockName] : [];
-        const isHorizontal = blockData?.config?.array_direction === 'horizontal';
-        const children = blockData.children || [];
-
-        if (isHorizontal) {
-            // Keep existing horizontal digit-split rendering
-            return (
-                <div className="space-y-4 mt-2 border-l-2 border-blue-200 pl-4 py-2 bg-blue-50/20 rounded-r-lg">
-                    <Badge className="bg-orange-600 uppercase text-[9px] tracking-tighter">
-                        {blockName} (Horizontal)
-                    </Badge>
-                    {rows.length === 0 ? (
-                        <div className="p-3 bg-white border rounded shadow-sm italic text-xs text-muted-foreground">
-                            No items in {blockName}
-                        </div>
-                    ) : (
-                        rows.map((row, idx) => (
-                            <div key={idx} className="p-3 bg-white border rounded shadow-sm space-y-3">
-                                {children.map(child => {
-                                    let resolvedOptions = [];
-                                    if (child.master_field_ids?.length > 0) {
-                                        const mf = masterFields.get(parseInt(child.master_field_ids[0]));
-                                        if (mf?.type === 'select') resolvedOptions = getDependentDropdownOptions(child, mf, row);
-                                    }
-                                    return (
-                                        <PlaceholderInput
-                                            key={child.id}
-                                            placeholder={child}
-                                            value={row[child.name]}
-                                            originalValue={originalFormData[blockName]?.[idx]?.[child.name]}
-                                            onChange={(val) => handleArrayInputChange(blockName, idx, child.name, val)}
-                                            onSaveToDb={saveFieldToDatabase}
-                                            resolvedOptions={resolvedOptions}
-                                            masterFields={masterFields}
-                                            imageStyles={imageStyles}
-                                            onImageStyleChange={handleImageStyleChange}
-                                            isArrayItem={true}
-                                            arrayIndex={idx}
-                                            blockName={blockName}
-                                            resolveSourceValue={resolveSpecificSourceValue}
-                                        />
-                                    );
-                                })}
-                            </div>
-                        ))
-                    )}
-                </div>
-            );
-        }
-
-        // --- TRANSPOSED TABLE LAYOUT ---
-        // Columns: [Field Label] [Entity 1] [Entity 2] [Entity 3] ...
-        const entityLabel = blockData?.config?.entity_type?.[0] || blockData?.config?.entity_type || blockName;
-        const colCount = rows.length + 1; // +1 for the field label column
-
-        return (
-            <div className="mt-2 space-y-2">
-                <div className="flex items-center justify-between">
-                    <Badge className="bg-blue-600 uppercase text-[9px] tracking-tighter">
-                        {blockName} — {rows.length} {String(entityLabel).toLowerCase()}(s)
-                    </Badge>
-                    <div className="flex gap-1">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-6 text-[10px] px-2 text-blue-600 border-blue-200"
-                            onClick={() => {
-                                const emptyRow = children.reduce((acc, child) => ({ ...acc, [child.name]: '' }), {});
-                                setFormData(prev => ({ ...prev, [blockName]: [...(prev[blockName] || []), emptyRow] }));
-                            }}
-                        >
-                            + Add Row
-                        </Button>
-                    </div>
-                </div>
-
-                {rows.length === 0 ? (
-                    <div className="p-4 bg-white border-2 border-dashed rounded text-xs text-muted-foreground italic text-center">
-                        No {String(entityLabel).toLowerCase()}s found for {blockName}
-                    </div>
-                ) : (
-                    <div className="overflow-x-auto rounded-lg border border-slate-200 shadow-sm">
-                        <table className="w-full text-xs border-collapse">
-                            <thead>
-                                <tr className="bg-slate-50 border-b border-slate-200">
-                                    {/* Field column header */}
-                                    <th className="text-left px-3 py-2 font-bold text-slate-500 uppercase tracking-wider text-[10px] w-[140px] border-r border-slate-200 sticky left-0 bg-slate-50 z-10">
-                                        Field
-                                    </th>
-                                    {rows.map((_, idx) => (
-                                        <th key={idx} className="px-3 py-2 text-center border-r border-slate-200 last:border-r-0 min-w-[180px]">
-                                            <div className="flex items-center justify-between gap-1">
-                                                <span className="font-bold text-blue-700 text-[10px] uppercase tracking-tight">
-                                                    {String(entityLabel).charAt(0).toUpperCase() + String(entityLabel).slice(1)} {idx + 1}
-                                                </span>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-4 w-4 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full shrink-0"
-                                                    onClick={() => {
-                                                        const newRows = rows.filter((_, i) => i !== idx);
-                                                        setFormData(prev => ({ ...prev, [blockName]: newRows }));
-                                                    }}
-                                                >
-                                                    <X className="h-2.5 w-2.5" />
-                                                </Button>
-                                            </div>
-                                        </th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {children.map((child, childIdx) => {
-                                    const isEvenRow = childIdx % 2 === 0;
-                                    return (
-                                        <tr
-                                            key={child.id || child.name}
-                                            className={cn(
-                                                "border-b border-slate-100 last:border-b-0 hover:bg-blue-50/30 transition-colors",
-                                                isEvenRow ? "bg-white" : "bg-slate-50/50"
-                                            )}
-                                        >
-                                            {/* Field label column */}
-                                            <td className="px-3 py-2 font-medium text-slate-700 text-[11px] border-r border-slate-200 sticky left-0 bg-inherit z-10">
-                                                {child.display_value || child.name.replace(/_/g, ' ')}
-                                            </td>
-
-                                            {/* One input cell per entity/row */}
-                                            {rows.map((row, rowIdx) => {
-                                                let resolvedOptions = [];
-                                                if (child.master_field_ids?.length > 0) {
-                                                    const mf = masterFields.get(parseInt(child.master_field_ids[0]));
-                                                    if (mf?.type === 'select') resolvedOptions = getDependentDropdownOptions(child, mf, row);
-                                                }
-                                                return (
-                                                    <td
-                                                        key={rowIdx}
-                                                        className="px-2 py-1.5 border-r border-slate-100 last:border-r-0 align-middle"
-                                                    >
-                                                        <PlaceholderInput
-                                                            placeholder={child}
-                                                            value={row[child.name]}
-                                                            originalValue={originalFormData[blockName]?.[rowIdx]?.[child.name]}
-                                                            onChange={(val) => handleArrayInputChange(blockName, rowIdx, child.name, val)}
-                                                            onSaveToDb={saveFieldToDatabase}
-                                                            resolvedOptions={resolvedOptions}
-                                                            onFileChange={(e) => {
-                                                                const file = e.target.files[0];
-                                                                if (file) {
-                                                                    const r = new FileReader();
-                                                                    r.onloadend = () => handleArrayInputChange(blockName, rowIdx, child.name, r.result);
-                                                                    r.readAsDataURL(file);
-                                                                }
-                                                            }}
-                                                            masterFields={masterFields}
-                                                            imageStyles={imageStyles}
-                                                            onImageStyleChange={handleImageStyleChange}
-                                                            isArrayItem={true}
-                                                            arrayIndex={rowIdx}
-                                                            blockName={blockName}
-                                                            requirementJobQuestions={requirementJobQuestions}
-                                                            task={task}
-                                                            formData={formData}
-                                                            showLabel={false}
-                                                            resolveSourceValue={resolveSpecificSourceValue}
-                                                            isSaving={isSavingProfile}
-                                                        />
-                                                    </td>
-                                                );
-                                            })}
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-            </div>
-        );
-    };
-
     const populateHtmlContent = useCallback((data, placeholders, styles) => {
         if (!selectedTemplate?.content) return '[NO TEMPLATE CONTENT]';
 
         // FIRST: Process the raw template content to preserve its native spaces/newlines
         let content = selectedTemplate.content
+            .trimStart() // Remove leading whitespace/newlines
             .replace(/  +/g, (match) => '&nbsp;'.repeat(match.length))
-            .replace(/\n/g, '<br />');
+            .replace(/\n/g, '<br />')
+            .replace(/^(<br\s*\/?>)+/, '') // Remove leading <br> tags
+            .replace(/^(<p[^>]*>\s*<\/p>)+/, '') // Remove leading empty <p> tags
+            .replace(/^(<div[^>]*>\s*<\/div>)+/, ''); // Remove leading empty <div> tags
 
         let processedHeader = (headerContent || '')
+            .trimStart()
             .replace(/  +/g, (match) => '&nbsp;'.repeat(match.length))
-            .replace(/\n/g, '<br />');
+            .replace(/\n/g, '<br />')
+            .replace(/^(<br\s*\/?>)+/, '')
+            .replace(/^(<p[^>]*>\s*<\/p>)+/, '')
+            .replace(/^(<div[^>]*>\s*<\/div>)+/, '');
 
         let processedFooter = (footerContent || '')
+            .trimStart()
             .replace(/  +/g, (match) => '&nbsp;'.repeat(match.length))
-            .replace(/\n/g, '<br />');
+            .replace(/\n/g, '<br />')
+            .replace(/^(<br\s*\/?>)+/, '')
+            .replace(/^(<p[^>]*>\s*<\/p>)+/, '')
+            .replace(/^(<div[^>]*>\s*<\/div>)+/, '');
+
+        // AUTO-DETECT AND FIX TABLE STRUCTURE
+        // Check if there's a table with placeholders that should be inside a repeating block
+        const tableRegex = /(<table[^>]*>)([\s\S]*?)(<\/table>)/gi;
+        const blockPlaceholders = Object.keys(groupedPlaceholders.blocks);
+
+        content = content.replace(tableRegex, (match, tableOpen, tableContent, tableClose) => {
+            // Check if any block placeholders are in table content
+            const hasBlockPlaceholder = blockPlaceholders.some(blockName =>
+                tableContent.includes(`{#${blockName}}`) || tableContent.includes(`{/${blockName}}`)
+            );
+
+            if (!hasBlockPlaceholder) return match;
+
+            // Find all <tr> elements in table
+            const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+            const rows = [];
+            let trMatch;
+
+            while ((trMatch = trRegex.exec(tableContent)) !== null) {
+                rows.push(trMatch[0]);
+            }
+
+            if (rows.length < 2) return match; // Need at least header + data row
+
+            // Assume first row is header, rest are data rows
+            const headerRow = rows[0];
+            const dataRows = rows.slice(1);
+
+            // Check if data rows contain placeholders from any block
+            const dataRowsHavePlaceholders = dataRows.some(row =>
+                blockPlaceholders.some(blockName =>
+                    row.includes(`{${blockName}.`) || row.includes(`{#${blockName}}`)
+                )
+            );
+
+            if (!dataRowsHavePlaceholders) return match;
+
+            // Find which block data rows belong to
+            let targetBlock = null;
+            for (const blockName of blockPlaceholders) {
+                if (dataRows.some(row => row.includes(`{${blockName}.`))) {
+                    targetBlock = blockName;
+                    break;
+                }
+            }
+
+            if (!targetBlock) return match;
+
+            // Reconstruct table with block tags around data rows
+            const newDataRows = dataRows.map(row => row).join('\n');
+            return `${tableOpen}${headerRow}\n{#${targetBlock}}\n${newDataRows}\n{/${targetBlock}}\n${tableClose}`;
+        });
 
         const universalReplace = (regex, replacement) => {
             content = content.replace(regex, replacement);
@@ -3285,14 +1765,13 @@ export default function TemplateGenerationDialog({
         });
 
         return `
-    <div class="generated-document-container" style="font-family: 'Times New Roman', Times, serif; line-height: 1.5; color: #000; white-space: pre-wrap;">
-        ${processedHeader ? `<div class="doc-header">${processedHeader}</div>` : ''}
-        <div class="doc-body" style="min-height:800px; position: relative;">
+        ${processedHeader ? `<div class="doc-header" style="margin: 0; padding: 0;">${processedHeader}</div>` : ''}
+        <div class="doc-body" style="font-family: 'Times New Roman', Times, serif; line-height: 1.5; color: #000; white-space: pre-wrap; margin: 0; padding: 0;">
             ${content}
         </div>
-        ${processedFooter ? `<div class="doc-footer" style="border-top:0.5px solid #e2e8f0; font-size: 10px;">${processedFooter}</div>` : ''}
-    </div>
+        ${processedFooter ? `<div class="doc-footer" style="border-top:0.5px solid #e2e8f0; font-size: 10px; margin: 0; padding: 0;">${processedFooter}</div>` : ''}
 `;
+
     }, [selectedTemplate, groupedPlaceholders, headerContent, footerContent]);
 
     const prepareRenderData = useCallback(async (data) => {
@@ -4466,149 +2945,23 @@ export default function TemplateGenerationDialog({
         <>
             <Dialog open={isOpen} onOpenChange={onClose}>
                 <DialogContent className="max-w-[98vw] w-full h-[95vh] flex flex-col p-0">
-                    <DialogHeader className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50 flex-shrink-0">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-blue-500 rounded-lg">
-                                    <Wand2 className="h-5 w-5 text-white" />
-                                </div>
-                                <div>
-                                    <DialogTitle className="text-xl font-bold">{documentName}</DialogTitle>
-                                    <DialogDescription className="text-sm">Auto-populate and generate</DialogDescription>
-                                    {loadedDraft && (
-                                        <div className="flex items-center gap-2 mt-2">
-                                            <Badge variant="outline" className="ml-2 text-[8px] bg-amber-50 text-amber-700 border-amber-200">
-                                                <FileText className="h-3 w-3" />
-                                                <span className="font-medium">Draft in Progress</span>
-                                            </Badge>
-                                            <span className="text-xs text-muted-foreground">
-                                                Last saved {new Date(loadedDraft.created_at).toLocaleString()}
-                                            </span>
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                onClick={discardDraft}
-                                                disabled={isLoadingDraft}
-                                                className="h-6 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
-                                            >
-                                                <X className="h-3 w-3 mr-1" />
-                                                Discard Draft
-                                            </Button>
-                                        </div>
-                                    )}
-
-                                    {isLoadingDraft && (
-                                        <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
-                                            <Loader2 className="h-4 w-4 animate-spin" />
-                                            Loading draft...
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                            <div className="flex items-center justify-between">
-                                <Label>{documentName}</Label>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={refineAllFieldsWithAI}
-                                    disabled={isGenerating}
-                                    className="border-purple-200 text-purple-700 hover:bg-purple-50"
-                                >
-                                    <Sparkles className="h-4 w-4 mr-2" />
-                                    AI Refine
-                                </Button>
-                                {availableTemplates.length > 1 && (
-                                    <Select value={selectedTemplate?.id} onValueChange={handleTemplateSelect}>
-                                        <SelectTrigger className="w-64 h-9">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {availableTemplates.map(t => (
-                                                <SelectItem key={t.id} value={t.id}>{t.file_name}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                )}
-                                <Button variant="ghost" size="icon" onClick={onClose}>
-                                    <X className="h-5 w-5" />
-                                </Button>
-                            </div>
-                        </div>
-                        <div className="mt-2 space-y-1">
-                            <div className="flex items-center justify-between text-xs">
-                                <span className="font-medium">
-                                    {completionStats.filled}/{completionStats.total} Fields
-                                    {loadedDraft && (
-                                        <Badge variant="outline" className="ml-2 text-[8px] bg-amber-50 text-amber-700 border-amber-200">
-                                            DRAFT
-                                        </Badge>
-                                    )}
-                                </span>
-                                <span>{completionStats.percentage}%</span>
-                            </div>
-                            <Progress
-                                value={completionStats.percentage}
-                                className={`h-1.5 ${loadedDraft ? '[&>div]:bg-amber-500' : ''}`}
-                            />
-                        </div>
-                        {showConflictBanner && dataConflicts.length > 0 && loadedDraft && (
-                            <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                                <div className="flex items-start gap-3">
-                                    <div className="flex-shrink-0 mt-0.5">
-                                        <svg className="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                        </svg>
-                                    </div>
-                                    <div className="flex-1">
-                                        <h4 className="text-sm font-semibold text-amber-900 mb-1">
-                                            ⚠️ Data Changes Detected
-                                        </h4>
-                                        <p className="text-xs text-amber-800 mb-2">
-                                            The following fields have been updated in the database since this draft was saved:
-                                        </p>
-                                        <div className="space-y-1 mb-3">
-                                            {dataConflicts.slice(0, 3).map((conflict, idx) => (
-                                                <div key={idx} className="text-xs text-amber-700 font-mono bg-white/50 p-2 rounded">
-                                                    <span className="font-semibold">{conflict.field}:</span>{' '}
-                                                    <span className="line-through opacity-60">{String(conflict.draftValue).substring(0, 30)}</span>
-                                                    {' → '}
-                                                    <span className="font-semibold text-green-700">{String(conflict.liveValue).substring(0, 30)}</span>
-                                                </div>
-                                            ))}
-                                            {dataConflicts.length > 3 && (
-                                                <div className="text-xs text-amber-600 italic">
-                                                    ...and {dataConflicts.length - 3} more field{dataConflicts.length - 3 > 1 ? 's' : ''}
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <Button
-                                                size="sm"
-                                                variant="default"
-                                                onClick={refreshWithLiveData}
-                                                className="h-7 text-xs bg-amber-600 hover:bg-amber-700"
-                                            >
-                                                <svg className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                                </svg>
-                                                Refresh with Latest Data
-                                            </Button>
-                                            <Button
-                                                size="sm"
-                                                variant="ghost"
-                                                onClick={() => setShowConflictBanner(false)}
-                                                className="h-7 text-xs text-amber-700 hover:bg-amber-100"
-                                            >
-                                                Keep Draft Values
-                                            </Button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                    </DialogHeader>
+                    <TemplateDialogHeader
+                        documentName={documentName}
+                        onClose={onClose}
+                        isGenerating={isGenerating}
+                        refineAllFieldsWithAI={refineAllFieldsWithAI}
+                        availableTemplates={availableTemplates}
+                        selectedTemplate={selectedTemplate}
+                        handleTemplateSelect={handleTemplateSelect}
+                        loadedDraft={loadedDraft}
+                        isLoadingDraft={isLoadingDraft}
+                        discardDraft={discardDraft}
+                        completionStats={completionStats}
+                        showConflictBanner={showConflictBanner}
+                        dataConflicts={dataConflicts}
+                        setShowConflictBanner={setShowConflictBanner}
+                        refreshWithLiveData={refreshWithLiveData}
+                    />
 
                     <div className="flex items-center gap-2 px-6 py-2 border-b bg-white">
                         <View className="h-4 w-4 text-muted-foreground" />
@@ -4713,7 +3066,21 @@ export default function TemplateGenerationDialog({
                                         </h4>
                                         {Object.keys(groupedPlaceholders.blocks).map(blockName => (
                                             <div key={blockName}>
-                                                {renderArrayInputs(blockName, groupedPlaceholders.blocks[blockName])}
+                                                <ArrayInputsPanel
+                                                    blockName={blockName}
+                                                    blockData={groupedPlaceholders.blocks[blockName]}
+                                                    formData={formData}
+                                                    originalFormData={originalFormData}
+                                                    onArrayInputChange={handleArrayInputChange}
+                                                    onFileChange={handleFileChange}
+                                                    handleImageStyleChange={handleImageStyleChange}
+                                                    imageStyles={imageStyles}
+                                                    masterFields={masterFields}
+                                                    saveFieldToDatabase={saveFieldToDatabase}
+                                                    isSavingProfile={isSavingProfile}
+                                                    resolveSpecificSourceValue={resolveSpecificSourceValue}
+                                                    getDependentDropdownOptions={getDependentDropdownOptions}
+                                                />
                                             </div>
                                         ))}
                                     </div>
@@ -4721,49 +3088,20 @@ export default function TemplateGenerationDialog({
                             </div>
                         </ScrollArea>
 
-                        <div className={`${panelClasses.preview} border-r relative bg-slate-100 overflow-y-auto transition-all duration-300`}>
-                            <div className="sticky top-0 z-10 bg-white/90 backdrop-blur px-4 py-2 border-b flex justify-between">
-                                <span className="text-[10px] font-bold text-slate-500">LIVE GENERATED DOCUMENT</span>
-                                {isPreviewLoading && <Loader2 className="h-4 w-4 animate-spin text-blue-500" />}
-                            </div>
-                            <div className="max-w-4xl mx-auto">
-                                <div
-                                    className={`bg-white shadow-xl min-h-[11in] ${EDITOR_PREVIEW_STYLES}`}
-                                    style={{ whiteSpace: 'pre-wrap' }} // Add this
-                                    dangerouslySetInnerHTML={{ __html: previewContent }}
-                                />
-                            </div>
-                        </div>
+                        <PreviewPanel
+                            previewContent={previewContent}
+                            isPreviewLoading={isPreviewLoading}
+                            panelClasses={panelClasses.preview}
+                            EDITOR_PREVIEW_STYLES={EDITOR_PREVIEW_STYLES}
+                        />
 
                         {/* RIGHT PANEL: Original Template Reference */}
-                        <div className={`${panelClasses.source} bg-slate-50 overflow-y-auto transition-all duration-300`}>
-                            <div className="sticky top-0 z-10 bg-white/90 backdrop-blur px-4 py-2 border-b flex justify-between">
-                                <span className="text-[10px] font-bold text-slate-500">ORIGINAL REFERENCE</span>
-                            </div>
-                            <div className="p-4">
-                                {isWordTemplate ? (
-                                    docPreviewUrl ? (
-                                        <iframe
-                                            src={docPreviewUrl}
-                                            className="w-full h-[calc(100vh-250px)] border-0 rounded shadow bg-white"
-                                            title="Original"
-                                            onError={() => setDocPreviewUrl(null)}
-                                        />
-                                    ) : (
-                                        <div className="h-[300px] flex flex-col items-center justify-center text-slate-400 border-2 border-dashed rounded">
-                                            <FileText className="h-12 w-12 mb-2" />
-                                            <p className="text-xs">Preview unavailable</p>
-                                        </div>
-                                    )
-                                ) : (
-                                    <div className="bg-white rounded border p-6">
-                                        <Code className="h-8 w-8 text-blue-500 mb-3" />
-                                        <h3 className="font-semibold text-sm mb-2">HTML Template Source</h3>
-                                        <p className="text-xs text-slate-600 italic">This template is HTML based. Use the Live Preview to see the output.</p>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
+                        <TemplateSourcePanel
+                            panelClasses={panelClasses.source}
+                            isWordTemplate={isWordTemplate}
+                            docPreviewUrl={docPreviewUrl}
+                            setDocPreviewUrl={setDocPreviewUrl}
+                        />
                     </div>
                     <DialogFooter className="border-t px-6 py-3 bg-white flex justify-between flex-shrink-0">
                         <div className="text-[10px] flex items-center gap-1.5">

@@ -39,12 +39,44 @@ export function DocxLivePreview({ file, className, style }: DocxLivePreviewProps
       try {
         setIsLoading(true);
         setError(null);
-        
+
         const arrayBuffer = await file.arrayBuffer();
         await renderAsync(arrayBuffer, previewRef.current, undefined, {
           className: 'docx-preview',
           style: 'html,body{height:100%}',
           ignoreLastRenderedPageBreak: true,
+        });
+
+        // Force uniform font styling by directly setting inline styles
+        const allElements = previewRef.current.querySelectorAll('*');
+        allElements.forEach(el => {
+          const htmlEl = el as HTMLElement;
+          htmlEl.style.setProperty('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif', 'important');
+          htmlEl.style.setProperty('font-size', '14px', 'important');
+          htmlEl.style.setProperty('line-height', '1.5', 'important');
+          // Remove margin and padding from all elements
+          htmlEl.style.removeProperty('margin-top');
+          htmlEl.style.removeProperty('margin-bottom');
+          htmlEl.style.removeProperty('margin-left');
+          htmlEl.style.removeProperty('margin-right');
+          htmlEl.style.removeProperty('padding-top');
+          htmlEl.style.removeProperty('padding-bottom');
+          htmlEl.style.removeProperty('padding-left');
+          htmlEl.style.removeProperty('padding-right');
+        });
+
+        // Specifically target the docx-wrapper section to remove top margin
+        const docxWrapper = previewRef.current.querySelector('.docx-wrapper');
+        if (docxWrapper) {
+          (docxWrapper as HTMLElement).style.paddingTop = '0';
+          (docxWrapper as HTMLElement).style.marginTop = '0';
+        }
+
+        // Target section elements
+        const sections = previewRef.current.querySelectorAll('section.docx');
+        sections.forEach(section => {
+          (section as HTMLElement).style.paddingTop = '0';
+          (section as HTMLElement).style.marginTop = '0';
         });
       } catch (err) {
         console.error('Error rendering DOCX:', err);
@@ -94,12 +126,12 @@ export function DocxLivePreview({ file, className, style }: DocxLivePreviewProps
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       )}
-      <div 
-        ref={previewRef} 
+      <div
+        ref={previewRef}
         className="h-full w-full overflow-auto p-4"
-        style={{ 
+        style={{
           background: '#fff',
-          ...style 
+          ...style
         }}
       />
     </div>
