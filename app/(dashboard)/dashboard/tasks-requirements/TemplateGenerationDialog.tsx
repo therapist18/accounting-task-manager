@@ -25,7 +25,7 @@ import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { executeComputedField } from '../tasks/utils/automationComputedFunctions';
 import { formatWhitespace, isDate, processDigitSplit, formatDate, base64Parser, toBase64, fetchImageAsBase64, parseJsonValue, normalizeString, findPrimaryDirector, getOrdinalNumber, getOrdinalWord, parseImageDimension, checkDocumentStatus, generateDocumentChecklist, EDITOR_PREVIEW_STYLES, extractDisplayValue } from './utils/templateUtils';
-import { getTargetEntity, processPlaceholderValue, processTextField, isValidValue, resolveArrayData } from './utils/placeholderProcessors';
+import { getTargetEntity, processPlaceholderValue, processTextField, isValidValue, resolveArrayData, resolveArrayDataWithExtractionMode } from './utils/placeholderProcessors';
 import { extractHeadersFooters, convertWordXmlToHtml, fetchTemplateBuffer as fetchTemplateBufferUtil } from './utils/wordDocumentUtils';
 import { TemplateDialogHeader } from './components/TemplateDialogHeader';
 import { TemplateSourcePanel } from './components/TemplateSourcePanel';
@@ -1406,7 +1406,8 @@ export default function TemplateGenerationDialog({
                     index,         // Argument 8: arrayIndex (Critical Fix)
                     sourceArray,
                     task,
-                    computedFieldCache
+                    computedFieldCache,
+                    extractionMode
                 );
                 // For boolean fields, preserve the structure (array of options)
                 if (field.type === 'boolean') {
@@ -1425,7 +1426,26 @@ export default function TemplateGenerationDialog({
 
         console.groupEnd();
         return result;
-    }, [extractedData, personData, companyData, task]);
+    }, [combinedCache, masterFields, entityIdMap, relationshipData, extractedData, companyData, computedFieldCache]);
+
+    const resolveArrayData = useCallback((blockPlaceholder, allPlaceholders, combinedCache, masterFields, entityIdMap, relationshipData, extractedData, companyData, computedFieldCache) => {
+        // Get extraction mode from block config, default to 'latest'
+        const extractionMode = blockPlaceholder.extractionMode || blockPlaceholder.extraction_mode || 'latest';
+
+        // Use the new function with extraction mode support
+        return resolveArrayDataWithExtractionMode(
+            blockPlaceholder,
+            allPlaceholders,
+            combinedCache,
+            masterFields,
+            entityIdMap,
+            relationshipData,
+            extractedData,
+            companyData,
+            computedFieldCache,
+            extractionMode
+        );
+    }, [combinedCache, masterFields, entityIdMap, relationshipData, extractedData, companyData, computedFieldCache]);
 
     const handleInputChange = (name, val) => {
         setFormData(prev => {
