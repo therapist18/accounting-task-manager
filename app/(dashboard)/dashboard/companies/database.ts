@@ -11,7 +11,6 @@ export type Company = {
   };
   default_display?: boolean;
   order?: number;
-  // Category fields for filtering
   acc_client_effective_from?: string | null;
   acc_client_effective_to?: string | null;
   imm_client_effective_from?: string | null;
