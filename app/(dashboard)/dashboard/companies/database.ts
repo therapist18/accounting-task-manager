@@ -11,6 +11,16 @@ export type Company = {
   };
   default_display?: boolean;
   order?: number;
+  // Category fields for filtering
+  acc_client_effective_from?: string | null;
+  acc_client_effective_to?: string | null;
+  imm_client_effective_from?: string | null;
+  imm_client_effective_to?: string | null;
+  audit_client_effective_from?: string | null;
+  audit_client_effective_to?: string | null;
+  sheria_client_effective_from?: string | null;
+  sheria_client_effective_to?: string | null;
+  cease_details?: any;
 }
 
 export async function fetchCompanies(): Promise<Company[]> {
@@ -22,7 +32,16 @@ export async function fetchCompanies(): Promise<Company[]> {
         company_name,
         registration_number,
         kra_email_address,
-        contact_details
+        contact_details,
+        acc_client_effective_from,
+        acc_client_effective_to,
+        imm_client_effective_from,
+        imm_client_effective_to,
+        audit_client_effective_from,
+        audit_client_effective_to,
+        sheria_client_effective_from,
+        sheria_client_effective_to,
+        cease_details
       `)
       .order('company_name', { ascending: true })
 
@@ -39,7 +58,17 @@ export async function fetchCompanies(): Promise<Company[]> {
       kra_email_address: company.kra_email_address,
       contact_details: company.contact_details,
       default_display: false, // Default value
-      order: 0 // Default value
+      order: 0, // Default value
+      // Category fields
+      acc_client_effective_from: company.acc_client_effective_from,
+      acc_client_effective_to: company.acc_client_effective_to,
+      imm_client_effective_from: company.imm_client_effective_from,
+      imm_client_effective_to: company.imm_client_effective_to,
+      audit_client_effective_from: company.audit_client_effective_from,
+      audit_client_effective_to: company.audit_client_effective_to,
+      sheria_client_effective_from: company.sheria_client_effective_from,
+      sheria_client_effective_to: company.sheria_client_effective_to,
+      cease_details: company.cease_details
     }))
 
     return companies

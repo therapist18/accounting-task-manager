@@ -6,13 +6,12 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel } from 'docx';
 import { saveAs } from 'file-saver';
-
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-
+import supabase from "@/lib/supabase/client";
 import { CompanySidebar } from '../companies/company-sidebar';
 import { IndividualSidebar } from '../individuals/individual-sidebar';
 import { useLetterData } from './hooks/useLetterData';
@@ -23,11 +22,11 @@ import { GeneralLetterLayout } from './components/GeneralLetterLayout';
 import { LetterControls } from './components/LetterControls';
 import { generateLetterWithLetterhead, downloadBlob } from './utils/letterheadMerge';
 import * as mammoth from 'mammoth';
-
 import {
     FileText, Download,
     Briefcase, User, Type, Layout
 } from "lucide-react";
+import { toast } from '@/lib/hooks/use-toast';
 
 const todayStr = () => new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 
@@ -39,6 +38,73 @@ export default function LetterGenerationModule() {
     const [companyId, setCompanyId] = useState('');
     const [individualId, setIndividualId] = useState('');
     const [signatoryId, setSignatoryId] = useState('');
+
+    // Category filter state
+    const [categoryFilters, setCategoryFilters] = useState(null);
+
+    // Handle category filter changes
+    const handleCategoryFilterChange = (filters) => {
+        setCategoryFilters(filters);
+        // Here you could add logic to filter companies based on category
+        // For now, we'll just store the filters
+    };
+
+    // Handle signature upload
+    const handleSignatureUpload = async (signatoryId: string, file: File) => {
+        const toastId = toast({
+            title: 'Uploading signature...',
+            variant: 'default',
+        });
+
+        try {
+            // Convert file to base64
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = async () => {
+                const base64 = reader.result as string;
+
+                const response = await fetch('/api/signature-upload', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        signatoryId,
+                        file: base64,
+                        fileName: file.name,
+                        fileType: file.type
+                    })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    toast({
+                        id: toastId.id,
+                        title: 'Signature uploaded successfully!',
+                        variant: 'default',
+                    });
+
+                    // Refresh individuals and signatures data
+                    await Promise.all([
+                        refreshIndividuals(),
+                        refreshSignatures()
+                    ]);
+                } else {
+                    toast({
+                        id: toastId.id,
+                        title: `Upload failed: ${result.error || 'Unknown error'}`,
+                        variant: 'destructive',
+                    });
+                }
+            };
+        } catch (error) {
+            console.error('Signature upload failed:', error);
+            toast({
+                id: toastId.id,
+                title: `Upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                variant: 'destructive',
+            });
+        }
+    };
 
     const [phone, setPhone] = useState('+254700298298');
     const [email, setEmail] = useState('');
@@ -53,7 +119,7 @@ export default function LetterGenerationModule() {
     const [footerImageUrl, setFooterImageUrl] = useState<string>('');
     const [loadingPreview, setLoadingPreview] = useState(false);
 
-    const { companies, individuals, availableSignatories } = useLetterData(tab, companyId);
+    const { companies, individuals, availableSignatories, refreshIndividuals, refreshSignatures } = useLetterData(tab, companyId);
     const { headerUrl, footerUrl, hasLetterhead } = useLetterheadData(companyId);
     const { letterheads, loading: letterheadsLoading, getDefaultLetterhead } = useLetterheads(
         tab === 'companies' && companyId ? parseInt(companyId) : undefined
@@ -337,8 +403,13 @@ export default function LetterGenerationModule() {
                         <div className="flex-1 overflow-hidden">
                             {tab === 'companies' ? (
                                 <CompanySidebar
-                                    companies={companies} activeCompany={companyId}
-                                    onCompanyClick={setCompanyId} isCollapsed={false}
+                                    companies={companies}
+                                    activeCompany={companyId}
+                                    onCompanyClick={setCompanyId}
+                                    isCollapsed={false}
+                                    showCategoryFilter={true}
+                                    onCategoryFilterChange={handleCategoryFilterChange}
+                                    initialCategoryFilters={categoryFilters}
                                 />
                             ) : (
                                 <IndividualSidebar
@@ -474,6 +545,7 @@ export default function LetterGenerationModule() {
                                     availableLetterheads={letterheads}
                                     selectedLetterheadId={selectedLetterheadId}
                                     setSelectedLetterheadId={setSelectedLetterheadId}
+                                    onSignatureUpload={handleSignatureUpload}
                                 />
                             </ResizablePanel>
                         </ResizablePanelGroup>

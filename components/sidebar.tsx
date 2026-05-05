@@ -436,17 +436,6 @@ export function AppSidebar() {
               </DropdownMenu>
             </div>
           )}
-
-          {!isCollapsed && (
-            <div className="bg-blue-50 dark:bg-slate-800 backdrop-blur-sm rounded-lg p-3 text-center mt-3">
-              <p className="text-xs font-semibold text-blue-700 dark:text-blue-300">
-                Booksmart Consult Limited
-              </p>
-              <p className="text-xs text-slate-500 dark:text-white/45 mt-1">
-                {new Date().getFullYear()}
-              </p>
-            </div>
-          )}
         </div>
       </aside>
     </>

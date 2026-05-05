@@ -1428,24 +1428,6 @@ export default function TemplateGenerationDialog({
         return result;
     }, [combinedCache, masterFields, entityIdMap, relationshipData, extractedData, companyData, computedFieldCache]);
 
-    const resolveArrayData = useCallback((blockPlaceholder, allPlaceholders, combinedCache, masterFields, entityIdMap, relationshipData, extractedData, companyData, computedFieldCache) => {
-        // Get extraction mode from block config, default to 'latest'
-        const extractionMode = blockPlaceholder.extractionMode || blockPlaceholder.extraction_mode || 'latest';
-
-        // Use the new function with extraction mode support
-        return resolveArrayDataWithExtractionMode(
-            blockPlaceholder,
-            allPlaceholders,
-            combinedCache,
-            masterFields,
-            entityIdMap,
-            relationshipData,
-            extractedData,
-            companyData,
-            computedFieldCache,
-            extractionMode
-        );
-    }, [combinedCache, masterFields, entityIdMap, relationshipData, extractedData, companyData, computedFieldCache]);
 
     const handleInputChange = (name, val) => {
         setFormData(prev => {

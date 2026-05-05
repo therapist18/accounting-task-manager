@@ -4,7 +4,7 @@
 
 import supabase from "@/lib/supabase/client";
 
-const EDITOR_PREVIEW_STYLES = `
+export const EDITOR_PREVIEW_STYLES = `
   prose prose-sm sm:prose-base dark:prose-invert max-w-full focus:outline-none
   font-serif
   [&_*]:whitespace-pre-wrap

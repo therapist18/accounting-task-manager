@@ -2,40 +2,56 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { X, Filter } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Filter } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+
+// Type definitions for better type safety
+interface CategorySettings {
+  clientStatus: Record<string, boolean>;
+  sectionStatus?: Record<string, boolean>;
+  operationalStatus?: Record<string, boolean>;
+}
+
+interface FilterState {
+  categories: Record<string, boolean>;
+  categorySettings: Record<string, CategorySettings>;
+}
 
 interface ClientCategoryFilterProps {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
-  onFilterChange: (filters: any) => void;
+  onFilterChange: (filters: FilterState) => void;
   showSectionName?: string;
-  initialFilters?: any;
+  initialFilters?: FilterState | null;
   showSectionStatus?: boolean;
+  showOperationalStatus?: boolean;
   hideCategoryFilterButton?: boolean;
 }
 
-export default function ClientCategoryFilter({ 
-  open: propOpen, 
-  onOpenChange: propOnOpenChange, 
-  onFilterChange, 
-  showSectionName, 
+export default function ClientCategoryFilter({
+  open: propOpen,
+  onOpenChange: propOnOpenChange,
+  onFilterChange,
+  showSectionName,
   initialFilters = null,
   showSectionStatus = true,
+  showOperationalStatus = false,
   hideCategoryFilterButton = false
 }: ClientCategoryFilterProps) {
   // Internal state for managing the dialog when not controlled
   const [internalOpen, setInternalOpen] = useState(false);
-  
+
   // Use props if provided, otherwise use internal state
   const open = propOpen !== undefined ? propOpen : internalOpen;
   const onOpenChange = propOnOpenChange || setInternalOpen;
 
-  const categories = ['All Categories', 'ACC', 'IMM', 'Sheria', 'Audit']; 
-  const clientStatuses = ['All', 'Active', 'Inactive'];
+  const categories = ['All Categories', 'ACC', 'IMM', 'Audit', 'Sheria'];
+  const clientStatuses = ['All', 'Active', 'Inactive (terminated)'];
   const sectionStatuses = ['All', 'Active', 'Inactive', 'Missing'];
+  const operationalStatuses = ['All', 'Operational', 'Ceased'];
 
   // Maintain filter state between dialog openings
   const [filters, setFilters] = useState({
@@ -50,27 +66,27 @@ export default function ClientCategoryFilter({
       setFilters(initialFilters);
     } else if (Object.keys(filters.categories).length === 0) {
       // Default initial state if no filters exist yet
-      const defaultFilters = {
+      const defaultFilters: FilterState = {
         categories: {
           'All Categories': false,
-          'Acc': true,
-          'Imm': false,
-          'Sheria': false,
-          'Audit': false
+          'ACC': true,
+          'IMM': false,
+          'Audit': false,
+          'Sheria': false
         },
         categorySettings: {
-          'Acc': {
-            clientStatus: { 
-              All: false, 
-              Active: true, 
-              Inactive: false 
+          'ACC': {
+            clientStatus: {
+              All: false,
+              Active: true,
+              'Inactive (terminated)': false
             },
-            sectionStatus: { 
-              All: false, 
-              Active: true, 
-              Inactive: false, 
-              Missing: false 
-            }
+            ...(showSectionStatus && {
+              sectionStatus: { All: false, Active: true, Inactive: false, Missing: false }
+            }),
+            ...(showOperationalStatus && {
+              operationalStatus: { All: false, Operational: true, Ceased: false }
+            })
           }
         }
       };
@@ -79,102 +95,94 @@ export default function ClientCategoryFilter({
     }
   }, []);
 
-// In ClientCategoryFilter.tsx, update the handleCategoryChange function
-const handleCategoryChange = (category) => {
-  console.log("Category changed:", category);
-  const newCategories = { ...filters.categories };
-  const newCategorySettings = { ...filters.categorySettings }; 
-  
-  // Handle "All Categories" special case
-  if (category === 'All Categories') {
-    const allSelected = !newCategories['All Categories'];
-    
-    // If selecting "All Categories", select all categories
-    if (allSelected) {
+  const handleCategoryChange = (category: string) => {
+    const newCategories = { ...filters.categories };
+    const newCategorySettings = { ...filters.categorySettings };
+
+    // Handle "All Categories" special case
+    if (category === 'All Categories') {
+      const isNowSelected = !newCategories['All Categories'];
+      newCategories['All Categories'] = isNowSelected;
       categories.forEach(cat => {
-        newCategories[cat] = true;
-        // Initialize settings for each category
-        if (!newCategorySettings[cat] && cat !== 'All Categories') {
-          newCategorySettings[cat] = {
-            clientStatus: { 
-              All: false,
-              Active: true,
-              Inactive: false
-            },
-            sectionStatus: {
-              All: true,
-              Active: true,
-              Inactive: false,
-              Missing: false
-            }
-          };
+        if (cat !== 'All Categories') {
+          newCategories[cat] = isNowSelected;
+          if (isNowSelected && !newCategorySettings[cat]) {
+            newCategorySettings[cat] = {
+              clientStatus: { All: true, Active: true, 'Inactive (terminated)': true },
+              ...(showSectionStatus && {
+                sectionStatus: { All: true, Active: true, Inactive: true, Missing: true }
+              }),
+              ...(showOperationalStatus && {
+                operationalStatus: { All: true, Operational: true, Ceased: true }
+              })
+            };
+          }
         }
       });
     } else {
-      // Just toggle "All Categories" off if it's already on
+      // Standard toggle logic for specific categories
+      const isSelected = !newCategories[category];
+      newCategories[category] = isSelected;
       newCategories['All Categories'] = false;
-    }
-  } else {
-    // If a specific category is toggled
-    const isSelected = !newCategories[category];
-    
-    // Uncheck "All Categories" when selecting a specific one
-    newCategories['All Categories'] = false;
-    newCategories[category] = isSelected;
-    
-    // Initialize status settings for a newly selected category
-    if (isSelected) {
-      newCategorySettings[category] = {
-        clientStatus: { 
-          All: false,
-          Active: true,  // Auto-select Active by default
-          Inactive: false
-        },
-        sectionStatus: {
-          All: true,     // Auto-select All section statuses by default
-          Active: true,
-          Inactive: false,
-          Missing: false
-        }
-      };
-    }
-  }
-  
-  const newFilters = { 
-    categories: newCategories, 
-    categorySettings: newCategorySettings 
-  };
-  
-  setFilters(newFilters);
-  console.log("Selected categories:", Object.entries(newFilters.categories)
-    .filter(([_, isSelected]) => isSelected)
-    .map(([category]) => category));
-    
-  if (onFilterChange) onFilterChange(newFilters);
-};
 
-  // Handle status changes for a specific category
-  const handleStatusChange = (category, type, status) => {
+      // Initialize settings for newly selected category
+      if (isSelected && !newCategorySettings[category]) {
+        newCategorySettings[category] = {
+          clientStatus: { All: false, Active: true, 'Inactive (terminated)': false },
+          ...(showSectionStatus && {
+            sectionStatus: { All: false, Active: true, Inactive: false, Missing: false }
+          }),
+          ...(showOperationalStatus && {
+            operationalStatus: { All: false, Operational: true, Ceased: false }
+          })
+        };
+      }
+    }
+
+    const newFilters: FilterState = {
+      categories: newCategories,
+      categorySettings: newCategorySettings
+    };
+
+    setFilters(newFilters);
+    if (onFilterChange) onFilterChange(newFilters);
+  };
+
+  const handleStatusChange = (category: string, type: 'client' | 'section' | 'operational', status: string) => {
     if (!filters.categories[category]) return;
-    
+
     const newCategorySettings = { ...filters.categorySettings };
-    
+
     // Initialize this category's settings if they don't exist
     if (!newCategorySettings[category]) {
       newCategorySettings[category] = {
         clientStatus: {},
-        sectionStatus: {}
+        ...(showSectionStatus && { sectionStatus: {} }),
+        ...(showOperationalStatus && { operationalStatus: {} })
       };
     }
-    
-    const statusKey = type === 'client' ? 'clientStatus' : 'sectionStatus';
-    const statusOptions = type === 'client' ? clientStatuses : sectionStatuses;
+
+    let statusKey: keyof CategorySettings;
+    let statusOptions: string[];
+
+    if (type === 'client') {
+      statusKey = 'clientStatus';
+      statusOptions = clientStatuses;
+    } else if (type === 'section' && showSectionStatus) {
+      statusKey = 'sectionStatus';
+      statusOptions = sectionStatuses;
+    } else if (type === 'operational' && showOperationalStatus) {
+      statusKey = 'operationalStatus';
+      statusOptions = operationalStatuses;
+    } else {
+      return; // Invalid type or status not shown
+    }
+
     const currentSettings = { ...newCategorySettings[category][statusKey] };
-    
+
     // Handle "All" status logic
     if (status === 'All') {
       const allSelected = !currentSettings['All'];
-      
       // Toggle all options to match the "All" state
       statusOptions.forEach(st => {
         currentSettings[st] = allSelected;
@@ -182,46 +190,53 @@ const handleCategoryChange = (category) => {
     } else {
       // Toggle the specific status
       currentSettings[status] = !currentSettings[status];
-      
       // Check if all specific statuses are selected
       const allSpecificSelected = statusOptions.slice(1).every(st => currentSettings[st]);
       currentSettings['All'] = allSpecificSelected;
-      
       // If none are selected, ensure at least one is
       const anySelected = statusOptions.slice(1).some(st => currentSettings[st]);
       if (!anySelected) {
         currentSettings[status] = true; // Keep the last one selected
       }
     }
-    
+
     newCategorySettings[category][statusKey] = currentSettings;
-    
-    const newFilters = { 
-      ...filters, 
-      categorySettings: newCategorySettings 
+
+    const newFilters: FilterState = {
+      ...filters,
+      categorySettings: newCategorySettings
     };
-    
+
     setFilters(newFilters);
     if (onFilterChange) onFilterChange(newFilters);
   };
 
-  // Get the checked state for a cell based on its category and status
-  const getCellChecked = (category, type, status) => {
+  const getCellChecked = (category: string, type: 'client' | 'section' | 'operational', status: string): boolean => {
     if (!filters.categories[category]) return false;
-    
+
     // Get this category's settings (initialize if needed)
     const categorySettings = filters.categorySettings[category] || {
       clientStatus: {},
-      sectionStatus: {}
+      ...(showSectionStatus && { sectionStatus: {} }),
+      ...(showOperationalStatus && { operationalStatus: {} })
     };
-    
-    const statusKey = type === 'client' ? 'clientStatus' : 'sectionStatus';
-    return !!categorySettings[statusKey][status];
+
+    let statusKey: keyof CategorySettings;
+    if (type === 'client') {
+      statusKey = 'clientStatus';
+    } else if (type === 'section' && showSectionStatus) {
+      statusKey = 'sectionStatus';
+    } else if (type === 'operational' && showOperationalStatus) {
+      statusKey = 'operationalStatus';
+    } else {
+      return false;
+    }
+
+    return !!categorySettings[statusKey]?.[status];
   };
 
-  // Clear all filters
   const clearAll = () => {
-    const emptyFilters = {
+    const emptyFilters: FilterState = {
       categories: {},
       categorySettings: {}
     };
@@ -240,83 +255,109 @@ const handleCategoryChange = (category) => {
 
   // Only render the dialog content if open is true
   const dialogContent = open ? (
-    <DialogContent className="sm:max-w-[800px]">
-      <DialogHeader className="mb-4">
-        <DialogTitle className="text-xl font-bold">Client Category Filter</DialogTitle>
+    <DialogContent className="max-w-5xl">
+      <DialogHeader className="flex-shrink-0 rounded-t-xl">
+        <div className="flex items-center gap-5">
+          <div className="h-10 w-10 rounded-full flex items-center justify-center shadow-2xl ring-2 ring-slate-500/20">
+            <Filter className="h-6 w-6" />
+          </div>
+          <div>
+            <DialogTitle className="text-2xl font-bold">Client Category Filter</DialogTitle>
+            <DialogDescription className="">Filter companies by category and status.</DialogDescription>
+          </div>
+        </div>
       </DialogHeader>
-        
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr>
-                <th className="bg-blue-500 text-white p-2 border">Client Category</th>
-                <th className="bg-blue-500 text-white p-2 border text-center" colSpan={3}>Client Status</th>
-                {showSectionStatus && (
-                  <th className="bg-blue-500 text-white p-2 border text-center" colSpan={4}>{showSectionName} (Section)</th>
-                )}
-              </tr>
-              <tr>
-                <th className="bg-blue-500 text-white p-2 border"></th>
-                {clientStatuses.map(status => (
-                  <th key={`client-${status}`} className="bg-blue-500 text-white p-2 border text-center">{status}</th>
-                ))}
-                {showSectionStatus && sectionStatuses.map(status => (
-                  <th key={`section-${status}`} className="bg-blue-500 text-white p-2 border text-center">{status}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {categories.map(category => (
-                <tr key={category} className="hover:bg-gray-100">
-                  <td className="p-2 border">
-                    <div className="flex items-center space-x-2">
-                      <Checkbox 
-                        id={`category-${category}`}
-                        checked={!!filters.categories[category]}
-                        onCheckedChange={() => handleCategoryChange(category)}
-                      />
-                      <label 
-                        htmlFor={`category-${category}`}
-                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                      >
-                        {category}
-                      </label>
-                    </div>
-                  </td>
-                  
-                  {clientStatuses.map(status => (
-                    <td key={`${category}-client-${status}`} className="p-2 border text-center">
-                      <Checkbox 
-                        id={`${category}-client-${status}`}
-                        checked={getCellChecked(category, 'client', status)}
-                        onCheckedChange={() => handleStatusChange(category, 'client', status)}
-                        disabled={!filters.categories[category]}
-                      />
-                    </td>
-                  ))}
-                  
-                  {showSectionStatus && sectionStatuses.map(status => (
-                    <td key={`${category}-section-${status}`} className="p-2 border text-center">
-                      <Checkbox 
-                        id={`${category}-section-${status}`}
-                        checked={getCellChecked(category, 'section', status)}
-                        onCheckedChange={() => handleStatusChange(category, 'section', status)}
-                        disabled={!filters.categories[category]}
-                      />
-                    </td>
-                  ))}
-                </tr>
+
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="bg-blue-500 text-white p-2 border text-sm">Client Category</TableHead>
+              <TableHead className="bg-blue-500 text-white p-2 border text-sm text-center" colSpan={3}>Client Status</TableHead>
+              {showSectionStatus && (
+                <TableHead className="bg-blue-500 text-white p-2 border text-sm text-center" colSpan={4}>{showSectionName} (Section)</TableHead>
+              )}
+              {showOperationalStatus && (
+                <TableHead className="bg-blue-500 text-white p-2 border text-sm text-center" colSpan={4}>Operational Status</TableHead>
+              )}
+            </TableRow>
+            <TableRow>
+              <TableHead className="bg-blue-500 text-white p-2 border text-sm"></TableHead>
+              {clientStatuses.map(status => (
+                <TableHead key={`client-${status}`} className="bg-blue-500 text-white p-2 border text-sm text-center">{status}</TableHead>
               ))}
-            </tbody>
-          </table>
-          <div className="flex justify-end mt-4">
+              {showSectionStatus && sectionStatuses.map(status => (
+                <TableHead key={`section-${status}`} className="bg-blue-500 text-white p-2 border text-sm text-center">{status}</TableHead>
+              ))}
+              {showOperationalStatus && operationalStatuses.map(status => (
+                <TableHead key={`operational-${status}`} className="bg-blue-500 text-white p-2 border text-sm text-center">{status}</TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {categories.map(category => (
+              <TableRow key={category} className="hover:bg-blue-50">
+                <TableCell className="p-2 border bg-gray-50">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id={`category-${category}`}
+                      checked={!!filters.categories[category]}
+                      onCheckedChange={() => handleCategoryChange(category)}
+                    />
+                    <label
+                      htmlFor={`category-${category}`}
+                      className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                    >
+                      {category}
+                    </label>
+                  </div>
+                </TableCell>
+
+                {clientStatuses.map(status => (
+                  <TableCell key={`${category}-client-${status}`} className="p-2 border text-center">
+                    <Checkbox
+                      id={`${category}-client-${status}`}
+                      checked={getCellChecked(category, 'client', status)}
+                      onCheckedChange={() => handleStatusChange(category, 'client', status)}
+                      disabled={!filters.categories[category]}
+                    />
+                  </TableCell>
+                ))}
+
+                {showSectionStatus && sectionStatuses.map(status => (
+                  <TableCell key={`${category}-section-${status}`} className="p-2 border text-center">
+                    <Checkbox
+                      id={`${category}-section-${status}`}
+                      checked={getCellChecked(category, 'section', status)}
+                      onCheckedChange={() => handleStatusChange(category, 'section', status)}
+                      disabled={!filters.categories[category]}
+                    />
+                  </TableCell>
+                ))}
+
+                {showOperationalStatus && operationalStatuses.map(status => (
+                  <TableCell key={`${category}-operational-${status}`} className="p-2 border text-center">
+                    <Checkbox
+                      id={`${category}-operational-${status}`}
+                      checked={getCellChecked(category, 'operational', status)}
+                      onCheckedChange={() => handleStatusChange(category, 'operational', status)}
+                      disabled={!filters.categories[category]}
+                    />
+                  </TableCell>
+                ))}
+
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+        <div className="flex justify-end mt-6 gap-2">
           <Button variant="destructive" onClick={clearAll}>
             Clear All
           </Button>
         </div>
-        </div>
-      </DialogContent>
-    ) : null;
+      </div>
+    </DialogContent>
+  ) : null;
 
   // If hideCategoryFilterButton is true, only render the dialog
   if (hideCategoryFilterButton) {
@@ -333,7 +374,7 @@ const handleCategoryChange = (category) => {
       <DialogTrigger asChild>
         <Button variant="outline" size="sm" className="h-10" onClick={() => toggleDialog(true)}>
           <Filter className="mr-2 h-4 w-4" />
-          Co Categories
+          Categories
         </Button>
       </DialogTrigger>
       {dialogContent}

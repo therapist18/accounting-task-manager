@@ -82,10 +82,30 @@ export function useLetterData(tab: 'companies' | 'individuals', companyId: strin
         return signatoryList;
     }, [companyId, individuals, signatures, tab]);
 
+    const refreshIndividuals = async () => {
+        try {
+            const individualsData = await fetchIndividuals();
+            setIndividuals(individualsData);
+        } catch (e) {
+            console.error('Failed to refresh individuals:', e);
+        }
+    };
+
+    const refreshSignatures = async () => {
+        try {
+            const signaturesData = await supabase.from('acc_portal_directors_documents').select('*').eq('document_id', SIGNATURE_DOC_TYPE_ID);
+            setSignatures(signaturesData.data || []);
+        } catch (e) {
+            console.error('Failed to refresh signatures:', e);
+        }
+    };
+
     return {
         companies,
         individuals,
         signatures,
-        availableSignatories
+        availableSignatories,
+        refreshIndividuals,
+        refreshSignatures
     };
 }

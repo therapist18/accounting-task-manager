@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -7,9 +7,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { Settings2, Layout, Phone, MapPin, Signature, Building2, FileCheck, Check, Image } from "lucide-react";
+import { Settings2, Layout, Phone, MapPin, Signature, Building2, FileCheck, Check, Image, Upload } from "lucide-react";
 import type { Signatory } from '../hooks/useLetterData';
 import type { Letterhead } from '../hooks/useLetterheads';
+import { SignatureUploadDialog } from './SignatureUploadDialog';
 
 const VALEDICTIONS = ['Yours faithfully,', 'Yours sincerely,', 'Kind regards,', 'Respectfully yours,'];
 
@@ -39,6 +40,7 @@ interface LetterControlsProps {
     availableLetterheads?: Letterhead[];
     selectedLetterheadId?: string;
     setSelectedLetterheadId?: (id: string) => void;
+    onSignatureUpload?: (signatoryId: string, file: File) => Promise<void>;
 }
 
 export function LetterControls({
@@ -66,8 +68,17 @@ export function LetterControls({
     hasLetterhead,
     availableLetterheads = [],
     selectedLetterheadId,
-    setSelectedLetterheadId
+    setSelectedLetterheadId,
+    onSignatureUpload
 }: LetterControlsProps) {
+    const [showSignatureUpload, setShowSignatureUpload] = useState(false);
+
+    const handleSignatureUpload = async (file: File) => {
+        if (onSignatureUpload && activeSignatory) {
+            await onSignatureUpload(activeSignatory.id.toString(), file);
+        }
+    };
+
     return (
         <div className="h-full flex flex-col">
             <div className="p-6 border-b border-slate-100 flex items-center gap-2 bg-slate-50/50 shrink-0">
@@ -265,8 +276,21 @@ export function LetterControls({
                                                 <Check size={12} /> Digital Signature Found
                                             </div>
                                         ) : (
-                                            <div className="text-[10px] font-bold text-amber-600 bg-amber-50 p-2 rounded border border-amber-100 uppercase">
-                                                No signature scan found
+                                            <div className="space-y-2">
+                                                <div className="text-[10px] font-bold text-amber-600 bg-amber-50 p-2 rounded border border-amber-100 uppercase">
+                                                    No signature scan found
+                                                </div>
+                                                {onSignatureUpload && (
+                                                    <Button
+                                                        onClick={() => setShowSignatureUpload(true)}
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="w-full text-xs h-8 border-blue-200 text-blue-600 hover:bg-blue-50"
+                                                    >
+                                                        <Upload size={12} className="mr-2" />
+                                                        Upload Signature
+                                                    </Button>
+                                                )}
                                             </div>
                                         )}
                                     </div>
@@ -278,6 +302,15 @@ export function LetterControls({
                     )}
                 </div>
             </ScrollArea>
+
+            {showSignatureUpload && activeSignatory && (
+                <SignatureUploadDialog
+                    isOpen={showSignatureUpload}
+                    onClose={() => setShowSignatureUpload(false)}
+                    onUpload={handleSignatureUpload}
+                    signatoryName={activeSignatory.name}
+                />
+            )}
         </div>
     );
 }
