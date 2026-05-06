@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
-import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel } from 'docx';
+import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, ImageRun } from 'docx';
 import { saveAs } from 'file-saver';
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -22,11 +22,9 @@ import { GeneralLetterLayout } from './components/GeneralLetterLayout';
 import { LetterControls } from './components/LetterControls';
 import { generateLetterWithLetterhead, downloadBlob } from './utils/letterheadMerge';
 import * as mammoth from 'mammoth';
-import {
-    FileText, Download,
-    Briefcase, User, Type, Layout
-} from "lucide-react";
-import { toast } from '@/lib/hooks/use-toast';
+import { FileText, Download, Briefcase, User, Type, Layout } from "lucide-react";
+import { useSignatureUploadHandler } from './components/SignatureUploadHandler';
+import { exportToWord } from './utils/Exporttoword';
 
 const todayStr = () => new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 
@@ -34,78 +32,11 @@ export default function LetterGenerationModule() {
     const paperRef = useRef(null);
     const [tab, setTab] = useState<'companies' | 'individuals'>('companies');
     const [letterType, setLetterType] = useState<'kra' | 'general'>('kra');
-
     const [companyId, setCompanyId] = useState('');
     const [individualId, setIndividualId] = useState('');
     const [signatoryId, setSignatoryId] = useState('');
-
-    // Category filter state
     const [categoryFilters, setCategoryFilters] = useState(null);
-
-    // Handle category filter changes
-    const handleCategoryFilterChange = (filters) => {
-        setCategoryFilters(filters);
-        // Here you could add logic to filter companies based on category
-        // For now, we'll just store the filters
-    };
-
-    // Handle signature upload
-    const handleSignatureUpload = async (signatoryId: string, file: File) => {
-        const toastId = toast({
-            title: 'Uploading signature...',
-            variant: 'default',
-        });
-
-        try {
-            // Convert file to base64
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = async () => {
-                const base64 = reader.result as string;
-
-                const response = await fetch('/api/signature-upload', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        signatoryId,
-                        file: base64,
-                        fileName: file.name,
-                        fileType: file.type
-                    })
-                });
-
-                const result = await response.json();
-
-                if (response.ok) {
-                    toast({
-                        id: toastId.id,
-                        title: 'Signature uploaded successfully!',
-                        variant: 'default',
-                    });
-
-                    // Refresh individuals and signatures data
-                    await Promise.all([
-                        refreshIndividuals(),
-                        refreshSignatures()
-                    ]);
-                } else {
-                    toast({
-                        id: toastId.id,
-                        title: `Upload failed: ${result.error || 'Unknown error'}`,
-                        variant: 'destructive',
-                    });
-                }
-            };
-        } catch (error) {
-            console.error('Signature upload failed:', error);
-            toast({
-                id: toastId.id,
-                title: `Upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                variant: 'destructive',
-            });
-        }
-    };
-
+    const handleCategoryFilterChange = (filters) => { setCategoryFilters(filters); };
     const [phone, setPhone] = useState('+254700298298');
     const [email, setEmail] = useState('');
     const [reference, setReference] = useState('');
@@ -118,17 +49,16 @@ export default function LetterGenerationModule() {
     const [headerImageUrl, setHeaderImageUrl] = useState<string>('');
     const [footerImageUrl, setFooterImageUrl] = useState<string>('');
     const [loadingPreview, setLoadingPreview] = useState(false);
-
     const { companies, individuals, availableSignatories, refreshIndividuals, refreshSignatures } = useLetterData(tab, companyId);
     const { headerUrl, footerUrl, hasLetterhead } = useLetterheadData(companyId);
-    const { letterheads, loading: letterheadsLoading, getDefaultLetterhead } = useLetterheads(
-        tab === 'companies' && companyId ? parseInt(companyId) : undefined
-    );
-
+    const { letterheads, loading: letterheadsLoading, getDefaultLetterhead } = useLetterheads(tab === 'companies' && companyId ? parseInt(companyId) : undefined);
+    const { handleSignatureUpload: handleSignatureUploadHook } = useSignatureUploadHandler({
+        refreshIndividuals,
+        refreshSignatures
+    });
     const selectedCompany = useMemo(() => companies.find(c => c.id.toString() === companyId), [companies, companyId]);
     const selectedIndividual = useMemo(() => individuals.find(i => i.id.toString() === individualId), [individuals, individualId]);
     const activeSignatory = availableSignatories.find(s => s.id.toString() === signatoryId.toString());
-
     const isReady = tab === 'companies' ? !!selectedCompany : !!selectedIndividual;
 
     useEffect(() => {
@@ -236,146 +166,77 @@ export default function LetterGenerationModule() {
         loadLetterheadPreview();
     }, [selectedLetterheadId, useLetterhead, letterheads]);
 
+
     const exportToPDF = async () => {
         if (!paperRef.current) return;
-        const canvas = await html2canvas(paperRef.current, { scale: 2, useCORS: true });
-        const imgData = canvas.toDataURL('image/png');
-        const pdf = new jsPDF('p', 'mm', 'a4');
-        const pdfWidth = pdf.internal.pageSize.getWidth();
-        const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-        pdf.save(`${selectedCompany?.company_name || 'Letter'}.pdf`);
-    };
 
-    const exportToWord = async () => {
-        const companyName = tab === 'companies' ? selectedCompany?.company_name : selectedIndividual?.full_name;
-        const contactEmail = tab === 'companies' ? email : selectedIndividual?.contact_details?.email;
-        const contactPhone = tab === 'companies' ? phone : selectedIndividual?.contact_details?.phone;
-
-        // If using letterhead, merge with template
-        if (useLetterhead && selectedLetterheadId) {
-            const selectedLh = letterheads.find(lh => lh.id === selectedLetterheadId);
-            if (selectedLh) {
-                try {
-                    const letterContent = {
-                        body: letterType === 'kra'
-                            ? 'We hereby apply for a Tax Compliance Certificate for the above-mentioned company.\n\nAll relevant returns have been filed and payments made up to date.\n\nYour prompt assistance in this matter will be highly appreciated.'
-                            : 'We are writing to request a bank statement for our account.\n\nKindly provide the statement for the period as indicated.\n\nThank you for your assistance.',
-                        recipient: recipient,
-                        subject: subject,
-                        date: letterDate,
-                        reference: reference,
-                        salutation: 'Dear Sir/Madam,',
-                        valediction: valediction,
-                        signatory: {
-                            name: activeSignatory?.name || '',
-                            title: activeSignatory?.title || activeSignatory?.role || '',
-                        },
-                    };
-
-                    const mergedDoc = await generateLetterWithLetterhead(
-                        selectedLh.file_path,
-                        letterContent
-                    );
-
-                    if (mergedDoc) {
-                        downloadBlob(mergedDoc, `${companyName || 'Letter'}_${new Date().toISOString().split('T')[0]}.docx`);
-                        return;
-                    }
-                } catch (error) {
-                    console.error('Error generating letter with letterhead:', error);
-                    alert('Failed to generate letter with letterhead. Generating without letterhead instead.');
-                }
-            }
-        }
-
-        // Fallback: Generate without letterhead
-        const doc = new Document({
-            sections: [{
-                properties: {},
-                children: [
-                    // Header - Company Name
-                    new Paragraph({
-                        text: companyName || '',
-                        heading: HeadingLevel.HEADING_1,
-                        alignment: AlignmentType.CENTER,
-                        spacing: { after: 200 }
-                    }),
-                    // Contact Details
-                    new Paragraph({
-                        alignment: AlignmentType.RIGHT,
-                        spacing: { after: 400 },
-                        children: [
-                            new TextRun({ text: 'P.O. BOX 12345 - 00100', size: 20 }),
-                            new TextRun({ text: '\nNAIROBI, KENYA', size: 20 }),
-                            new TextRun({ text: `\nTEL: ${contactPhone}`, size: 20 }),
-                            new TextRun({ text: `\n${contactEmail}`, size: 20, bold: true })
-                        ]
-                    }),
-                    // Reference
-                    new Paragraph({
-                        spacing: { after: 200 },
-                        children: [
-                            new TextRun({ text: `Ref: ${reference}`, size: 20, bold: true })
-                        ]
-                    }),
-                    // Date
-                    new Paragraph({
-                        text: letterDate,
-                        spacing: { after: 400 },
-                        alignment: AlignmentType.LEFT
-                    }),
-                    // Recipient
-                    new Paragraph({
-                        text: recipient,
-                        spacing: { after: 400 }
-                    }),
-                    // Subject
-                    new Paragraph({
-                        spacing: { after: 400 },
-                        children: [
-                            new TextRun({ text: 'RE: ', bold: true, size: 22 }),
-                            new TextRun({ text: subject.toUpperCase(), bold: true, size: 22, underline: {} })
-                        ]
-                    }),
-                    // Salutation
-                    new Paragraph({
-                        text: 'Dear Sir/Madam,',
-                        spacing: { after: 400 }
-                    }),
-                    // Body
-                    new Paragraph({
-                        text: letterType === 'kra'
-                            ? 'We hereby apply for a Tax Compliance Certificate for the above-mentioned company.\n\nAll relevant returns have been filed and payments made up to date.\n\nYour prompt assistance in this matter will be highly appreciated.'
-                            : 'We are writing to request a bank statement for our account.\n\nKindly provide the statement for the period as indicated.\n\nThank you for your assistance.',
-                        spacing: { after: 600, line: 360 }
-                    }),
-                    // Valediction
-                    new Paragraph({
-                        text: valediction,
-                        spacing: { after: 800 }
-                    }),
-                    // Signatory Name
-                    new Paragraph({
-                        text: tab === 'companies' ? (activeSignatory?.name || '____________________') : selectedIndividual?.full_name || '',
-                        spacing: { after: 100 },
-                        children: [
-                            new TextRun({ text: tab === 'companies' ? (activeSignatory?.name || '____________________') : selectedIndividual?.full_name || '', bold: true, size: 24 })
-                        ]
-                    }),
-                    // Position
-                    new Paragraph({
-                        text: tab === 'companies' ? (activeSignatory?.position || 'Director') : 'Applicant',
-                        children: [
-                            new TextRun({ text: tab === 'companies' ? (activeSignatory?.position || 'Director') : 'Applicant', italics: true, size: 20 })
-                        ]
-                    })
-                ]
-            }]
+        const canvas = await html2canvas(paperRef.current, {
+            scale: 2,
+            useCORS: true,
+            backgroundColor: '#ffffff',
+            // Ignore UI-only elements inside the paper div (badge, edit hints)
+            ignoreElements: (el: Element) =>
+                el.classList.contains('print:hidden') ||
+                el.getAttribute('data-pdf-ignore') === 'true',
         });
 
-        const blob = await Packer.toBlob(doc);
-        saveAs(blob, `${companyName || 'Letter'}.docx`);
+        const imgData = canvas.toDataURL('image/png');
+        const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+        const pdfWidth = pdf.internal.pageSize.getWidth();   // 210 mm
+        const pdfHeight = pdf.internal.pageSize.getHeight();  // 297 mm
+
+        // Scale the captured canvas to fill the page exactly (letterbox if needed)
+        const canvasAspect = canvas.width / canvas.height;
+        const pageAspect = pdfWidth / pdfHeight;
+
+        let imgW: number, imgH: number, x: number, y: number;
+        if (canvasAspect > pageAspect) {
+            // Canvas is wider than A4 — fit to width
+            imgW = pdfWidth;
+            imgH = pdfWidth / canvasAspect;
+            x = 0;
+            y = (pdfHeight - imgH) / 2;
+        } else {
+            // Canvas is taller — fit to height
+            imgH = pdfHeight;
+            imgW = pdfHeight * canvasAspect;
+            x = (pdfWidth - imgW) / 2;
+            y = 0;
+        }
+
+        pdf.addImage(imgData, 'PNG', x, y, imgW, imgH);
+
+        const entityName = tab === 'companies'
+            ? selectedCompany?.company_name
+            : selectedIndividual?.full_name;
+
+        pdf.save(`${entityName || 'Letter'}_${new Date().toISOString().split('T')[0]}.pdf`);
+    };
+
+    const handleExportToWord = async () => {
+        if (!isReady) return;
+
+        await exportToWord({
+            tab,
+            letterType,
+            selectedCompany,
+            selectedIndividual,
+            email,
+            phone,
+            letterDate,
+            reference,
+            recipient,
+            subject,
+            valediction,
+            activeSignatory,
+            useLetterhead,
+            headerImageUrl,
+            footerImageUrl,
+            letterheads,
+            selectedLetterheadId,
+            generateLetterWithLetterhead,
+            downloadBlob,
+        });
     };
 
     return (
@@ -436,7 +297,7 @@ export default function LetterGenerationModule() {
                             </div>
 
                             <div className="flex items-center gap-3">
-                                <Button variant="outline" size="sm" className="border-slate-200 text-slate-600 font-bold text-xs uppercase" disabled={!isReady} onClick={exportToWord}>
+                                <Button variant="outline" size="sm" className="border-slate-200 text-slate-600 font-bold text-xs uppercase" disabled={!isReady} onClick={handleExportToWord}>
                                     <Download className="mr-2 h-3.5 w-3.5" /> Download Word
                                 </Button>
                                 <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs uppercase shadow-lg shadow-blue-100 px-6 h-9" disabled={!isReady} onClick={exportToPDF}>
@@ -545,7 +406,7 @@ export default function LetterGenerationModule() {
                                     availableLetterheads={letterheads}
                                     selectedLetterheadId={selectedLetterheadId}
                                     setSelectedLetterheadId={setSelectedLetterheadId}
-                                    onSignatureUpload={handleSignatureUpload}
+                                    onSignatureUpload={handleSignatureUploadHook}
                                 />
                             </ResizablePanel>
                         </ResizablePanelGroup>
