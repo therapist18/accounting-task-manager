@@ -4,6 +4,7 @@ export type Company = {
   id: string | number;
   company_name: string;
   registration_number?: string;
+  kra_pin?: string;
   kra_email_address?: string;
   contact_details?: {
     email?: string;
@@ -30,6 +31,7 @@ export async function fetchCompanies(): Promise<Company[]> {
         id,
         company_name,
         registration_number,
+        kra_pin,
         kra_email_address,
         contact_details,
         acc_client_effective_from,
@@ -54,6 +56,7 @@ export async function fetchCompanies(): Promise<Company[]> {
       id: company.id,
       company_name: company.company_name || 'Unnamed Company',
       registration_number: company.registration_number,
+      kra_pin: company.kra_pin,
       kra_email_address: company.kra_email_address,
       contact_details: company.contact_details,
       default_display: false, // Default value

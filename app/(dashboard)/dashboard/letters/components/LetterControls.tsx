@@ -7,9 +7,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { Settings2, Layout, Phone, MapPin, Signature, Building2, FileCheck, Check, Image, Upload } from "lucide-react";
+import { Settings2, Layout, Phone, MapPin, Signature, Building2, FileCheck, Check, Image, Upload, CreditCard, AlertCircle } from "lucide-react";
 import type { Signatory } from '../hooks/useLetterData';
 import type { Letterhead } from '../hooks/useLetterheads';
+import type { IndividualIdInfo } from '../hooks/useIndividualIdentificationNumbers';
 import { SignatureUploadDialog } from './SignatureUploadDialog';
 
 const VALEDICTIONS = ['Yours faithfully,', 'Yours sincerely,', 'Kind regards,', 'Respectfully yours,'];
@@ -22,8 +23,8 @@ interface LetterControlsProps {
     setPhone: (phone: string) => void;
     email: string;
     setEmail: (email: string) => void;
-    reference: string;
-    setReference: (reference: string) => void;
+    kra_pin: string;
+    setKraPin: (kra_pin: string) => void;
     recipient: string;
     setRecipient: (recipient: string) => void;
     subject: string;
@@ -41,6 +42,7 @@ interface LetterControlsProps {
     selectedLetterheadId?: string;
     setSelectedLetterheadId?: (id: string) => void;
     onSignatureUpload?: (signatoryId: string, file: File) => Promise<void>;
+    individualIdInfo?: IndividualIdInfo | null;
 }
 
 export function LetterControls({
@@ -51,8 +53,8 @@ export function LetterControls({
     setPhone,
     email,
     setEmail,
-    reference,
-    setReference,
+    kra_pin,
+    setKraPin,
     recipient,
     setRecipient,
     subject,
@@ -69,7 +71,8 @@ export function LetterControls({
     availableLetterheads = [],
     selectedLetterheadId,
     setSelectedLetterheadId,
-    onSignatureUpload
+    onSignatureUpload,
+    individualIdInfo
 }: LetterControlsProps) {
     const [showSignatureUpload, setShowSignatureUpload] = useState(false);
 
@@ -207,10 +210,12 @@ export function LetterControls({
                             </CardTitle>
                         </CardHeader>
                         <CardContent className="p-4 space-y-4">
-                            <div className="space-y-1.5">
-                                <Label className="text-[10px] font-black uppercase text-slate-400">Ref / PIN Number</Label>
-                                <Input className="h-9 text-xs font-bold" value={reference} onChange={e => setReference(e.target.value)} />
-                            </div>
+                            {tab === 'companies' && (
+                                <div className="space-y-1.5">
+                                    <Label className="text-[10px] font-black uppercase text-slate-400">KRA PIN Number</Label>
+                                    <Input className="h-9 text-xs font-bold" value={kra_pin} onChange={e => setKraPin(e.target.value)} />
+                                </div>
+                            )}
                             <div className="space-y-1.5">
                                 <Label className="text-[10px] font-black uppercase text-slate-400">Recipient</Label>
                                 <Textarea className="text-xs font-medium min-h-[60px]" value={recipient} onChange={e => setRecipient(e.target.value)} />
@@ -243,6 +248,45 @@ export function LetterControls({
                             </div>
                         </CardContent>
                     </Card>
+
+                    {tab === 'individuals' && (
+                        <Card className="border-teal-100 shadow-sm overflow-hidden ring-1 ring-teal-50">
+                            <CardHeader className="bg-teal-50/50 py-3 px-4 border-b border-teal-100">
+                                <CardTitle className="text-[10px] font-black text-teal-700 uppercase tracking-widest flex items-center gap-2">
+                                    <CreditCard size={12} /> Individual Identity
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="p-4 space-y-3">
+                                {individualIdInfo ? (
+                                    <>
+                                        <div className="flex items-center gap-2 text-[10px] font-bold text-emerald-700 bg-emerald-50 p-2 rounded border border-emerald-100 uppercase">
+                                            <Check size={12} /> ID Document Found
+                                        </div>
+                                        <div className="space-y-1">
+                                            <p className="text-[10px] font-black uppercase text-slate-400">
+                                                {individualIdInfo.label}
+                                            </p>
+                                            <p className="text-sm font-black text-slate-800 tracking-widest font-mono">
+                                                {individualIdInfo.value}
+                                            </p>
+                                        </div>
+                                        <p className="text-[10px] text-teal-600 bg-teal-50 p-2 rounded border border-teal-100">
+                                            Included in letter subject automatically.
+                                        </p>
+                                    </>
+                                ) : (
+                                    <div className="space-y-2">
+                                        <div className="flex items-center gap-2 text-[10px] font-bold text-amber-600 bg-amber-50 p-2 rounded border border-amber-100 uppercase">
+                                            <AlertCircle size={12} /> No ID Document Found
+                                        </div>
+                                        <p className="text-[10px] text-slate-400">
+                                            Upload a national ID or alien certificate in the registry to auto-populate the subject line.
+                                        </p>
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
+                    )}
 
                     {tab === 'companies' && (
                         <Card className="border-blue-100 shadow-sm overflow-hidden ring-1 ring-blue-50">

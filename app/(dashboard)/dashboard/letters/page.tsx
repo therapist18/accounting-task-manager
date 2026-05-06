@@ -25,8 +25,26 @@ import * as mammoth from 'mammoth';
 import { FileText, Download, Briefcase, User, Type, Layout } from "lucide-react";
 import { useSignatureUploadHandler } from './components/SignatureUploadHandler';
 import { exportToWord } from './utils/Exporttoword';
+import { useIndividualIdentificationNumbers, resolveIndividualId } from './hooks/useIndividualIdentificationNumbers';
+import type { IndividualIdInfo } from './hooks/useIndividualIdentificationNumbers';
 
-const todayStr = () => new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+const todayStr = () => {
+    const date = new Date();
+    const day = date.getDate();
+    const month = date.toLocaleDateString('en-GB', { month: 'long' });
+    const year = date.getFullYear();
+
+    // Add ordinal suffix to day
+    const getOrdinalSuffix = (n) => {
+        if (n > 3 && n < 21) return 'th';
+        if (n === 1 || n === 21) return 'st';
+        if (n === 2 || n === 22) return 'nd';
+        if (n === 3 || n === 23) return 'rd';
+        return 'th';
+    };
+
+    return `${day}${getOrdinalSuffix(day)} ${month} ${year}`;
+};
 
 export default function LetterGenerationModule() {
     const paperRef = useRef(null);
@@ -40,6 +58,7 @@ export default function LetterGenerationModule() {
     const [phone, setPhone] = useState('+254700298298');
     const [email, setEmail] = useState('');
     const [reference, setReference] = useState('');
+    const [kra_pin, setKraPin] = useState('');
     const [recipient, setRecipient] = useState('');
     const [subject, setSubject] = useState('');
     const [valediction, setValediction] = useState('Yours faithfully,');
@@ -61,6 +80,13 @@ export default function LetterGenerationModule() {
     const activeSignatory = availableSignatories.find(s => s.id.toString() === signatoryId.toString());
     const isReady = tab === 'companies' ? !!selectedCompany : !!selectedIndividual;
 
+    const individualIds = useMemo(() => individuals.map(i => i.id), [individuals]);
+    const { identificationNumbers } = useIndividualIdentificationNumbers(individualIds);
+    const individualIdInfo: IndividualIdInfo | null = useMemo(
+        () => selectedIndividual ? resolveIndividualId(identificationNumbers[selectedIndividual.id]) : null,
+        [selectedIndividual, identificationNumbers]
+    );
+
     useEffect(() => {
         if (selectedCompany) {
             if (letterType === 'kra') {
@@ -68,7 +94,13 @@ export default function LetterGenerationModule() {
                 setEmail(kraEmail);
                 setPhone('+254700298298');
                 setRecipient("Kenya Revenue Authority,\nP.O. Box 48240 - 00100,\nNairobi, Kenya.");
-                setSubject("APPLICATION FOR TAX COMPLIANCE CERTIFICATE");
+                // Add KRA PIN to subject if available
+                const kraPin = selectedCompany.kra_pin || selectedCompany.registration_number || '';
+                const subjectWithPin = kraPin
+                    ? `APPLICATION FOR TAX COMPLIANCE CERTIFICATE (KRA PIN: ${kraPin})`
+                    : "APPLICATION FOR TAX COMPLIANCE CERTIFICATE";
+                setSubject(subjectWithPin);
+                setKraPin(kraPin);
             } else {
                 const companyEmail = selectedCompany.contact_details?.email || '';
                 const companyPhone = selectedCompany.phone
@@ -81,11 +113,37 @@ export default function LetterGenerationModule() {
                 setEmail(companyEmail);
                 setPhone(companyPhone);
                 setRecipient("Select Bank Ltd,\nIndustrial Area Branch,\nNairobi.");
-                setSubject("REQUEST FOR BANK STATEMENT");
+                // Add registration number to subject if available
+                const regNumber = selectedCompany.registration_number || '';
+                const subjectWithReg = regNumber
+                    ? `REQUEST FOR BANK STATEMENT (Reg No: ${regNumber})`
+                    : "REQUEST FOR BANK STATEMENT";
+                setSubject(subjectWithReg);
             }
             setReference(selectedCompany.registration_number || '');
+            setKraPin(selectedCompany.kra_pin || '');
         }
     }, [selectedCompany, letterType]);
+
+    useEffect(() => {
+        if (selectedIndividual) {
+            const idInfo = resolveIndividualId(identificationNumbers[selectedIndividual.id]);
+            const idSuffix = idInfo ? ` (${idInfo.label}: ${idInfo.value})` : '';
+
+            if (letterType === 'kra') {
+                setEmail(selectedIndividual.contact_details?.email || '');
+                setPhone(selectedIndividual.contact_details?.phone || '+254700298298');
+                setRecipient("Kenya Revenue Authority,\nP.O. Box 48240 - 00100,\nNairobi, Kenya.");
+                setSubject(`APPLICATION FOR TAX COMPLIANCE CERTIFICATE${idSuffix}`);
+            } else {
+                setEmail(selectedIndividual.contact_details?.email || '');
+                setPhone(selectedIndividual.contact_details?.phone || '+254700000000');
+                setRecipient("Select Bank Ltd,\nIndustrial Area Branch,\nNairobi.");
+                setSubject(`REQUEST FOR BANK STATEMENT${idSuffix}`);
+                setReference('');
+            }
+        }
+    }, [selectedIndividual, letterType, identificationNumbers]);
 
     useEffect(() => {
         if (availableSignatories.length > 0) {
@@ -166,55 +224,84 @@ export default function LetterGenerationModule() {
         loadLetterheadPreview();
     }, [selectedLetterheadId, useLetterhead, letterheads]);
 
-
     const exportToPDF = async () => {
         if (!paperRef.current) return;
 
-        const canvas = await html2canvas(paperRef.current, {
-            scale: 2,
-            useCORS: true,
-            backgroundColor: '#ffffff',
-            // Ignore UI-only elements inside the paper div (badge, edit hints)
-            ignoreElements: (el: Element) =>
-                el.classList.contains('print:hidden') ||
-                el.getAttribute('data-pdf-ignore') === 'true',
-        });
-
-        const imgData = canvas.toDataURL('image/png');
         const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-        const pdfWidth = pdf.internal.pageSize.getWidth();   // 210 mm
-        const pdfHeight = pdf.internal.pageSize.getHeight();  // 297 mm
+        const pdfWidth = pdf.internal.pageSize.getWidth();
 
-        // Scale the captured canvas to fill the page exactly (letterbox if needed)
-        const canvasAspect = canvas.width / canvas.height;
-        const pageAspect = pdfWidth / pdfHeight;
+        const hasImageHeader = useLetterhead && headerImageUrl;
+        const shouldUseFallbackHeader = !hasImageHeader;
 
-        let imgW: number, imgH: number, x: number, y: number;
-        if (canvasAspect > pageAspect) {
-            // Canvas is wider than A4 — fit to width
-            imgW = pdfWidth;
-            imgH = pdfWidth / canvasAspect;
-            x = 0;
-            y = (pdfHeight - imgH) / 2;
+        if (shouldUseFallbackHeader) {
+            const entityName = tab === 'companies' ? selectedCompany?.company_name : selectedIndividual?.full_name;
+            const displayEmail = tab === 'companies' ? (selectedCompany?.kra_email_address || email) : email;
+
+            // 1. Draw Manual PDF Header
+            pdf.setTextColor(15, 23, 42); // Slate 900
+            if (letterType === 'kra') {
+                pdf.setFontSize(18);
+                pdf.setFont('helvetica', 'bold');
+                pdf.text(entityName?.toUpperCase() || '', pdfWidth / 2, 25, { align: 'center' });
+                pdf.setFontSize(10);
+                pdf.setFont('helvetica', 'normal');
+                pdf.text(`EMAIL: ${displayEmail}    MOBILE NO: ${phone}`, pdfWidth / 2, 32, { align: 'center' });
+                pdf.text('P.O. BOX 12345 - 00100, NAIROBI, KENYA', pdfWidth / 2, 38, { align: 'center' });
+                pdf.setLineWidth(0.8);
+                pdf.line(20, 45, pdfWidth - 20, 45); // Thick KRA Line
+                var contentStart = 55;
+            } else {
+                pdf.setFontSize(16);
+                pdf.setFont('helvetica', 'bold');
+                pdf.text(entityName?.toUpperCase() || '', 20, 25);
+                pdf.setFontSize(9);
+                pdf.setTextColor(37, 99, 235); // Blue 600
+                pdf.text(`Ref: ${reference}`, 20, 31);
+                pdf.setTextColor(100, 116, 139); // Slate 500
+                pdf.text('P.O. BOX 12345 - 00100', pdfWidth - 20, 25, { align: 'right' });
+                pdf.text('NAIROBI, KENYA', pdfWidth - 20, 30, { align: 'right' });
+                pdf.text(`TEL: ${phone}`, pdfWidth - 20, 35, { align: 'right' });
+                pdf.setLineWidth(0.3);
+                pdf.setDrawColor(226, 232, 240);
+                pdf.line(20, 42, pdfWidth - 20, 42); // Thin General Line
+                var contentStart = 50;
+            }
+
+            // 2. Capture Content (Body & Signature)
+            const canvas = await html2canvas(paperRef.current, {
+                scale: 4, // Higher scale for crisp text
+                useCORS: true,
+                backgroundColor: '#ffffff',
+                ignoreElements: (el) => {
+                    // Ignore the UI header (which we just drew manually)
+                    return el.classList.contains('border-b-2') || el.classList.contains('border-b-[3px]');
+                }
+            });
+
+            const imgData = canvas.toDataURL('image/png');
+            const imgWidth = pdfWidth - 40; // 20mm margin on each side
+            const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+            // Add body image exactly at the contentStart coordinate
+            pdf.addImage(imgData, 'PNG', 20, contentStart, imgWidth, imgHeight);
         } else {
-            // Canvas is taller — fit to height
-            imgH = pdfHeight;
-            imgW = pdfHeight * canvasAspect;
-            x = (pdfWidth - imgW) / 2;
-            y = 0;
+            // Handle full-image letterhead capture
+            const canvas = await html2canvas(paperRef.current, { scale: 4, useCORS: true });
+            pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, pdfWidth, (canvas.height * pdfWidth) / canvas.width);
         }
 
-        pdf.addImage(imgData, 'PNG', x, y, imgW, imgH);
-
-        const entityName = tab === 'companies'
-            ? selectedCompany?.company_name
-            : selectedIndividual?.full_name;
-
-        pdf.save(`${entityName || 'Letter'}_${new Date().toISOString().split('T')[0]}.pdf`);
+        pdf.save(`${(tab === 'companies' ? selectedCompany?.company_name : selectedIndividual?.full_name) || 'Letter'}.pdf`);
     };
 
     const handleExportToWord = async () => {
-        if (!isReady) return;
+        console.log('[handleExportToWord] Function called!');
+
+        if (!isReady) {
+            console.log('[handleExportToWord] Not ready, returning');
+            return;
+        }
+
+        console.log('[handleExportToWord] Calling exportToWord...');
 
         await exportToWord({
             tab,
@@ -236,6 +323,7 @@ export default function LetterGenerationModule() {
             selectedLetterheadId,
             generateLetterWithLetterhead,
             downloadBlob,
+            individualIdInfo,
         });
     };
 
@@ -309,9 +397,9 @@ export default function LetterGenerationModule() {
                         <ResizablePanelGroup direction="horizontal" className="flex-1">
                             <ResizablePanel defaultSize={70} className="bg-slate-100/50">
                                 <ScrollArea className="h-full">
-                                    <div className="p-12 flex flex-col items-center">
+                                    <div className="p-4 flex flex-col items-center">
                                         {isReady ? (
-                                            <div className="space-y-6">
+                                            <div className="space-y-2">
                                                 <div className="flex justify-center">
                                                     <Badge variant="secondary" className="bg-white text-blue-600 border-blue-100 px-4 py-1.5 rounded-full shadow-sm">
                                                         <Type size={14} className="mr-2" />
@@ -322,7 +410,7 @@ export default function LetterGenerationModule() {
                                                 <div
                                                     ref={paperRef}
                                                     className={cn(
-                                                        "w-[210mm] min-h-[297mm] bg-white p-[25mm] shadow-[0_20px_50px_rgba(0,0,0,0.05)] transition-all",
+                                                        "w-[210mm] min-h-[297mm] bg-white p-16 shadow-[0_20px_50px_rgba(0,0,0,0.05)] transition-all",
                                                         "print:shadow-none print:w-full print:m-0"
                                                     )}
                                                 >
@@ -339,6 +427,7 @@ export default function LetterGenerationModule() {
                                                             subject={subject}
                                                             valediction={valediction}
                                                             activeSignatory={activeSignatory}
+                                                            individualIdInfo={individualIdInfo}
                                                         />
                                                     ) : (
                                                         <GeneralLetterLayout
@@ -353,6 +442,7 @@ export default function LetterGenerationModule() {
                                                             subject={subject}
                                                             valediction={valediction}
                                                             activeSignatory={activeSignatory}
+                                                            individualIdInfo={individualIdInfo}
                                                             useLetterhead={useLetterhead}
                                                             headerUrl={headerUrl}
                                                             footerUrl={footerUrl}
@@ -388,6 +478,8 @@ export default function LetterGenerationModule() {
                                     setPhone={setPhone}
                                     email={email}
                                     setEmail={setEmail}
+                                    kra_pin={kra_pin}
+                                    setKraPin={setKraPin}
                                     reference={reference}
                                     setReference={setReference}
                                     recipient={recipient}
@@ -407,6 +499,7 @@ export default function LetterGenerationModule() {
                                     selectedLetterheadId={selectedLetterheadId}
                                     setSelectedLetterheadId={setSelectedLetterheadId}
                                     onSignatureUpload={handleSignatureUploadHook}
+                                    individualIdInfo={individualIdInfo}
                                 />
                             </ResizablePanel>
                         </ResizablePanelGroup>
