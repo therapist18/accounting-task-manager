@@ -1406,8 +1406,7 @@ export default function TemplateGenerationDialog({
                     index,         // Argument 8: arrayIndex (Critical Fix)
                     sourceArray,
                     task,
-                    computedFieldCache,
-                    extractionMode
+                    computedFieldCache
                 );
                 // For boolean fields, preserve the structure (array of options)
                 if (field.type === 'boolean') {
@@ -1924,10 +1923,8 @@ export default function TemplateGenerationDialog({
                 },
             });
 
-            const doc = new Docxtemplater();
-            doc.loadZip(zip);
-            doc.attachModule(imageModule);
-            doc.setOptions({
+            const doc = new Docxtemplater(zip, {
+                modules: [imageModule],
                 paragraphLoop: true,
                 linebreaks: true,
                 nullGetter: () => ""

@@ -8,10 +8,10 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { X } from 'lucide-react';
+import { X, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PlaceholderInput } from './PlaceholderInput';
 import { extractDisplayValue } from '../utils/templateUtils';
@@ -50,7 +50,7 @@ export const ArrayInputsPanel = ({
   const children = blockData.children || [];
   const rows = Array.isArray(formData[blockName]) ? formData[blockName] : [];
   const config = blockData.config || {};
-  const isTransposed = config.array_direction === 'transposed';
+  const [isTransposed, setIsTransposed] = useState(true); // Default to transposed layout
   const isHorizontal = config.array_direction === 'horizontal';
 
   // --- HORIZONTAL LAYOUT (Digit-splitting style) ---
@@ -136,9 +136,18 @@ export const ArrayInputsPanel = ({
       <div className="mt-2 space-y-2">
         <div className="flex items-center justify-between">
           <Badge className="bg-blue-600 uppercase text-[9px] tracking-tighter">
-            {blockName} — {rows.length} {String(entityLabel).toLowerCase()}(s)
+            {blockName} — {rows.length} {String(entityLabel).toLowerCase()}(s) {!isTransposed ? '(Vertical)' : '(Transposed)'}
           </Badge>
           <div className="flex gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 text-[10px] px-2 text-blue-600 border-blue-200"
+              onClick={() => setIsTransposed(!isTransposed)}
+              title={isTransposed ? "Switch to vertical layout" : "Switch to transposed layout"}
+            >
+              <RotateCcw className="h-3 w-3" />
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -258,9 +267,18 @@ export const ArrayInputsPanel = ({
     <div className="mt-2 space-y-2">
       <div className="flex items-center justify-between">
         <Badge className="bg-blue-600 uppercase text-[9px] tracking-tighter">
-          {blockName} — {rows.length} {String(entityLabel).toLowerCase()}(s)
+          {blockName} — {rows.length} {String(entityLabel).toLowerCase()}(s) {!isTransposed ? '(Vertical)' : '(Transposed)'}
         </Badge>
         <div className="flex gap-1">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 text-[10px] px-2 text-blue-600 border-blue-200"
+            onClick={() => setIsTransposed(!isTransposed)}
+            title={isTransposed ? "Switch to vertical layout" : "Switch to transposed layout"}
+          >
+            <RotateCcw className="h-3 w-3" />
+          </Button>
           <Button
             variant="outline"
             size="sm"
