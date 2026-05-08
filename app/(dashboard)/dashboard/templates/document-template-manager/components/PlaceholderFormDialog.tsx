@@ -728,6 +728,35 @@ export function PlaceholderFormDialog({
                       onClear={() => onChange({ linked_job_question_ids: [] })}
                       placeholder="Select job questions..."
                     />
+                    {(() => {
+                      const qIds = placeholder.linked_job_question_ids || [];
+                      if (qIds.length !== 1) return null;
+                      const linkedQ = jobQuestions.find(q => q.id === qIds[0]);
+                      if (!linkedQ?.options?.length) return null;
+                      return (
+                        <div className="mt-2 p-2 bg-purple-50 rounded-lg border border-purple-100 space-y-1.5">
+                          <Label className="text-[10px] font-bold text-purple-700 uppercase flex items-center gap-1">
+                            <Layers className="h-3 w-3" /> Represents Option
+                          </Label>
+                          <Select
+                            value={placeholder.linked_job_question_option || ''}
+                            onValueChange={(v) => onChange({ linked_job_question_option: v || undefined })}
+                          >
+                            <SelectTrigger className="h-7 text-xs bg-white border-purple-200">
+                              <SelectValue placeholder="Which option does this placeholder map to?" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {linkedQ.options.map((opt: string) => (
+                                <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <p className="text-[9px] text-purple-400">
+                            When &quot;{placeholder.linked_job_question_option || '...'}&quot; is selected by the user, {`{${placeholder.name || '...'}}`} will be populated.
+                          </p>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div className="space-y-1.5">

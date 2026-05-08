@@ -129,6 +129,8 @@ export const extractPlaceholders = async (
     const results: Placeholder[] = [];
     const blockStack: string[] = [];
     const processedTags = new Set<string>();
+    let _idSeq = 0;
+    const uid = () => `${Date.now()}_${_idSeq++}`;
 
     const formatFunctions = new Set([
       'upper', 'lower', 'capital', 'capitalize', 'title', 'camel', 'snake', 'kebab',
@@ -168,7 +170,7 @@ export const extractPlaceholders = async (
           if (tagName.startsWith('condition_')) {
             const conditionName = tagName.replace('condition_', '');
             results.push({
-              id: `block_${tagName}_${Date.now()}`,
+              id: `block_${tagName}_${uid()}`,
               name: tagName,
               type: 'conditional',
               required: true,
@@ -194,7 +196,7 @@ export const extractPlaceholders = async (
             }
 
             results.push({
-              id: `block_${tagName}_${Date.now()}`,
+              id: `block_${tagName}_${uid()}`,
               name: tagName,
               type: 'array',
               required: true,
@@ -243,7 +245,7 @@ export const extractPlaceholders = async (
         }
 
         const placeholder: Placeholder = {
-          id: `ph_${tagName}_${Date.now()}`,
+          id: `ph_${tagName}_${uid()}`,
           name: tagName,
           parent_name: currentParent,
           type: prefix === '%' ? 'image' : 'text',
@@ -270,7 +272,7 @@ export const extractPlaceholders = async (
     sequences.forEach((data, groupName) => {
       if (data.count > 1) {
         results.push({
-          id: `seq_${groupName}_${Date.now()}`,
+          id: `seq_${groupName}_${uid()}`,
           name: groupName,
           type: 'text',
           is_digit_split: true,

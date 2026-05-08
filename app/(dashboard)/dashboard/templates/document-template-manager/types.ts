@@ -172,6 +172,9 @@ export type Placeholder = {
   image_height?: string;
   is_digit_split?: boolean;
   digit_count?: number;
+  // When a boolean/text placeholder represents one option of a linked job question
+  // (e.g. {usd} → question "Which currencies?" option "USD")
+  linked_job_question_option?: string;
 };
 
 export interface DocumentTemplateManagerProps {

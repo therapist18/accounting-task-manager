@@ -228,10 +228,12 @@ export default function TemplateGenerationDialog({
     }, [selectedTemplate?.id]);
 
     const groupedPlaceholders = useMemo(() => {
-        if (!selectedTemplate?.placeholders) return { topLevel: [], blocks: {} };
+        if (!selectedTemplate?.placeholders) return { topLevel: [], blocks: {}, questionGroups: new Map() };
 
         const topLevel = [];
         const blocks = {};
+        // Map<questionId, { members: Placeholder[] }>
+        const questionGroups = new Map();
         const seenDisplayValues = new Set();
 
         selectedTemplate.placeholders.forEach(p => {
@@ -240,6 +242,14 @@ export default function TemplateGenerationDialog({
             } else if (p.parent_name && blocks[p.parent_name]) {
                 blocks[p.parent_name].children.push(p);
             } else if (!p.parent_name) {
+                // Collapse option-mapped placeholders into one question group control
+                if (p.linked_job_question_ids?.length === 1 && p.linked_job_question_option) {
+                    const qId = p.linked_job_question_ids[0];
+                    if (!questionGroups.has(qId)) questionGroups.set(qId, { members: [] });
+                    questionGroups.get(qId).members.push(p);
+                    return;
+                }
+
                 const qId = p.boolean_conditions?.[0]?.linked_job_question_id;
                 const uniqueKey = qId ? `q_${qId}` : p.display_value || p.name;
 
@@ -251,7 +261,7 @@ export default function TemplateGenerationDialog({
                 topLevel.push(p);
             }
         });
-        return { topLevel, blocks };
+        return { topLevel, blocks, questionGroups };
     }, [selectedTemplate]);
 
     const resolveSpecificSourceValue = useCallback((type, id, placeholder, arrayIndex = null, computedFieldCache = null) => {
@@ -1035,6 +1045,7 @@ export default function TemplateGenerationDialog({
 
         try {
             const fetchPromises: Promise<void>[] = [];
+            const localCacheUpdate: Record<string, any> = {};
 
             tableFetchPlan.forEach((entry, table) => {
                 const { linkingVar, docIds, isDocScoped } = entry;
@@ -1081,10 +1092,7 @@ export default function TemplateGenerationDialog({
                             }
                         });
 
-                        setAdditionalCache(prev => ({
-                            ...prev,
-                            [table]: { ...(prev[table] || {}), ...tableCache },
-                        }));
+                        localCacheUpdate[table] = { ...(localCacheUpdate[table] || {}), ...tableCache };
                     }).catch(err => {
                         console.error(`❌ [resolveComputedFields] fetch ${table}:`, err);
                     })
@@ -1106,6 +1114,9 @@ export default function TemplateGenerationDialog({
             }
 
             await Promise.all(fetchPromises);
+            if (Object.keys(localCacheUpdate).length > 0) {
+                setAdditionalCache(prev => ({ ...prev, ...localCacheUpdate }));
+            }
         } catch (err) {
             console.error('❌ [resolveComputedFields] fetch phase failed:', err);
         }
@@ -1184,12 +1195,6 @@ export default function TemplateGenerationDialog({
     }, [isOpen, selectedTemplate?.id]);
 
     useEffect(() => {
-        if (isOpen && selectedTemplate?.id && masterFields) {
-            resolveComputedFields(combinedCache);
-        }
-    }, [isOpen, selectedTemplate?.id, masterFields]);
-
-    useEffect(() => {
         if (!isOpen || !selectedTemplate) return;
         if (loadedDraft && Object.keys(formData).length > 0) return;
         if (fetchingTables.size > 0) {
@@ -1261,6 +1266,25 @@ export default function TemplateGenerationDialog({
                     hasChanged = true;
                 }
             }
+        });
+
+        // Auto-populate question-group placeholders from the job answer array
+        const taskRecord = (combinedCache['tm_tasks'] && Object.values(combinedCache['tm_tasks'])[0]) || task;
+        const jobAnswers = taskRecord?.job_specific_answers || {};
+        groupedPlaceholders.questionGroups.forEach(({ members }, qId) => {
+            const answer = jobAnswers[String(qId)] ?? jobAnswers[Number(qId)];
+            if (!answer) return;
+            const selectedOptions = Array.isArray(answer) ? answer : [String(answer)];
+            members.forEach(member => {
+                if (!init[member.name]) {
+                    const isSelected = selectedOptions.includes(member.linked_job_question_option);
+                    init[member.name] = isSelected ? member.linked_job_question_option : '';
+                    if (isSelected) {
+                        autoMap.set(member.name, `Job Answer: ${member.linked_job_question_option}`);
+                        hasChanged = true;
+                    }
+                }
+            });
         });
 
         if (hasChanged) {
@@ -1456,16 +1480,6 @@ export default function TemplateGenerationDialog({
                 });
             }
 
-            if (docxTemplateBuffer.current) {
-                updateWordPreview(newState, imageStyles);
-            } else {
-                // Use async update for HTML templates to convert images to base64
-                (async () => {
-                    const base64Data = await prepareRenderData(newState);
-                    setPreviewContent(populateHtmlContent(base64Data, selectedTemplate?.placeholders || [], imageStyles));
-                })();
-            }
-
             return newState;
         });
 
@@ -1485,21 +1499,7 @@ export default function TemplateGenerationDialog({
     };
 
     const handleImageStyleChange = (name, key, value) => {
-        setImageStyles(prev => {
-            const newStyles = { ...prev, [name]: { ...(prev[name] || {}), [key]: value } };
-
-            if (docxTemplateBuffer.current) {
-                updateWordPreview(formData, newStyles);
-            } else {
-                // Use async update for HTML templates to convert images to base64
-                (async () => {
-                    const base64Data = await prepareRenderData(formData);
-                    setPreviewContent(populateHtmlContent(base64Data, selectedTemplate?.placeholders || [], newStyles));
-                })();
-            }
-
-            return newStyles;
-        });
+        setImageStyles(prev => ({ ...prev, [name]: { ...(prev[name] || {}), [key]: value } }));
     };
 
     const handleArrayInputChange = (blockName, index, fieldName, value) => {
@@ -1509,17 +1509,6 @@ export default function TemplateGenerationDialog({
             updatedArray[index] = { ...updatedArray[index], [fieldName]: value };
 
             const newState = { ...prev, [blockName]: updatedArray };
-
-            if (docxTemplateBuffer.current) {
-                updateWordPreview(newState, imageStyles);
-            } else {
-                // Use async update for HTML templates to convert images to base64
-                (async () => {
-                    const base64Data = await prepareRenderData(newState);
-                    setPreviewContent(populateHtmlContent(base64Data, selectedTemplate?.placeholders || [], imageStyles));
-                })();
-            }
-
             return newState;
         });
 
@@ -1971,10 +1960,24 @@ export default function TemplateGenerationDialog({
         }
     }, [selectedTemplate, toast, prepareRenderData]);
 
-    useEffect(() => {
-        if (!isOpen) return;
+    // Debounced preview update to prevent excessive processing
+    const debouncedFormDataRef = useRef(formData);
+    const debouncedImageStylesRef = useRef(imageStyles);
+    const previewTimeoutRef = useRef<NodeJS.Timeout>();
 
-        const updatePreview = async () => {
+    useEffect(() => {
+        debouncedFormDataRef.current = formData;
+        debouncedImageStylesRef.current = imageStyles;
+
+        // Clear existing timeout
+        if (previewTimeoutRef.current) {
+            clearTimeout(previewTimeoutRef.current);
+        }
+
+        // Set new timeout for preview update
+        previewTimeoutRef.current = setTimeout(async () => {
+            if (!isOpen) return;
+
             const current = availableTemplates.find(t => t.id === selectedTemplate?.id) || availableTemplates[0] || template;
 
             if (current?.file_path && current?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
@@ -1996,53 +1999,85 @@ export default function TemplateGenerationDialog({
                         }
                         publicUrl = data.signedUrl;
                     } else {
-                        // Old structure: use public URL
+                        // Legacy structure: use public URL
                         publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/templates/${current.file_path}`;
                     }
 
-                    // Use Microsoft Office Online Viewer for consistent preview
-                    setDocPreviewUrl(`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(publicUrl)}`);
-
                     try {
-                        const arrayBuffer = await fetchTemplateBuffer(current.id, current.file_path);
-                        if (!arrayBuffer) {
-                            throw new Error('Failed to fetch template buffer');
-                        }
-                        docxTemplateBuffer.current = arrayBuffer;
+                        const response = await fetch(publicUrl);
+                        if (!response.ok) throw new Error(`Failed to fetch template: ${response.statusText}`);
+                        const arrayBuffer = await response.arrayBuffer();
 
-                        // Update preview after loading
-                        setTimeout(() => {
-                            updateWordPreview(formData, imageStyles);
-                        }, 100);
+                        const zip = new PizZip(arrayBuffer);
+                        const doc = new Docxtemplater(zip, {
+                            modules: [new ImageModule({
+                                centered: false,
+                                getImage: (tagValue, tagName) => {
+                                    if (tagValue.startsWith('http')) {
+                                        return new Promise((resolve) => {
+                                            fetch(tagValue)
+                                                .then((res) => res.arrayBuffer())
+                                                .then((buffer) => resolve(buffer))
+                                                .catch(() => resolve(null));
+                                        });
+                                    }
+                                    return base64Parser(tagValue);
+                                },
+                                getSize: (img, tagValue, tagName) => {
+                                    if (tagValue.startsWith('http')) {
+                                        return new Promise((resolve) => {
+                                            const img = new Image();
+                                            img.onload = () => resolve([img.width, img.height]);
+                                            img.src = tagValue;
+                                            img.onerror = () => resolve([200, 200]);
+                                        });
+                                    } else {
+                                        const img = new Image();
+                                        img.src = tagValue;
+                                        return [img.width, img.height];
+                                    }
+                                },
+                            })],
+                            paragraphLoop: true,
+                            linebreaks: true,
+                        });
+
+                        // Extract headers and footers for HTML preview
+                        const { headerContent, footerContent } = extractHeadersFooters(zip);
+                        setHeaderContent(headerContent);
+                        setFooterContent(footerContent);
+
+                        docxTemplateBuffer.current = doc;
+                        loadedTemplateId.current = current.id;
+
+                        // Generate preview after template is loaded
+                        await updateWordPreview(debouncedFormDataRef.current, debouncedImageStylesRef.current);
                     } catch (error) {
                         console.error('Error loading template:', error);
                         toast({
-                            title: "Template Loading Error",
-                            description: "Could not load the Word document template",
-                            variant: "destructive"
+                            title: 'Error loading template',
+                            description: 'Failed to load the document template for preview.',
+                            variant: 'destructive',
                         });
                     } finally {
                         setIsPreviewLoading(false);
                     }
                 } else {
-                    updateWordPreview(formData, imageStyles);
+                    // Template already loaded, just update preview
+                    await updateWordPreview(debouncedFormDataRef.current, debouncedImageStylesRef.current);
                 }
             } else {
                 // HTML template
-                setIsPreviewLoading(true);
-                try {
-                    const base64Data = await prepareRenderData(formData);
-                    setPreviewContent(populateHtmlContent(base64Data, current?.placeholders || [], imageStyles));
-                } catch (err) {
-                    console.error('Preview error:', err);
-                } finally {
-                    setIsPreviewLoading(false);
-                }
+                setPreviewContent(populateHtmlContent(debouncedFormDataRef.current, selectedTemplate?.placeholders || [], debouncedImageStylesRef.current));
+            }
+        }, 500); // Increased debounce time to reduce processing
+
+        return () => {
+            if (previewTimeoutRef.current) {
+                clearTimeout(previewTimeoutRef.current);
             }
         };
-
-        updatePreview();
-    }, [isOpen, selectedTemplate?.id, formData, imageStyles, fetchTemplateBuffer]); // Added dependencies to refresh on change
+    }, [isOpen, selectedTemplate?.id, fetchTemplateBuffer]); // Removed formData and imageStyles from dependencies
 
     useEffect(() => {
         if (isOpen && (headerContent || footerContent) && formData) {
@@ -3006,6 +3041,47 @@ export default function TemplateGenerationDialog({
                                     </h4>
 
                                     <div className="grid grid-cols-1 gap-y-1">
+                                        {/* Question-option groups rendered as a single multiselect row */}
+                                        {Array.from(groupedPlaceholders.questionGroups.entries()).map(([qId, { members }]) => {
+                                            const question = requirementJobQuestions.find(q => q.id === qId);
+                                            const options = question?.options || [...new Set(members.map(m => m.linked_job_question_option).filter(Boolean))];
+                                            if (!options.length) return null;
+                                            const label = question?.label || members[0]?.display_value || qId;
+                                            return (
+                                                <div key={qId} className="flex flex-row items-start gap-6 p-2 border-b border-slate-50 last:border-0 hover:bg-slate-50/50 transition-colors">
+                                                    <div className="w-1/3 flex items-start pt-0.5">
+                                                        <Label className="font-bold text-slate-700 text-xs leading-relaxed uppercase tracking-tight">
+                                                            {label}
+                                                        </Label>
+                                                    </div>
+                                                    <div className="flex-1 min-w-0 flex flex-wrap gap-1.5">
+                                                        {options.map(opt => {
+                                                            const member = members.find(m => m.linked_job_question_option === opt);
+                                                            if (!member) return null;
+                                                            const isChecked = !!formData[member.name];
+                                                            return (
+                                                                <button
+                                                                    key={opt}
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        handleInputChange(member.name, isChecked ? '' : opt);
+                                                                    }}
+                                                                    className={cn(
+                                                                        "px-3 py-1 rounded-full text-xs font-semibold border transition-all",
+                                                                        isChecked
+                                                                            ? "bg-blue-600 text-white border-blue-600"
+                                                                            : "bg-white text-slate-500 border-slate-300 hover:border-blue-400 hover:text-blue-600"
+                                                                    )}
+                                                                >
+                                                                    {opt}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+
                                         {groupedPlaceholders.topLevel.map((p, idx) => {
                                             let resolvedOptions = [];
                                             if (p.master_field_ids?.length > 0) {
@@ -3023,7 +3099,7 @@ export default function TemplateGenerationDialog({
                                                     {/* COLUMN 1: ID Badge + Right Aligned Label */}
                                                     <div className="w-1/3 flex items-start">
                                                         <Label className="font-bold text-slate-700 text-xs leading-relaxed uppercase tracking-tight">
-                                                            {p.name.replace(/_/g, ' ')}
+                                                            {p.display_value || p.name.replace(/_/g, ' ')}
                                                         </Label>
                                                     </div>
 
