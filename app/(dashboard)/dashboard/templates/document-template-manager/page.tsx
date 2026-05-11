@@ -57,6 +57,13 @@ export function DocumentTemplateManager({
   const [editingPlaceholderIndex, setEditingPlaceholderIndex] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [templateFiles, setTemplateFiles] = useState<Map<string, File>>(new Map());
+  const templateFilesRef = useRef(templateFiles);
+  
+  // Keep ref in sync
+  useEffect(() => {
+    templateFilesRef.current = templateFiles;
+  }, [templateFiles]);
+  
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
   const [panelsVisible, setPanelsVisible] = useState({
     left: true,
@@ -152,6 +159,73 @@ export function DocumentTemplateManager({
 
     fetchExistingTemplates();
   }, [isOpen, document?.id, initialTemplates]);
+
+  // Fetch template file from Supabase storage when a template with file_path is selected
+  useEffect(() => {
+    const fetchTemplateFile = async () => {
+      if (!currentTemplate?.file_path || !currentTemplate?.id) return;
+      
+      // Skip if we already have the file (check using ref to avoid dependency issues)
+      if (templateFilesRef.current.has(currentTemplate.id)) return;
+      
+      try {
+        // Extract bucket and path from file_path
+        // file_path format: https://.../storage/v1/object/public/templates/filename.docx
+        const pathParts = currentTemplate.file_path.split('/');
+        const bucketIndex = pathParts.indexOf('public');
+        
+        if (bucketIndex === -1) {
+          console.error('Invalid file path format:', currentTemplate.file_path);
+          return;
+        }
+        
+        const bucket = pathParts[bucketIndex + 1];
+        const filePath = pathParts.slice(bucketIndex + 2).join('/');
+        
+        if (!bucket || !filePath) {
+          console.error('Could not extract bucket/path from:', currentTemplate.file_path);
+          return;
+        }
+        
+        // Fetch the file from Supabase storage
+        const { data, error } = await supabase.storage
+          .from(bucket)
+          .download(filePath);
+        
+        if (error) {
+          console.error('Error fetching template file:', error);
+          // Mark as missing so UI shows appropriate message
+          setTemplates(prev => {
+            const idx = prev.findIndex(t => t.id === currentTemplate.id);
+            if (idx === -1) return prev;
+            const newTemplates = [...prev];
+            newTemplates[idx] = { ...newTemplates[idx], _fileMissing: true } as any;
+            return newTemplates;
+          });
+          return;
+        }
+        
+        if (data) {
+          // Create a File object from the blob
+          const file = new File([data], currentTemplate.file_name || 'template.docx', {
+            type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          });
+          
+          // Store in templateFiles Map using functional update
+          setTemplateFiles(prev => {
+            const newFiles = new Map(prev);
+            newFiles.set(currentTemplate.id, file);
+            return newFiles;
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching template file:', error);
+      }
+    };
+    
+    fetchTemplateFile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTemplate?.id, currentTemplate?.file_path]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -404,13 +478,19 @@ export function DocumentTemplateManager({
     if (currentTemplateIndex === null) return;
     const newTemplates = [...templates];
     const currentPlaceholders = newTemplates[currentTemplateIndex].placeholders || [];
-    
+
     if (editingPlaceholderIndex !== null) {
-      currentPlaceholders[editingPlaceholderIndex] = placeholder;
+      // Ensure we're updating the correct placeholder by ID, not just index
+      const existingIndex = currentPlaceholders.findIndex(p => p.id === placeholder.id);
+      if (existingIndex !== -1) {
+        currentPlaceholders[existingIndex] = placeholder;
+      } else {
+        currentPlaceholders[editingPlaceholderIndex] = placeholder;
+      }
     } else {
       currentPlaceholders.push(placeholder);
     }
-    
+
     newTemplates[currentTemplateIndex] = { ...newTemplates[currentTemplateIndex], placeholders: currentPlaceholders };
     setTemplates(newTemplates);
     setPlaceholderDialogOpen(false);

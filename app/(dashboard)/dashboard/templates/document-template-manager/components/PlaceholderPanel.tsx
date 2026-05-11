@@ -36,9 +36,11 @@ export function PlaceholderPanel({
 
   const filteredPlaceholders = React.useMemo(() => {
     if (!currentTemplate?.placeholders) return [];
-    if (!placeholderSearch) return currentTemplate.placeholders;
+    // Show all placeholders in admin panel (ui_hidden only affects TemplateGenerationDialog)
+    const allPlaceholders = currentTemplate.placeholders;
+    if (!placeholderSearch) return allPlaceholders;
     const searchLower = placeholderSearch.toLowerCase();
-    return currentTemplate.placeholders.filter((p: Placeholder) =>
+    return allPlaceholders.filter((p: Placeholder) =>
       p.name.toLowerCase().includes(searchLower) ||
       p.type.toLowerCase().includes(searchLower) ||
       (Array.isArray(p.entity_type) ? p.entity_type : [p.entity_type]).some((et: any) => et?.toLowerCase().includes(searchLower)) ||
@@ -129,6 +131,11 @@ export function PlaceholderPanel({
                             <span className={cn(isBlock && "font-bold text-blue-800")}>
                               {isBlock ? `{#${p.name}}` : `{${p.name}}`}
                             </span>
+                            {p.ui_hidden && (
+                              <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200 ml-2">
+                                Backend Only
+                              </Badge>
+                            )}
                           </div>
                         </TableCell>
 

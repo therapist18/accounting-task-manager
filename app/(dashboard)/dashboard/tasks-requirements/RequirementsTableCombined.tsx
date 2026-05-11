@@ -2510,11 +2510,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
           personData={selectedLetterInfo.personData}
           companyData={selectedLetterInfo.companyData}
           relationshipData={selectedLetterInfo.relationshipData}
+          task={selectedLetterInfo.task}
           onDraftDiscarded={refreshDocumentData}
           jobLevel={jobLevel}
           activeEntityType={selectedLetterInfo.activeEntityType}
           activeEntityId={selectedLetterInfo.activeEntityId}
-          // ADD THIS PROP:
           refreshDocuments={refreshDocuments}
         />
       )}

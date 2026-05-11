@@ -12,7 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { PlusCircle, Pencil, X, Check, ChevronsUpDown, Search, Sparkles, Code, Database, HelpCircle, FileText, Link2, Plus, Layers, ChevronDown } from "lucide-react";
+import { PlusCircle, Pencil, X, Check, ChevronsUpDown, Search, Sparkles, Code, Database, HelpCircle, FileText, Link2, Plus, Layers, ChevronDown, View } from "lucide-react";
 import { EntityType, ENTITY_TYPES, DEPENDANT_RELATIONSHIPS, DIRECTOR_TYPES, type DirectorType, COMPUTED_FUNCTIONS, LINKING_VARIABLES } from "@/lib/constants/entity-types";
 import { cn } from "@/lib/utils";
 import type { Placeholder, JobField, JobQuestion, Requirement, ConditionalCondition } from "../types";
@@ -676,6 +676,95 @@ export function PlaceholderFormDialog({
                 <Label htmlFor="required" className="text-sm font-semibold">Mandatory Field (Validation will block generation if empty)</Label>
               </div>
 
+              {/* UI Visibility & Grouping */}
+              <div className="space-y-4 border-t pt-4">
+                <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 space-y-4">
+                  <Label className="text-[11px] font-black uppercase text-amber-700 flex items-center gap-2">
+                    <View className="h-3.5 w-3.5" /> UI Visibility Settings
+                  </Label>
+                  <p className="text-[10px] text-amber-600">
+                    Use these settings to hide technical placeholders from users while keeping them active in the backend.
+                    Useful for currency options, conditional variants, and other backend-resolved fields.
+                  </p>
+
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="ui_hidden"
+                      checked={placeholder.ui_hidden}
+                      onCheckedChange={c => onChange({ ui_hidden: !!c })}
+                    />
+                    <Label htmlFor="ui_hidden" className="text-sm font-semibold text-amber-800">
+                      Hide from UI (Backend Only)
+                    </Label>
+                  </div>
+
+                  {placeholder.ui_hidden && (
+                    <div className="space-y-2 pt-2 border-t border-amber-200">
+                      <Label className="text-[10px] font-bold text-amber-700">Parent Group Placeholder</Label>
+                      <div className="space-y-2">
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="use_job_question_label"
+                            checked={!!placeholder.linked_job_question_id && placeholder.group_parent_id === placeholder.linked_job_question_id}
+                            onCheckedChange={(checked) => {
+                              if (checked && placeholder.linked_job_question_id) {
+                                onChange({ group_parent_id: placeholder.linked_job_question_id });
+                              }
+                            }}
+                          />
+                          <Label htmlFor="use_job_question_label" className="text-xs text-amber-800">
+                            Use linked job question label
+                          </Label>
+                        </div>
+                        {placeholder.linked_job_question_id && (
+                          <>
+                            <p className="text-[9px] text-amber-600 ml-6">
+                              {jobQuestions.find(q => q.id === placeholder.linked_job_question_id)?.label || 'Unknown question'}
+                            </p>
+                            <div className="space-y-2 pt-2 border-t border-amber-200">
+                              <Label className="text-[10px] font-bold text-amber-700">Linked Question Option</Label>
+                              <Input
+                                placeholder="e.g., USD, GBP, EUR"
+                                value={placeholder.linked_job_question_option || ''}
+                                onChange={e => onChange({ linked_job_question_option: e.target.value })}
+                                className="bg-white border-amber-200 h-10 text-xs"
+                              />
+                              <p className="text-[9px] text-amber-500 ml-6">
+                                Links this placeholder to a specific option from the job question above.
+                              </p>
+                            </div>
+                          </>
+                        )}
+                        <Input
+                          placeholder="Or enter custom parent placeholder ID"
+                          value={placeholder.group_parent_id || ''}
+                          onChange={e => onChange({ group_parent_id: e.target.value || undefined })}
+                          className="bg-white text-xs font-mono"
+                        />
+                      </div>
+                      <p className="text-[9px] text-amber-500">
+                        This hidden placeholder will be linked to a parent group placeholder that users see in the UI.
+                      </p>
+                    </div>
+                  )}
+
+                  {placeholder.type === 'group' && (
+                    <div className="space-y-2 pt-2 border-t border-amber-200">
+                      <Label className="text-[10px] font-bold text-amber-700">Child Placeholders</Label>
+                      <Textarea
+                        placeholder="Enter child placeholder IDs (one per line)&#10;usd_placeholder_id&#10;gbp_placeholder_id&#10;eur_placeholder_id"
+                        value={placeholder.group_children?.join('\n') || ''}
+                        onChange={e => onChange({ group_children: e.target.value.split('\n').filter(Boolean) })}
+                        className="bg-white text-xs font-mono min-h-[80px]"
+                      />
+                      <p className="text-[9px] text-amber-500">
+                        This group represents these hidden child placeholders in the UI. Backend will resolve based on job question answers.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div className="space-y-4 border-t pt-4">
                 <div className="flex items-center space-x-2">
                   <Checkbox id="is_ai" checked={placeholder.is_ai_generated} onCheckedChange={c => onChange({ is_ai_generated: !!c })} />
@@ -724,8 +813,22 @@ export function PlaceholderFormDialog({
                       jobQuestions={jobQuestions}
                       allowMultiple={true}
                       selectedQuestionIds={placeholder.linked_job_question_ids || []}
-                      onMultipleSelect={(questionIds) => onChange({ linked_job_question_ids: questionIds })}
-                      onClear={() => onChange({ linked_job_question_ids: [] })}
+                      onMultipleSelect={(questionIds) => {
+                        // Set both array (legacy) and singular (new grouping logic)
+                        const updates: any = { linked_job_question_ids: questionIds };
+                        if (questionIds.length === 1) {
+                          updates.linked_job_question_id = questionIds[0];
+                        } else {
+                          updates.linked_job_question_id = undefined;
+                          updates.linked_job_question_option = undefined; // Clear option if multiple or none
+                        }
+                        onChange(updates);
+                      }}
+                      onClear={() => onChange({ 
+                        linked_job_question_ids: [],
+                        linked_job_question_id: undefined,
+                        linked_job_question_option: undefined 
+                      })}
                       placeholder="Select job questions..."
                     />
                     {(() => {

@@ -123,7 +123,7 @@ export type Placeholder = {
   name: string;
   description?: string;
   display_value?: string;
-  type: 'text' | 'number' | 'date' | 'select' | 'array' | 'conditional' | 'if' | 'image' | 'boolean' | 'ordinal' | 'document_checklist';
+  type: 'text' | 'number' | 'date' | 'select' | 'array' | 'conditional' | 'if' | 'image' | 'boolean' | 'ordinal' | 'document_checklist' | 'group';
   array_direction?: 'horizontal' | 'vertical';
   boolean_conditions?: BooleanCondition[];
   boolean_type?: 'single' | 'multiple';
@@ -150,6 +150,8 @@ export type Placeholder = {
   default_value?: string;
   linked_job_question_id?: string;
   linked_requirement_id?: string;
+  linked_job_question_option?: string;
+  group_parent_id?: string;
   computed_function?: string;
   execution_mode?: 'all' | 'latest';
   source_table?: string;
@@ -175,6 +177,12 @@ export type Placeholder = {
   // When a boolean/text placeholder represents one option of a linked job question
   // (e.g. {usd} → question "Which currencies?" option "USD")
   linked_job_question_option?: string;
+  // Hide this placeholder from the UI (used for backend-resolved placeholders like currency options)
+  ui_hidden?: boolean;
+  // ID of the parent group placeholder (for grouped/hidden placeholders)
+  group_parent_id?: string;
+  // For group placeholders: the child placeholder IDs that this group represents
+  group_children?: string[];
 };
 
 export interface DocumentTemplateManagerProps {
@@ -206,4 +214,5 @@ export const PLACEHOLDER_TYPES = [
   { value: 'boolean', label: 'Boolean/Checkbox' },
   { value: 'image', label: 'Image' },
   { value: 'document_checklist', label: 'Document Checklist' },
+  { value: 'group', label: 'Group (UI Only)' },
 ];

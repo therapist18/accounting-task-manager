@@ -130,7 +130,10 @@ export const extractPlaceholders = async (
     const blockStack: string[] = [];
     const processedTags = new Set<string>();
     let _idSeq = 0;
-    const uid = () => `${Date.now()}_${_idSeq++}`;
+    const uid = () => {
+      const randomPart = Math.random().toString(36).substring(2, 9);
+      return `${Date.now()}_${_idSeq++}_${randomPart}`;
+    };
 
     const formatFunctions = new Set([
       'upper', 'lower', 'capital', 'capitalize', 'title', 'camel', 'snake', 'kebab',

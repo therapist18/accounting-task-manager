@@ -33,6 +33,7 @@ export function PlaceholderSourceManager({
 
   const totalSources = (placeholder.master_field_ids?.length || 0) +
     (placeholder.linked_job_question_ids?.length || 0) +
+    (placeholder.linked_job_question_id ? 1 : 0) +
     (placeholder.linked_requirement_ids?.length || 0);
 
   if (totalSources === 0) return null;
@@ -74,6 +75,7 @@ export function PlaceholderSourceManager({
           </div>
         ))}
 
+        {/* Legacy array support */}
         {placeholder.linked_job_question_ids?.map((id, idx) => (
           <div key={`job-${id}`} className="flex items-center gap-2 bg-white p-2 rounded-md border shadow-sm group">
             <div className="flex flex-col border-r pr-1 mr-1">
@@ -88,6 +90,30 @@ export function PlaceholderSourceManager({
             <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-300 hover:text-red-500" onClick={() => onRemove('job', id)}><X className="h-4 w-4" /></Button>
           </div>
         ))}
+
+        {/* New singular field with option mapping */}
+        {placeholder.linked_job_question_id && (
+          <div className="flex items-center gap-2 bg-purple-50 p-2 rounded-md border border-purple-200 shadow-sm group">
+            <HelpCircle className="h-3.5 w-3.5 text-purple-600" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-slate-700 truncate">{jobQuestions.find(q => q.id === placeholder.linked_job_question_id)?.label || placeholder.linked_job_question_id}</p>
+              <p className="text-[9px] text-purple-500/70 font-mono">Job Question</p>
+              {placeholder.linked_job_question_option && (
+                <p className="text-[9px] text-amber-600 font-mono mt-0.5">
+                  Option: <span className="font-bold">{placeholder.linked_job_question_option}</span>
+                </p>
+              )}
+            </div>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-6 w-6 text-slate-300 hover:text-red-500" 
+              onClick={() => onUpdate({ linked_job_question_id: undefined, linked_job_question_option: undefined })}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
 
         {placeholder.linked_requirement_ids?.map((id, idx) => (
           <div key={`req-${id}`} className="flex items-center gap-2 bg-white p-2 rounded-md border shadow-sm group">

@@ -88,6 +88,9 @@ export default function TemplateGenerationDialog({
     activeEntityType,
     activeEntityId, refreshDocuments
 }) {
+    // Debug: Log props at component start
+    console.log('[TemplateGenerationDialog] Component render - task?.job_level:', task?.job_level, 'jobLevel prop:', jobLevel, 'isOpen:', isOpen);
+
     const [panelsVisible, setPanelsVisible] = useState({ form: true, preview: true, source: true });
     const { toast } = useToast();
     const [formData, setFormData] = useState(() => {
@@ -124,6 +127,7 @@ export default function TemplateGenerationDialog({
     const [headerContent, setHeaderContent] = useState('');
     const [footerContent, setFooterContent] = useState('');
     const docxTemplateBuffer = useRef(null);
+    const templateZipBuffer = useRef<ArrayBuffer | null>(null); // Store raw zip data for preview
     const loadedTemplateId = useRef<string | null>(null);
     const isWordTemplate = selectedTemplate?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -150,36 +154,48 @@ export default function TemplateGenerationDialog({
     const [documentTablesReady, setDocumentTablesReady] = useState(false);
 
     useEffect(() => {
+        const effectiveJobLevel = task?.job_level || jobLevel;
+
         const fetchJobQuestions = async () => {
-            if (!task?.job_level) return;
+            if (effectiveJobLevel?.level) {
+                const jl = effectiveJobLevel;
+                const jobLevelObject = {
+                    level: jl.level,
+                    department_id: jl.department_id,
+                    subdepartment_id: jl.subdepartment_id,
+                    class_id: jl.class_id,
+                    subclass_id: jl.subclass_id
+                };
 
-            const jl = task.job_level;
-            let query = supabase
+                const { data: requirement, error } = await supabase
+                    .from('tm_class_requirements')
+                    .select('*')
+                    .filter('job_level', 'eq', JSON.stringify(jobLevelObject))
+                    .maybeSingle();
+
+                if (!error && requirement?.job_specific_questions?.length) {
+                    setRequirementJobQuestions(requirement.job_specific_questions);
+                    return;
+                }
+            }
+
+            // Fallback: fetch all requirements and deduplicate by id
+            const { data: allRequirements, error: allError } = await supabase
                 .from('tm_class_requirements')
-                .select('*')
-                .eq('job_level->>department_id', String(jl.department_id))
-                .eq('job_level->>subdepartment_id', String(jl.subdepartment_id));
+                .select('job_specific_questions');
 
-            if (jl.class_id) {
-                query = query.eq('job_level->>class_id', String(jl.class_id));
-            } else {
-                query = query.is('job_level->>class_id', null);
+            if (allError) {
+                console.error('[TemplateGenerationDialog] Error fetching job questions:', allError);
+                return;
             }
 
-            if (jl.subclass_id) {
-                query = query.eq('job_level->>subclass_id', String(jl.subclass_id));
-            } else {
-                query = query.is('job_level->>subclass_id', null);
-            }
-
-            const { data: requirement } = await query.maybeSingle();
-            if (requirement) {
-                setRequirementJobQuestions(requirement.job_specific_questions || []);
-            }
+            const allQuestions = allRequirements?.flatMap(r => r.job_specific_questions || []) || [];
+            const uniqueQuestions = Array.from(new Map(allQuestions.map(q => [q.id || q.label, q])).values());
+            setRequirementJobQuestions(uniqueQuestions);
         };
 
         fetchJobQuestions();
-    }, [task?.job_level, isOpen]);
+    }, [task?.job_level, jobLevel, isOpen]);
 
     useEffect(() => {
         if (!selectedTemplate?.placeholders) return;
@@ -223,6 +239,7 @@ export default function TemplateGenerationDialog({
     useEffect(() => {
         if (selectedTemplate?.id && loadedTemplateId.current !== selectedTemplate.id) {
             docxTemplateBuffer.current = null;
+            templateZipBuffer.current = null;
             loadedTemplateId.current = null;
         }
     }, [selectedTemplate?.id]);
@@ -236,6 +253,8 @@ export default function TemplateGenerationDialog({
         const questionGroups = new Map();
         const seenDisplayValues = new Set();
 
+        console.log('[TemplateGenerationDialog] Processing', selectedTemplate.placeholders.length, 'placeholders for grouping');
+
         selectedTemplate.placeholders.forEach(p => {
             if (p.is_block_start) {
                 blocks[p.name] = { config: p, children: [] };
@@ -243,8 +262,11 @@ export default function TemplateGenerationDialog({
                 blocks[p.parent_name].children.push(p);
             } else if (!p.parent_name) {
                 // Collapse option-mapped placeholders into one question group control
-                if (p.linked_job_question_ids?.length === 1 && p.linked_job_question_option) {
-                    const qId = p.linked_job_question_ids[0];
+                // Support both singular (linked_job_question_id) and array (linked_job_question_ids) formats
+                const jobQuestionId = p.linked_job_question_id || p.linked_job_question_ids?.[0];
+                if (jobQuestionId && p.linked_job_question_option) {
+                    const qId = jobQuestionId;
+                    console.log(`[TemplateGenerationDialog] Grouping placeholder {${p.name}} to question ${qId} (option: ${p.linked_job_question_option})`);
                     if (!questionGroups.has(qId)) questionGroups.set(qId, { members: [] });
                     questionGroups.get(qId).members.push(p);
                     return;
@@ -261,8 +283,36 @@ export default function TemplateGenerationDialog({
                 topLevel.push(p);
             }
         });
+
+        console.log('[TemplateGenerationDialog] Grouped result:', {
+            topLevelCount: topLevel.length,
+            blocksCount: Object.keys(blocks).length,
+            questionGroupsCount: questionGroups.size,
+            questionGroupIds: Array.from(questionGroups.keys())
+        });
+
         return { topLevel, blocks, questionGroups };
     }, [selectedTemplate]);
+
+    // Auto-populate formData for question-group placeholders from task.job_specific_answers
+    useEffect(() => {
+        if (!task?.job_specific_answers || !groupedPlaceholders.questionGroups.size) return;
+
+        const updates: Record<string, string> = {};
+
+        groupedPlaceholders.questionGroups.forEach(({ members }, qId) => {
+            const answer = task.job_specific_answers[String(qId)] ?? task.job_specific_answers[qId];
+            if (!answer) return;
+
+            members.forEach(m => {
+                updates[m.name] = m.linked_job_question_option === answer ? String(answer) : '';
+            });
+        });
+
+        if (Object.keys(updates).length > 0) {
+            setFormData(prev => ({ ...prev, ...updates }));
+        }
+    }, [task?.job_specific_answers, groupedPlaceholders.questionGroups]);
 
     const resolveSpecificSourceValue = useCallback((type, id, placeholder, arrayIndex = null, computedFieldCache = null) => {
         if (!isOpen) return '';
@@ -1840,18 +1890,13 @@ export default function TemplateGenerationDialog({
     }, [groupedPlaceholders, selectedTemplate]);
 
     const updateWordPreview = useCallback(async (data, styles) => {
-        if (!docxTemplateBuffer.current) return;
+        // Use the raw zip buffer, not the doc instance
+        if (!templateZipBuffer.current) return;
 
         try {
             setIsPreviewLoading(true);
-            let templateBuffer = docxTemplateBuffer.current;
-            if (templateBuffer && typeof templateBuffer.then === 'function') {
-                templateBuffer = await templateBuffer;
-            }
 
-            if (!templateBuffer) return;
-
-            const zip = new PizZip(templateBuffer);
+            const zip = new PizZip(templateZipBuffer.current);
             const renderData = await prepareRenderData(data);
 
             const processedData = { ...renderData };
@@ -1986,7 +2031,10 @@ export default function TemplateGenerationDialog({
 
                     // Fix: Handle both old and new storage path structures
                     let publicUrl;
-                    if (current.file_path.startsWith('kyc-templates/')) {
+                    if (current.file_path.startsWith('http')) {
+                        // file_path is already a full URL - use it directly
+                        publicUrl = current.file_path;
+                    } else if (current.file_path.startsWith('kyc-templates/')) {
                         // New structure: use signed URL for private bucket
                         const { data, error } = await supabase.storage
                             .from('templates')
@@ -2043,11 +2091,14 @@ export default function TemplateGenerationDialog({
                         });
 
                         // Extract headers and footers for HTML preview
-                        const { headerContent, footerContent } = extractHeadersFooters(zip);
+                        // Need to pass arrayBuffer, not the zip instance
+                        const { headerContent, footerContent } = await extractHeadersFooters(arrayBuffer);
                         setHeaderContent(headerContent);
                         setFooterContent(footerContent);
 
+                        // Store both the doc instance and the raw zip buffer
                         docxTemplateBuffer.current = doc;
+                        templateZipBuffer.current = arrayBuffer;
                         loadedTemplateId.current = current.id;
 
                         // Generate preview after template is loaded
@@ -2092,7 +2143,8 @@ export default function TemplateGenerationDialog({
     const changedFields = useMemo(() => {
         const changes = [];
 
-        groupedPlaceholders.topLevel.forEach(placeholder => {
+        // Only track changes for visible placeholders (not ui_hidden)
+        groupedPlaceholders.topLevel.filter(p => !p.ui_hidden).forEach(placeholder => {
             const original = originalFormData[placeholder.name];
             const current = formData[placeholder.name];
 
@@ -2614,18 +2666,22 @@ export default function TemplateGenerationDialog({
     };
 
     const completionStats = useMemo(() => {
-        let totalFields = groupedPlaceholders.topLevel.length;
-        let filledFields = groupedPlaceholders.topLevel.filter(p =>
+        // Exclude ui_hidden placeholders from completion stats (users don't fill these - backend does)
+        const visibleTopLevel = groupedPlaceholders.topLevel.filter(p => !p.ui_hidden);
+        let totalFields = visibleTopLevel.length;
+        let filledFields = visibleTopLevel.filter(p =>
             formData[p.name] && String(formData[p.name]).trim() !== ''
         ).length;
 
         Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
             const rows = Array.isArray(formData[blockName]) ? formData[blockName] : [];
-            if (rows.length > 0) {
-                totalFields += rows.length * groupedPlaceholders.blocks[blockName].children.length;
+            // Also filter out ui_hidden children from blocks
+            const visibleChildren = groupedPlaceholders.blocks[blockName].children.filter(c => !c.ui_hidden);
+            if (rows.length > 0 && visibleChildren.length > 0) {
+                totalFields += rows.length * visibleChildren.length;
                 rows.forEach(row => {
                     if (row && typeof row === 'object') {
-                        groupedPlaceholders.blocks[blockName].children.forEach(child => {
+                        visibleChildren.forEach(child => {
                             if (row[child.name] && String(row[child.name]).trim() !== '') {
                                 filledFields++;
                             }
@@ -3041,48 +3097,74 @@ export default function TemplateGenerationDialog({
                                     </h4>
 
                                     <div className="grid grid-cols-1 gap-y-1">
-                                        {/* Question-option groups rendered as a single multiselect row */}
+                                        {/* Question-option groups: one row per job question, pills show task-pre-selected answer */}
                                         {Array.from(groupedPlaceholders.questionGroups.entries()).map(([qId, { members }]) => {
                                             const question = requirementJobQuestions.find(q => q.id === qId);
                                             const options = question?.options || [...new Set(members.map(m => m.linked_job_question_option).filter(Boolean))];
                                             if (!options.length) return null;
-                                            const label = question?.label || members[0]?.display_value || qId;
+                                            const label = question?.label || members[0]?.display_value || members[0]?.name || qId;
+                                            const category = question?.category;
+                                            const taskAnswer = task?.job_specific_answers?.[String(qId)] ?? task?.job_specific_answers?.[qId];
                                             return (
                                                 <div key={qId} className="flex flex-row items-start gap-6 p-2 border-b border-slate-50 last:border-0 hover:bg-slate-50/50 transition-colors">
-                                                    <div className="w-1/3 flex items-start pt-0.5">
+                                                    <div className="w-1/3 flex flex-col items-start pt-0.5 gap-1">
+                                                        {category && (
+                                                            <Badge variant="outline" className="text-[9px] bg-purple-50 text-purple-700 border-purple-200">
+                                                                {category}
+                                                            </Badge>
+                                                        )}
                                                         <Label className="font-bold text-slate-700 text-xs leading-relaxed uppercase tracking-tight">
                                                             {label}
                                                         </Label>
+                                                        {taskAnswer && (
+                                                            <span className="text-[9px] text-emerald-600 flex items-center gap-0.5 font-medium">
+                                                                <CheckCircle2 className="h-2.5 w-2.5" /> set from task
+                                                            </span>
+                                                        )}
                                                     </div>
-                                                    <div className="flex-1 min-w-0 flex flex-wrap gap-1.5">
-                                                        {options.map(opt => {
-                                                            const member = members.find(m => m.linked_job_question_option === opt);
-                                                            if (!member) return null;
-                                                            const isChecked = !!formData[member.name];
-                                                            return (
-                                                                <button
-                                                                    key={opt}
-                                                                    type="button"
-                                                                    onClick={() => {
-                                                                        handleInputChange(member.name, isChecked ? '' : opt);
-                                                                    }}
-                                                                    className={cn(
-                                                                        "px-3 py-1 rounded-full text-xs font-semibold border transition-all",
-                                                                        isChecked
-                                                                            ? "bg-blue-600 text-white border-blue-600"
-                                                                            : "bg-white text-slate-500 border-slate-300 hover:border-blue-400 hover:text-blue-600"
-                                                                    )}
-                                                                >
-                                                                    {opt}
-                                                                </button>
-                                                            );
-                                                        })}
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex flex-wrap gap-1.5">
+                                                            {options.map(opt => {
+                                                                const member = members.find(m => m.linked_job_question_option === opt);
+                                                                if (!member) return null;
+                                                                const isChecked = !!formData[member.name];
+                                                                const isFromTask = taskAnswer === opt;
+                                                                return (
+                                                                    <button
+                                                                        key={opt}
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            if (question?.type === 'multiselect') {
+                                                                                handleInputChange(member.name, isChecked ? '' : opt);
+                                                                            } else {
+                                                                                members.forEach(m => {
+                                                                                    if (formData[m.name]) handleInputChange(m.name, '');
+                                                                                });
+                                                                                handleInputChange(member.name, isChecked ? '' : opt);
+                                                                            }
+                                                                        }}
+                                                                        className={cn(
+                                                                            "px-3 py-1 rounded-full text-xs font-semibold border transition-all flex items-center gap-1",
+                                                                            isChecked
+                                                                                ? isFromTask
+                                                                                    ? "bg-emerald-600 text-white border-emerald-600"
+                                                                                    : "bg-blue-600 text-white border-blue-600"
+                                                                                : "bg-white text-slate-400 border-slate-200 hover:border-blue-400 hover:text-blue-600"
+                                                                        )}
+                                                                    >
+                                                                        {isChecked && <CheckCircle2 className="h-3 w-3 shrink-0" />}
+                                                                        {opt}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
                                                     </div>
                                                 </div>
                                             );
                                         })}
 
-                                        {groupedPlaceholders.topLevel.map((p, idx) => {
+                                        {/* Filter out ui_hidden placeholders - they are populated by backend from job answers */}
+                                        {groupedPlaceholders.topLevel.filter(p => !p.ui_hidden).map((p, idx) => {
                                             let resolvedOptions = [];
                                             if (p.master_field_ids?.length > 0) {
                                                 const mf = masterFields.get(parseInt(p.master_field_ids[0]));
