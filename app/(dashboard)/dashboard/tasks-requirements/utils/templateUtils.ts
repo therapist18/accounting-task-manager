@@ -151,7 +151,25 @@ export const parseJsonValue = (data: any, path: string): string => {
       }
 
       if (Array.isArray(currentValue)) {
-        currentValue = currentValue[0];
+        // For branch-linked arrays (items carry branch_id), resolve to the main branch item
+        // rather than always taking index 0.
+        if (currentValue.length > 0 && currentValue[0]?.branch_id !== undefined) {
+          const branches = Array.isArray(data?.branch) ? data.branch : null;
+          const mainBranch = branches?.find((b: any) => b.is_main === true);
+          if (mainBranch) {
+            const mainItem = currentValue.find(
+              (item: any) => String(item.branch_id) === String(mainBranch.branch_id)
+            );
+            currentValue = mainItem ?? currentValue[0];
+          } else {
+            currentValue = currentValue[0];
+          }
+        } else {
+          currentValue = currentValue[0];
+        }
+        // If this key was a numeric array index (e.g. '0' in ->>'0.postal_address'),
+        // skip the key lookup — array resolution already consumed it.
+        if (/^\d+$/.test(key)) continue;
       }
 
       if (currentValue && typeof currentValue === 'object') {

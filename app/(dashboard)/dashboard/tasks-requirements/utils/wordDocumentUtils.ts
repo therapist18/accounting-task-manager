@@ -47,8 +47,21 @@ export const extractHeadersFooters = async (templateBuffer: ArrayBuffer) => {
  * @returns HTML string
  */
 export const convertWordXmlToHtml = async (xml: string): Promise<string> => {
+    // Mammoth requires w:body inside word/document.xml.
+    // Header/footer XML uses w:hdr/w:ftr as the root — swap it to w:document > w:body.
+    let documentXml = xml;
+    if (/<w:hdr[\s>]/.test(xml)) {
+        documentXml = xml
+            .replace(/<w:hdr(\s[^>]*)?>/, (_, attrs) => `<w:document${attrs || ''}><w:body>`)
+            .replace(/<\/w:hdr>/, '</w:body></w:document>');
+    } else if (/<w:ftr[\s>]/.test(xml)) {
+        documentXml = xml
+            .replace(/<w:ftr(\s[^>]*)?>/, (_, attrs) => `<w:document${attrs || ''}><w:body>`)
+            .replace(/<\/w:ftr>/, '</w:body></w:document>');
+    }
+
     const tempZip = new PizZip();
-    tempZip.file('word/document.xml', xml);
+    tempZip.file('word/document.xml', documentXml);
     tempZip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
     <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
         <Default Extension="xml" ContentType="application/xml"/>

@@ -114,6 +114,7 @@ export default function TemplateGenerationDialog({
     const [isGenerating, setIsGenerating] = useState(false);
     const [isPreviewLoading, setIsPreviewLoading] = useState(false);
     const [previewContent, setPreviewContent] = useState('');
+    const [docxPreviewBuffer, setDocxPreviewBuffer] = useState<ArrayBuffer | null>(null);
     const [docPreviewUrl, setDocPreviewUrl] = useState(null);
     const [autoPopulatedFields, setAutoPopulatedFields] = useState(new Map());
     const [manuallyEditedFields, setManuallyEditedFields] = useState(new Set());
@@ -241,6 +242,7 @@ export default function TemplateGenerationDialog({
             docxTemplateBuffer.current = null;
             templateZipBuffer.current = null;
             loadedTemplateId.current = null;
+            setDocxPreviewBuffer(null);
         }
     }, [selectedTemplate?.id]);
 
@@ -1969,29 +1971,7 @@ export default function TemplateGenerationDialog({
 
             const out = doc.getZip().generate({ type: "arraybuffer" });
 
-            const result = await mammoth.convertToHtml(
-                { arrayBuffer: out },
-                {
-                    styleMap: [
-                        "p => p:fresh",
-                        "table => table.border-collapse.table-auto.w-full.my-4",
-                        "td => td.border.p-2",
-                        "th => th.border.bg-muted.p-2.font-bold"
-                    ],
-                    convertImage: mammoth.images.imgElement(function (image) {
-                        return image.read("base64").then(function (imageBuffer) {
-                            return {
-                                src: "data:" + (image.contentType || 'image/png') + ";base64," + imageBuffer
-                            };
-                        }).catch(err => {
-                            console.warn('Failed to convert image in preview:', err);
-                            return { src: '' };
-                        });
-                    })
-                }
-            );
-
-            setPreviewContent(result.value);
+            setDocxPreviewBuffer(out);
 
         } catch (err) {
             console.error("❌ [updateWordPreview] Error:", err);
@@ -2289,10 +2269,15 @@ export default function TemplateGenerationDialog({
 
                         if (nestedPath.length > 0) {
                             // It's a JSON column update
-                            // Initialize with existing JSON data if available
-                            const existingJson = { ...(recordToUpdate[column] || {}) };
-                            const updatedJson = setDeepValue(existingJson, nestedPath, valueToSave);
-                            updatePayload[column] = updatedJson;
+                            const existingRaw = recordToUpdate[column];
+                            const effectivePath = nestedPath.filter((p: string) => !/^\d+$/.test(p));
+                            if (Array.isArray(existingRaw) && existingRaw[0]?.branch_id !== undefined) {
+                                // Branch-linked array — update only the main-branch item, keep array structure
+                                updatePayload[column] = setDeepValueInArray(existingRaw, effectivePath, valueToSave, recordToUpdate['branch']);
+                            } else {
+                                const existingJson = { ...(existingRaw || {}) };
+                                updatePayload[column] = setDeepValue(existingJson, effectivePath, valueToSave);
+                            }
                         } else {
                             // Standard column update
                             updatePayload[column] = valueToSave;
@@ -2343,6 +2328,27 @@ export default function TemplateGenerationDialog({
         }
         current[pathParts[pathParts.length - 1]] = value;
         return obj;
+    };
+
+    // Sets a field on the main-branch item inside a branch_id array, preserving the array structure.
+    const setDeepValueInArray = (arr, pathParts, value, branchData) => {
+        const mainBranch = Array.isArray(branchData) ? branchData.find((b: any) => b.is_main === true) : null;
+        const targetBranchId = mainBranch ? String(mainBranch.branch_id) : null;
+        return arr.map((item: any, idx: number) => {
+            const isTarget = targetBranchId
+                ? String(item.branch_id) === targetBranchId
+                : idx === 0;
+            if (!isTarget) return item;
+            const updatedItem = { ...item };
+            let current: any = updatedItem;
+            for (let i = 0; i < pathParts.length - 1; i++) {
+                const key = pathParts[i];
+                if (!(key in current) || typeof current[key] !== 'object') current[key] = {};
+                current = current[key];
+            }
+            current[pathParts[pathParts.length - 1]] = value;
+            return updatedItem;
+        });
     };
 
     const saveFieldToDatabase = async (placeholder, newValue, specificSource = null, arrayIndex = null) => {
@@ -2449,21 +2455,25 @@ export default function TemplateGenerationDialog({
                 const pathParts = path.split(/->>|->|\./).map(p => p.trim().replace(/['"]/g, '')).filter(Boolean);
                 const column = pathParts[0];
                 const nestedPath = pathParts.slice(1);
-                const existingJson = existing ? { ...(existing[column] || {}) } : {};
-                const setDeepValue = (obj, parts, val) => {
-                    let current = obj;
-                    for (let i = 0; i < parts.length - 1; i++) {
-                        const key = parts[i];
-                        if (!(key in current) || typeof current[key] !== 'object') {
-                            current[key] = {};
+                const existingRaw = existing ? existing[column] : null;
+                const effectivePath = nestedPath.filter((p: string) => !/^\d+$/.test(p));
+                if (Array.isArray(existingRaw) && existingRaw[0]?.branch_id !== undefined) {
+                    // Branch-linked array — update only the main-branch item, keep array structure
+                    updatePayload[column] = setDeepValueInArray(existingRaw, effectivePath, newValue, existing?.branch);
+                } else {
+                    const existingJson = existingRaw ? { ...existingRaw } : {};
+                    const localSetDeep = (obj, parts, val) => {
+                        let current = obj;
+                        for (let i = 0; i < parts.length - 1; i++) {
+                            const key = parts[i];
+                            if (!(key in current) || typeof current[key] !== 'object') current[key] = {};
+                            current = current[key];
                         }
-                        current = current[key];
-                    }
-                    current[parts[parts.length - 1]] = val;
-                    return obj;
-                };
-
-                updatePayload[column] = setDeepValue(existingJson, nestedPath, newValue);
+                        current[parts[parts.length - 1]] = val;
+                        return obj;
+                    };
+                    updatePayload[column] = localSetDeep(existingJson, effectivePath, newValue);
+                }
             } else {
                 updatePayload[path || placeholder.name] = newValue;
             }
@@ -3250,6 +3260,8 @@ export default function TemplateGenerationDialog({
                             isPreviewLoading={isPreviewLoading}
                             panelClasses={panelClasses.preview}
                             EDITOR_PREVIEW_STYLES={EDITOR_PREVIEW_STYLES}
+                            isWordTemplate={isWordTemplate}
+                            docxBuffer={docxPreviewBuffer}
                         />
 
                         {/* RIGHT PANEL: Original Template Reference */}

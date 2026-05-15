@@ -946,6 +946,69 @@ export default function DepartmentTasksManager({
   const displayedTasks = activeTabConfig.tasks
   const activeTabTitle = activeTabConfig.title
 
+  const buildTaskExportRows = useCallback((tasksToExport: any[]) => {
+    const exportData = [];
+
+    for (const task of tasksToExport) {
+      const taskDeps = taskDependants.get(task.id.toString()) || [];
+
+      exportData.push({
+        'Task ID': getRawCellValue(departments, task, 'id', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+        'Type': 'Applicant',
+        'Name': getRawCellValue(departments, task, 'applicant_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+        'Nationality': getRawCellValue(departments, task, 'nationality', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+        'Age': getRawCellValue(departments, task, 'age', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+        'Relationship': 'Principal',
+        'Company': getRawCellValue(departments, task, 'company_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+        'Sub Department': getRawCellValue(departments, task, 'sub_department', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+        'Class': getRawCellValue(departments, task, 'job_level', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+        'Immigration Document Type': getRawCellValue(departments, task, 'immigration_document_type', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+        'Immigration Expiry Date': getRawCellValue(departments, task, 'immigration_expiry_date', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+        'Current Stage': getRawCellValue(departments, task, 'current_stage_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+        'Stage Status': getRawCellValue(departments, task, 'current_stage_status_value', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+        'Stage Follow-up': getRawCellValue(departments, task, 'current_stage_follow_up', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+        'Task Manager': getRawCellValue(departments, task, 'task_manager', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+        'Officer': getRawCellValue(departments, task, 'officer', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+        'Task Assistant': getRawCellValue(departments, task, 'task_assistant', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+        'Renewal Status': getRawCellValue(departments, task, 'renewal_new', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers)
+      });
+
+      taskDeps.forEach(dep => {
+        exportData.push({
+          'Task ID': task.id,
+          'Type': 'Dependant',
+          'Name': dep.full_name,
+          'Nationality': dep.nationality || 'N/A',
+          'Age': dep.age?.toString() || 'N/A',
+          'Relationship': dep.relationship || 'Dependant',
+          'Company': getRawCellValue(departments, task, 'company_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+          'Sub Department': getRawCellValue(departments, task, 'sub_department', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+          'Class': getRawCellValue(departments, task, 'job_level', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+          'Immigration Document Type': 'N/A',
+          'Immigration Expiry Date': 'N/A',
+          'Current Stage': 'N/A',
+          'Stage Status': 'N/A',
+          'Stage Follow-up': 'N/A',
+          'Task Manager': getRawCellValue(departments, task, 'task_manager', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+          'Officer': getRawCellValue(departments, task, 'officer', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+          'Task Assistant': getRawCellValue(departments, task, 'task_assistant', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, realOfficers),
+          'Renewal Status': task.renewal_status || 'New'
+        });
+      });
+    }
+
+    return exportData;
+  }, [
+    enhancedTasksData,
+    taskDependants,
+    departments,
+    companies,
+    getStaffName,
+    getEnhancedImmigrationStatusWrapper,
+    getCurrentStageStatusWrapper,
+    realOfficers
+  ]);
+
   const handleExport = useCallback(async (tasks: any[], tableType: string) => {
     if (!tasks.length) {
       toast({ title: "No Data", description: "No data available to export.", variant: "destructive" });
@@ -1040,6 +1103,63 @@ export default function DepartmentTasksManager({
     getEnhancedImmigrationStatusWrapper,
     getCurrentStageStatusWrapper
   ]);
+
+  const handleApiExport = useCallback(async (format: 'pdf' | 'word') => {
+    if (!displayedTasks.length) {
+      toast({ title: "No Data", description: "No data available to export.", variant: "destructive" });
+      return;
+    }
+
+    const rows = buildTaskExportRows(displayedTasks);
+    const endpoint = format === 'pdf' ? '/api/tasks/export/pdf' : '/api/tasks/export/word';
+    const fallbackFilename = `${activeTabTitle.replace(/\s+/g, '-')}.${format === 'pdf' ? 'pdf' : 'docx'}`;
+
+    setIsDownloading(true);
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: activeTabTitle,
+          rows
+        })
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => null);
+        throw new Error(errorBody?.error || `Failed to export ${format.toUpperCase()}`);
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get('Content-Disposition') || '';
+      const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
+      const filename = filenameMatch?.[1] || fallbackFilename;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+
+      toast({
+        title: "Export Successful",
+        description: `${activeTabTitle} downloaded as ${format === 'pdf' ? 'PDF' : 'Word'}.`
+      });
+    } catch (error) {
+      console.error(`${format.toUpperCase()} export error:`, error);
+      toast({
+        title: "Export Failed",
+        description: error instanceof Error ? error.message : `Failed to export ${format.toUpperCase()}.`,
+        variant: "destructive"
+      });
+    } finally {
+      setIsDownloading(false);
+    }
+  }, [activeTabTitle, buildTaskExportRows, displayedTasks, toast]);
+
   const getClassesForSubdepartment = useCallback((deptId: number, subDeptId: number) => {
     const department = departments.find(d => d.id === deptId);
     if (!department) return [];
@@ -3546,6 +3666,28 @@ export default function DepartmentTasksManager({
 
                         <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport(displayedTasks, activeTabTitle)}>
                           <Download className="h-4 w-4" />Export to Excel
+                        </Button>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex items-center gap-2"
+                          onClick={() => handleApiExport('pdf')}
+                          disabled={isDownloading}
+                        >
+                          {isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                          Export PDF
+                        </Button>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex items-center gap-2"
+                          onClick={() => handleApiExport('word')}
+                          disabled={isDownloading}
+                        >
+                          {isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                          Export Word
                         </Button>
 
                         <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={refreshAllData}>
