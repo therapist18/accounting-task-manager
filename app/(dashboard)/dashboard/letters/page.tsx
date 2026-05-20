@@ -24,7 +24,7 @@ import { generateLetterWithLetterhead, downloadBlob } from './utils/letterheadMe
 import * as mammoth from 'mammoth';
 import { FileText, Download, Briefcase, User, Type, Layout } from "lucide-react";
 import { useSignatureUploadHandler } from './components/SignatureUploadHandler';
-import { exportToWord } from './utils/Exporttoword';
+import { exportToWord } from './utils/exportToWord';
 import { useIndividualIdentificationNumbers, resolveIndividualId } from './hooks/useIndividualIdentificationNumbers';
 import type { IndividualIdInfo } from './hooks/useIndividualIdentificationNumbers';
 
