@@ -134,11 +134,11 @@ export default function TemplateGenerationDialog({
 
     // Centralized function to fetch template buffer with caching
     const fetchTemplateBuffer = useCallback(async (templateId: string, filePath: string): Promise<ArrayBuffer | null> => {
-        const buffer = await fetchTemplateBufferUtil(templateId, filePath, docxTemplateBuffer.current, loadedTemplateId.current);
+        const buffer = await fetchTemplateBufferUtil(templateId, filePath, templateZipBuffer.current, loadedTemplateId.current);
 
         // Cache the buffer and template ID if successful
         if (buffer) {
-            docxTemplateBuffer.current = buffer;
+            templateZipBuffer.current = buffer;
             loadedTemplateId.current = templateId;
         }
 
@@ -1784,6 +1784,36 @@ export default function TemplateGenerationDialog({
                 } else {
                     universalReplace(regex, `<div style="border:1px dashed #cbd5e1; padding:10px; text-align:center; color:#94a3b8; font-size:10px; border-radius:4px;">[Upload Image: ${placeholder.display_value || placeholder.name}]</div>`);
                 }
+            } else if (placeholder.type === 'boolean' && placeholder.boolean_conditions?.length) {
+                // Replace {placeholder.name} itself
+                const value = extractDisplayValue(rawValue);
+                const boolNameRegex = new RegExp(`\\{+\\s*%?\\s*${cleanName}\\s*\\}+`, 'gi');
+                universalReplace(boolNameRegex, formatWhitespace(value) || '');
+
+                // Replace each condition tag  e.g. {is_usd} → "√" or ""
+                const options = Array.isArray(rawValue) ? rawValue : null;
+                const strVal = String(rawValue || '').trim().toLowerCase();
+                placeholder.boolean_conditions.forEach((condition: any) => {
+                    if (!condition.tag) return;
+                    const tagClean = condition.tag.replace(/[{}]/g, '').trim();
+                    const tagRegex = new RegExp(`\\{+\\s*${tagClean}\\s*\\}+`, 'gi');
+                    let isChecked = false;
+                    if (options) {
+                        const opt = options.find((o: any) => o.tag === condition.tag);
+                        isChecked = !!opt?.checked;
+                    } else if (condition.comparison) {
+                        const cmpVal = String(condition.comparison.value || '').trim().toLowerCase();
+                        switch (condition.comparison.operator) {
+                            case 'equals': isChecked = strVal === cmpVal; break;
+                            case 'not_equals': isChecked = strVal !== cmpVal && !!strVal; break;
+                            case 'contains': isChecked = strVal.includes(cmpVal); break;
+                            default: isChecked = !!strVal;
+                        }
+                    } else {
+                        isChecked = !!strVal;
+                    }
+                    universalReplace(tagRegex, isChecked ? (condition.label || '✔') : '');
+                });
             } else {
                 const value = extractDisplayValue(rawValue);
 
@@ -1865,12 +1895,38 @@ export default function TemplateGenerationDialog({
             }
             else if (p.type === 'boolean') {
                 const options = Array.isArray(val) ? val : [];
-                options.forEach(opt => {
-                    if (opt && opt.tag) {
-                        renderData[opt.tag] = opt.checked ? extractDisplayValue([opt].filter(o => o.checked)) : "";
-                    }
-                });
-                renderData[baseKey] = extractDisplayValue(val);
+                if (options.length > 0) {
+                    // Standard boolean array — already evaluated
+                    options.forEach(opt => {
+                        if (opt && opt.tag) {
+                            renderData[opt.tag] = opt.checked ? extractDisplayValue([opt].filter(o => o.checked)) : "";
+                        }
+                    });
+                    renderData[baseKey] = extractDisplayValue(val);
+                } else if (p.boolean_conditions?.length) {
+                    // Value is a plain string (from questionGroups auto-populate, e.g. "USD").
+                    // Evaluate each condition against it so condition tags get filled in the doc.
+                    const strVal = String(val || '').trim().toLowerCase();
+                    p.boolean_conditions.forEach((condition: any) => {
+                        if (!condition.tag) return;
+                        let isChecked = false;
+                        if (condition.comparison) {
+                            const cmpVal = String(condition.comparison.value || '').trim().toLowerCase();
+                            switch (condition.comparison.operator) {
+                                case 'equals': isChecked = strVal === cmpVal; break;
+                                case 'not_equals': isChecked = strVal !== cmpVal && !!strVal; break;
+                                case 'contains': isChecked = strVal.includes(cmpVal); break;
+                                default: isChecked = !!strVal;
+                            }
+                        } else {
+                            isChecked = !!strVal;
+                        }
+                        renderData[condition.tag] = isChecked ? (condition.label || '✔') : '';
+                    });
+                    renderData[baseKey] = val || '';
+                } else {
+                    renderData[baseKey] = extractDisplayValue(val);
+                }
             }
             else if (p.type === 'image') {
                 const displayValue = typeof val === 'string' ? val : extractDisplayValue(val);
@@ -2719,14 +2775,14 @@ export default function TemplateGenerationDialog({
         try {
             const kycDocId = selectedTemplate?.document_id || template?.document_id;
             // --- 1. ROBUST BUFFER RECOVERY ---
-            let templateBuffer = docxTemplateBuffer.current;
+            let templateBuffer = templateZipBuffer.current;
             // If buffer is missing and it's a Word template, try fetching it now
             if (!templateBuffer && isWordTemplate) {
                 templateBuffer = await fetchTemplateBuffer(selectedTemplate.id, selectedTemplate.file_path);
                 if (!templateBuffer) {
                     throw new Error("Failed to fetch template source from storage");
                 }
-                docxTemplateBuffer.current = templateBuffer; // Cache it for next time
+                templateZipBuffer.current = templateBuffer; // Cache it for next time
             }
 
             let storagePath = null;
@@ -2879,12 +2935,7 @@ export default function TemplateGenerationDialog({
             });
             await Promise.all(imageConversionPromises);
             if (isWordTemplate) {
-                let templateBuffer = docxTemplateBuffer.current;
-
-                // Resolve promise if the ref was set before the fetch completed
-                if (templateBuffer && typeof (templateBuffer as any).then === 'function') {
-                    templateBuffer = await templateBuffer;
-                }
+                let templateBuffer = templateZipBuffer.current;
 
                 // If still missing, fetch it now (same pattern as saveAsDraft)
                 if (!templateBuffer) {
@@ -2895,7 +2946,7 @@ export default function TemplateGenerationDialog({
                     if (!templateBuffer) {
                         throw new Error('Failed to fetch template buffer');
                     }
-                    docxTemplateBuffer.current = templateBuffer;   // cache for next time
+                    templateZipBuffer.current = templateBuffer;   // cache for next time
                 }
 
                 // At this point templateBuffer is guaranteed to be an ArrayBuffer

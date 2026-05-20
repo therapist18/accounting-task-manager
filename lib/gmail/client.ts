@@ -1,7 +1,11 @@
 import { google } from 'googleapis'
 import { createClient } from '@supabase/supabase-js'
 
-const SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+const SCOPES = [
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/calendar',
+  'https://www.googleapis.com/auth/userinfo.email',
+]
 
 export function getOAuthClient() {
   return new google.auth.OAuth2(

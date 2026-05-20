@@ -471,12 +471,390 @@ export function PlaceholderFormDialog({
               </div>
             )}
 
-            {/* DOCUMENT CHECKLIST LOGIC */}
+            {/* BOOLEAN / CHECKBOX CONFIGURATION */}
+            {placeholder.type === 'boolean' && (
+              <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100 space-y-4">
+                <div className="flex items-center justify-between">
+                  <Label className="text-[11px] font-black uppercase text-emerald-700">Boolean / Checkbox Options</Label>
+                  <Button
+                    size="sm"
+                    type="button"
+                    onClick={() => onChange({
+                      boolean_conditions: [...(placeholder.boolean_conditions || []), { tag: '', label: '' }]
+                    })}
+                    className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700"
+                  >
+                    <Plus className="h-3 w-3 mr-1" /> Add Option
+                  </Button>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] font-bold text-emerald-700">Selection Mode</Label>
+                  <Select
+                    value={placeholder.boolean_type || 'single'}
+                    onValueChange={v => onChange({ boolean_type: v as 'single' | 'multiple' })}
+                  >
+                    <SelectTrigger className="bg-white h-9 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="single">Single (Radio — only one can be checked)</SelectItem>
+                      <SelectItem value="multiple">Multiple (Checkboxes — any can be checked)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  {(placeholder.boolean_conditions || []).map((condition, idx) => (
+                    <div key={idx} className="bg-white rounded-lg border p-3 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wide">Option {idx + 1}</span>
+                        <Button
+                          variant="ghost" size="icon" type="button"
+                          onClick={() => {
+                            const updated = [...(placeholder.boolean_conditions || [])];
+                            updated.splice(idx, 1);
+                            onChange({ boolean_conditions: updated });
+                          }}
+                          className="h-6 w-6 text-red-400 hover:text-red-600 hover:bg-red-50"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <Label className="text-[9px] font-bold text-slate-500 uppercase">Tag (template key)</Label>
+                          <Input
+                            placeholder="e.g. is_married"
+                            value={condition.tag}
+                            onChange={e => {
+                              const updated = [...(placeholder.boolean_conditions || [])];
+                              updated[idx] = { ...updated[idx], tag: e.target.value };
+                              onChange({ boolean_conditions: updated });
+                            }}
+                            className="h-8 text-xs font-mono bg-slate-50"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[9px] font-bold text-slate-500 uppercase">Display Label</Label>
+                          <Input
+                            placeholder="e.g. Married"
+                            value={condition.label}
+                            onChange={e => {
+                              const updated = [...(placeholder.boolean_conditions || [])];
+                              updated[idx] = { ...updated[idx], label: e.target.value };
+                              onChange({ boolean_conditions: updated });
+                            }}
+                            className="h-8 text-xs"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5 border-t border-slate-100 pt-2">
+                        <Label className="text-[9px] font-bold text-blue-600 uppercase">Link to Job Question</Label>
+                        <Select
+                          value={condition.linked_job_question_id || '__none__'}
+                          onValueChange={v => {
+                            const updated = [...(placeholder.boolean_conditions || [])];
+                            updated[idx] = { ...updated[idx], linked_job_question_id: v === '__none__' ? undefined : v };
+                            onChange({ boolean_conditions: updated });
+                          }}
+                        >
+                          <SelectTrigger className="bg-white h-8 text-xs"><SelectValue placeholder="No question linked" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">— No question linked —</SelectItem>
+                            {jobQuestions.map(q => (
+                              <SelectItem key={q.id} value={q.id}>{q.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {condition.linked_job_question_id && (
+                        <div className="grid grid-cols-3 gap-2 border-t border-slate-100 pt-2">
+                          <div className="space-y-1">
+                            <Label className="text-[9px] font-bold text-slate-500 uppercase">Operator</Label>
+                            <Select
+                              value={condition.comparison?.operator || 'equals'}
+                              onValueChange={v => {
+                                const updated = [...(placeholder.boolean_conditions || [])];
+                                updated[idx] = { ...updated[idx], comparison: { ...(updated[idx].comparison || { value: '' }), operator: v as any } };
+                                onChange({ boolean_conditions: updated });
+                              }}
+                            >
+                              <SelectTrigger className="bg-white h-8 text-xs"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="equals">Equals</SelectItem>
+                                <SelectItem value="not_equals">Not Equals</SelectItem>
+                                <SelectItem value="contains">Contains</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="col-span-2 space-y-1">
+                            <Label className="text-[9px] font-bold text-slate-500 uppercase">Match Value</Label>
+                            <Input
+                              placeholder="e.g. yes, true, married"
+                              value={condition.comparison?.value || ''}
+                              onChange={e => {
+                                const updated = [...(placeholder.boolean_conditions || [])];
+                                updated[idx] = { ...updated[idx], comparison: { operator: updated[idx].comparison?.operator || 'equals', ...updated[idx].comparison, value: e.target.value } };
+                                onChange({ boolean_conditions: updated });
+                              }}
+                              className="h-8 text-xs"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-1.5 border-t border-slate-100 pt-2">
+                        <Label className="text-[9px] font-bold text-blue-600 uppercase">Or Link to Master Field</Label>
+                        <Select
+                          value={condition.master_field_id ? String(condition.master_field_id) : '__none__'}
+                          onValueChange={v => {
+                            const updated = [...(placeholder.boolean_conditions || [])];
+                            updated[idx] = { ...updated[idx], master_field_id: v === '__none__' ? undefined : parseInt(v) };
+                            onChange({ boolean_conditions: updated });
+                          }}
+                        >
+                          <SelectTrigger className="bg-white h-8 text-xs"><SelectValue placeholder="No master field" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">— No master field —</SelectItem>
+                            {masterFields.map(mf => (
+                              <SelectItem key={mf.id} value={String(mf.id)}>{mf.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  ))}
+
+                  {(!placeholder.boolean_conditions || placeholder.boolean_conditions.length === 0) && (
+                    <div className="text-center py-6 border-2 border-dashed border-emerald-200 rounded-lg text-emerald-500 text-xs">
+                      No options yet. Click "Add Option" to define checkbox states.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* DOCUMENT CHECKLIST CONFIGURATION */}
             {placeholder.type === 'document_checklist' && (
               <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 space-y-4">
-                <Label className="text-[11px] font-black uppercase text-blue-600">Document Checklist Configuration</Label>
-                <div className="text-sm text-slate-600 italic">
-                  Document checklist configuration is simplified in this view. Use the full configuration in the main editor for advanced options.
+                <Label className="text-[11px] font-black uppercase text-blue-700">Document Checklist Configuration</Label>
+
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-bold text-blue-700">Display Format</Label>
+                    <Select
+                      value={placeholder.checklist_display_format || 'bullets'}
+                      onValueChange={v => onChange({ checklist_display_format: v as 'bullets' | 'checkboxes' | 'table' })}
+                    >
+                      <SelectTrigger className="bg-white h-9 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="bullets">Bullets</SelectItem>
+                        <SelectItem value="checkboxes">Checkboxes</SelectItem>
+                        <SelectItem value="table">Table</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-bold text-blue-700">Found Label</Label>
+                    <Input
+                      placeholder="✔"
+                      value={placeholder.checklist_success_label || ''}
+                      onChange={e => onChange({ checklist_success_label: e.target.value })}
+                      className="bg-white h-9 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-bold text-blue-700">Not Found Label</Label>
+                    <Input
+                      placeholder="✗"
+                      value={placeholder.checklist_not_found_label || ''}
+                      onChange={e => onChange({ checklist_not_found_label: e.target.value })}
+                      className="bg-white h-9 text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-[10px] font-bold text-blue-700">Document Sources</Label>
+                    <Button
+                      size="sm" type="button"
+                      onClick={() => onChange({
+                        checklist_data_sources: [...(placeholder.checklist_data_sources || []), {
+                          id: crypto.randomUUID(),
+                          label: '',
+                          table: 'acc_portal_kyc_uploads' as const,
+                          linking_variable: 'company_id',
+                          entity_types: ['company' as EntityType],
+                          execution_mode: 'latest',
+                          linked_document_ids: []
+                        }]
+                      })}
+                      className="h-7 text-xs bg-blue-600 hover:bg-blue-700"
+                    >
+                      <Plus className="h-3 w-3 mr-1" /> Add Source
+                    </Button>
+                  </div>
+
+                  {(placeholder.checklist_data_sources || []).map((source, idx) => (
+                    <div key={source.id || idx} className="bg-white rounded-lg border p-3 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-blue-700 uppercase tracking-wide">Document #{idx + 1}</span>
+                        <Button
+                          variant="ghost" size="icon" type="button"
+                          onClick={() => {
+                            const updated = [...(placeholder.checklist_data_sources || [])];
+                            updated.splice(idx, 1);
+                            onChange({ checklist_data_sources: updated });
+                          }}
+                          className="h-6 w-6 text-red-400 hover:text-red-600 hover:bg-red-50"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="text-[9px] font-bold text-slate-500 uppercase">Checklist Row Label</Label>
+                        <Input
+                          placeholder="e.g. National ID, KRA PIN"
+                          value={(source as any).label || ''}
+                          onChange={e => {
+                            const updated = [...(placeholder.checklist_data_sources || [])];
+                            updated[idx] = { ...updated[idx], label: e.target.value } as any;
+                            onChange({ checklist_data_sources: updated });
+                          }}
+                          className="h-8 text-xs"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1.5">
+                          <Label className="text-[9px] font-bold text-slate-500 uppercase">Source Table</Label>
+                          <Select
+                            value={source.table}
+                            onValueChange={v => {
+                              const updated = [...(placeholder.checklist_data_sources || [])];
+                              updated[idx] = {
+                                ...updated[idx],
+                                table: v as any,
+                                linking_variable: v === 'acc_portal_kyc_uploads' ? 'company_id' : 'director_id'
+                              };
+                              onChange({ checklist_data_sources: updated });
+                            }}
+                          >
+                            <SelectTrigger className="bg-white h-8 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="acc_portal_kyc_uploads">Company Uploads</SelectItem>
+                              <SelectItem value="acc_portal_directors_documents">Director Documents</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-[9px] font-bold text-slate-500 uppercase">Linking Variable</Label>
+                          <Select
+                            value={source.linking_variable || 'company_id'}
+                            onValueChange={v => {
+                              const updated = [...(placeholder.checklist_data_sources || [])];
+                              updated[idx] = { ...updated[idx], linking_variable: v };
+                              onChange({ checklist_data_sources: updated });
+                            }}
+                          >
+                            <SelectTrigger className="bg-white h-8 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="company_id">company_id</SelectItem>
+                              <SelectItem value="director_id">director_id</SelectItem>
+                              <SelectItem value="individual_id">individual_id</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="text-[9px] font-bold text-slate-500 uppercase">Execution Mode</Label>
+                        <Select
+                          value={(source as any).execution_mode || 'latest'}
+                          onValueChange={v => {
+                            const updated = [...(placeholder.checklist_data_sources || [])];
+                            updated[idx] = { ...updated[idx], execution_mode: v } as any;
+                            onChange({ checklist_data_sources: updated });
+                          }}
+                        >
+                          <SelectTrigger className="bg-white h-8 text-xs w-48"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="latest">Latest only</SelectItem>
+                            <SelectItem value="all">All records</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="text-[9px] font-bold text-slate-500 uppercase">Linked KYC Documents</Label>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="outline" className="w-full justify-between h-8 text-xs bg-white font-normal">
+                              {(source.linked_document_ids || []).length > 0
+                                ? `${(source.linked_document_ids || []).length} document(s) selected`
+                                : 'Select documents to check for...'}
+                              <ChevronDown className="h-3 w-3 opacity-50" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent className="w-64 max-h-60 overflow-y-auto">
+                            {kycDocuments.map(doc => (
+                              <DropdownMenuCheckboxItem
+                                key={doc.id}
+                                checked={(source.linked_document_ids || []).includes(String(doc.id))}
+                                onCheckedChange={checked => {
+                                  const updated = [...(placeholder.checklist_data_sources || [])];
+                                  const ids = [...(updated[idx].linked_document_ids || [])];
+                                  if (checked) {
+                                    if (!ids.includes(String(doc.id))) ids.push(String(doc.id));
+                                  } else {
+                                    const pos = ids.indexOf(String(doc.id));
+                                    if (pos !== -1) ids.splice(pos, 1);
+                                  }
+                                  updated[idx] = { ...updated[idx], linked_document_ids: ids };
+                                  onChange({ checklist_data_sources: updated });
+                                }}
+                              >
+                                {doc.display_name || doc.name}
+                              </DropdownMenuCheckboxItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                        {(source.linked_document_ids || []).length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {(source.linked_document_ids || []).map(id => {
+                              const doc = kycDocuments.find(d => String(d.id) === id);
+                              return (
+                                <Badge key={id} variant="secondary" className="text-[9px] pl-1.5 pr-1 gap-1">
+                                  {doc?.display_name || doc?.name || id}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const updated = [...(placeholder.checklist_data_sources || [])];
+                                      updated[idx] = { ...updated[idx], linked_document_ids: (updated[idx].linked_document_ids || []).filter(d => d !== id) };
+                                      onChange({ checklist_data_sources: updated });
+                                    }}
+                                    className="hover:text-red-500"
+                                  >
+                                    <X className="h-2.5 w-2.5" />
+                                  </button>
+                                </Badge>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+
+                  {(!placeholder.checklist_data_sources || placeholder.checklist_data_sources.length === 0) && (
+                    <div className="text-center py-6 border-2 border-dashed border-blue-200 rounded-lg text-blue-400 text-xs">
+                      No document sources yet. Click "Add Source" to define what documents to check for.
+                    </div>
+                  )}
                 </div>
               </div>
             )}
