@@ -20,6 +20,7 @@ import EntityVisibilityControl, { type EntityVisibilityOption } from "../main-sh
 import * as XLSX from "xlsx"
 import * as ExcelJS from "exceljs"
 import { toast } from "@/lib/hooks/use-toast"
+import { saveAs } from "file-saver"
 import { userService, DisplayUser, getOfficerDisplayName } from "@/lib/shared-user-assignment-service"
 
 // Simple UUID generator for client-side use
