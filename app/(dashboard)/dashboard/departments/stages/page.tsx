@@ -1860,138 +1860,174 @@ export default function Stages() {
 
       if (isTransposed) {
         // ==========================================
-        // TRANSPOSED VIEW (Stages as Rows)
+        // TRANSPOSED VIEW (Stages as Rows, Entities as Columns)
         // ==========================================
+        const headerTree = buildHeaderTree(currentDept);
         const leafEntities = getLeafEntities(currentDept);
-        const headerStartRow = 4;
 
-        // 1. Setup Columns
-        // Fixed columns based on visibility
-        const fixedHeaders = [];
-        if (columnVisibility.index) fixedHeaders.push({ header: '#', key: 'index', width: 6 });
-        if (columnVisibility.entity) fixedHeaders.push({ header: 'Stage Name', key: 'name', width: 30 });
+        // 1. Calculate Header Depth
+        let maxDepth = 0;
+        const findDepth = (nodes: any[], d: number) => {
+          maxDepth = Math.max(maxDepth, d);
+          nodes.forEach(n => n.children && findDepth(n.children, d + 1));
+        };
+        findDepth(headerTree, 1);
+
+        const headerStartRow = 4;
+        const totalHeaderRows = maxDepth + (columnVisibility.controls ? 1 : 0);
+        const dataStartRow = headerStartRow + totalHeaderRows;
+
+        // 2. Setup Fixed Columns (Index, Stage Name, Duration, Follow-up)
+        let colIndex = 1;
+        const fixedCols = [];
+        if (columnVisibility.index) fixedCols.push({ header: '#', width: 6 });
+        if (columnVisibility.entity) fixedCols.push({ header: 'Stage Name', width: 30 });
         if (columnVisibility.stageName) {
-          fixedHeaders.push({ header: 'Duration', key: 'duration', width: 15 });
-          fixedHeaders.push({ header: 'Follow Up', key: 'followUp', width: 15 });
+          fixedCols.push({ header: 'Duration', width: 12 });
+          fixedCols.push({ header: 'Follow-up', width: 20 });
+          fixedCols.push({ header: 'Actions', width: 15 });
         }
 
-        // 2. Build Header Rows
-        const mainHeaderRow = worksheet.getRow(headerStartRow);
-        const subHeaderRow = worksheet.getRow(headerStartRow + 1);
-
-        let colIndex = 1;
-
-        // Write Fixed Headers
-        fixedHeaders.forEach(h => {
-          // Merge vertical for fixed headers
-          worksheet.mergeCells(headerStartRow, colIndex, headerStartRow + 1, colIndex);
-          const cell = mainHeaderRow.getCell(colIndex);
-          cell.value = h.header;
-          worksheet.getColumn(colIndex).width = h.width;
+        fixedCols.forEach(fc => {
+          worksheet.mergeCells(headerStartRow, colIndex, headerStartRow + totalHeaderRows - 1, colIndex);
+          const cell = worksheet.getCell(headerStartRow, colIndex);
+          cell.value = fc.header;
+          worksheet.getColumn(colIndex).width = fc.width;
           styleCell(cell, {
             font: { bold: true, color: { argb: 'FFFFFFFF' } },
             fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF002060' } },
             alignment: { horizontal: 'center' }
           });
-          // Apply style to the merged cell bottom just to be safe
-          styleCell(subHeaderRow.getCell(colIndex), { border: { bottom: { style: 'thin' } } });
           colIndex++;
         });
 
-        // Write Entity Headers (Dynamic Columns)
-        leafEntities.forEach(entity => {
-          // Determine span (Controls visibility)
-          const span = columnVisibility.controls ? 2 : 1;
+        const entityStartCol = colIndex;
 
-          if (span > 1) {
-            worksheet.mergeCells(headerStartRow, colIndex, headerStartRow, colIndex + span - 1);
-          }
+        // 3. Recursive Header Drawing & Column Outlining
+        const drawHeader = (nodes: any[], currentRow: number, currentCol: number, level: number) => {
+          let offset = 0;
+          nodes.forEach(node => {
+            const span = node.colspan * (columnVisibility.controls ? 2 : 1);
+            const cell = worksheet.getCell(currentRow, currentCol + offset);
 
-          const mainCell = mainHeaderRow.getCell(colIndex);
-          mainCell.value = entity.name; // Top header is Entity Name
-          styleCell(mainCell, {
-            font: { bold: true, color: { argb: 'FFFFFFFF' } },
-            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } }, // Lighter blue
-            alignment: { horizontal: 'center' }
+            cell.value = node.name;
+
+            // Style based on depth
+            const colors = ['FF0070C0', 'FF2F75B5', 'FF5B9BD5']; // Dark to lighter blue
+            styleCell(cell, {
+              font: { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 - level },
+              fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: colors[level] || 'FF5B9BD5' } },
+              alignment: { horizontal: 'center' }
+            });
+
+            // Set column outline levels for children (nesting controls)
+            if (level > 0) {
+              for (let i = 0; i < span; i++) {
+                worksheet.getColumn(currentCol + offset + i).outlineLevel = level;
+              }
+            }
+
+            if (node.children && node.children.length > 0) {
+              // Merge horizontally across children
+              worksheet.mergeCells(currentRow, currentCol + offset, currentRow, currentCol + offset + span - 1);
+              drawHeader(node.children, currentRow + 1, currentCol + offset, level + 1);
+            } else {
+              // It's a leaf: Merge vertically down to the end of hierarchy
+              const verticalTarget = headerStartRow + maxDepth - 1;
+              if (verticalTarget > currentRow) {
+                worksheet.mergeCells(currentRow, currentCol + offset, verticalTarget, currentCol + offset + span - 1);
+              } else if (span > 1) {
+                worksheet.mergeCells(currentRow, currentCol + offset, currentRow, currentCol + offset + span - 1);
+              }
+
+              // Draw the "Applicable / Display" labels if enabled
+              if (columnVisibility.controls) {
+                const labelRow = headerStartRow + maxDepth;
+                const cApp = worksheet.getCell(labelRow, currentCol + offset);
+                const cDisp = worksheet.getCell(labelRow, currentCol + offset + 1);
+
+                cApp.value = "App.";
+                cDisp.value = "Disp.";
+
+                [cApp, cDisp].forEach(c => styleCell(c, {
+                  font: { size: 9, bold: true },
+                  fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } },
+                  alignment: { horizontal: 'center' }
+                }));
+
+                worksheet.getColumn(currentCol + offset).width = 9;
+                worksheet.getColumn(currentCol + offset + 1).width = 9;
+              } else {
+                worksheet.getColumn(currentCol + offset).width = 15;
+              }
+            }
+            offset += span;
           });
+        };
 
-          // Sub headers
-          if (columnVisibility.controls) {
-            const sub1 = subHeaderRow.getCell(colIndex);
-            sub1.value = "App.";
-            styleCell(sub1, { font: { size: 9, bold: true }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }, alignment: { horizontal: 'center' } });
+        drawHeader(headerTree, headerStartRow, entityStartCol, 0);
 
-            const sub2 = subHeaderRow.getCell(colIndex + 1);
-            sub2.value = "Disp.";
-            styleCell(sub2, { font: { size: 9, bold: true }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }, alignment: { horizontal: 'center' } });
-
-            worksheet.getColumn(colIndex).width = 8;
-            worksheet.getColumn(colIndex + 1).width = 8;
-          } else {
-            const sub1 = subHeaderRow.getCell(colIndex);
-            sub1.value = "Status";
-            styleCell(sub1, { font: { size: 9 }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } } });
-            worksheet.getColumn(colIndex).width = 10;
-          }
-
-          colIndex += span;
-        });
-
-        // 3. Write Data Rows (Stages)
-        currentDept.stages.forEach((stage, idx) => {
+        // 4. Write Stage Data Rows
+        currentDept.stages.forEach((stage) => {
           const row = worksheet.addRow([]);
-          let currentCell = 1;
+          let currCol = 1;
 
-          // Fixed Data
+          // Fixed Meta Data
           if (columnVisibility.index) {
-            const c = row.getCell(currentCell++);
+            const c = row.getCell(currCol++);
             c.value = stage.order_num;
             styleCell(c, { alignment: { horizontal: 'center' } });
           }
           if (columnVisibility.entity) {
-            const c = row.getCell(currentCell++);
+            const c = row.getCell(currCol++);
             c.value = stage.name;
             styleCell(c, { font: { bold: true } });
           }
           if (columnVisibility.stageName) {
-            const cDur = row.getCell(currentCell++);
+            const cDur = row.getCell(currCol++);
             cDur.value = minutesToTimeString(stage.estimated_time);
-            const cFol = row.getCell(currentCell++);
+            styleCell(cDur, { alignment: { horizontal: 'center' } });
+
+            const cFol = row.getCell(currCol++);
             const officerIds = stage.officer_ids && stage.officer_ids.length > 0 ? stage.officer_ids : (stage.officer_id ? [stage.officer_id] : []);
             cFol.value = stage.follow_up === 'Officer' && officerIds.length > 0
               ? officerIds.map(id => userData.officers.find(o => o.id === id)?.displayName).filter(Boolean).join(', ') || stage.follow_up
               : stage.follow_up || '-';
+            styleCell(cFol);
+
+            const cAct = row.getCell(currCol++);
+            cAct.value = stage.status || '-'; // Simplified actions/status for excel
+            styleCell(cAct, { alignment: { horizontal: 'center' } });
           }
 
-          // Dynamic Entity Data
+          // Entity Specific Data
           leafEntities.forEach(entity => {
             const allocation = getStageAllocation(stage, entity);
 
             if (columnVisibility.controls) {
               // Applicable Cell
-              const cApp = row.getCell(currentCell++);
+              const cApp = row.getCell(currCol++);
               cApp.value = allocation.applicable ? "Yes" : "No";
               styleCell(cApp, {
-                font: { color: { argb: allocation.applicable ? 'FF006100' : 'FF9C0006' } },
-                fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: allocation.applicable ? 'FFC6EFCE' : 'FFFFC7CE' } }, // Light Green / Light Red
+                font: { color: { argb: allocation.applicable ? 'FF006100' : 'FF9C0006' }, bold: true },
+                fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: allocation.applicable ? 'FFC6EFCE' : 'FFFFC7CE' } },
                 alignment: { horizontal: 'center' }
               });
 
               // Display Cell
-              const cDisp = row.getCell(currentCell++);
+              const cDisp = row.getCell(currCol++);
               cDisp.value = allocation.display ? "Yes" : "No";
               styleCell(cDisp, {
-                font: { color: { argb: allocation.display ? 'FF000000' : 'FF808080' } },
-                alignment: { horizontal: 'center' }
+                alignment: { horizontal: 'center' },
+                font: { color: { argb: allocation.display ? 'FF000000' : 'FF999999' } }
               });
             } else {
-              // Single Status Cell
-              const cStat = row.getCell(currentCell++);
+              const cStat = row.getCell(currCol++);
               cStat.value = allocation.applicable ? "Active" : "-";
+              styleCell(cStat, { alignment: { horizontal: 'center' } });
             }
           });
         });
-
       } else {
         // ==========================================
         // STANDARD VIEW (Entities as Rows - HIERARCHICAL)

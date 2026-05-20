@@ -40,6 +40,7 @@ import type { AuthUser } from "@/lib/auth/types"
 
 const navItems = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { title: "Email Inbox", href: "/dashboard/emails", icon: Mail },
   {
     title: "Task Management",
     icon: CheckSquare,

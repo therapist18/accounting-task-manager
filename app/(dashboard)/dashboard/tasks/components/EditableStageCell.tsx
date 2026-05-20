@@ -417,20 +417,6 @@ export default function EditableStageCell({
         variant: "success"
       });
 
-      // Fetch and update states after successful submission
-      if (onFetchData) {
-        try {
-          await onFetchData();
-        } catch (fetchError) {
-          console.error('Error refreshing data after save:', fetchError);
-          toast({
-            title: "Warning",
-            description: "Stage saved but data refresh failed. Please refresh manually.",
-            variant: "warning"
-          });
-        }
-      }
-
       // Clear any cached data that might be stale
       if (linkedDocument?.document_type_id) {
         documentFieldsCache.delete(linkedDocument.document_type_id);
@@ -446,7 +432,7 @@ export default function EditableStageCell({
     } finally {
       setIsLoading(false);
     }
-  }, [editValue, onSave, stage?.id, task?.id, linkedDocument, selectedSkipReason, previewDocuments, currentPreviewIndex, onFetchData]);
+  }, [editValue, onSave, stage?.id, task?.id, linkedDocument, selectedSkipReason, previewDocuments, currentPreviewIndex]);
 
   const checkPreviousStages = useCallback(async () => {
     if (!task.stages || !stages || stages.length === 0) return true;
@@ -498,11 +484,6 @@ export default function EditableStageCell({
         description: "Stage reset.",
         variant: "success"
       });
-
-      // Fetch and update states after successful submission
-      if (onFetchData) {
-        await onFetchData();
-      }
     } catch (error) {
       console.error('Error unskipping stage:', error);
       toast({ title: "Error", description: "Failed to reset stage", variant: "destructive" });
@@ -840,11 +821,6 @@ export default function EditableStageCell({
       setPreviewDocuments(updatedDocs);
 
       toast({ title: "Success", description: "Document data saved and refreshed successfully.", variant: "success" });
-
-      // Fetch and update states after successful submission
-      if (onFetchData) {
-        await onFetchData();
-      }
 
       if (currentPreviewIndex >= previewDocuments.length - 1) {
         setIsPreviewOpen(false);

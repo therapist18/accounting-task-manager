@@ -1600,13 +1600,18 @@ export default function DepartmentTasksManager({
 
       if (error) throw error;
 
+      setTasks(prevTasks => prevTasks.map(t =>
+        t.id.toString() === taskId.toString()
+          ? { ...t, stages: updatedStages, updated_at: timestamp }
+          : t
+      ));
+      clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
+
       toast({
         title: "Success",
         description: "Officers updated successfully",
         variant: "success"
       });
-
-      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
     } catch (error: any) {
       console.error('Error updating task stage officers:', error);
       toast({
@@ -1615,7 +1620,7 @@ export default function DepartmentTasksManager({
         variant: "destructive"
       });
     }
-  }, [loadTasksData, activeDepartmentTab, activeSubdepartmentTab]);
+  }, [activeDepartmentTab, activeSubdepartmentTab, clearTasksCache]);
 
   const updateAllTaskStageOfficers = useCallback(async (taskId: string, stageAssignments: Record<string, string[]>) => {
     if (!taskId) {
@@ -1662,13 +1667,18 @@ export default function DepartmentTasksManager({
 
       if (error) throw error;
 
+      setTasks(prevTasks => prevTasks.map(t =>
+        t.id.toString() === taskId.toString()
+          ? { ...t, stages: updatedStages, updated_at: timestamp }
+          : t
+      ));
+      clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
+
       toast({
         title: "Success",
         description: "All stage officers updated successfully",
         variant: "success"
       });
-
-      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
     } catch (error: any) {
       console.error('Error updating all task stage officers:', error);
       toast({
@@ -1677,7 +1687,7 @@ export default function DepartmentTasksManager({
         variant: "destructive"
       });
     }
-  }, [loadTasksData, activeDepartmentTab, activeSubdepartmentTab]);
+  }, [activeDepartmentTab, activeSubdepartmentTab, clearTasksCache]);
 
   const updateTaskOfficer = useCallback(async (taskId: string, officerId: string | null, stageId: string) => {
     if (!taskId || !stageId) {
@@ -1736,13 +1746,18 @@ export default function DepartmentTasksManager({
 
       if (error) throw error;
 
+      setTasks(prevTasks => prevTasks.map(t =>
+        t.id.toString() === taskId.toString()
+          ? { ...t, stages: updatedStages, updated_at: timestamp }
+          : t
+      ));
+      clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
+
       toast({
         title: "Success",
         description: "Officer updated successfully",
         variant: "success"
       });
-
-      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
     } catch (error: any) {
       console.error('Error updating task officer:', error);
       toast({
@@ -1751,7 +1766,7 @@ export default function DepartmentTasksManager({
         variant: "destructive"
       });
     }
-  }, [loadTasksData, activeDepartmentTab, activeSubdepartmentTab]);
+  }, [activeDepartmentTab, activeSubdepartmentTab, clearTasksCache]);
 
   const enhancedHandleStageStatusSave = useCallback(async (
     stageId: string,
@@ -1883,8 +1898,13 @@ export default function DepartmentTasksManager({
 
       if (error) throw error;
 
-      // 8. Refresh Data
-      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
+      // 8. Update local state directly
+      setTasks(prevTasks => prevTasks.map(t =>
+        t.id.toString() === taskId.toString()
+          ? { ...t, ...taskStatusUpdate, stages: updatedStages, updated_at: timestamp }
+          : t
+      ));
+      clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
 
       const successMessage = isSkipped
         ? 'Stage marked as skipped'
@@ -1902,7 +1922,7 @@ export default function DepartmentTasksManager({
         variant: "destructive"
       });
     }
-  }, [tasks, stages, determineCurrentStage, loadTasksData, activeDepartmentTab, activeSubdepartmentTab]);
+  }, [tasks, stages, determineCurrentStage, activeDepartmentTab, activeSubdepartmentTab, clearTasksCache]);
 
   const generateEnhancedTableRows = useCallback(async (tasks: UtilTask[]) => {
     if (!tasks.length) return [];
@@ -2450,13 +2470,6 @@ export default function DepartmentTasksManager({
             )
           );
           clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
-
-          // If this is from a document upload, refresh documents to show newly uploaded ones
-          if (action.source === 'stage-upload') {
-            refreshAllData();
-          } else {
-            void loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
-          }
         }
         break
       case 'refresh':
@@ -2466,7 +2479,7 @@ export default function DepartmentTasksManager({
       default:
         onTaskAction?.(action)
     }
-  }, [onTaskAction, refreshAllData, activeDepartmentTab, activeSubdepartmentTab, loadTasksData])
+  }, [onTaskAction, activeDepartmentTab, activeSubdepartmentTab])
 
   const renderCellContent = useCallback((row: any, task: any, columnType?: 'date' | 'actions') => {
     const value = row.getValue?.(task) ?? '';
@@ -3221,52 +3234,46 @@ export default function DepartmentTasksManager({
       realtimeSubscriptionRef.current = null;
     }
 
-    const refreshTasksForRealtimeChange = async () => {
-      clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
-      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true);
-    };
-
     const subscription = supabase
       .channel(`tm_tasks_changes:${activeDepartmentTab}:${activeSubdepartmentTab || 'all'}`)
       .on(
         'postgres_changes',
         {
-          event: '*', // Listen to all changes (INSERT, UPDATE, DELETE)
+          event: '*',
           schema: 'public',
           table: 'tm_tasks'
         },
         async (payload) => {
-          const newTask = payload.new;
-          const oldTask = payload.old;
+          const newTask = payload.new as any;
+          const oldTask = payload.old as any;
           const isRelevant = isTaskRelevantToActiveView(newTask) || isTaskRelevantToActiveView(oldTask);
 
-          if (isRelevant) {
-            await refreshTasksForRealtimeChange();
+          if (!isRelevant) return;
 
-            if (payload.eventType === 'INSERT') {
-              toast({
-                title: "New Task Added",
-                description: "A new task has been added to the current view.",
-                variant: "success"
-              });
-            } else if (payload.eventType === 'UPDATE') {
-              const hasSignificantChange = newTask?.status !== oldTask?.status ||
-                JSON.stringify(newTask?.job_level || {}) !== JSON.stringify(oldTask?.job_level || {});
-
-              if (hasSignificantChange) {
-                toast({
-                  title: "Task Updated",
-                  description: "Task information has been updated.",
-                  variant: "success"
-                });
-              }
-            } else if (payload.eventType === 'DELETE') {
-              toast({
-                title: "Task Removed",
-                description: "A task has been removed from the current view.",
-                variant: "default"
-              });
-            }
+          if (payload.eventType === 'UPDATE') {
+            // Merge DB columns into existing enriched task — no loading state
+            setTasks(prevTasks => prevTasks.map(t =>
+              t.id?.toString() === newTask?.id?.toString()
+                ? { ...t, ...newTask }
+                : t
+            ));
+            clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
+          } else if (payload.eventType === 'INSERT') {
+            clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
+            await loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true);
+            toast({
+              title: "New Task Added",
+              description: "A new task has been added to the current view.",
+              variant: "success"
+            });
+          } else if (payload.eventType === 'DELETE') {
+            setTasks(prevTasks => prevTasks.filter(t => t.id?.toString() !== oldTask?.id?.toString()));
+            clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
+            toast({
+              title: "Task Removed",
+              description: "A task has been removed from the current view.",
+              variant: "default"
+            });
           }
         }
       )
