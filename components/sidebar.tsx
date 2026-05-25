@@ -79,6 +79,7 @@ const navItems = [
     ],
   },
   { title: "Diary", href: "/dashboard/diary", icon: Calendar },
+  { title: "Business Tasks", href: "/dashboard/business-task-manager", icon: Calendar },
   { title: "Applications", href: "/dashboard/applications", icon: AppWindow },
   { title: "Reports", href: "/dashboard/reports", icon: BarChart3 },
 ]
