@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import Link from "next/link"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
 import { NotificationCenter } from "@/components/notification-center"
@@ -27,6 +28,7 @@ function useCurrentUser() {
         const response = await fetch("/api/auth/session")
         const json = await response.json()
         if (json?.authenticated && json?.user) setUser(json.user)
+        else window.location.replace("/login")
       } catch (error) { console.error(error) } finally { setLoading(false) }
     }
     fetchUser()
@@ -85,8 +87,10 @@ export function Navbar() {
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="cursor-pointer flex items-center gap-3 px-4 py-3">
-                <Settings className="w-4 h-4" /> Settings
+              <DropdownMenuItem asChild>
+                <Link href="/dashboard/settings/access-controls" className="cursor-pointer flex items-center gap-3 px-4 py-3">
+                  <Settings className="w-4 h-4" /> Settings
+                </Link>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem

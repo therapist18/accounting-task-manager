@@ -6,6 +6,7 @@ import {
   getSessionCookieOptions,
   resolveSessionFromIdToken,
 } from "@/lib/auth/session";
+import { getEffectivePermissionsForUser } from "@/lib/auth/access-controls";
 import { toAuthErrorResponse } from "@/lib/auth/errors";
 
 function isAuthConfigurationError(error: unknown) {
@@ -16,7 +17,8 @@ export async function GET(request: NextRequest) {
   try {
     const session = await getAppSessionFromRequest(request);
     if (!session) return NextResponse.json({ authenticated: false, user: null });
-    return NextResponse.json({ authenticated: true, user: session.user });
+    const permissions = await getEffectivePermissionsForUser(session.user);
+    return NextResponse.json({ authenticated: true, user: { ...session.user, permissions } });
   } catch (error) {
     if (isAuthConfigurationError(error)) {
       return NextResponse.json({ authenticated: false, user: null });
@@ -47,7 +49,10 @@ export async function POST(request: NextRequest) {
     const response = NextResponse.json({
       success: true,
       authenticated: true,
-      user: session.user,
+      user: {
+        ...session.user,
+        permissions: await getEffectivePermissionsForUser(session.user),
+      },
     });
     response.cookies.set(AUTH_SESSION_COOKIE_NAME, sessionCookie, getSessionCookieOptions());
     return response;

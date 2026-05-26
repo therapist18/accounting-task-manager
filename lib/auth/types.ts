@@ -1,3 +1,5 @@
+import type { PermissionKey } from "@/lib/auth/permissions";
+
 export type TaskManagerRole =
   | "admin"
   | "manager"
@@ -9,6 +11,7 @@ export type ScannerUserRole =
   | "company_admin"
   | "petty_cash_user"
   | "officer"
+  | "company_staff"
   | "SuperAdmin";
 
 export interface AuthUser {
@@ -27,6 +30,7 @@ export interface AuthUser {
   hasAllCompanyAccess: boolean;
   isAdmin: boolean;
   isSuperAdmin: boolean;
+  permissions?: PermissionKey[];
 }
 
 export interface AppSession {

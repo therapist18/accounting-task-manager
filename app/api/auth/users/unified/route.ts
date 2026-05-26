@@ -7,10 +7,16 @@ import {
   updateManagedScannerUser,
   deleteManagedScannerUser
 } from '@/lib/auth/scanner-users';
+import { ensurePermission } from '@/lib/auth/access-controls';
+import { requireAppSession } from '@/lib/auth/session';
+import { toAuthErrorResponse } from '@/lib/auth/errors';
 import type { ManagedAuthUserCreateInput, ManagedAuthUserUpdateInput } from '@/lib/auth/types';
 
 export async function GET(req: NextRequest) {
   try {
+    const session = await requireAppSession(req);
+    await ensurePermission(session.user, 'users.view');
+
     const { searchParams } = new URL(req.url);
     const role = searchParams.get('role');
     const companyId = searchParams.get('companyId');
@@ -57,6 +63,8 @@ export async function GET(req: NextRequest) {
       payrollAccess
     });
   } catch (error) {
+    const authResponse = toAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     console.error('Unified API Error:', error);
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : "Failed to fetch users" },
@@ -67,6 +75,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await requireAppSession(req);
+    await ensurePermission(session.user, 'users.manage');
+
     const body = await req.json();
     const { searchParams } = new URL(req.url);
     const role = searchParams.get('role');
@@ -85,6 +96,8 @@ export async function POST(req: NextRequest) {
       message: "User created successfully"
     });
   } catch (error) {
+    const authResponse = toAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     console.error('Unified API POST Error:', error);
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : "Failed to create user" },
@@ -95,6 +108,9 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
+    const session = await requireAppSession(req);
+    await ensurePermission(session.user, 'users.manage');
+
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
     const role = searchParams.get('role');
@@ -119,6 +135,8 @@ export async function PUT(req: NextRequest) {
       message: "User updated successfully"
     });
   } catch (error) {
+    const authResponse = toAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     console.error('Update user error:', error);
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : "Failed to update user" },
@@ -129,6 +147,9 @@ export async function PUT(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
+    const session = await requireAppSession(req);
+    await ensurePermission(session.user, 'users.manage');
+
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
 
@@ -143,6 +164,8 @@ export async function DELETE(req: NextRequest) {
       message: "User deleted successfully"
     });
   } catch (error) {
+    const authResponse = toAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     console.error('Unified API DELETE Error:', error);
     return NextResponse.json(
       { success: false, error: "Failed to delete user" },

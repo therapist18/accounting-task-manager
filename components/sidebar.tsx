@@ -40,58 +40,77 @@ import {
 import type { AuthUser } from "@/lib/auth/types"
 
 const navItems = [
-  { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { title: "Email Inbox", href: "/dashboard/emails", icon: Mail },
+  { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard, permission: "dashboard.view" },
+  { title: "Email Inbox", href: "/dashboard/emails", icon: Mail, permission: "emails.view" },
   {
     title: "Task Management",
     icon: CheckSquare,
     items: [
-      { title: "Tasks Requirements", href: "/dashboard/tasks-requirements" },
-      { title: "Tasks Tracking", href: "/dashboard/tasks" },
-      { title: "Reports Dashboard", href: "/dashboard/reports" },
+      { title: "Tasks Requirements", href: "/dashboard/tasks-requirements", permission: "tasks_requirements.view" },
+      { title: "Tasks Tracking", href: "/dashboard/tasks", permission: "tasks.view" },
+      { title: "Reports Dashboard", href: "/dashboard/reports", permission: "reports.view" },
     ],
   },
   {
     title: "Administration",
     icon: Users,
-    items: [{ title: "Users", href: "/dashboard/users-management" }],
+    items: [{ title: "Users", href: "/dashboard/users-management", permission: "users.view" }],
   },
   {
     title: "Settings",
     icon: Settings2,
     items: [
-      { title: "Departments", href: "/dashboard/departments/departments" },
-      { title: "Stages", href: "/dashboard/departments/stages" },
-      { title: "Rates", href: "/dashboard/departments/rates" },
-      { title: "Upload Requirements", href: "/dashboard/departments/upload-requirements" },
-      { title: "Guidelines", href: "/dashboard/departments/guidelines" },
-      { title: "Documents + Fields", href: "/dashboard/departments/documents+fields" },
-      { title: "Automations", href: "/dashboard/departments/automation" }
+      { title: "Departments", href: "/dashboard/departments/departments", permission: "settings.departments.view" },
+      { title: "Stages", href: "/dashboard/departments/stages", permission: "settings.stages.view" },
+      { title: "Rates", href: "/dashboard/departments/rates", permission: "settings.rates.view" },
+      { title: "Upload Requirements", href: "/dashboard/departments/upload-requirements", permission: "settings.upload_requirements.view" },
+      { title: "Guidelines", href: "/dashboard/departments/guidelines", permission: "settings.guidelines.view" },
+      { title: "Documents + Fields", href: "/dashboard/departments/documents+fields", permission: "settings.documents_fields.view" },
+      { title: "Automations", href: "/dashboard/departments/automation", permission: "settings.automations.view" },
+      { title: "User Access", href: "/dashboard/settings/access-controls", permission: "settings.access_controls.view" }
     ],
   },
-  { title: "Templates", href: "/dashboard/templates", icon: FileText },
-  { title: "Master Fields", href: "/dashboard/master-fields", icon: Database },
+  { title: "Templates", href: "/dashboard/templates", icon: FileText, permission: "templates.view" },
+  { title: "Master Fields", href: "/dashboard/master-fields", icon: Database, permission: "master_fields.view" },
   {
     title: "Letters",
     icon: Mail,
     items: [
-      { title: "Letter Generation", href: "/dashboard/letters" },
-      { title: "Letterheads", href: "/dashboard/letters/letterheads" },
+      { title: "Letter Generation", href: "/dashboard/letters", permission: "letters.view" },
+      { title: "Letterheads", href: "/dashboard/letters/letterheads", permission: "letterheads.view" },
     ],
   },
-  { title: "Diary", href: "/dashboard/diary", icon: Calendar },
+  { title: "Diary", href: "/dashboard/diary", icon: Calendar, permission: "diary.view" },
   {
     title: "BCL Task Diary",
     icon: BookOpen,
     items: [
-      { title: "My Workspace", href: "/dashboard/bcl-task-diary" },
-      { title: "Recurring Templates", href: "/dashboard/bcl-task-diary/settings" },
-      { title: "Admin Dashboard", href: "/dashboard/bcl-task-diary/admin" },
+      { title: "My Workspace", href: "/dashboard/bcl-task-diary", permission: "bcl_task_diary.view" },
+      { title: "Recurring Templates", href: "/dashboard/bcl-task-diary/settings", permission: "bcl_task_diary.settings.view" },
+      { title: "Admin Dashboard", href: "/dashboard/bcl-task-diary/admin", permission: "bcl_task_diary.admin.view" },
     ],
   },
-  { title: "Applications", href: "/dashboard/applications", icon: AppWindow },
-  { title: "Reports", href: "/dashboard/reports", icon: BarChart3 },
+  { title: "Applications", href: "/dashboard/applications", icon: AppWindow, permission: "applications.view" },
+  { title: "Reports", href: "/dashboard/reports", icon: BarChart3, permission: "reports.view" },
 ]
+
+function hasPermission(user, permission) {
+  if (!permission) return true
+  if (user?.isSuperAdmin) return true
+  return Array.isArray(user?.permissions) && user.permissions.includes(permission)
+}
+
+function filterNavItems(items, user) {
+  return items
+    .map((item) => {
+      if (item.items) {
+        const visibleChildren = item.items.filter((sub) => hasPermission(user, sub.permission))
+        return visibleChildren.length > 0 ? { ...item, items: visibleChildren } : null
+      }
+      return hasPermission(user, item.permission) ? item : null
+    })
+    .filter(Boolean)
+}
 
 function useCurrentUser() {
   const [user, setUser] = useState<AuthUser | null>(null)
@@ -103,6 +122,7 @@ function useCurrentUser() {
         const response = await fetch("/api/auth/session")
         const json = await response.json()
         if (json?.authenticated && json?.user) setUser(json.user)
+        else window.location.replace("/login")
       } catch (error) { console.error(error) } finally { setLoading(false) }
     }
     fetchUser()
@@ -118,6 +138,7 @@ export function AppSidebar() {
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [openItems, setOpenItems] = useState<string[]>([])
+  const visibleNavItems = filterNavItems(navItems, user)
 
   useEffect(() => {
     const stored = localStorage.getItem("theme")
@@ -229,7 +250,7 @@ export function AppSidebar() {
           "flex-1 px-3 py-6 space-y-2 overflow-y-auto",
           isCollapsed && "lg:px-2 lg:space-y-4"
         )}>
-          {navItems.map((item, index) => {
+          {visibleNavItems.map((item, index) => {
             const hasChildren = !!item.items
             const isActiveParent = hasChildren && item.items.some(sub => pathname === sub.href)
             const isActiveStandalone = pathname === item.href
@@ -372,7 +393,7 @@ export function AppSidebar() {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56 rounded-xl border border-slate-200 bg-white shadow-xl">
                   <DropdownMenuItem asChild>
-                    <Link href="/settings" className="w-full cursor-pointer flex items-center gap-3 px-4 py-3">
+                    <Link href="/dashboard/settings/access-controls" className="w-full cursor-pointer flex items-center gap-3 px-4 py-3">
                       <Settings className="w-4 h-4" /> Settings
                     </Link>
                   </DropdownMenuItem>
@@ -423,7 +444,7 @@ export function AppSidebar() {
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem asChild>
-                    <Link href="/settings" className="w-full cursor-pointer flex items-center gap-3 px-4 py-3">
+                    <Link href="/dashboard/settings/access-controls" className="w-full cursor-pointer flex items-center gap-3 px-4 py-3">
                       <Settings className="w-4 h-4" /> Settings
                     </Link>
                   </DropdownMenuItem>
