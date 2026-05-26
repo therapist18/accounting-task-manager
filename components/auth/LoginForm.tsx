@@ -66,17 +66,19 @@ export function LoginForm() {
       });
       const loginJson = (await loginResponse.json()) as {
         success?: boolean;
-        data?: { customToken?: string };
+        customToken?: string | null;
+        data?: { customToken?: string | null };
         error?: string;
       };
-      if (!loginResponse.ok || !loginJson.data?.customToken) {
+      const customToken = loginJson.customToken ?? loginJson.data?.customToken;
+      if (!loginResponse.ok || !customToken) {
         throw new Error(loginJson.error ?? "Login failed.");
       }
 
       const firebaseAuth = getFirebaseAuthClient();
       if (!firebaseAuth) throw new Error(SIGN_IN_UNAVAILABLE_MESSAGE);
 
-      const credential = await signInWithCustomToken(firebaseAuth, loginJson.data.customToken);
+      const credential = await signInWithCustomToken(firebaseAuth, customToken);
       const idToken = await credential.user.getIdToken();
 
       const sessionResponse = await fetch("/api/auth/session", {

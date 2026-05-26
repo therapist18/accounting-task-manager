@@ -5,7 +5,8 @@
       "Bash(grep -E \"\\\\.\\(tsx?|jsx?\\)$\")",
       "Bash(xargs grep *)",
       "Bash(grep -E \"\\\\.tsx$\")",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "mcp__claude_ai_Supabase__list_projects"
     ]
   }
 }

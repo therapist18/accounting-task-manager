@@ -339,6 +339,40 @@ export async function findScannerUserByEmail(email: string): Promise<AuthUser | 
   return mapScannerUser(rows[0]);
 }
 
+async function fetchRowsByIdentifier(identifier: string): Promise<ScannerUserRow[]> {
+  const normalizedIdentifier = identifier.trim();
+  if (!normalizedIdentifier) return [];
+
+  const [usernameRows, emailRows] = await Promise.all([
+    fetchRowsByField("username", normalizedIdentifier),
+    fetchRowsByField("email", normalizedIdentifier.toLowerCase()),
+  ]);
+
+  return [...new Map([...usernameRows, ...emailRows].map((row) => [row.id, row])).values()];
+}
+
+export async function findScannerUserByIdentifier(identifier: string): Promise<ManagedAuthUser | null> {
+  const rows = await fetchRowsByIdentifier(identifier);
+  if (rows.length === 0) return null;
+  if (rows.length > 1) throw new Error("Duplicate identifier values found in scanner_users.");
+  return mapManagedScannerUser(rows[0]);
+}
+
+export async function authenticateScannerUserByIdentifier(
+  identifier: string,
+  password: string
+): Promise<AuthUser | null> {
+  const rows = await fetchRowsByIdentifier(identifier);
+  if (rows.length === 0) return null;
+  if (rows.length > 1) throw new Error("Duplicate identifier values found in scanner_users.");
+
+  const row = rows[0];
+  const passwordMatches = await verifyScannerUserPassword(password, row.password);
+  if (!passwordMatches) return null;
+
+  return mapScannerUser(row);
+}
+
 export async function getScannerUserByFirebaseUid(firebaseUid: string): Promise<AuthUser | null> {
   const rows = await fetchRowsByField("firebase_uid", firebaseUid);
   if (rows.length === 0) return null;

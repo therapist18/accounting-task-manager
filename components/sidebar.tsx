@@ -24,6 +24,7 @@ import {
   Settings2,
   Users,
   X,
+  BookOpen,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -79,7 +80,15 @@ const navItems = [
     ],
   },
   { title: "Diary", href: "/dashboard/diary", icon: Calendar },
-  { title: "Business Tasks", href: "/dashboard/business-task-manager", icon: Calendar },
+  {
+    title: "BCL Task Diary",
+    icon: BookOpen,
+    items: [
+      { title: "My Workspace", href: "/dashboard/bcl-task-diary" },
+      { title: "Recurring Templates", href: "/dashboard/bcl-task-diary/settings" },
+      { title: "Admin Dashboard", href: "/dashboard/bcl-task-diary/admin" },
+    ],
+  },
   { title: "Applications", href: "/dashboard/applications", icon: AppWindow },
   { title: "Reports", href: "/dashboard/reports", icon: BarChart3 },
 ]
