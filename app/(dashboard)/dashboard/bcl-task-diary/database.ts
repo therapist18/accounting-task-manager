@@ -88,10 +88,10 @@ export async function fetchDiaryUsers(): Promise<{
   const data: FilteredUserData = await userService.getAllUserData({ payrollAccess: true }, rawDepts)
 
   return {
-    allUsers: data.allUsers.map(displayUserToBUser),
-    officers: data.officers.map(displayUserToBUser),
-    managers: data.managers.map(displayUserToBUser),
-    assistants: data.assistants.map(displayUserToBUser),
+    allUsers: (data.allUsers ?? []).map(displayUserToBUser),
+    officers: (data.officers ?? []).map(displayUserToBUser),
+    managers: (data.managers ?? []).map(displayUserToBUser),
+    assistants: (data.assistants ?? []).map(displayUserToBUser),
     raw: data,
   }
 }
@@ -121,6 +121,9 @@ export async function fetchCurrentUserId(): Promise<string | null> {
 // ─── Row → type mappers ───────────────────────────────────────────────────────
 
 function rowToTask(row: any): BTask {
+  const assignedToUserIds: string[] = Array.isArray(row.assigned_to_user_ids)
+    ? row.assigned_to_user_ids
+    : [];
   return {
     id: row.id,
     title: row.title,
@@ -128,15 +131,17 @@ function rowToTask(row: any): BTask {
     status: row.status,
     priority: row.priority,
     type: row.type,
-    departmentId: row.department_id ?? "",
-    subdepartmentId: row.subdepartment_id ?? null,
-    classId: row.class_id ?? null,
-    jobLevel: row.job_level ?? {},
+    departmentId: "",
+    subdepartmentId: null,
+    classId: null,
+    jobLevel: {},
     createdByUserId: row.created_by_user_id,
-    assignedToUserId: row.assigned_to_user_id ?? null,
-    officerId: row.officer_id ?? null,
-    managerId: row.manager_id ?? null,
-    assistantId: row.assistant_id ?? null,
+    assignedToUserIds,
+    assignedToUserId: assignedToUserIds[0] ?? null,
+    collaboratorIds: row.collaborator_ids ?? [],
+    officerId: null,
+    managerId: null,
+    assistantId: null,
     startDate: row.start_date,
     dueDate: row.due_date,
     tags: row.tags ?? [],
@@ -150,18 +155,23 @@ function rowToTask(row: any): BTask {
 }
 
 function rowToTemplate(row: any): BRecurringTemplate {
+  const assignedToUserIds: string[] = Array.isArray(row.assigned_to_user_ids)
+    ? row.assigned_to_user_ids
+    : [];
   return {
     id: row.id,
     title: row.title,
     description: row.description ?? "",
-    departmentId: row.department_id ?? "",
-    subdepartmentId: row.subdepartment_id ?? null,
-    classId: row.class_id ?? null,
-    jobLevel: row.job_level ?? {},
-    assignedToUserId: row.assigned_to_user_id ?? null,
-    officerId: row.officer_id ?? null,
-    managerId: row.manager_id ?? null,
-    assistantId: row.assistant_id ?? null,
+    departmentId: "",
+    subdepartmentId: null,
+    classId: null,
+    jobLevel: {},
+    assignedToUserIds,
+    assignedToUserId: assignedToUserIds[0] ?? null,
+    collaboratorIds: row.collaborator_ids ?? [],
+    officerId: null,
+    managerId: null,
+    assistantId: null,
     priority: row.priority,
     frequency: row.frequency,
     tags: row.tags ?? [],
@@ -193,8 +203,6 @@ function rowToReminder(row: any): BReminder {
 export async function fetchDiaryTasks(
   userId: string,
   isAdmin: boolean,
-  departmentId?: string,
-  subdepartmentId?: string
 ): Promise<BTask[]> {
   let query = supabase
     .from("tm_task_diary")
@@ -203,12 +211,13 @@ export async function fetchDiaryTasks(
 
   if (!isAdmin) {
     query = query.or(
-      `assigned_to_user_id.eq.${userId},created_by_user_id.eq.${userId}`
+      [
+        `created_by_user_id.eq.${userId}`,
+        `assigned_to_user_ids.cs.["${userId}"]`,
+        `collaborator_ids.cs.{${userId}}`,
+      ].join(",")
     )
   }
-
-  if (departmentId) query = query.eq("department_id", departmentId)
-  if (subdepartmentId) query = query.eq("subdepartment_id", subdepartmentId)
 
   const { data, error } = await query
   if (error) throw error
@@ -226,15 +235,9 @@ export async function createDiaryTask(
       status: input.status,
       priority: input.priority,
       type: input.type,
-      department_id: input.departmentId || null,
-      subdepartment_id: input.subdepartmentId || null,
-      class_id: input.classId || null,
-      job_level: input.jobLevel,
       created_by_user_id: input.createdByUserId,
-      assigned_to_user_id: input.assignedToUserId || null,
-      officer_id: input.officerId || null,
-      manager_id: input.managerId || null,
-      assistant_id: input.assistantId || null,
+      assigned_to_user_ids: input.assignedToUserIds ?? [],
+      collaborator_ids: input.collaboratorIds ?? [],
       start_date: input.startDate,
       due_date: input.dueDate,
       tags: input.tags,
@@ -262,14 +265,8 @@ export async function updateDiaryTask(
   }
   if (updates.priority !== undefined) patch.priority = updates.priority
   if (updates.type !== undefined) patch.type = updates.type
-  if (updates.departmentId !== undefined) patch.department_id = updates.departmentId || null
-  if (updates.subdepartmentId !== undefined) patch.subdepartment_id = updates.subdepartmentId || null
-  if (updates.classId !== undefined) patch.class_id = updates.classId || null
-  if (updates.jobLevel !== undefined) patch.job_level = updates.jobLevel
-  if (updates.assignedToUserId !== undefined) patch.assigned_to_user_id = updates.assignedToUserId || null
-  if (updates.officerId !== undefined) patch.officer_id = updates.officerId || null
-  if (updates.managerId !== undefined) patch.manager_id = updates.managerId || null
-  if (updates.assistantId !== undefined) patch.assistant_id = updates.assistantId || null
+  if (updates.assignedToUserIds !== undefined) patch.assigned_to_user_ids = updates.assignedToUserIds
+  if (updates.collaboratorIds !== undefined) patch.collaborator_ids = updates.collaboratorIds
   if (updates.startDate !== undefined) patch.start_date = updates.startDate
   if (updates.dueDate !== undefined) patch.due_date = updates.dueDate
   if (updates.tags !== undefined) patch.tags = updates.tags
@@ -293,13 +290,25 @@ export async function deleteDiaryTask(id: string): Promise<void> {
 
 // ─── Recurring templates ──────────────────────────────────────────────────────
 
-export async function fetchRecurringTemplates(departmentId?: string): Promise<BRecurringTemplate[]> {
+export async function fetchRecurringTemplates(
+  departmentId?: string,
+  userId?: string,
+  isAdmin = true
+): Promise<BRecurringTemplate[]> {
   let query = supabase
     .from("tm_recurring_templates")
     .select("*")
     .order("created_at", { ascending: false })
 
-  if (departmentId) query = query.eq("department_id", departmentId)
+  if (!isAdmin && userId) {
+    query = query.or(
+      [
+        `created_by_user_id.eq.${userId}`,
+        `assigned_to_user_ids.cs.["${userId}"]`,
+        `collaborator_ids.cs.{${userId}}`,
+      ].join(",")
+    )
+  }
 
   const { data, error } = await query
   if (error) throw error
@@ -314,14 +323,8 @@ export async function createRecurringTemplate(
     .insert({
       title: input.title,
       description: input.description,
-      department_id: input.departmentId || null,
-      subdepartment_id: input.subdepartmentId || null,
-      class_id: input.classId || null,
-      job_level: input.jobLevel,
-      assigned_to_user_id: input.assignedToUserId || null,
-      officer_id: input.officerId || null,
-      manager_id: input.managerId || null,
-      assistant_id: input.assistantId || null,
+      assigned_to_user_ids: input.assignedToUserIds ?? [],
+      collaborator_ids: input.collaboratorIds ?? [],
       priority: input.priority,
       frequency: input.frequency,
       tags: input.tags,
@@ -348,14 +351,8 @@ export async function updateRecurringTemplate(
 
   if (updates.title !== undefined) patch.title = updates.title
   if (updates.description !== undefined) patch.description = updates.description
-  if (updates.departmentId !== undefined) patch.department_id = updates.departmentId || null
-  if (updates.subdepartmentId !== undefined) patch.subdepartment_id = updates.subdepartmentId || null
-  if (updates.classId !== undefined) patch.class_id = updates.classId || null
-  if (updates.jobLevel !== undefined) patch.job_level = updates.jobLevel
-  if (updates.assignedToUserId !== undefined) patch.assigned_to_user_id = updates.assignedToUserId || null
-  if (updates.officerId !== undefined) patch.officer_id = updates.officerId || null
-  if (updates.managerId !== undefined) patch.manager_id = updates.managerId || null
-  if (updates.assistantId !== undefined) patch.assistant_id = updates.assistantId || null
+  if (updates.assignedToUserIds !== undefined) patch.assigned_to_user_ids = updates.assignedToUserIds
+  if (updates.collaboratorIds !== undefined) patch.collaborator_ids = updates.collaboratorIds
   if (updates.priority !== undefined) patch.priority = updates.priority
   if (updates.frequency !== undefined) patch.frequency = updates.frequency
   if (updates.dayOfMonth !== undefined) patch.day_of_month = updates.dayOfMonth ?? null
@@ -391,7 +388,7 @@ export async function fetchReminders(userId?: string): Promise<BReminder[]> {
   // so we fetch all reminders for tasks the user is part of via a two-step approach.
   let query = supabase
     .from("tm_reminders")
-    .select("*, tm_task_diary(title, assigned_to_user_id, created_by_user_id)")
+    .select("*, tm_task_diary(title, assigned_to_user_ids, created_by_user_id)")
     .order("remind_at", { ascending: true })
 
   const { data, error } = await query
@@ -402,7 +399,7 @@ export async function fetchReminders(userId?: string): Promise<BReminder[]> {
   // Filter client-side when userId is provided — avoids complex PostgREST join filters
   const filtered = userId
     ? rows.filter(r =>
-      r.tm_task_diary?.assigned_to_user_id === userId ||
+      (r.tm_task_diary?.assigned_to_user_ids ?? []).includes(userId) ||
       r.tm_task_diary?.created_by_user_id === userId
     )
     : rows

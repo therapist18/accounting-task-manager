@@ -64,6 +64,8 @@ export type BTask = {
   jobLevel: BJobLevel
   createdByUserId: string
   assignedToUserId?: string | null
+  assignedToUserIds: string[]
+  collaboratorIds: string[]
   officerId?: string | null
   managerId?: string | null
   assistantId?: string | null
@@ -87,6 +89,8 @@ export type BRecurringTemplate = {
   classId?: string | null
   jobLevel: BJobLevel
   assignedToUserId?: string | null
+  assignedToUserIds: string[]
+  collaboratorIds: string[]
   officerId?: string | null
   managerId?: string | null
   assistantId?: string | null

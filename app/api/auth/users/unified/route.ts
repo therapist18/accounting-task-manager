@@ -7,15 +7,23 @@ import {
   updateManagedScannerUser,
   deleteManagedScannerUser
 } from '@/lib/auth/scanner-users';
-import { ensurePermission } from '@/lib/auth/access-controls';
+import { ensurePermission, getEffectivePermissionsForUser } from '@/lib/auth/access-controls';
 import { requireAppSession } from '@/lib/auth/session';
-import { toAuthErrorResponse } from '@/lib/auth/errors';
+import { toAuthErrorResponse, AuthError } from '@/lib/auth/errors';
 import type { ManagedAuthUserCreateInput, ManagedAuthUserUpdateInput } from '@/lib/auth/types';
 
 export async function GET(req: NextRequest) {
   try {
     const session = await requireAppSession(req);
-    await ensurePermission(session.user, 'users.view');
+
+    if (!session.user.isSuperAdmin) {
+      const permissions = await getEffectivePermissionsForUser(session.user);
+      const allowed =
+        permissions.includes('users.view') ||
+        permissions.includes('bcl_task_diary.view') ||
+        permissions.includes('bcl_task_diary.admin.view');
+      if (!allowed) throw new AuthError(403, 'You do not have access to perform this action.');
+    }
 
     const { searchParams } = new URL(req.url);
     const role = searchParams.get('role');
