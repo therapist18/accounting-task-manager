@@ -15,7 +15,14 @@
       "mcp__claude_ai_Supabase__list_tables",
       "mcp__claude_ai_Supabase__execute_sql",
       "Bash(node -e \"const p=require\\('./E:/GitHub/accounting-task-manager/package.json'\\); console.log\\(p.dependencies.next\\)\")",
-      "Bash(npx shadcn@latest add tabs --yes)"
+      "Bash(npx shadcn@latest add tabs --yes)",
+      "Bash(Get-ChildItem -Path \"e:\\\\GitHub\\\\Appointment-Booking\" -Force)",
+      "Bash(Select-Object Name, PSIsContainer)",
+      "Bash(grep -E \"\\\\.\\(ts|tsx|js\\)$\")",
+      "Bash(Get-ChildItem -Recurse -Depth 3)",
+      "Bash(Select-Object -First 100 FullName)",
+      "Bash(cd /e/GitHub/Appointment-Booking && find . -maxdepth 3 -type f -o -type d | head -150)",
+      "Read(//e/e/GitHub/**)"
     ]
   }
 }

@@ -11,7 +11,7 @@ import {
   CheckCircle2, Edit3, X, Save, Calculator,
   FunctionSquare, ExternalLink, Paperclip, AlertTriangle,
   ArrowUpDown, Filter, Check, List, ChevronDown,
-  HelpCircle, Eye, Download
+  HelpCircle, Eye, Download, Lock
 } from 'lucide-react';
 import {
   Table,
@@ -250,6 +250,15 @@ const isValidValue = (val: any): boolean => {
 // ─── CONSTANT: Fixed document_id for eTA Kenya screenshots ───────────────────
 const ETA_SCREENSHOT_DOCUMENT_ID = '630d0ece-4c94-417b-ae64-135187419699';
 
+const ENTITY_TYPE_COLORS: Record<string, string> = {
+  principal:  'bg-blue-100 text-blue-700 border-blue-200',
+  dependant:  'bg-purple-100 text-purple-700 border-purple-200',
+  sponsor:    'bg-amber-100 text-amber-700 border-amber-200',
+  director:   'bg-green-100 text-green-700 border-green-200',
+  company:    'bg-slate-100 text-slate-700 border-slate-200',
+  understudy: 'bg-teal-100 text-teal-700 border-teal-200',
+};
+
 export const AutomationMappingDialog = ({
   isOpen,
   onClose,
@@ -263,17 +272,6 @@ export const AutomationMappingDialog = ({
   refreshDocuments,
   enhancedTasksData = new Map()
 }: AutomationMappingDialogProps) => {
-  useEffect(() => {
-    if (isOpen && relationshipData) {
-      console.log('👤 [Entity Debug] Relationship Data Source:', {
-        principal: relationshipData.principal?.id,
-        dependants: relationshipData.dependants?.map(d => ({ id: d.id, rel: d.relationship })),
-        directors: relationshipData.directors?.map(d => d.id),
-        sponsor: relationshipData.sponsor?.id,
-        company: relationshipData.company?.id
-      });
-    }
-  }, [isOpen, relationshipData]);
   const [isLoading, setIsLoading] = useState(false);
   const [isAutomationRunning, setIsAutomationRunning] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
@@ -292,30 +290,25 @@ export const AutomationMappingDialog = ({
   const [sourceData, setSourceData] = useState<Record<string, Record<string, any>>>({});
   const [masterFieldComputedValues, setMasterFieldComputedValues] = useState<Record<string, any>>({});
   const [sortMissingFirst, setSortMissingFirst] = useState(false);
+  const [entitySort, setEntitySort] = useState<'asc' | 'desc' | null>(null);
   const [expandedArrayFields, setExpandedArrayFields] = useState<Set<string>>(new Set());
   const [expandedSourceFields, setExpandedSourceFields] = useState<Set<string>>(new Set());
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [previewingDocuments, setPreviewingDocuments] = useState<any>(null);
   const lastFetchKey = React.useRef<string>('');
   const isFetchingRef = React.useRef(false);
+  const logsEndRef = React.useRef<HTMLDivElement>(null);
   const [requirementJobQuestions, setRequirementJobQuestions] = useState<any[]>([]);
   const [individualName, setIndividualName] = useState<string>('');
-  // ── NEW: track the saved eTA screenshot document record ──────────────────────
   const [savedScreenshotDoc, setSavedScreenshotDoc] = useState<any>(null);
   const [isSavingScreenshot, setIsSavingScreenshot] = useState(false);
-  // ── NEW: progress tracking state ───────────────────────────────────────────────
   const [automationJobId, setAutomationJobId] = useState<string | null>(null);
   const [automationProgress, setAutomationProgress] = useState<any>(null);
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
-
-  // Progress polling function
-  const pollProgress = useCallback(async (jobId: string) => {
+ const pollProgress = useCallback(async (jobId: string) => {
     try {
-      // Assuming the imm-automations server runs on localhost:5000
-      const response = await fetch(`http://localhost:5000/api/permit/eta-kenya/progress/${jobId}`);
-
-      // Stop polling if job not found (404) - automation completed and job removed
-      if (response.status === 404) {
+     const response = await fetch(`http://localhost:5000/api/permit/eta-kenya/progress/${jobId}`);
+  if (response.status === 404) {
         console.log('Job completed - stopping polling');
         setPollingInterval(prevInterval => {
           if (prevInterval) {
@@ -336,8 +329,6 @@ export const AutomationMappingDialog = ({
       const data = await response.json();
       if (data.success && data.progress) {
         setAutomationProgress(data.progress);
-
-        // Stop polling if job is complete or failed
         if (!data.progress.isRunning) {
           setPollingInterval(prevInterval => {
             if (prevInterval) {
@@ -350,7 +341,6 @@ export const AutomationMappingDialog = ({
       }
     } catch (error) {
       console.error('Error polling progress:', error);
-      // Stop polling on connection errors (server might be down)
       if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
         setPollingInterval(prevInterval => {
           if (prevInterval) {
@@ -363,6 +353,17 @@ export const AutomationMappingDialog = ({
     }
   }, []);
 
+  // Stop a running automation job
+  const stopAutomation = useCallback(async () => {
+    if (!automationJobId) return;
+    try {
+      await fetch(`http://localhost:5000/api/permit/eta-kenya/progress/${automationJobId}`, { method: 'DELETE' });
+    } catch (_) {}
+    setPollingInterval(prev => { if (prev) clearInterval(prev); return null; });
+    setIsAutomationRunning(false);
+    setAutomationProgress(prev => prev ? { ...prev, isRunning: false, message: 'Stopped by user' } : prev);
+  }, [automationJobId]);
+
   // Cleanup polling on unmount
   useEffect(() => {
     return () => {
@@ -371,6 +372,11 @@ export const AutomationMappingDialog = ({
       }
     };
   }, [pollingInterval]);
+
+  // Auto-scroll logs to bottom when new entries arrive
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [automationProgress?.logs?.length]);
 
   // Helper functions for document preview (moved inside component)
   const getFileUrl = (filePath: string) => {
@@ -388,7 +394,7 @@ export const AutomationMappingDialog = ({
     }
 
     // Construct full path
-    const fullPath = `${bucketName} / ${cleanPath}`;
+    const fullPath = `${bucketName}/${cleanPath}`;
 
     // Build complete URL
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -397,9 +403,8 @@ export const AutomationMappingDialog = ({
       return '';
     }
 
-    // Use encodeURI for the entire path to handle spaces properly
-    const encodedPath = encodeURI(fullPath);
-    return `${supabaseUrl} / storage / v1 / object / public / ${encodedPath}`;
+    const encodedPath = encodeURIComponent(fullPath).replace(/%2F/g, '/');
+    return `${supabaseUrl}/storage/v1/object/public/${encodedPath}`;
   };
 
   const handlePreviewDocument = async (doc: any) => {
@@ -484,15 +489,15 @@ export const AutomationMappingDialog = ({
       filePath = filePath.substring(bucketName.length + 1);
     }
 
-    const fullPath = `${bucketName} / ${filePath}`;
+    const fullPath = `${bucketName}/${filePath}`;
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (!supabaseUrl) {
       console.error('NEXT_PUBLIC_SUPABASE_URL environment variable is not set');
       return null;
     }
-    const encodedPath = encodeURI(fullPath);
-    return `${supabaseUrl} / storage / v1 / object / public / ${encodedPath}`;
+    const encodedPath = encodeURIComponent(fullPath).replace(/%2F/g, '/');
+    return `${supabaseUrl}/storage/v1/object/public/${encodedPath}`;
   };
 
   // Memoize entity type to prevent recalculation
@@ -689,6 +694,11 @@ export const AutomationMappingDialog = ({
   const toggleSourceFieldExpansion = (fieldId: string) => setExpandedSourceFields(prev => { const newSet = new Set(prev); if (newSet.has(fieldId)) newSet.delete(fieldId); else newSet.add(fieldId); return newSet; });
 
   const resolveVariableValue = useCallback((fieldDef: any, targetEntityId: string) => {
+    // defaultValue takes absolute priority — it is a preset locked in by the automation settings
+    if (fieldDef.defaultValue && fieldDef.defaultValue !== 'Missing' && fieldDef.defaultValue !== '') {
+      return fieldDef.defaultValue;
+    }
+
     const logic = fieldDef.sourceLogic || 'priority';
     const masterIds = fieldDef.linkedMasterFields || [];
     const questionIds = fieldDef.linkedJobQuestionIds || [];
@@ -1037,12 +1047,13 @@ export const AutomationMappingDialog = ({
   }, [isOpen, task?.job_level]);
 
   // Combine fetch operations into a single useEffect to prevent multiple triggers
+  // Note: jobFields is a Record — use Object.keys().length (not .length) as the dep
   useEffect(() => {
     if (isOpen && selectedAutomationId && Object.keys(jobFields).length > 0) {
       fetchSourceData();
       fetchDocumentFiles();
     }
-  }, [selectedAutomationId, isOpen, jobFields.length, webData.length]);
+  }, [selectedAutomationId, isOpen, Object.keys(jobFields).length, webData.length]);
 
   useEffect(() => {
     const fetchIndividualName = async () => {
@@ -1535,15 +1546,13 @@ export const AutomationMappingDialog = ({
     return availableOptions;
   }, [jobFields, getFieldValue]);
 
-  // Memoize field processing at component level (not inside render function to avoid hooks violation)
+  // Show ALL automation fields — entityTypes controls data resolution, not visibility.
+  // Filtering by currentEntityType hid fields that source from other entities (sponsor,
+  // director, etc.) even though the automation needs every field regardless of viewer role.
   const filteredFields = useMemo(() => {
     if (!activeWebEntry || !activeWebEntry.fields || activeWebEntry.fields.length === 0) return [];
-    return activeWebEntry.fields.filter((field) => {
-      const fieldEntityTypes = field.entityTypes || [];
-      if (fieldEntityTypes.length === 0) return true;
-      return fieldEntityTypes.includes(currentEntityType);
-    });
-  }, [activeWebEntry, currentEntityType]);
+    return activeWebEntry.fields;
+  }, [activeWebEntry]);
 
   const processedFields = useMemo(() => filteredFields.map((field) => {
     const targetId = resolveTargetEntityId(field);
@@ -1564,46 +1573,109 @@ export const AutomationMappingDialog = ({
       value = resolveVariableValue(field, String(targetId));
     }
 
+    const hasDefault = !!(field.defaultValue && field.defaultValue !== 'Missing' && field.defaultValue !== '');
+
     return {
       ...field,
       resolvedValue: value,
       isMissing: !isValidValue(value),
+      isDefault: hasDefault,
       targetId: String(targetId)
     };
   }), [filteredFields, resolveTargetEntityId, getArrayFieldData, documentFiles, computedFieldsPreview, resolveVariableValue]);
 
-  const sortedFields = useMemo(() => sortMissingFirst
-    ? [...processedFields].sort((a, b) => (a.isMissing === b.isMissing ? 0 : a.isMissing ? -1 : 1))
-    : processedFields, [processedFields, sortMissingFirst]);
+  const sortedFields = useMemo(() => {
+    let fields = sortMissingFirst
+      ? [...processedFields].sort((a, b) => (a.isMissing === b.isMissing ? 0 : a.isMissing ? -1 : 1))
+      : [...processedFields];
+    if (entitySort) {
+      fields = fields.sort((a, b) => {
+        const aKey = (a.entityTypes || []).slice().sort().join(',');
+        const bKey = (b.entityTypes || []).slice().sort().join(',');
+        return entitySort === 'asc' ? aKey.localeCompare(bKey) : bKey.localeCompare(aKey);
+      });
+    }
+    return fields;
+  }, [processedFields, sortMissingFirst, entitySort]);
 
   const renderFieldsTable = () => {
     if (!activeWebEntry?.fields || activeWebEntry.fields.length === 0) {
       return <div className="p-12 text-center text-slate-400 text-sm">No fields configured for this automation.</div>;
     }
 
-    // --- 1. PRE-PROCESS FIELDS (Calculate values and status) ---
-    // Fields are now pre-processed at component level for performance
+    // Compute per-entity-group stats for the summary strip
+    const entityGroupStats = (() => {
+      const groups: Record<string, { total: number; filled: number; missing: number; defaultCount: number }> = {};
+      processedFields.forEach(f => {
+        const types = (f.entityTypes && f.entityTypes.length > 0) ? f.entityTypes : ['—'];
+        const key = types.slice().sort().join(', ');
+        if (!groups[key]) groups[key] = { total: 0, filled: 0, missing: 0, defaultCount: 0 };
+        groups[key].total++;
+        if (f.isDefault) { groups[key].defaultCount++; groups[key].filled++; }
+        else if (!f.isMissing) groups[key].filled++;
+        else groups[key].missing++;
+      });
+      return groups;
+    })();
+
+    // Track which entity group was last rendered so we can inject section headers
+    let lastGroupKey = '__init__';
 
     return (
       <div className="flex flex-col h-full">
-        {/* --- TABLE HEADER / ACTIONS --- */}
-        <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-slate-200">
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-semibold text-slate-600">{processedFields.length} Fields Total</span>
+        {/* --- ENTITY GROUP SUMMARY STRIP --- */}
+        <div className="px-4 py-2 bg-white border-b border-slate-100 flex flex-wrap gap-2">
+          {Object.entries(entityGroupStats).map(([key, stats]) => {
+            const pct = Math.round((stats.filled / stats.total) * 100);
+            const allDone = stats.missing === 0;
+            return (
+              <div key={key} className={cn(
+                "flex items-center gap-2 px-2.5 py-1 rounded-lg border text-xs",
+                allDone ? "bg-green-50 border-green-200" : "bg-amber-50 border-amber-200"
+              )}>
+                <div className="flex flex-wrap gap-0.5">
+                  {key.split(', ').map(t => (
+                    <span key={t} className={cn(
+                      "text-[8px] px-1 py-0.5 rounded uppercase font-semibold border",
+                      ENTITY_TYPE_COLORS[t] || 'bg-slate-100 text-slate-600 border-slate-200'
+                    )}>{t}</span>
+                  ))}
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-16 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                    <div className={cn("h-full rounded-full transition-all", allDone ? "bg-green-500" : "bg-amber-500")} style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className={cn("font-semibold", allDone ? "text-green-700" : "text-amber-700")}>{pct}%</span>
+                </div>
+                {stats.defaultCount > 0 && (
+                  <span className="text-[9px] text-slate-400 flex items-center gap-0.5">
+                    <Lock className="h-2 w-2" />{stats.defaultCount}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-xs text-slate-500">{processedFields.filter(f => !f.isMissing).length}/{processedFields.length} ready</span>
             {processedFields.filter(f => f.isMissing).length > 0 && (
-              <Badge variant="destructive" className="h-6 px-2 text-xs">
+              <Badge variant="destructive" className="h-5 px-2 text-[10px]">
                 {processedFields.filter(f => f.isMissing).length} Missing
               </Badge>
             )}
           </div>
+        </div>
+
+        {/* --- TABLE HEADER / ACTIONS --- */}
+        <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-slate-200">
+          <span className="text-xs font-semibold text-slate-500">{processedFields.length} fields configured</span>
           <Button
             variant={sortMissingFirst ? "default" : "outline"}
             size="sm"
             onClick={() => setSortMissingFirst(!sortMissingFirst)}
-            className="h-8 text-xs"
+            className="h-7 text-xs"
           >
-            <Filter className="h-3 w-3 mr-2" />
-            {sortMissingFirst ? "Show All" : "Show Missing First"}
+            <Filter className="h-3 w-3 mr-1.5" />
+            {sortMissingFirst ? "Show All" : "Missing First"}
           </Button>
         </div>
 
@@ -1614,8 +1686,17 @@ export const AutomationMappingDialog = ({
                 <TableRow>
                   <TableHead className="w-12 px-2 py-3 text-center text-xs font-bold text-slate-600 border-r border-slate-200">#</TableHead>
                   <TableHead className="w-80 px-4 py-3 text-left text-xs font-bold text-slate-700 border-r border-slate-200">TARGET VARIABLE</TableHead>
-                  <TableHead className="px-4 py-3 text-left text-xs font-bold text-slate-700">SOURCE LOGIC</TableHead>
-                  <TableHead className="px-4 py-3 text-left text-xs font-bold text-slate-700 border-r border-slate-200">CURRENT VALUE</TableHead>
+                  <TableHead className="px-4 py-3 text-left text-xs font-bold text-slate-700 border-r border-slate-200">SOURCE LOGIC</TableHead>
+                  <TableHead
+                    className="w-44 px-4 py-3 text-left text-xs font-bold text-slate-700 border-r border-slate-200 cursor-pointer select-none hover:bg-slate-200 transition-colors"
+                    onClick={() => setEntitySort(prev => prev === 'asc' ? 'desc' : prev === 'desc' ? null : 'asc')}
+                  >
+                    <div className="flex items-center gap-1">
+                      ENTITIES
+                      <ArrowUpDown className={cn("h-3 w-3 shrink-0", entitySort ? "text-blue-600" : "text-slate-300")} />
+                    </div>
+                  </TableHead>
+                  <TableHead className="px-4 py-3 text-left text-xs font-bold text-slate-700">CURRENT VALUE</TableHead>
                 </TableRow>
               </TableHeader>
 
@@ -1623,6 +1704,42 @@ export const AutomationMappingDialog = ({
                 {sortedFields.map((field, fIdx) => {
                   const isEditing = editingCell?.fieldId === field.variableName;
                   const entityCategory = field.entityTypes?.includes('company') ? 'company' : 'individual';
+
+                  // ── Entity group section header (injected when group changes) ──
+                  const fieldGroupKey = (field.entityTypes && field.entityTypes.length > 0)
+                    ? field.entityTypes.slice().sort().join(', ')
+                    : '—';
+                  const showGroupHeader = !entitySort && fieldGroupKey !== lastGroupKey;
+                  if (showGroupHeader) lastGroupKey = fieldGroupKey;
+                  const groupFieldsTotal = showGroupHeader ? sortedFields.filter(f => {
+                    const k = (f.entityTypes && f.entityTypes.length > 0) ? f.entityTypes.slice().sort().join(', ') : '—';
+                    return k === fieldGroupKey;
+                  }).length : 0;
+                  const groupFieldsFilled = showGroupHeader ? sortedFields.filter(f => {
+                    const k = (f.entityTypes && f.entityTypes.length > 0) ? f.entityTypes.slice().sort().join(', ') : '—';
+                    return k === fieldGroupKey && !f.isMissing;
+                  }).length : 0;
+
+                  const groupHeaderRow = showGroupHeader ? (
+                    <TableRow key={`group-${fieldGroupKey}-${fIdx}`} className="bg-gradient-to-r from-slate-100 to-slate-50 border-y border-slate-300">
+                      <TableCell colSpan={5} className="px-4 py-1.5">
+                        <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap gap-1">
+                            {fieldGroupKey.split(', ').map(t => (
+                              <span key={t} className={cn(
+                                "text-[9px] px-1.5 py-0.5 rounded-full uppercase font-bold border",
+                                ENTITY_TYPE_COLORS[t] || 'bg-slate-200 text-slate-600 border-slate-300'
+                              )}>{t}</span>
+                            ))}
+                          </div>
+                          <span className="text-[10px] text-slate-400">
+                            {groupFieldsFilled}/{groupFieldsTotal} fields complete
+                          </span>
+                          <div className="flex-1 h-px bg-slate-200 ml-1" />
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ) : null;
 
                   // =========================================================
                   // CASE: ARRAY FIELDS (Nested Logic)
@@ -1632,7 +1749,8 @@ export const AutomationMappingDialog = ({
                     const isExpanded = expandedArrayFields.has(field.variableName);
 
                     return (
-                      <React.Fragment key={`field - ${fIdx} `}>
+                      <React.Fragment key={`field-${fIdx}`}>
+                        {groupHeaderRow}
                         <TableRow
                           className="bg-blue-50/80 border-b border-blue-200 hover:bg-blue-100 cursor-pointer transition-colors"
                           onClick={() => toggleArrayFieldExpansion(field.variableName)}
@@ -1640,10 +1758,17 @@ export const AutomationMappingDialog = ({
                           <TableCell className="px-2 py-2 text-center text-xs font-bold text-blue-600 border-r border-blue-200 bg-blue-100/50">
                             {isExpanded ? <ChevronDown className="h-4 w-4 mx-auto" /> : <ChevronRight className="h-4 w-4 mx-auto" />}
                           </TableCell>
-                          <TableCell colSpan={3} className="px-4 py-2">
+                          <TableCell colSpan={4} className="px-4 py-2">
                             <div className="flex items-center gap-3">
                               <div className="bg-blue-100 p-1 rounded text-blue-600"><List className="h-4 w-4" /></div>
                               <span className="text-sm font-bold text-slate-800">{field.efnsDisplayName || field.variableName}</span>
+                              <div className="flex flex-wrap gap-1 ml-1">
+                                {(field.entityTypes || []).map(type => (
+                                  <Badge key={type} variant="outline" className={cn("text-[8px] h-4 px-1 uppercase font-medium", ENTITY_TYPE_COLORS[type] || 'bg-slate-100 text-slate-700')}>
+                                    {type}
+                                  </Badge>
+                                ))}
+                              </div>
                               <Badge className="bg-blue-600 text-white h-5 text-[10px] px-2 ml-auto">{arrayData.length} Items</Badge>
                             </div>
                           </TableCell>
@@ -1693,6 +1818,15 @@ export const AutomationMappingDialog = ({
                                 </TableCell>
                                 <TableCell className="px-4 py-2">
                                   <Badge variant="outline" className="text-[8px] h-4 uppercase">{colItem.sourceLogic || 'priority'}</Badge>
+                                </TableCell>
+                                <TableCell className="px-4 py-2">
+                                  <div className="flex flex-wrap gap-1">
+                                    {(colItem.entityTypes || field.entityTypes || []).map(type => (
+                                      <Badge key={type} variant="outline" className={cn("text-[8px] h-4 px-1 uppercase", ENTITY_TYPE_COLORS[type] || 'bg-slate-100 text-slate-700')}>
+                                        {type}
+                                      </Badge>
+                                    ))}
+                                  </div>
                                 </TableCell>
                                 <TableCell className="px-4 py-1">
                                   {isItemEditing ? (
@@ -1838,7 +1972,9 @@ export const AutomationMappingDialog = ({
                     const foundDoc = documentFiles.find(d => field.linkedKycDocuments?.includes(d.document_id) && String(d.owner_id) === String(targetId));
 
                     return (
-                      <TableRow key={fIdx} className="group border-b border-slate-200 hover:bg-slate-50">
+                      <React.Fragment key={`doc-${fIdx}`}>
+                        {groupHeaderRow}
+                        <TableRow className="group border-b border-slate-200 hover:bg-slate-50">
                         <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r bg-slate-50">{fIdx + 1}</TableCell>
                         <TableCell className="px-4 py-2 border-r">
                           <div className="flex items-center gap-2">
@@ -1848,6 +1984,15 @@ export const AutomationMappingDialog = ({
                         </TableCell>
                         <TableCell className="px-4 py-2">
                           <Badge variant="outline" className="text-[9px] border-amber-200 text-amber-700 bg-amber-50 uppercase">Asset Mapping</Badge>
+                        </TableCell>
+                        <TableCell className="px-4 py-2">
+                          <div className="flex flex-wrap gap-1">
+                            {(field.entityTypes || []).map(type => (
+                              <Badge key={type} variant="outline" className={cn("text-[8px] h-4 px-1 uppercase", ENTITY_TYPE_COLORS[type] || 'bg-slate-100 text-slate-700')}>
+                                {type}
+                              </Badge>
+                            ))}
+                          </div>
                         </TableCell>
                         <TableCell className="px-4 py-2 border-r">
                           {foundDoc ? (
@@ -1859,7 +2004,8 @@ export const AutomationMappingDialog = ({
                             </div>
                           ) : <Badge variant="destructive" className="h-6">Missing</Badge>}
                         </TableCell>
-                      </TableRow>
+                        </TableRow>
+                      </React.Fragment>
                     );
                   }
 
@@ -1867,6 +2013,7 @@ export const AutomationMappingDialog = ({
                   // CASE: STANDARD FIELDS (Text, Number, Date, Computed)
                   // =========================================================
                   const isValueMissing = field.isMissing;
+                  const isDefaultField = field.isDefault;
                   const mIds = field.linkedMasterFields || [];
                   const qIds = field.linkedJobQuestionIds || [];
 
@@ -1892,11 +2039,16 @@ export const AutomationMappingDialog = ({
                   const isDropdown = normalizedOptions.length > 0;
 
                   return (
-                    <TableRow key={fIdx} className={cn("group border-b border-slate-200 transition-colors", isEditing ? "bg-blue-50/50" : (field.fieldType === 'computed' ? "bg-purple-50/10" : "hover:bg-blue-50"))}>
+                    <React.Fragment key={`std-${fIdx}`}>
+                      {groupHeaderRow}
+                    <TableRow className={cn("group border-b border-slate-200 transition-colors", isDefaultField ? "bg-slate-50/60" : isEditing ? "bg-blue-50/50" : (field.fieldType === 'computed' ? "bg-purple-50/10" : "hover:bg-blue-50"))}>
                       <TableCell className="px-2 py-2 text-center text-xs font-mono text-slate-400 border-r bg-slate-50">{fIdx + 1}</TableCell>
                       <TableCell className="px-4 py-2 border-r">
                         <div className="flex flex-col">
-                          <span className="text-sm font-semibold text-slate-900">{field.efnsDisplayName || field.variableName}</span>
+                          <div className="flex items-center gap-1.5">
+                            {isDefaultField && <Lock className="h-3 w-3 text-slate-400 shrink-0" />}
+                            <span className={cn("text-sm font-semibold", isDefaultField ? "text-slate-500" : "text-slate-900")}>{field.efnsDisplayName || field.variableName}</span>
+                          </div>
                           <span className="text-[10px] text-slate-400 font-mono tracking-tighter">{field.variableName}</span>
                         </div>
                       </TableCell>
@@ -1906,28 +2058,66 @@ export const AutomationMappingDialog = ({
                           <div className="flex items-center gap-1.5">
                             {field.customFieldSource || 'System'}
                             <div className="flex flex-col gap-1">
-                              {field.linkedMasterFields?.length > 0 && (
-                                <Badge variant="outline" className="text-[8px] h-5 border-blue-200 text-blue-700 bg-blue-50">
-                                  Master Field
+                              {isDefaultField ? (
+                                <Badge variant="outline" className="text-[8px] h-5 border-slate-300 text-slate-500 bg-slate-100 gap-0.5">
+                                  <Lock className="h-2 w-2" /> Preset Default
                                 </Badge>
-                              )}
-                              {field.linkedJobQuestionIds?.length > 0 && (
-                                <Badge variant="outline" className="text-[8px] h-5 border-purple-200 text-purple-700 bg-purple-50">
-                                  Job Question
-                                </Badge>
-                              )}
-                              {(!field.linkedMasterFields?.length && !field.linkedJobQuestionIds?.length) && (
-                                <Badge variant="outline" className="text-[8px] h-5 border-slate-200 text-slate-600">
-                                  Requirement
-                                </Badge>
+                              ) : (
+                                <>
+                                  {field.linkedMasterFields?.length > 0 && (
+                                    <Badge variant="outline" className="text-[8px] h-5 border-blue-200 text-blue-700 bg-blue-50">
+                                      Master Field
+                                    </Badge>
+                                  )}
+                                  {field.linkedJobQuestionIds?.length > 0 && (
+                                    <Badge variant="outline" className="text-[8px] h-5 border-purple-200 text-purple-700 bg-purple-50">
+                                      Job Question
+                                    </Badge>
+                                  )}
+                                  {(!field.linkedMasterFields?.length && !field.linkedJobQuestionIds?.length) && (
+                                    <Badge variant="outline" className="text-[8px] h-5 border-slate-200 text-slate-600">
+                                      Requirement
+                                    </Badge>
+                                  )}
+                                </>
                               )}
                             </div>
                           </div>
                         </div>
                       </TableCell>
 
+                      <TableCell className="px-4 py-2">
+                        <div className="flex flex-wrap gap-1">
+                          {(field.entityTypes || []).map(type => (
+                            <Badge key={type} variant="outline" className={cn("text-[8px] h-4 px-1 uppercase", ENTITY_TYPE_COLORS[type] || 'bg-slate-100 text-slate-700')}>
+                              {type}
+                            </Badge>
+                          ))}
+                          {(!field.entityTypes || field.entityTypes.length === 0) && (
+                            <span className="text-[10px] text-slate-400">—</span>
+                          )}
+                        </div>
+                      </TableCell>
+
                       <TableCell className="px-4 py-1 border-r h-full">
-                        {isEditing ? (
+                        {/* Default fields are read-only — show lock badge and muted value */}
+                        {isDefaultField ? (
+                          <div className="flex items-center gap-2 h-7">
+                            <span className="text-sm text-slate-500 truncate flex-1">{field.resolvedValue}</span>
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="flex items-center gap-0.5 text-[9px] font-medium text-slate-400 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 cursor-default shrink-0">
+                                    <Lock className="h-2.5 w-2.5" /> Default
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent side="left" className="text-xs max-w-xs">
+                                  This value is preset by the automation settings and cannot be changed here.
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </div>
+                        ) : isEditing ? (
                           <div className="flex items-center gap-2">
                             {isDropdown ? (
                               <SearchableSelect
@@ -1991,7 +2181,7 @@ export const AutomationMappingDialog = ({
                                   {/* List Job Questions */}
                                   {qIds.map((qid, idx) => {
                                     const qDef = requirementJobQuestions.find(q => String(q.id) === String(qid));
-                                    const sourceVal = getFieldValue(field.variableName, String(field.targetId)); // Simple for demo
+                                    const sourceVal = getFieldValue(field.variableName, String(field.targetId));
 
                                     return (
                                       <div key={`q - ${qid} `} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-200 group">
@@ -2036,6 +2226,7 @@ export const AutomationMappingDialog = ({
                         )}
                       </TableCell>
                     </TableRow>
+                    </React.Fragment>
                   );
                 })}
               </TableBody>
@@ -2300,10 +2491,38 @@ export const AutomationMappingDialog = ({
                   </div>
                 )}
 
-                {/* Job ID for debugging */}
+                {/* Job ID */}
                 {automationJobId && (
                   <div className="mt-2 text-xs text-slate-400">
                     Job ID: {automationJobId}
+                  </div>
+                )}
+
+                {/* Live Logs */}
+                {automationProgress.logs && automationProgress.logs.length > 0 && (
+                  <div className="mt-3 rounded-lg overflow-hidden border border-slate-700">
+                    <div className="flex items-center justify-between px-3 py-1.5 bg-slate-800">
+                      <span className="text-[10px] font-mono font-bold text-slate-300 uppercase tracking-wider">Automation Logs</span>
+                      <span className="text-[10px] text-slate-500">{automationProgress.logs.length} lines</span>
+                    </div>
+                    <ScrollArea className="h-52 bg-slate-950">
+                      <div className="p-3 space-y-px font-mono">
+                        {automationProgress.logs.map((log: any, i: number) => (
+                          <div key={i} className={cn(
+                            "text-[11px] leading-relaxed whitespace-pre-wrap break-all",
+                            log.level === 'error' ? 'text-red-400' :
+                            log.level === 'warn'  ? 'text-yellow-400' :
+                            'text-green-300'
+                          )}>
+                            <span className="text-slate-600 mr-2 select-none">
+                              {new Date(log.timestamp).toLocaleTimeString()}
+                            </span>
+                            {log.message}
+                          </div>
+                        ))}
+                        <div ref={logsEndRef} />
+                      </div>
+                    </ScrollArea>
                   </div>
                 )}
               </div>
@@ -2369,6 +2588,16 @@ export const AutomationMappingDialog = ({
               >
                 Close
               </Button>
+              {isAutomationRunning && automationJobId && (
+                <Button
+                  variant="destructive"
+                  onClick={stopAutomation}
+                  className="px-6 h-11 font-bold uppercase text-xs tracking-wide"
+                >
+                  <X className="mr-2 h-4 w-4" />
+                  Stop
+                </Button>
+              )}
               <Button
                 onClick={handleRunAutomation}
                 disabled={isAutomationRunning || isSavingScreenshot}

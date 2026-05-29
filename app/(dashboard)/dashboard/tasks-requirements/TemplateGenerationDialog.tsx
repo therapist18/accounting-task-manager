@@ -32,6 +32,7 @@ import { TemplateSourcePanel } from './components/TemplateSourcePanel';
 import { PreviewPanel } from './components/PreviewPanel';
 import { PlaceholderInput } from './components/PlaceholderInput';
 import { ArrayInputsPanel } from './components/ArrayInputsPanel';
+import { Separator } from '@/components/ui/separator';
 
 // Common docxtemplater format functions
 const formatFunctions = new Set([
@@ -346,9 +347,6 @@ export default function TemplateGenerationDialog({
             }
         }
 
-        // Reusing the getTargetEntity logic we defined outside (make sure getTargetEntity is imported or available)
-        // If getTargetEntity is defined outside component, we pass args. If inside, we use it directly.
-        // Assuming getTargetEntity is defined at module level (top of file):
         const combinedCacheWithAdditional = { ...sourceDataCache, ...additionalCache };
         const targetEntity = getTargetEntity(placeholder, relationshipData, arrayIndex, sourceArray, entityIdMap, combinedCacheWithAdditional, extractedData, companyData);
 
@@ -362,8 +360,6 @@ export default function TemplateGenerationDialog({
         if (type === 'db' && targetEntity) {
             const mf = masterFields.get(parseInt(id));
             if (!mf) return '';
-
-            // Construct a temp placeholder to use the existing resolver logic for a single field
             const tempPlaceholder = { ...placeholder, master_field_ids: [id] };
             const result = processTextField(tempPlaceholder, targetEntity, combinedCacheWithAdditional, masterFields, computedFieldCache);
             return result.value || '';
@@ -375,9 +371,9 @@ export default function TemplateGenerationDialog({
     const panelClasses = useMemo(() => {
         const { form, preview, source } = panelsVisible;
         const count = [form, preview, source].filter(Boolean).length;
-        if (count === 3) return { form: 'col-span-3', preview: 'col-span-5', source: 'col-span-4' };
+        if (count === 3) return { form: 'col-span-3', preview: 'col-span-6', source: 'col-span-3' };
         if (count === 2) {
-            if (!form) return { form: 'hidden', preview: 'col-span-7', source: 'col-span-5' };
+            if (!form) return { form: 'hidden', preview: 'col-span-8', source: 'col-span-4' };
             if (!preview) return { form: 'col-span-5', preview: 'hidden', source: 'col-span-7' };
             return { form: 'col-span-4', preview: 'col-span-8', source: 'hidden' };
         }
@@ -498,7 +494,6 @@ export default function TemplateGenerationDialog({
             source: string;
         }> = [];
 
-        // Check top-level placeholders
         selectedTemplate?.placeholders?.forEach(placeholder => {
             const fieldName = placeholder.name;
             const draftValue = draftFormData[fieldName];
@@ -569,7 +564,6 @@ export default function TemplateGenerationDialog({
                     const draftFormData = draft.metadata.formData;
                     const liveData = {};
                     const liveAutoMap = new Map();
-
                     groupedPlaceholders.topLevel.forEach(p => {
                         const match = processPlaceholderValue(
                             p,
@@ -584,15 +578,11 @@ export default function TemplateGenerationDialog({
                             task,
                             computedFieldCache
                         );
-
                         let val = p.type === 'boolean' ? match.value : extractDisplayValue(match.value);
-
                         if (val) {
                             liveData[p.name] = val;
                             if (match.source) liveAutoMap.set(p.name, match.source);
                         }
-
-                        // Smart Match fallback
                         if (!liveData[p.name]) {
                             const smartMatch = smartFieldMatch(p.name);
                             if (smartMatch.value) {
@@ -601,8 +591,6 @@ export default function TemplateGenerationDialog({
                             }
                         }
                     });
-
-                    // Generate live data for array items fields
                     Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
                         const blockConfig = groupedPlaceholders.blocks[blockName].config;
                         const children = groupedPlaceholders.blocks[blockName].children;
@@ -618,12 +606,10 @@ export default function TemplateGenerationDialog({
                             task,
                             computedFieldCache
                         );
-
                         if (resolvedArray.length > 0) {
                             liveData[blockName] = resolvedArray;
                         }
                     });
-
                     const conflicts = await detectDataConflicts(draftFormData, liveData);
                     setFormData(draftFormData);
                     setOriginalFormData(JSON.parse(JSON.stringify(draftFormData)));
@@ -986,19 +972,14 @@ export default function TemplateGenerationDialog({
 
     const resolveComputedFields = useCallback(async (_updatedCache: Record<string, any>) => {
         if (!selectedTemplate?.placeholders || !masterFields) return;
-
-        // ── 1. Collect every entity ID we might need ──────────────────────────────
         const allEntityIds = new Set<string>();
-
         if (entityIdMap?.company) allEntityIds.add(String(entityIdMap.company));
         if (entityIdMap?.principal) allEntityIds.add(String(entityIdMap.principal));
         if (entityIdMap?.sponsor) allEntityIds.add(String(entityIdMap.sponsor));
-
         const dirIds = Array.isArray(entityIdMap?.directors)
             ? entityIdMap.directors
             : (entityIdMap?.director ? [entityIdMap.director] : []);
         dirIds.forEach((id: any) => id && allEntityIds.add(String(id)));
-
         const addAllIds = (obj: any) => {
             if (!obj) return;
             if (typeof obj !== 'object') { allEntityIds.add(String(obj)); return; }
@@ -1234,7 +1215,6 @@ export default function TemplateGenerationDialog({
 
     useEffect(() => {
         if (!isOpen || !selectedTemplate?.id) return;
-
         const loadAndResolve = async () => {
             await fetchMissingDataSources();
             const freshDocCache = await resolveComputedFields(combinedCache);
@@ -1242,7 +1222,6 @@ export default function TemplateGenerationDialog({
                 setAdditionalCache(prev => ({ ...prev, ...freshDocCache }));
             }
         };
-
         loadAndResolve();
     }, [isOpen, selectedTemplate?.id]);
 
@@ -1349,24 +1328,19 @@ export default function TemplateGenerationDialog({
     useEffect(() => {
         const fetchAvailableDocuments = async () => {
             if (!isOpen) return;
-
             try {
                 const { data, error } = await supabase
                     .from('acc_portal_kyc')
                     .select('id, name, display_name, category')
                     .order('display_name');
-
                 if (error) throw error;
-
                 setAvailableDocuments(data || []);
                 window.__availableDocuments = data || [];
             } catch (error) {
                 console.error('Error fetching available documents:', error);
             }
         };
-
         fetchAvailableDocuments();
-
         return () => {
             window.__availableDocuments = undefined;
         };
@@ -1503,38 +1477,23 @@ export default function TemplateGenerationDialog({
         return result;
     }, [combinedCache, masterFields, entityIdMap, relationshipData, extractedData, companyData, computedFieldCache]);
 
-
     const handleInputChange = (name, val) => {
         setFormData(prev => {
             const newState = { ...prev, [name]: val };
-
-            // DEDUPLICATION SYNC: 
-            // If 'val' is a boolean array (the checkboxes), check if other 
-            // placeholders need to be updated based on this selection.
             if (Array.isArray(val) && val[0]?.linked_job_question_id) {
                 const selectedTag = val.find(opt => opt.checked)?.tag;
-
-                // Look for other placeholders in the template linked to the same question
                 selectedTemplate.placeholders.forEach(otherPh => {
-                    if (otherPh.name === name) return; // skip self
-
+                    if (otherPh.name === name) return;
                     const otherQId = otherPh.boolean_conditions?.[0]?.linked_job_question_id;
                     const masterQId = val[0].linked_job_question_id;
-
                     if (otherQId === masterQId) {
-                        // This other placeholder (e.g. between_10_99p) is part of the same group.
-                        // We set its formData value to '✔' or '' based on the selection.
                         const isMatch = otherPh.boolean_conditions[0].tag === selectedTag;
-                        // Note: Generation logic usually expects the boolean array or the processed string
-                        // For document generation, we update its individual state
                         newState[otherPh.name] = isMatch ? val : val.map(v => ({ ...v, checked: false }));
                     }
                 });
             }
-
             return newState;
         });
-
         if (!manuallyEditedFields.has(name)) {
             setManuallyEditedFields(prev => new Set(prev).add(name));
         }
@@ -1559,18 +1518,14 @@ export default function TemplateGenerationDialog({
             const updatedArray = [...(prev[blockName] || [])];
             if (!updatedArray[index]) updatedArray[index] = {};
             updatedArray[index] = { ...updatedArray[index], [fieldName]: value };
-
             const newState = { ...prev, [blockName]: updatedArray };
             return newState;
         });
-
         setManuallyEditedFields(prev => new Set(prev).add(`${blockName}[${index}].${fieldName}`));
     };
 
     const populateHtmlContent = useCallback((data, placeholders, styles) => {
         if (!selectedTemplate?.content) return '[NO TEMPLATE CONTENT]';
-
-        // FIRST: Process the raw template content to preserve its native spaces/newlines
         let content = selectedTemplate.content
             .trimStart() // Remove leading whitespace/newlines
             .replace(/  +/g, (match) => '&nbsp;'.repeat(match.length))
@@ -1578,7 +1533,6 @@ export default function TemplateGenerationDialog({
             .replace(/^(<br\s*\/?>)+/, '') // Remove leading <br> tags
             .replace(/^(<p[^>]*>\s*<\/p>)+/, '') // Remove leading empty <p> tags
             .replace(/^(<div[^>]*>\s*<\/div>)+/, ''); // Remove leading empty <div> tags
-
         let processedHeader = (headerContent || '')
             .trimStart()
             .replace(/  +/g, (match) => '&nbsp;'.repeat(match.length))
@@ -1586,7 +1540,6 @@ export default function TemplateGenerationDialog({
             .replace(/^(<br\s*\/?>)+/, '')
             .replace(/^(<p[^>]*>\s*<\/p>)+/, '')
             .replace(/^(<div[^>]*>\s*<\/div>)+/, '');
-
         let processedFooter = (footerContent || '')
             .trimStart()
             .replace(/  +/g, (match) => '&nbsp;'.repeat(match.length))
@@ -1594,45 +1547,28 @@ export default function TemplateGenerationDialog({
             .replace(/^(<br\s*\/?>)+/, '')
             .replace(/^(<p[^>]*>\s*<\/p>)+/, '')
             .replace(/^(<div[^>]*>\s*<\/div>)+/, '');
-
-        // AUTO-DETECT AND FIX TABLE STRUCTURE
-        // Check if there's a table with placeholders that should be inside a repeating block
         const tableRegex = /(<table[^>]*>)([\s\S]*?)(<\/table>)/gi;
         const blockPlaceholders = Object.keys(groupedPlaceholders.blocks);
-
         content = content.replace(tableRegex, (match, tableOpen, tableContent, tableClose) => {
-            // Check if any block placeholders are in table content
             const hasBlockPlaceholder = blockPlaceholders.some(blockName =>
                 tableContent.includes(`{#${blockName}}`) || tableContent.includes(`{/${blockName}}`)
             );
-
             if (!hasBlockPlaceholder) return match;
-
-            // Find all <tr> elements in table
             const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
             const rows = [];
             let trMatch;
-
             while ((trMatch = trRegex.exec(tableContent)) !== null) {
                 rows.push(trMatch[0]);
             }
-
-            if (rows.length < 2) return match; // Need at least header + data row
-
-            // Assume first row is header, rest are data rows
+            if (rows.length < 2) return match;
             const headerRow = rows[0];
             const dataRows = rows.slice(1);
-
-            // Check if data rows contain placeholders from any block
             const dataRowsHavePlaceholders = dataRows.some(row =>
                 blockPlaceholders.some(blockName =>
                     row.includes(`{${blockName}.`) || row.includes(`{#${blockName}}`)
                 )
             );
-
             if (!dataRowsHavePlaceholders) return match;
-
-            // Find which block data rows belong to
             let targetBlock = null;
             for (const blockName of blockPlaceholders) {
                 if (dataRows.some(row => row.includes(`{${blockName}.`))) {
@@ -1640,35 +1576,24 @@ export default function TemplateGenerationDialog({
                     break;
                 }
             }
-
             if (!targetBlock) return match;
-
-            // Reconstruct table with block tags around data rows
             const newDataRows = dataRows.map(row => row).join('\n');
             return `${tableOpen}${headerRow}\n{#${targetBlock}}\n${newDataRows}\n{/${targetBlock}}\n${tableClose}`;
         });
-
         const universalReplace = (regex, replacement) => {
             content = content.replace(regex, replacement);
             processedHeader = processedHeader.replace(regex, replacement);
             processedFooter = processedFooter.replace(regex, replacement);
         };
-
-        // 1. PROCESS REPEATING BLOCKS/TABLES
         Object.keys(groupedPlaceholders.blocks).forEach(blockName => {
             const block = groupedPlaceholders.blocks[blockName];
             const blockConfig = block.config || {};
             const isHorizontal = blockConfig.array_direction === 'horizontal';
-
             const blockRegex = new RegExp(`\\{#${blockName}\\}([\\s\\S]*?)\\{/${blockName}\\}`, 'g');
             const rows = Array.isArray(data[blockName]) ? data[blockName] : [];
-
-            // Handle the block replacement in content, header, and footer
             const processBlockInText = (text) => {
                 return text.replace(blockRegex, (_, innerTemplate) => {
                     if (rows.length === 0) return '';
-
-                    // Handle Horizontal Logic (often used for digit-splitting styles)
                     if (isHorizontal) {
                         const childName = block.children[0]?.name || 'd';
                         const cells = rows.map(row => {
@@ -1677,33 +1602,24 @@ export default function TemplateGenerationDialog({
                         }).join('');
                         return `<div style="display:flex;align-items:center;">${cells}</div>`;
                     }
-
-                    // Handle Standard Vertical Rows
                     return rows.map((row, rowIndex) => {
                         let rowHtml = innerTemplate;
                         block.children.forEach(child => {
                             const rawValue = row?.[child.name];
                             const cleanChildName = child.name.replace(/[{}]/g, '').trim();
-
-                            // Handle dynamic format suffixes from template syntax for block children
                             const childFormatRegex = new RegExp(`\\{+\\s*%?\\s*${cleanChildName}\\s*(?:\\/\\s*([a-zA-Z0-9_]+))?\\s*\\}+`, 'g');
-
                             if (child.type === 'image') {
                                 const value = typeof rawValue === 'string' ? rawValue : extractDisplayValue(rawValue);
                                 if (value && (value.startsWith('http') || value.startsWith('data:image'))) {
                                     const styleKey = `${blockName}_${rowIndex}_${child.name}`;
                                     const style = styles[styleKey] || styles[child.name] || {};
-
-                                    // Use custom style if available, otherwise use default values from placeholder configuration
-                                    let imgWidth = "120px"; // default fallback for blocks
+                                    let imgWidth = "120px";
                                     if (style.imageWidth) {
                                         imgWidth = `${style.imageWidth}px`;
                                     } else if (child.image_width) {
                                         imgWidth = child.image_width;
                                     }
-
                                     const textAlign = style.textAlign || 'center';
-
                                     const imageHtml = `<div style="text-align:${textAlign};">
                                     <img src="${value}" style="width:${imgWidth}; height:auto; display:block; margin:${textAlign === 'center' ? '0 auto' : '0'}; border-radius: 2px;" 
                                          onerror="console.error('[HTML IMAGE DEBUG] Failed to load image:', '${value}'); this.style.display='none'; this.nextElementSibling.style.display='block';" />
@@ -1716,7 +1632,6 @@ export default function TemplateGenerationDialog({
                                     rowHtml = rowHtml.replace(childFormatRegex, `<span style="color:#ccc; font-size: 8px;">[Empty Image: ${child.display_value || child.name}]</span>`);
                                 }
                             } else {
-                                // Standard text inside block with format suffix support
                                 const value = extractDisplayValue(rawValue);
                                 rowHtml = rowHtml.replace(childFormatRegex, (match, formatSuffix) => {
                                     let formattedValue = value;
@@ -1731,22 +1646,17 @@ export default function TemplateGenerationDialog({
                     }).join('');
                 });
             };
-
             content = processBlockInText(content);
             processedHeader = processBlockInText(processedHeader);
             processedFooter = processBlockInText(processedFooter);
         });
 
-        // 2. PROCESS TOP LEVEL PLACEHOLDERS
         (placeholders || []).forEach(placeholder => {
             if (placeholder.parent_name) return;
-
             const rawValue = data[placeholder.name];
             const cleanName = placeholder.name.replace(/[{}]/g, '').trim();
             const formatSuffix = placeholder.format || '';
             const regex = new RegExp(`\\{+\\s*%?\\s*${cleanName}${formatSuffix ? '\\s*\\/\\s*' + formatSuffix : ''}\\s*\\}+`, 'gi');
-
-            // Handle Digit Splitting (Sequences like {passport_1}, {passport_2})
             if (placeholder.is_digit_split) {
                 const chars = processDigitSplit(rawValue, placeholder.digit_count || 8);
                 for (let i = 1; i <= (placeholder.digit_count || 8); i++) {
@@ -1761,17 +1671,13 @@ export default function TemplateGenerationDialog({
                 const regex = new RegExp(`\\{+\\s*%?\\s*${cleanName}${imageFormatSuffix ? '\\s*\\/\\s*' + imageFormatSuffix : ''}\\s*\\}+`, 'gi');
                 if (value && (value.startsWith('http') || value.startsWith('data:image'))) {
                     const style = styles[placeholder.name] || {};
-
-                    // Use custom style if available, otherwise use default values from placeholder configuration
-                    let imgWidth = "200px"; // default fallback
+                    let imgWidth = "200px";
                     if (style.imageWidth) {
                         imgWidth = `${style.imageWidth}px`;
                     } else if (placeholder.image_width) {
                         imgWidth = placeholder.image_width;
                     }
-
                     const textAlign = style.textAlign || 'center';
-
                     const imageHtml = `<div style="text-align:${textAlign};">
         <img src="${value}" style="width:${imgWidth}; height:auto; max-width:100%; display:inline-block; border-radius: 4px;" 
              onerror="console.error('[HTML IMAGE DEBUG] Failed to load image:', '${value}'); this.style.display='none'; this.nextElementSibling.style.display='block';" />
@@ -1779,18 +1685,14 @@ export default function TemplateGenerationDialog({
             ❌ Failed to load: ${value.substring(0, 50)}...
         </div>
     </div>`;
-
                     universalReplace(regex, imageHtml);
                 } else {
                     universalReplace(regex, `<div style="border:1px dashed #cbd5e1; padding:10px; text-align:center; color:#94a3b8; font-size:10px; border-radius:4px;">[Upload Image: ${placeholder.display_value || placeholder.name}]</div>`);
                 }
             } else if (placeholder.type === 'boolean' && placeholder.boolean_conditions?.length) {
-                // Replace {placeholder.name} itself
                 const value = extractDisplayValue(rawValue);
                 const boolNameRegex = new RegExp(`\\{+\\s*%?\\s*${cleanName}\\s*\\}+`, 'gi');
                 universalReplace(boolNameRegex, formatWhitespace(value) || '');
-
-                // Replace each condition tag  e.g. {is_usd} → "√" or ""
                 const options = Array.isArray(rawValue) ? rawValue : null;
                 const strVal = String(rawValue || '').trim().toLowerCase();
                 placeholder.boolean_conditions.forEach((condition: any) => {
@@ -1816,26 +1718,18 @@ export default function TemplateGenerationDialog({
                 });
             } else {
                 const value = extractDisplayValue(rawValue);
-
-                // Handle dynamic format suffixes from template syntax (e.g., /upper, /capital, /lower)
-                // Match placeholder with any format suffix
                 const formatRegex = new RegExp(`\\{+\\s*%?\\s*${cleanName}\\s*(?:\\/\\s*([a-zA-Z0-9_]+))?\\s*\\}+`, 'gi');
-
                 universalReplace(formatRegex, (match, formatSuffix) => {
                     let formattedValue = value;
-                    // Apply case formatting if format suffix is present
                     if (formatSuffix) {
                         formattedValue = applyFormat(value, formatSuffix);
                     }
-                    // Apply whitespace formatting
                     formattedValue = formatWhitespace(formattedValue);
-
                     return formattedValue ||
                         `<span style="background-color: #fef9c3; color: #854d0e; padding: 0 2px; border-radius: 2px;">[${placeholder.display_value || placeholder.name}]</span>`;
                 });
             }
         });
-
         return `
         ${processedHeader ? `<div class="doc-header" style="margin: 0; padding: 0;">${processedHeader}</div>` : ''}
         <div class="doc-body" style="font-family: 'Times New Roman', Times, serif; line-height: 1.5; color: #000; white-space: pre-wrap; margin: 0; padding: 0;">
@@ -1843,46 +1737,37 @@ export default function TemplateGenerationDialog({
         </div>
         ${processedFooter ? `<div class="doc-footer" style="border-top:0.5px solid #e2e8f0; font-size: 10px; margin: 0; padding: 0;">${processedFooter}</div>` : ''}
 `;
-
     }, [selectedTemplate, groupedPlaceholders, headerContent, footerContent]);
 
     const prepareRenderData = useCallback(async (data) => {
         const renderData = {};
         const imagePromises = [];
-
         for (const blockName of Object.keys(groupedPlaceholders.blocks)) {
             const block = groupedPlaceholders.blocks[blockName];
             const rows = JSON.parse(JSON.stringify(data[blockName] || []));
             for (const row of rows) {
                 for (const child of block.children) {
-                    // Use raw value for images
                     const displayValue = child.type === 'image' && typeof row[child.name] === 'string'
-                        ? row[child.name]  // ✅ Preserve raw string
+                        ? row[child.name]
                         : extractDisplayValue(row[child.name]);
-
                     row[child.name] = displayValue;
-
                     if (child.type === 'image' && displayValue && displayValue.startsWith('http')) {
                         const promise = fetchImageAsBase64(displayValue).then(b64 => {
                             if (b64) {
                                 row[child.name] = b64;
                             }
                         });
-                        imagePromises.push(promise);  // ← THIS LINE WAS MISSING
+                        imagePromises.push(promise);
                     }
                 }
             }
             renderData[blockName] = rows;
         }
-
         if (!selectedTemplate) return renderData;
-
         (selectedTemplate.placeholders || []).forEach(p => {
             const val = data[p.name];
             const baseKey = p.name.replace(/[%#{}]/g, '').trim();
-
             if (p.parent_name || p.is_block_start) return;
-
             if (p.is_digit_split) {
                 const strVal = extractDisplayValue(val);
                 const chars = processDigitSplit(strVal, p.digit_count || 8);
@@ -1896,7 +1781,6 @@ export default function TemplateGenerationDialog({
             else if (p.type === 'boolean') {
                 const options = Array.isArray(val) ? val : [];
                 if (options.length > 0) {
-                    // Standard boolean array — already evaluated
                     options.forEach(opt => {
                         if (opt && opt.tag) {
                             renderData[opt.tag] = opt.checked ? extractDisplayValue([opt].filter(o => o.checked)) : "";
@@ -1904,8 +1788,6 @@ export default function TemplateGenerationDialog({
                     });
                     renderData[baseKey] = extractDisplayValue(val);
                 } else if (p.boolean_conditions?.length) {
-                    // Value is a plain string (from questionGroups auto-populate, e.g. "USD").
-                    // Evaluate each condition against it so condition tags get filled in the doc.
                     const strVal = String(val || '').trim().toLowerCase();
                     p.boolean_conditions.forEach((condition: any) => {
                         if (!condition.tag) return;
@@ -1948,15 +1830,11 @@ export default function TemplateGenerationDialog({
     }, [groupedPlaceholders, selectedTemplate]);
 
     const updateWordPreview = useCallback(async (data, styles) => {
-        // Use the raw zip buffer, not the doc instance
         if (!templateZipBuffer.current) return;
-
         try {
             setIsPreviewLoading(true);
-
             const zip = new PizZip(templateZipBuffer.current);
             const renderData = await prepareRenderData(data);
-
             const processedData = { ...renderData };
             const imagePromises = Object.entries(renderData)
                 .filter(([_, value]) => value && typeof value === 'string' &&
@@ -3091,11 +2969,14 @@ export default function TemplateGenerationDialog({
             setIsGenerating(false);
         }
     };
-
     return (
-        <>
-            <Dialog open={isOpen} onOpenChange={onClose}>
-                <DialogContent className="max-w-[98vw] w-full h-[95vh] flex flex-col p-0">
+        <Dialog open={isOpen} onOpenChange={onClose}>
+            <DialogContent className="max-w-[99vw] w-[99vw] h-[98vh] flex flex-col p-0 overflow-hidden border-slate-200/80 dark:border-slate-800 shadow-2xl rounded-2xl">
+                {/* ── AMBIENT BACKGROUND GLOWS ── */}
+                <div className="pointer-events-none absolute -top-40 right-0 z-0 h-[600px] w-[600px] rounded-full bg-blue-100/30 opacity-40 blur-3xl dark:bg-blue-900/10" />
+                <div className="pointer-events-none absolute bottom-0 -left-20 z-0 h-[400px] w-[400px] rounded-full bg-indigo-100/20 opacity-30 blur-3xl dark:bg-indigo-900/10" />
+
+                <div className="relative z-10 flex h-full flex-col">
                     <TemplateDialogHeader
                         documentName={documentName}
                         onClose={onClose}
@@ -3114,51 +2995,62 @@ export default function TemplateGenerationDialog({
                         refreshWithLiveData={refreshWithLiveData}
                     />
 
-                    <div className="flex items-center gap-2 px-6 py-2 border-b bg-white">
-                        <View className="h-4 w-4 text-muted-foreground" />
-                        <Label className="text-xs font-semibold mr-2">View Panels:</Label>
-                        <div className="flex bg-slate-100 p-1 rounded-md">
-                            <Button
-                                variant={panelsVisible.form ? 'secondary' : 'ghost'}
-                                size="sm"
-                                className="h-7 text-xs"
-                                onClick={() => togglePanel('form')}
-                            >
-                                <MousePointer2 className="h-3 w-3 mr-1" />
-                                Form Fields
-                            </Button>
-                            <Button
-                                variant={panelsVisible.preview ? 'secondary' : 'ghost'}
-                                size="sm"
-                                className="h-7 text-xs"
-                                onClick={() => togglePanel('preview')}
-                            >
-                                <Layout className="h-3 w-3 mr-1" />
-                                Live Preview
-                            </Button>
-                            <Button
-                                variant={panelsVisible.source ? 'secondary' : 'ghost'}
-                                size="sm"
-                                className="h-7 text-xs"
-                                onClick={() => togglePanel('source')}
-                            >
-                                <FileText className="h-3 w-3 mr-1" />
-                                Template Source
-                            </Button>
+                    {/* ── TOOLBAR / PANEL SELECTOR ── */}
+                    <div className="flex items-center justify-between px-6 py-3 border-b border-slate-200/60 bg-white/60 backdrop-blur-md dark:bg-slate-950/60 dark:border-slate-800">
+                        <div className="flex items-center gap-3">
+                            <div className="flex h-8 items-center gap-2 rounded-xl bg-slate-100/80 dark:bg-slate-900/80 p-1 shadow-inner border border-slate-200/50 dark:border-slate-800">
+                                <Button
+                                    variant={panelsVisible.form ? 'secondary' : 'ghost'}
+                                    size="sm"
+                                    className={cn("h-6 rounded-lg px-3 text-[11px] font-bold uppercase tracking-wider transition-all",
+                                        panelsVisible.form ? "bg-white dark:bg-slate-800 shadow-sm text-blue-600 dark:text-blue-400" : "text-slate-500")}
+                                    onClick={() => togglePanel('form')}
+                                >
+                                    <MousePointer2 className="h-3 w-3 mr-1.5" /> Fields
+                                </Button>
+                                <Button
+                                    variant={panelsVisible.preview ? 'secondary' : 'ghost'}
+                                    size="sm"
+                                    className={cn("h-6 rounded-lg px-3 text-[11px] font-bold uppercase tracking-wider transition-all",
+                                        panelsVisible.preview ? "bg-white dark:bg-slate-800 shadow-sm text-blue-600 dark:text-blue-400" : "text-slate-500")}
+                                    onClick={() => togglePanel('preview')}
+                                >
+                                    <Layout className="h-3 w-3 mr-1.5" /> Preview
+                                </Button>
+                                <Button
+                                    variant={panelsVisible.source ? 'secondary' : 'ghost'}
+                                    size="sm"
+                                    className={cn("h-6 rounded-lg px-3 text-[11px] font-bold uppercase tracking-wider transition-all",
+                                        panelsVisible.source ? "bg-white dark:bg-slate-800 shadow-sm text-blue-600 dark:text-blue-400" : "text-slate-500")}
+                                    onClick={() => togglePanel('source')}
+                                >
+                                    <FileText className="h-3 w-3 mr-1.5" /> Source
+                                </Button>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-50 dark:bg-slate-900 px-3 py-1 rounded-full border border-slate-200/50 dark:border-slate-800">
+                                <Layers className="h-3 w-3" />
+                                {selectedTemplate?.category || 'Standard Document'}
+                            </div>
                         </div>
                     </div>
 
                     <div className="flex-1 overflow-hidden grid grid-cols-12 gap-0">
-                        <ScrollArea className={`${panelClasses.form} border-r bg-white`}>
+                        {/* ── FORM PANEL ── */}
+                        <ScrollArea className={`${panelClasses.form} border-r border-slate-200/60 bg-slate-50/50 dark:bg-slate-950/50 dark:border-slate-800`}>
                             <div className="p-6 space-y-8">
-                                {/* Section Header */}
-                                <div className="space-y-4">
-                                    <h4 className="flex items-center gap-2 font-black text-blue-600 text-[10px] tracking-widest uppercase border-b pb-2">
-                                        <Layout className="h-3 w-3" /> General Document Fields
+                                <div className="space-y-6">
+                                    <h4 className="flex items-center gap-2.5 font-black text-blue-600 dark:text-blue-400 text-[10px] tracking-widest uppercase border-b border-slate-200 dark:border-slate-800 pb-3">
+                                        <div className="h-5 w-5 rounded-lg bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center">
+                                            <Layout className="h-3 w-3" />
+                                        </div>
+                                        General Document Fields
                                     </h4>
 
-                                    <div className="grid grid-cols-1 gap-y-1">
-                                        {/* Question-option groups: one row per job question, pills show task-pre-selected answer */}
+                                    <div className="space-y-1">
+                                        {/* Question-option groups */}
                                         {Array.from(groupedPlaceholders.questionGroups.entries()).map(([qId, { members }]) => {
                                             const question = requirementJobQuestions.find(q => q.id === qId);
                                             const options = question?.options || [...new Set(members.map(m => m.linked_job_question_option).filter(Boolean))];
@@ -3167,155 +3059,131 @@ export default function TemplateGenerationDialog({
                                             const category = question?.category;
                                             const taskAnswer = task?.job_specific_answers?.[String(qId)] ?? task?.job_specific_answers?.[qId];
                                             return (
-                                                <div key={qId} className="flex flex-row items-start gap-6 p-2 border-b border-slate-50 last:border-0 hover:bg-slate-50/50 transition-colors">
-                                                    <div className="w-1/3 flex flex-col items-start pt-0.5 gap-1">
+                                                <div key={qId} className="flex flex-col gap-3 p-4 rounded-xl border border-slate-200/60 bg-white dark:bg-slate-900 dark:border-slate-800 shadow-sm mb-4">
+                                                    <div className="flex items-start justify-between">
+                                                        <Label className="font-bold text-slate-700 dark:text-slate-300 text-[11px] leading-relaxed uppercase tracking-tight max-w-[80%]">
+                                                            {label}
+                                                        </Label>
                                                         {category && (
-                                                            <Badge variant="outline" className="text-[9px] bg-purple-50 text-purple-700 border-purple-200">
+                                                            <Badge variant="outline" className="text-[8px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:text-purple-400 dark:border-purple-800">
                                                                 {category}
                                                             </Badge>
                                                         )}
-                                                        <Label className="font-bold text-slate-700 text-xs leading-relaxed uppercase tracking-tight">
-                                                            {label}
-                                                        </Label>
-                                                        {taskAnswer && (
-                                                            <span className="text-[9px] text-emerald-600 flex items-center gap-0.5 font-medium">
-                                                                <CheckCircle2 className="h-2.5 w-2.5" /> set from task
-                                                            </span>
-                                                        )}
                                                     </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="flex flex-wrap gap-1.5">
-                                                            {options.map(opt => {
-                                                                const member = members.find(m => m.linked_job_question_option === opt);
-                                                                if (!member) return null;
-                                                                const isChecked = !!formData[member.name];
-                                                                const isFromTask = taskAnswer === opt;
-                                                                return (
-                                                                    <button
-                                                                        key={opt}
-                                                                        type="button"
-                                                                        onClick={() => {
-                                                                            if (question?.type === 'multiselect') {
-                                                                                handleInputChange(member.name, isChecked ? '' : opt);
-                                                                            } else {
-                                                                                members.forEach(m => {
-                                                                                    if (formData[m.name]) handleInputChange(m.name, '');
-                                                                                });
-                                                                                handleInputChange(member.name, isChecked ? '' : opt);
-                                                                            }
-                                                                        }}
-                                                                        className={cn(
-                                                                            "px-3 py-1 rounded-full text-xs font-semibold border transition-all flex items-center gap-1",
-                                                                            isChecked
-                                                                                ? isFromTask
-                                                                                    ? "bg-emerald-600 text-white border-emerald-600"
-                                                                                    : "bg-blue-600 text-white border-blue-600"
-                                                                                : "bg-white text-slate-400 border-slate-200 hover:border-blue-400 hover:text-blue-600"
-                                                                        )}
-                                                                    >
-                                                                        {isChecked && <CheckCircle2 className="h-3 w-3 shrink-0" />}
-                                                                        {opt}
-                                                                    </button>
-                                                                );
-                                                            })}
-                                                        </div>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {options.map(opt => {
+                                                            const member = members.find(m => m.linked_job_question_option === opt);
+                                                            if (!member) return null;
+                                                            const isChecked = !!formData[member.name];
+                                                            const isFromTask = taskAnswer === opt;
+                                                            return (
+                                                                <button
+                                                                    key={opt}
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        if (question?.type === 'multiselect') {
+                                                                            handleInputChange(member.name, isChecked ? '' : opt);
+                                                                        } else {
+                                                                            members.forEach(m => {
+                                                                                if (formData[m.name]) handleInputChange(m.name, '');
+                                                                            });
+                                                                            handleInputChange(member.name, isChecked ? '' : opt);
+                                                                        }
+                                                                    }}
+                                                                    className={cn(
+                                                                        "px-3 py-1.5 rounded-xl text-[11px] font-bold border transition-all flex items-center gap-1.5 shadow-sm",
+                                                                        isChecked
+                                                                            ? isFromTask
+                                                                                ? "bg-emerald-600 text-white border-emerald-600 shadow-emerald-600/20"
+                                                                                : "bg-blue-600 text-white border-blue-600 shadow-blue-600/20"
+                                                                            : "bg-white dark:bg-slate-800 text-slate-400 border-slate-200 hover:border-blue-400 hover:text-blue-600 dark:border-slate-700"
+                                                                    )}
+                                                                >
+                                                                    {isChecked && <CheckCircle2 className="h-3 w-3 shrink-0" />}
+                                                                    {opt}
+                                                                </button>
+                                                            );
+                                                        })}
                                                     </div>
                                                 </div>
                                             );
                                         })}
 
-                                        {/* Filter out ui_hidden placeholders - they are populated by backend from job answers */}
-                                        {groupedPlaceholders.topLevel.filter(p => !p.ui_hidden).map((p, idx) => {
-                                            let resolvedOptions = [];
-                                            if (p.master_field_ids?.length > 0) {
-                                                const mf = masterFields.get(parseInt(p.master_field_ids[0]));
-                                                if (mf?.type === 'select') {
-                                                    resolvedOptions = getDependentDropdownOptions(p, mf);
-                                                }
-                                            }
-
-                                            return (
-                                                <div
-                                                    key={`${p.id || p.name}-${p.name}`}
-                                                    className="flex flex-row items-start gap-6 p-2 border-b border-slate-50 last:border-0 hover:bg-slate-50/50 transition-colors"
-                                                >
-                                                    {/* COLUMN 1: ID Badge + Right Aligned Label */}
-                                                    <div className="w-1/3 flex items-start">
-                                                        <Label className="font-bold text-slate-700 text-xs leading-relaxed uppercase tracking-tight">
-                                                            {p.display_value || p.name.replace(/_/g, ' ')}
-                                                        </Label>
-                                                    </div>
-
-                                                    {/* COLUMN 2: Input Control */}
-                                                    <div className="flex-1 min-w-0">
-                                                        <PlaceholderInput
-                                                            placeholder={p}
-                                                            value={formData[p.name]}
-                                                            onChange={(val) => handleInputChange(p.name, val)}
-                                                            onSaveToDb={saveFieldToDatabase}
-                                                            masterFields={masterFields}
-                                                            resolvedOptions={resolvedOptions}
-                                                            onFileChange={(e) => handleFileChange(p.name, e)}
-                                                            imageStyles={imageStyles}
-                                                            onImageStyleChange={handleImageStyleChange}
-                                                            autoPopulated={autoPopulatedFields.get(p.name)}
-                                                            originalValue={originalFormData[p.name]}
-                                                            requirementJobQuestions={requirementJobQuestions}  // NEW
-                                                            task={task}                                         // NEW
-                                                            formData={formData}
-                                                            isArrayItem={false}
-                                                            onAIRefine={handleSingleFieldAIRefine}
-                                                            isAIRefining={refiningFields.has(p.name)}
-                                                            showLabel={false} // Hides the internal vertical label
-                                                            resolveSourceValue={resolveSpecificSourceValue}
-                                                        />
-                                                    </div>
+                                        {/* Top level fields */}
+                                        <div className="grid grid-cols-1 gap-2">
+                                            {groupedPlaceholders.topLevel.filter(p => !p.ui_hidden).map((p) => (
+                                                <div key={p.name} className="flex flex-col gap-1.5 p-3 rounded-xl hover:bg-white dark:hover:bg-slate-900 transition-colors border border-transparent hover:border-slate-200/60 dark:hover:border-slate-800 group">
+                                                    <Label className="font-bold text-slate-500 dark:text-slate-400 text-[10px] uppercase tracking-widest px-1">
+                                                        {p.display_value || p.name.replace(/_/g, ' ')}
+                                                    </Label>
+                                                    <PlaceholderInput
+                                                        placeholder={p}
+                                                        value={formData[p.name]}
+                                                        onChange={(val) => handleInputChange(p.name, val)}
+                                                        onSaveToDb={saveFieldToDatabase}
+                                                        masterFields={masterFields}
+                                                        onFileChange={(e) => handleFileChange(p.name, e)}
+                                                        imageStyles={imageStyles}
+                                                        onImageStyleChange={handleImageStyleChange}
+                                                        autoPopulated={autoPopulatedFields.get(p.name)}
+                                                        requirementJobQuestions={requirementJobQuestions}
+                                                        task={task}
+                                                        formData={formData}
+                                                        isArrayItem={false}
+                                                        onAIRefine={handleSingleFieldAIRefine}
+                                                        isAIRefining={refiningFields.has(p.name)}
+                                                        showLabel={false}
+                                                        resolveSourceValue={resolveSpecificSourceValue}
+                                                    />
                                                 </div>
-                                            );
-                                        })}
+                                            ))}
+                                        </div>
                                     </div>
                                 </div>
 
-                                {/* Repeating Sections Logic */}
+                                {/* Repeating Sections */}
                                 {Object.keys(groupedPlaceholders.blocks).length > 0 && (
-                                    <div className="space-y-4 pt-4 border-t">
-                                        <h4 className="flex items-center gap-2 font-black text-blue-600 text-[10px] tracking-widest uppercase border-b pb-2">
-                                            <Layers className="h-3 w-3" /> Repeating Tables / Blocks
+                                    <div className="space-y-6 pt-6 border-t border-slate-200 dark:border-slate-800">
+                                        <h4 className="flex items-center gap-2.5 font-black text-blue-600 dark:text-blue-400 text-[10px] tracking-widest uppercase border-b border-slate-200 dark:border-slate-800 pb-3">
+                                            <div className="h-5 w-5 rounded-lg bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center">
+                                                <Layers className="h-3 w-3" />
+                                            </div>
+                                            Repeating Tables / Blocks
                                         </h4>
                                         {Object.keys(groupedPlaceholders.blocks).map(blockName => (
-                                            <div key={blockName}>
-                                                <ArrayInputsPanel
-                                                    blockName={blockName}
-                                                    blockData={groupedPlaceholders.blocks[blockName]}
-                                                    formData={formData}
-                                                    originalFormData={originalFormData}
-                                                    onArrayInputChange={handleArrayInputChange}
-                                                    onFileChange={handleFileChange}
-                                                    handleImageStyleChange={handleImageStyleChange}
-                                                    imageStyles={imageStyles}
-                                                    masterFields={masterFields}
-                                                    saveFieldToDatabase={saveFieldToDatabase}
-                                                    isSavingProfile={isSavingProfile}
-                                                    resolveSpecificSourceValue={resolveSpecificSourceValue}
-                                                    getDependentDropdownOptions={getDependentDropdownOptions}
-                                                />
-                                            </div>
+                                            <ArrayInputsPanel
+                                                key={blockName}
+                                                blockName={blockName}
+                                                blockData={groupedPlaceholders.blocks[blockName]}
+                                                formData={formData}
+                                                originalFormData={originalFormData}
+                                                onArrayInputChange={handleArrayInputChange}
+                                                onFileChange={handleFileChange}
+                                                handleImageStyleChange={handleImageStyleChange}
+                                                imageStyles={imageStyles}
+                                                masterFields={masterFields}
+                                                saveFieldToDatabase={saveFieldToDatabase}
+                                                isSavingProfile={isSavingProfile}
+                                                resolveSpecificSourceValue={resolveSpecificSourceValue}
+                                                getDependentDropdownOptions={getDependentDropdownOptions}
+                                            />
                                         ))}
                                     </div>
                                 )}
                             </div>
                         </ScrollArea>
 
+                        {/* ── PREVIEW PANEL ── */}
                         <PreviewPanel
                             previewContent={previewContent}
                             isPreviewLoading={isPreviewLoading}
-                            panelClasses={panelClasses.preview}
+                            panelClasses={cn(panelClasses.preview, "bg-slate-100/30 dark:bg-slate-900/30 backdrop-blur-sm")}
                             EDITOR_PREVIEW_STYLES={EDITOR_PREVIEW_STYLES}
                             isWordTemplate={isWordTemplate}
                             docxBuffer={docxPreviewBuffer}
                         />
 
-                        {/* RIGHT PANEL: Original Template Reference */}
+                        {/* ── SOURCE PANEL ── */}
                         <TemplateSourcePanel
                             panelClasses={panelClasses.source}
                             isWordTemplate={isWordTemplate}
@@ -3323,53 +3191,69 @@ export default function TemplateGenerationDialog({
                             setDocPreviewUrl={setDocPreviewUrl}
                         />
                     </div>
-                    <DialogFooter className="border-t px-6 py-3 bg-white flex justify-between flex-shrink-0">
-                        <div className="text-[10px] flex items-center gap-1.5">
-                            <CheckCircle2 className="h-3 w-3 text-green-500" />
-                            {isWordTemplate ? 'Word + Images' : 'HTML'}
+
+                    <DialogFooter className="border-t border-slate-200 dark:border-slate-800 px-6 py-4 bg-white/80 backdrop-blur-xl dark:bg-slate-950/80 flex items-center justify-between flex-shrink-0 relative z-20">
+                        <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200/60 dark:border-slate-800">
+                                <div className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                                    Format: {isWordTemplate ? 'Word + Images' : 'HTML View'}
+                                </span>
+                            </div>
                         </div>
-                        <div className='flex gap-2'>
+
+                        <div className='flex items-center gap-3'>
                             <Button
                                 variant="outline"
-                                size="sm"
                                 onClick={saveAsDraft}
-                                // ADD isPreviewLoading here
                                 disabled={isGenerating || isPreviewLoading}
+                                className="h-10 rounded-xl border-slate-200 dark:border-slate-800 font-bold text-xs shadow-sm"
                             >
                                 {isGenerating || isPreviewLoading ? (
                                     <Loader2 className="animate-spin mr-2 h-4 w-4" />
                                 ) : (
-                                    <Save className="mr-2 h-4 w-4" />
+                                    <Save className="mr-2 h-4 w-4 text-slate-400" />
                                 )}
                                 {loadedDraft ? 'Update Draft' : 'Save as Draft'}
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <Button size="sm" disabled={isGenerating} className="bg-blue-600">
+                                    <Button disabled={isGenerating} className="h-10 rounded-xl bg-blue-600 px-6 font-bold text-white shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition-all active:scale-[0.98]">
                                         {isGenerating ? (
                                             <Loader2 className="animate-spin mr-2 h-4 w-4" />
                                         ) : (
                                             <Download className="mr-2 h-4 w-4" />
                                         )}
-                                        Download
+                                        Generate & Download
+                                        <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
                                     </Button>
                                 </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                    <DropdownMenuItem onClick={() => generateAndDownload('word')}>
-                                        <FileText className="h-4 w-4 mr-2 text-blue-600" />
-                                        Word
+                                <DropdownMenuContent align="end" className="w-48 rounded-xl border-slate-200/80 dark:border-slate-800 shadow-xl">
+                                    <DropdownMenuItem onClick={() => generateAndDownload('word')} className="flex items-center gap-3 py-2.5 font-semibold text-sm cursor-pointer">
+                                        <div className="h-8 w-8 rounded-lg bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center">
+                                            <FileText className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                                        </div>
+                                        Word Document
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => generateAndDownload('pdf')}>
-                                        <FileText className="h-4 w-4 mr-2 text-red-600" />
-                                        PDF
+                                    <DropdownMenuItem onClick={() => generateAndDownload('pdf')} className="flex items-center gap-3 py-2.5 font-semibold text-sm cursor-pointer">
+                                        <div className="h-8 w-8 rounded-lg bg-red-50 dark:bg-red-900/30 flex items-center justify-center">
+                                            <FileText className="h-4 w-4 text-red-600 dark:text-red-400" />
+                                        </div>
+                                        PDF Format
                                     </DropdownMenuItem>
                                 </DropdownMenuContent>
                             </DropdownMenu>
+
+                            <Separator orientation="vertical" className="h-6 mx-1" />
+
+                            <Button variant="ghost" size="icon" onClick={onClose} className="h-10 w-10 rounded-xl text-slate-400 hover:text-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800">
+                                <X className="h-5 w-5" />
+                            </Button>
                         </div>
                     </DialogFooter>
-                </DialogContent>
-            </Dialog>
-        </>
+                </div>
+            </DialogContent>
+        </Dialog>
     );
 }

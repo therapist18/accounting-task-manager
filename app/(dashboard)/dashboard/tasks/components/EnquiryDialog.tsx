@@ -399,16 +399,23 @@ export function EnquiryDialog({
         return data || [];
     }, []);
 
+    const isPrincipalIndividual = (ind: any): boolean =>
+        ind.employment_data?.associations?.some((a: any) => a.individual_type === 'Principal') ?? false;
+
     const fetchIndividualsByType = useCallback(async (type: 'principal' | 'dependant') => {
         const { data, error } = await supabase
             .from('registry_individuals')
-            .select('id, full_name, contact_details, individual_type, relationships, employment_data')
-            .eq('individual_type', type)
-            .order('full_name');
+            .select('id, full_name, contact_details, relationships, employment_data')
+            .order('full_name', { ascending: true });
 
         if (error) throw error;
-        setIndividuals(data || []);
-        return data || [];
+        const all = data || [];
+        // Classify via employment_data instead of the non-existent individual_type column
+        const filtered = type === 'principal'
+            ? all.filter(ind => isPrincipalIndividual(ind))
+            : all.filter(ind => !isPrincipalIndividual(ind));
+        setIndividuals(filtered);
+        return filtered;
     }, []);
 
     const fetchUnderstudies = useCallback(async (companyId: string) => {
@@ -941,7 +948,8 @@ export function EnquiryDialog({
         promises.push(
             supabase.from('registry_individuals').select('references').eq('id', ind.id).single()
                 .then(({ data }) => {
-                    const refIds = data?.references?.map(r => r.id).filter(Boolean) || []
+                    // Strip any 'ref_' prefix that may be stored in the references array
+                    const refIds = data?.references?.map((r: any) => String(r.id || '').replace(/^ref_/, '')).filter(Boolean) || []
                     return refIds.length ? supabase.from('registry_individuals').select('id, full_name').in('id', refIds) : { data: [] }
                 })
         )
@@ -952,7 +960,7 @@ export function EnquiryDialog({
             return validIds.length ? supabase.from('acc_portal_company_duplicate').select('id, company_name, understudy').in('id', validIds) : Promise.resolve({ data: [] })
         }
 
-        if (ind.individual_type === 'principal') {
+        if (isPrincipalIndividual(ind)) {
             promises.push(getCompaniesForInd(ind).then(res => ({ type: 'companies', data: res.data })))
             if (ind.relationships?.length) {
                 const familyIds = ind.relationships.map(r => r.individual_id)
@@ -1083,7 +1091,7 @@ export function EnquiryDialog({
 
             const { data, error } = await supabase
                 .from('registry_individuals')
-                .select('id, full_name, contact_details, individual_type, relationships, employment_data')
+                .select('id, full_name, contact_details, relationships, employment_data')
                 .eq('id', individualId)
                 .single();
 

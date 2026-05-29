@@ -2,6 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  html {
+    font-size: 16px;
+  }
+  /* Scale down the layout globally on desktops/laptops to provide a high-density, professional view */
+  @media (min-width: 1024px) {
+    html {
+      font-size: 11px;
+    }
+  }
+}
+
 body {
   font-family: Arial, Helvetica, sans-serif;
 }
