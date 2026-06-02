@@ -7,6 +7,10 @@ import type { Individual } from '../../individuals/database';
 import type { Signatory } from '../hooks/useLetterData';
 import type { IndividualIdInfo } from '../hooks/useIndividualIdentificationNumbers';
 
+function todayStr(): string {
+    return new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
 interface GeneralLetterLayoutProps {
     tab: 'companies' | 'individuals';
     selectedCompany?: Company;
