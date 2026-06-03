@@ -527,6 +527,45 @@ export default function ReportsPage() {
     return latest;
   }, [stages, departments]);
 
+  const getCurrentOfficerStage = useCallback((task: any) => {
+    const applicableStages = [...stages]
+      .filter(stage => isStageApplicableToTask(stage, task, departments))
+      .sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
+
+    return applicableStages.find(stage => {
+      const stageData = task?.stages?.[stage.id];
+      const status = stageData?.status?.toString().toLowerCase();
+      return (
+        stageData &&
+        stage.follow_up?.toLowerCase() === 'officer' &&
+        status !== 'completed' &&
+        status !== 'skipped'
+      );
+    }) || null;
+  }, [stages, departments]);
+
+  const getStageOfficerIds = useCallback((task: any, mode: 'current' | 'history' = 'current') => {
+    const normalizeIds = (ids: any) =>
+      Array.isArray(ids) ? ids.map(id => id?.toString()).filter(Boolean) : [];
+
+    if (mode === 'current') {
+      const currentOfficerStage = getCurrentOfficerStage(task);
+      return normalizeIds(currentOfficerStage ? task?.stages?.[currentOfficerStage.id]?.officer_ids : []);
+    }
+
+    const officerIds = new Set<string>();
+    Object.values(task?.stages || {}).forEach((stageData: any) => {
+      normalizeIds(stageData?.officer_ids).forEach(id => officerIds.add(id));
+    });
+    return Array.from(officerIds);
+  }, [getCurrentOfficerStage]);
+
+  const taskHasStageOfficer = useCallback((task: any, officerIds: string[], mode: 'current' | 'history') => {
+    if (!officerIds.length) return true;
+    const allocatedOfficerIds = getStageOfficerIds(task, mode);
+    return allocatedOfficerIds.some(id => officerIds.includes(id));
+  }, [getStageOfficerIds]);
+
   const tasksByFilters = useMemo(() => {
     return tasks.filter(task => {
       if (activeDeptId && task.department_id?.toString() !== activeDeptId) return false;
@@ -536,19 +575,7 @@ export default function ReportsPage() {
 
       // Officer filtering
       if (effectiveOfficerIds.length > 0) {
-        if (officerFilterMode === 'current') {
-          // Filter by task's officer (from participants_details)
-          const officer = task.officer;
-          if (!officer || !officer.id) return false;
-          const hasOfficer = effectiveOfficerIds.includes(officer.id.toString());
-          if (!hasOfficer) return false;
-        } else {
-          // History mode - filter by task's officer (same as current since officer is task-level)
-          const officer = task.officer;
-          if (!officer || !officer.id) return false;
-          const hasOfficer = effectiveOfficerIds.includes(officer.id.toString());
-          if (!hasOfficer) return false;
-        }
+        if (!taskHasStageOfficer(task, effectiveOfficerIds, officerFilterMode)) return false;
       }
 
       // Task Manager filtering - only applies if current stage's follow_up is BCL
@@ -613,48 +640,58 @@ export default function ReportsPage() {
 
       return true;
     });
-  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, effectiveOfficerIds, officerFilterMode, effectiveTaskManagerIds, taskManagerFilterMode, effectiveClientIds, clientFilterMode, effectiveBCLIds, bclFilterMode, stages]);
+  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, effectiveOfficerIds, officerFilterMode, effectiveTaskManagerIds, taskManagerFilterMode, effectiveClientIds, clientFilterMode, effectiveBCLIds, bclFilterMode, stages, getCurrentStageTracking, taskHasStageOfficer]);
 
-  const allTasksCount = useMemo(() => tasksByFilters.length, [tasksByFilters]);
+  // Dept/subdept/class filter only — used for stable status tab counts (unaffected by officer/TM/BCL tabs)
+  const tasksByDeptFilter = useMemo(() => {
+    return tasks.filter(task => {
+      if (activeDeptId && task.department_id?.toString() !== activeDeptId) return false;
+      if (activeSubDeptId !== 'all' && task.subdepartment_id?.toString() !== activeSubDeptId) return false;
+      if (activeClassId !== 'all' && task.class_id?.toString() !== activeClassId) return false;
+      if (activeSubClassId !== 'all' && task.subclass_id?.toString() !== activeSubClassId) return false;
+      return true;
+    });
+  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId]);
+
+  const allTasksCount = useMemo(() => tasksByDeptFilter.length, [tasksByDeptFilter]);
   const wipTasksCount = useMemo(() => {
-    return tasksByFilters.filter(task => {
+    return tasksByDeptFilter.filter(task => {
       const isWriteUp = task.status === 'write_up_completed';
       const isEndorsed = task.status === 'endorsed';
       const isCancelled = task.status === 'cancel';
       const isCompleted = isWriteUp || isEndorsed || ['completed', 'archived'].includes(task.status);
       return !isCompleted && !isCancelled;
     }).length;
-  }, [tasksByFilters]);
-  const writeUpCompletedCount = useMemo(() => tasksByFilters.filter(t => t.status === 'write_up_completed').length, [tasksByFilters]);
-  const endorsedCount = useMemo(() => tasksByFilters.filter(t => t.status === 'endorsed').length, [tasksByFilters]);
-  const cancelledCount = useMemo(() => tasksByFilters.filter(t => t.status === 'cancel').length, [tasksByFilters]);
+  }, [tasksByDeptFilter]);
+  const writeUpCompletedCount = useMemo(() => tasksByDeptFilter.filter(t => t.status === 'write_up_completed').length, [tasksByDeptFilter]);
+  const endorsedCount = useMemo(() => tasksByDeptFilter.filter(t => t.status === 'endorsed').length, [tasksByDeptFilter]);
+  const cancelledCount = useMemo(() => tasksByDeptFilter.filter(t => t.status === 'cancel').length, [tasksByDeptFilter]);
 
-  // Count tasks per officer based on filter mode
+  // Count tasks per officer — always use 'history' mode so badges show total allocation (not just current stage)
   const officerTaskCounts = useMemo(() => {
     const counts: Record<string, number> = { all: 0 };
     availableOfficers.forEach(officer => {
       counts[officer.id] = 0;
     });
 
-    tasksByFilters.forEach(task => {
+    tasksByDeptFilter.forEach(task => {
       counts.all++;
-      const officer = task.officer;
-      if (officer && officer.id && counts[officer.id.toString()] !== undefined) {
-        counts[officer.id.toString()]++;
-      }
+      getStageOfficerIds(task, 'history').forEach(officerId => {
+        if (counts[officerId] !== undefined) counts[officerId]++;
+      });
     });
 
     return counts;
-  }, [tasksByFilters, availableOfficers]);
+  }, [tasksByDeptFilter, availableOfficers, getStageOfficerIds]);
 
-  // Count tasks per task manager based on filter mode
+  // Count tasks per task manager — use dept filter base so counts remain stable
   const taskManagerTaskCounts = useMemo(() => {
     const counts: Record<string, number> = { all: 0 };
     availableTaskManagers.forEach(tm => {
       counts[tm.id] = 0;
     });
 
-    tasksByFilters.forEach(task => {
+    tasksByDeptFilter.forEach(task => {
       const tracking = getCurrentStageTracking(task);
       if (tracking && tracking.stage.follow_up === 'BCL') {
         counts.all++;
@@ -666,16 +703,16 @@ export default function ReportsPage() {
     });
 
     return counts;
-  }, [tasksByFilters, availableTaskManagers, getCurrentStageTracking]);
+  }, [tasksByDeptFilter, availableTaskManagers, getCurrentStageTracking]);
 
-  // Count tasks per client based on filter mode
+  // Count tasks per client — use dept filter base so counts remain stable
   const clientTaskCounts = useMemo(() => {
     const counts: Record<string, number> = { all: 0 };
     availableClients.forEach(client => {
       counts[client.id] = 0;
     });
 
-    tasksByFilters.forEach(task => {
+    tasksByDeptFilter.forEach(task => {
       counts.all++;
       const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
       if (company && company.name) {
@@ -687,7 +724,7 @@ export default function ReportsPage() {
     });
 
     return counts;
-  }, [tasksByFilters, availableClients]);
+  }, [tasksByDeptFilter, availableClients]);
 
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
@@ -713,19 +750,7 @@ export default function ReportsPage() {
 
       // Officer filtering
       if (effectiveOfficerIds.length > 0) {
-        if (officerFilterMode === 'current') {
-          // Filter by task's officer (from participants_details)
-          const officer = task.officer;
-          if (!officer || !officer.id) return false;
-          const hasOfficer = effectiveOfficerIds.includes(officer.id.toString());
-          if (!hasOfficer) return false;
-        } else {
-          // History mode - filter by task's officer (same as current since officer is task-level)
-          const officer = task.officer;
-          if (!officer || !officer.id) return false;
-          const hasOfficer = effectiveOfficerIds.includes(officer.id.toString());
-          if (!hasOfficer) return false;
-        }
+        if (!taskHasStageOfficer(task, effectiveOfficerIds, officerFilterMode)) return false;
       }
 
       // Task Manager filtering - only applies if current stage's follow_up is BCL
@@ -789,7 +814,7 @@ export default function ReportsPage() {
 
       return true;
     });
-  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, activeStatus, effectiveOfficerIds, officerFilterMode, effectiveTaskManagerIds, taskManagerFilterMode, effectiveClientIds, clientFilterMode, effectiveBCLIds, bclFilterMode, stages, getCurrentStageTracking]);
+  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, activeStatus, effectiveOfficerIds, officerFilterMode, effectiveTaskManagerIds, taskManagerFilterMode, effectiveClientIds, clientFilterMode, effectiveBCLIds, bclFilterMode, stages, getCurrentStageTracking, taskHasStageOfficer]);
 
   const searchedTasks = useMemo(() => {
     if (!searchQuery) return filteredTasks;
@@ -1469,7 +1494,8 @@ export default function ReportsPage() {
         (t: any) => renderImmigrationStatusCell(t, getEnhancedImmigrationStatusWrapper, new Set(), () => { }),
         (t: any) => renderCurrentStageStatusCell(t, getCurrentStageStatusWrapper),
         () => { }, () => { }, () => { },
-        unifiedOfficers
+        unifiedOfficers,
+        stages
       );
     }
 
@@ -1514,22 +1540,13 @@ export default function ReportsPage() {
     }
 
     if (col.type === 'current_stage_officer') {
-      const applicableStages = [...stages]
-        .filter(stage => checkStageApplicableForTask(stage, task))
-        .sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-
-      const currentStage = applicableStages.find(stage => {
-        const stageData = task.stages?.[stage.id];
-        return stageData && stageData.status !== 'completed' && stageData.status !== 'skipped';
-      });
+      const currentStage = getCurrentOfficerStage(task);
 
       if (!currentStage) {
         return <span className="text-sm text-slate-400">—</span>;
       }
 
-      const stageData = task.stages?.[currentStage.id];
-      const officerIds = stageData?.officer_ids || [];
-
+      const officerIds = getStageOfficerIds(task, 'current');
 
       if (!officerIds || officerIds.length === 0) {
         return <span className="text-sm text-slate-400 italic">None assigned</span>;
@@ -1556,8 +1573,9 @@ export default function ReportsPage() {
     }
 
     if (col.type === 'stage_officers') {
-      const stageData = task.stages?.[col.stageId];
-      const officerIds = stageData?.officer_ids || [];
+      const officerIds = Array.isArray(task.stages?.[col.stageId]?.officer_ids)
+        ? task.stages[col.stageId].officer_ids.map((id: any) => id?.toString()).filter(Boolean)
+        : [];
 
       if (!officerIds || officerIds.length === 0) {
         return <span className="text-sm text-slate-400 italic">None assigned</span>;
@@ -1589,7 +1607,7 @@ export default function ReportsPage() {
     enhancedTasksData, taskDependants, showTimeStatuses,
     checkStageApplicableForTask, isDocumentApplicable, getDocumentForTaskStage,
     getStaffName, getTaskHierarchy, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper,
-    getCurrentStageTracking, getTaskInitiatedDate, unifiedOfficers
+    getCurrentStageTracking, getTaskInitiatedDate, getCurrentOfficerStage, getStageOfficerIds, unifiedOfficers
   ]);
 
   const getExportCellValue = useCallback((task: any, col: any): string => {
@@ -1610,6 +1628,26 @@ export default function ReportsPage() {
       const elapsedMinutes = getElapsedMinutes(initiatedAt);
       if (!initiatedAt || elapsedMinutes == null) return '-';
       return `${formatDuration(elapsedMinutes)} (since ${formatDateTimeForDisplay(initiatedAt)})`;
+    }
+
+    if (col.type === 'current_stage_officer') {
+      const officerIds = getStageOfficerIds(task, 'current');
+      if (!officerIds.length) return 'None assigned';
+      return officerIds.map((id: string) => {
+        const officer = unifiedOfficers.find((o: any) => o.id.toString() === id.toString());
+        return officer ? getOfficerDisplayName(officer) : 'Unknown';
+      }).join(', ');
+    }
+
+    if (col.type === 'stage_officers') {
+      const officerIds = Array.isArray(task.stages?.[col.stageId]?.officer_ids)
+        ? task.stages[col.stageId].officer_ids.map((id: any) => id?.toString()).filter(Boolean)
+        : [];
+      if (!officerIds.length) return 'None assigned';
+      return officerIds.map((id: string) => {
+        const officer = unifiedOfficers.find((o: any) => o.id.toString() === id.toString());
+        return officer ? getOfficerDisplayName(officer) : 'Unknown';
+      }).join(', ');
     }
 
     if (col.type === 'stage_date') {
@@ -1659,7 +1697,7 @@ export default function ReportsPage() {
       return (col.fieldType === 'Date' || col.fieldType === 'date') ? formatDateForDisplay(foundValue) : String(foundValue || '-');
     }
     return '';
-  }, [departments, stages, kycDocuments, companies, enhancedTasksData, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, checkStageApplicableForTask, isDocumentApplicable, getDocumentForTaskStage, getCurrentStageTracking, getTaskInitiatedDate]);
+  }, [departments, stages, kycDocuments, companies, enhancedTasksData, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, checkStageApplicableForTask, isDocumentApplicable, getDocumentForTaskStage, getCurrentStageTracking, getTaskInitiatedDate, getStageOfficerIds, unifiedOfficers]);
 
   const handleExport = async (type: 'excel' | 'pdf') => {
     if (type !== 'excel') {

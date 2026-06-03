@@ -981,7 +981,7 @@ export const getCellContent = (
     cancellation_reason: task.cancellation_details?.reason || 'N/A',
     cancellation_date: task.cancellation_details?.cancelled_at ? format(new Date(task.cancellation_details.cancelled_at), 'dd MMM yyyy HH:mm') : 'N/A',
     cancelled_by: task.participants_details?.cancelled_by || 'N/A',
-    officer: getStaffFromParticipants(task, 'officer', getStaffName, departments, officers) || 'Unallocated'
+    // officer is intentionally NOT in simpleCellMap — handled in complexCellMap using stages JSON
   };
 
   if (headerId in simpleCellMap) return simpleCellMap[headerId];
