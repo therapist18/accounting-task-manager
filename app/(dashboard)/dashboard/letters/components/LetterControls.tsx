@@ -12,6 +12,8 @@ import type { Signatory } from '../hooks/useLetterData';
 import type { Letterhead } from '../hooks/useLetterheads';
 import type { IndividualIdInfo } from '../hooks/useIndividualIdentificationNumbers';
 import { SignatureUploadDialog } from './SignatureUploadDialog';
+import { Palette, Eraser, RotateCcw } from "lucide-react";
+import type { LetterTheme } from './GeneralLetterLayout';
 
 const VALEDICTIONS = ['Yours faithfully,', 'Yours sincerely,', 'Kind regards,', 'Respectfully yours,'];
 
@@ -43,37 +45,13 @@ interface LetterControlsProps {
     setSelectedLetterheadId?: (id: string) => void;
     onSignatureUpload?: (signatoryId: string, file: File) => Promise<void>;
     individualIdInfo?: IndividualIdInfo | null;
+    theme?: LetterTheme;
+    onThemeChange?: (theme: LetterTheme) => void;
+    onClearAll?: () => void;
+    onReset?: () => void;
 }
 
-export function LetterControls({
-    tab,
-    letterType,
-    setLetterType,
-    phone,
-    setPhone,
-    email,
-    setEmail,
-    kra_pin,
-    setKraPin,
-    recipient,
-    setRecipient,
-    subject,
-    setSubject,
-    valediction,
-    setValediction,
-    availableSignatories,
-    signatoryId,
-    setSignatoryId,
-    activeSignatory,
-    useLetterhead,
-    setUseLetterhead,
-    hasLetterhead,
-    availableLetterheads = [],
-    selectedLetterheadId,
-    setSelectedLetterheadId,
-    onSignatureUpload,
-    individualIdInfo
-}: LetterControlsProps) {
+export function LetterControls({ tab, letterType, setLetterType, phone, setPhone, email, setEmail, kra_pin, setKraPin, recipient, setRecipient, subject, setSubject, valediction, setValediction, availableSignatories, signatoryId, setSignatoryId, activeSignatory, useLetterhead, setUseLetterhead, hasLetterhead, availableLetterheads = [], selectedLetterheadId, setSelectedLetterheadId, onSignatureUpload, individualIdInfo, theme = 'dark-teal', onThemeChange, onClearAll, onReset }: LetterControlsProps) {
     const [showSignatureUpload, setShowSignatureUpload] = useState(false);
 
     const handleSignatureUpload = async (file: File) => {
@@ -119,66 +97,119 @@ export function LetterControls({
                     </Card>
 
                     {letterType === 'general' && (
-                        <Card className="border-purple-100 shadow-sm overflow-hidden ring-1 ring-purple-50">
-                            <CardHeader className="bg-purple-50/50 py-3 px-4 border-b border-purple-100">
-                                <CardTitle className="text-[10px] font-black text-purple-700 uppercase tracking-widest flex items-center gap-2">
-                                    <Image size={12} /> Letterhead Options
-                                </CardTitle>
-                            </CardHeader>
-                            <CardContent className="p-4 space-y-3">
-                                <div className="flex items-center justify-between">
-                                    <Label className="text-xs font-bold text-slate-700">Use Uploaded Letterhead</Label>
-                                    <button
-                                        onClick={() => setUseLetterhead(!useLetterhead)}
-                                        disabled={!hasLetterhead}
-                                        className={cn(
-                                            "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
-                                            useLetterhead ? "bg-purple-600" : "bg-slate-200",
-                                            !hasLetterhead && "opacity-50 cursor-not-allowed"
-                                        )}
-                                    >
-                                        <span
-                                            className={cn(
-                                                "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
-                                                useLetterhead ? "translate-x-6" : "translate-x-1"
-                                            )}
-                                        />
-                                    </button>
-                                </div>
+                        <>
+                            <Card className="border-violet-100 shadow-sm overflow-hidden ring-1 ring-violet-50">
+                                <CardHeader className="bg-violet-50/50 py-3 px-4 border-b border-violet-100">
+                                    <CardTitle className="text-[10px] font-black text-violet-700 uppercase tracking-widest flex items-center gap-2">
+                                        <Palette size={12} /> Theme Style
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent className="p-4 space-y-4">
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {([
+                                            { id: 'dark-teal', label: 'Dark Teal', swatch: 'bg-slate-900 border-l-4 border-l-teal-400' },
+                                            { id: 'corporate-blue', label: 'Corporate', swatch: 'bg-white border border-slate-200 border-b-4 border-b-blue-700' },
+                                            { id: 'bold-violet', label: 'Bold Violet', swatch: 'bg-gradient-to-r from-violet-700 to-indigo-600' },
+                                            { id: 'classic-serif', label: 'Classic Serif', swatch: 'bg-white border border-stone-200 border-t-2 border-t-stone-900' },
+                                        ] as { id: LetterTheme; label: string; swatch: string }[]).map(t => (
+                                            <button
+                                                key={t.id}
+                                                onClick={() => onThemeChange?.(t.id)}
+                                                className={cn(
+                                                    "flex flex-col items-center gap-2 p-2.5 rounded-lg border transition-all",
+                                                    theme === t.id
+                                                        ? "border-violet-500 bg-violet-50 shadow-sm"
+                                                        : "border-slate-200 hover:border-slate-300 bg-white"
+                                                )}
+                                            >
+                                                <div className={cn("w-full h-7 rounded-md", t.swatch)} />
+                                                <span className={cn(
+                                                    "text-[10px] font-bold uppercase tracking-wide",
+                                                    theme === t.id ? "text-violet-700" : "text-slate-500"
+                                                )}>{t.label}</span>
+                                            </button>
+                                        ))}
+                                    </div>
 
-                                {availableLetterheads.length > 0 && useLetterhead && setSelectedLetterheadId && (
-                                    <div className="space-y-1.5">
-                                        <Label className="text-[10px] font-black uppercase text-slate-400">Select Letterhead</Label>
-                                        <Select
-                                            value={selectedLetterheadId}
-                                            onValueChange={setSelectedLetterheadId}
+                                    {/* Clear / Reset actions */}
+                                    <div className="pt-1 flex gap-2">
+                                        <button
+                                            onClick={onClearAll}
+                                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border border-red-200 bg-red-50 text-[10px] font-black uppercase text-red-600 hover:bg-red-100 transition-colors"
                                         >
-                                            <SelectTrigger className="h-9 text-xs">
-                                                <SelectValue placeholder="Choose letterhead template" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {availableLetterheads.map(letterhead => (
-                                                    <SelectItem key={letterhead.id} value={letterhead.id}>
-                                                        {letterhead.name} {letterhead.is_default && '(Default)'}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
+                                            <Eraser size={11} /> Clear All
+                                        </button>
+                                        <button
+                                            onClick={onReset}
+                                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-[10px] font-black uppercase text-emerald-700 hover:bg-emerald-100 transition-colors"
+                                        >
+                                            <RotateCcw size={11} /> Reset
+                                        </button>
                                     </div>
-                                )}
+                                </CardContent>
+                            </Card>
 
-                                {!hasLetterhead && (
-                                    <p className="text-[10px] text-amber-600 bg-amber-50 p-2 rounded border border-amber-200">
-                                        No letterhead uploaded for this company
-                                    </p>
-                                )}
-                                {hasLetterhead && useLetterhead && (
-                                    <div className="flex items-center gap-2 text-[10px] font-bold text-purple-600 bg-purple-50 p-2 rounded border border-purple-100 uppercase">
-                                        <Check size={12} /> Using Company Letterhead
+                            <Card className="border-purple-100 shadow-sm overflow-hidden ring-1 ring-purple-50">
+                                <CardHeader className="bg-purple-50/50 py-3 px-4 border-b border-purple-100">
+                                    <CardTitle className="text-[10px] font-black text-purple-700 uppercase tracking-widest flex items-center gap-2">
+                                        <Image size={12} /> Letterhead Options
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent className="p-4 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <Label className="text-xs font-bold text-slate-700">Use Uploaded Letterhead</Label>
+                                        <button
+                                            onClick={() => setUseLetterhead(!useLetterhead)}
+                                            disabled={!hasLetterhead}
+                                            className={cn(
+                                                "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
+                                                useLetterhead ? "bg-purple-600" : "bg-slate-200",
+                                                !hasLetterhead && "opacity-50 cursor-not-allowed"
+                                            )}
+                                        >
+                                            <span
+                                                className={cn(
+                                                    "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                                                    useLetterhead ? "translate-x-6" : "translate-x-1"
+                                                )}
+                                            />
+                                        </button>
                                     </div>
-                                )}
-                            </CardContent>
-                        </Card>
+
+                                    {availableLetterheads.length > 0 && useLetterhead && setSelectedLetterheadId && (
+                                        <div className="space-y-1.5">
+                                            <Label className="text-[10px] font-black uppercase text-slate-400">Select Letterhead</Label>
+                                            <Select
+                                                value={selectedLetterheadId}
+                                                onValueChange={setSelectedLetterheadId}
+                                            >
+                                                <SelectTrigger className="h-9 text-xs">
+                                                    <SelectValue placeholder="Choose letterhead template" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {availableLetterheads.map(letterhead => (
+                                                        <SelectItem key={letterhead.id} value={letterhead.id}>
+                                                            {letterhead.name} {letterhead.is_default && '(Default)'}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    )}
+
+                                    {!hasLetterhead && (
+                                        <p className="text-[10px] text-amber-600 bg-amber-50 p-2 rounded border border-amber-200">
+                                            No letterhead uploaded for this company
+                                        </p>
+                                    )}
+                                    {hasLetterhead && useLetterhead && (
+                                        <div className="flex items-center gap-2 text-[10px] font-bold text-purple-600 bg-purple-50 p-2 rounded border border-purple-100 uppercase">
+                                            <Check size={12} /> Using Company Letterhead
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        </>
                     )}
 
                     <Card className="border-slate-100 shadow-sm overflow-hidden">

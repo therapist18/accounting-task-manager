@@ -4,6 +4,7 @@ import type { Company } from '../../companies/database';
 import type { Individual } from '../../individuals/database';
 import type { Signatory } from '../hooks/useLetterData';
 import type { IndividualIdInfo } from '../hooks/useIndividualIdentificationNumbers';
+import { getBclContactDetails, resolveCompanyKraEmail, resolveCompanyKraPin, resolveIndividualEmail, resolveIndividualKraPin } from '../utils/contactDetails';
 
 interface KRALetterLayoutProps {
     tab: 'companies' | 'individuals';
@@ -18,6 +19,7 @@ interface KRALetterLayoutProps {
     valediction: string;
     activeSignatory?: Signatory;
     individualIdInfo?: IndividualIdInfo | null;
+    kraPin?: string;
 }
 
 export function KRALetterLayout({
@@ -32,8 +34,17 @@ export function KRALetterLayout({
     subject,
     valediction,
     activeSignatory,
-    individualIdInfo
+    individualIdInfo,
+    kraPin: kraPinProp = ''
 }: KRALetterLayoutProps) {
+    const bclContact = getBclContactDetails();
+    const displayEmail = tab === 'companies'
+        ? resolveCompanyKraEmail(selectedCompany, email)
+        : resolveIndividualEmail(selectedIndividual, email);
+    const kraPin = tab === 'companies'
+        ? resolveCompanyKraPin(selectedCompany, kraPinProp)
+        : resolveIndividualKraPin(selectedIndividual, kraPinProp);
+
     return (
         <div className="text-[14px] text-slate-800 leading-relaxed">
             <div className="border-b-[3px] border-slate-900 pb-10 mb-6 text-center">
@@ -43,13 +54,12 @@ export function KRALetterLayout({
                 <div className="text-[11px] font-bold text-slate-700 space-y-2 uppercase tracking-wider leading-relaxed">
                     <p className="flex justify-center gap-6">
                         <span className="flex items-center gap-1">
-                            EMAIL: {tab === 'companies'
-                                ? (selectedCompany?.kra_email_address || email || '')
-                                : (email || '')}
+                            EMAIL: {displayEmail}
                         </span>
-                        <span className="flex items-center gap-1">MOBILE NO: {phone || ''}</span>
+                        <span className="flex items-center gap-1">MOBILE NO: {bclContact.phone}</span>
                     </p>
-                    <p>P.O. BOX 12345 - 00100, NAIROBI, KENYA</p>
+                    <p>{bclContact.address.toUpperCase()}</p>
+                    {kraPin && <p>KRA PIN: {kraPin}</p>}
                 </div>
             </div>
 

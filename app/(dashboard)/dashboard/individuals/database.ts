@@ -3,6 +3,8 @@ import { supabase } from "@/lib/supabase/client"
 export type Individual = {
   id: string | number;
   full_name: string;
+  kra_pin?: string;
+  contact_details?: any;
   employment_data?: {
     associations?: Array<{
       company_id?: string | number;
@@ -21,6 +23,8 @@ export async function fetchIndividuals(): Promise<Individual[]> {
       .select(`
         id,
         full_name,
+        kra_pin,
+        contact_details,
         employment_data
             `)
       .order('full_name', { ascending: true })
@@ -34,6 +38,8 @@ export async function fetchIndividuals(): Promise<Individual[]> {
     const individuals: Individual[] = (data || []).map((individual: any) => ({
       id: individual.id,
       full_name: individual.full_name || 'Unnamed Individual',
+      kra_pin: individual.kra_pin,
+      contact_details: individual.contact_details,
       employment_data: individual.employment_data || {},
       default_display: false, // Default value
       order: 0 // Default value
@@ -53,6 +59,8 @@ export async function fetchIndividualById(id: string | number): Promise<Individu
       .select(`
         id,
         full_name,
+        kra_pin,
+        contact_details,
         employment_data
             `)
       .eq('id', id)
@@ -69,6 +77,8 @@ export async function fetchIndividualById(id: string | number): Promise<Individu
     const individual: Individual = {
       id: data.id,
       full_name: data.full_name || 'Unnamed Individual',
+      kra_pin: data.kra_pin,
+      contact_details: data.contact_details,
       employment_data: data.employment_data || {},
       default_display: false, // Default value
       order: 0 // Default value
@@ -88,6 +98,8 @@ export async function searchIndividuals(query: string): Promise<Individual[]> {
       .select(`
         id,
         full_name,
+        kra_pin,
+        contact_details,
         employment_data
             `)
       .or(`full_name.ilike.%${query}%`)
@@ -102,6 +114,8 @@ export async function searchIndividuals(query: string): Promise<Individual[]> {
     const individuals: Individual[] = (data || []).map((individual: any) => ({
       id: individual.id,
       full_name: individual.full_name || 'Unnamed Individual',
+      kra_pin: individual.kra_pin,
+      contact_details: individual.contact_details,
       employment_data: individual.employment_data || {},
       default_display: false, // Default value
       order: 0 // Default value

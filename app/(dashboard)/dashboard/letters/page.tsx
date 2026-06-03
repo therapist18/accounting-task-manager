@@ -18,7 +18,7 @@ import { useLetterData } from './hooks/useLetterData';
 import { useLetterheadData } from './hooks/useLetterheadData';
 import { useLetterheads } from './hooks/useLetterheads';
 import { KRALetterLayout } from './components/KRALetterLayout';
-import { GeneralLetterLayout } from './components/GeneralLetterLayout';
+import { GeneralLetterLayout, LetterTheme } from './components/GeneralLetterLayout';
 import { LetterControls } from './components/LetterControls';
 import { generateLetterWithLetterhead, downloadBlob } from './utils/letterheadMerge';
 import * as mammoth from 'mammoth';
@@ -27,6 +27,16 @@ import { useSignatureUploadHandler } from './components/SignatureUploadHandler';
 import { exportToWord } from './utils/exportToWord';
 import { useIndividualIdentificationNumbers, resolveIndividualId } from './hooks/useIndividualIdentificationNumbers';
 import type { IndividualIdInfo } from './hooks/useIndividualIdentificationNumbers';
+import {
+    getBclContactDetails,
+    resolveCompanyGeneralEmail,
+    resolveCompanyKraEmail,
+    resolveCompanyKraPin,
+    resolveCompanyPhone,
+    resolveIndividualEmail,
+    resolveIndividualKraPin,
+    resolveIndividualPhone,
+} from './utils/contactDetails';
 
 const todayStr = () => {
     const date = new Date();
@@ -71,45 +81,38 @@ export default function LetterGenerationModule() {
     const { companies, individuals, availableSignatories, refreshIndividuals, refreshSignatures } = useLetterData(tab, companyId);
     const { headerUrl, footerUrl, hasLetterhead } = useLetterheadData(companyId);
     const { letterheads, loading: letterheadsLoading, getDefaultLetterhead } = useLetterheads(tab === 'companies' && companyId ? parseInt(companyId) : undefined);
-    const { handleSignatureUpload: handleSignatureUploadHook } = useSignatureUploadHandler({
-        refreshIndividuals,
-        refreshSignatures
-    });
+    const { handleSignatureUpload: handleSignatureUploadHook } = useSignatureUploadHandler({ refreshIndividuals, refreshSignatures });
     const selectedCompany = useMemo(() => companies.find(c => c.id.toString() === companyId), [companies, companyId]);
     const selectedIndividual = useMemo(() => individuals.find(i => i.id.toString() === individualId), [individuals, individualId]);
     const activeSignatory = availableSignatories.find(s => s.id.toString() === signatoryId.toString());
     const isReady = tab === 'companies' ? !!selectedCompany : !!selectedIndividual;
-
     const individualIds = useMemo(() => individuals.map(i => i.id), [individuals]);
     const { identificationNumbers } = useIndividualIdentificationNumbers(individualIds);
     const individualIdInfo: IndividualIdInfo | null = useMemo(
         () => selectedIndividual ? resolveIndividualId(identificationNumbers[selectedIndividual.id]) : null,
         [selectedIndividual, identificationNumbers]
     );
+    const [letterTheme, setLetterTheme] = useState<LetterTheme>('dark-teal');
+    const [isLetterCleared, setIsLetterCleared] = useState(false);
+    const bclContact = getBclContactDetails();
 
     useEffect(() => {
         if (selectedCompany) {
             if (letterType === 'kra') {
-                const kraEmail = selectedCompany.kra_email_address || selectedCompany.contact_details?.email || '';
+                const kraEmail = resolveCompanyKraEmail(selectedCompany);
                 setEmail(kraEmail);
-                setPhone('+254700298298');
+                setPhone(bclContact.phone);
                 setRecipient("Kenya Revenue Authority,\nP.O. Box 48240 - 00100,\nNairobi, Kenya.");
                 // Add KRA PIN to subject if available
-                const kraPin = selectedCompany.kra_pin || selectedCompany.registration_number || '';
+                const kraPin = resolveCompanyKraPin(selectedCompany);
                 const subjectWithPin = kraPin
                     ? `APPLICATION FOR TAX COMPLIANCE CERTIFICATE (KRA PIN: ${kraPin})`
                     : "APPLICATION FOR TAX COMPLIANCE CERTIFICATE";
                 setSubject(subjectWithPin);
                 setKraPin(kraPin);
             } else {
-                const companyEmail = selectedCompany.contact_details?.email || '';
-                const companyPhone = selectedCompany.phone
-                    || selectedCompany.office_phone
-                    || selectedCompany.contact_details?.office_phone
-                    || selectedCompany.contact_details?.phone
-                    || selectedCompany.contact_details?.mobile
-                    || selectedCompany.contact_details?.telephone
-                    || '+254700000000';
+                const companyEmail = resolveCompanyGeneralEmail(selectedCompany);
+                const companyPhone = resolveCompanyPhone(selectedCompany, '+254700000000');
                 setEmail(companyEmail);
                 setPhone(companyPhone);
                 setRecipient("Select Bank Ltd,\nIndustrial Area Branch,\nNairobi.");
@@ -121,29 +124,32 @@ export default function LetterGenerationModule() {
                 setSubject(subjectWithReg);
             }
             setReference(selectedCompany.registration_number || '');
-            setKraPin(selectedCompany.kra_pin || '');
         }
-    }, [selectedCompany, letterType]);
+    }, [selectedCompany, letterType, bclContact.phone]);
 
     useEffect(() => {
         if (selectedIndividual) {
             const idInfo = resolveIndividualId(identificationNumbers[selectedIndividual.id]);
             const idSuffix = idInfo ? ` (${idInfo.label}: ${idInfo.value})` : '';
+            const individualKraPin = resolveIndividualKraPin(selectedIndividual);
+            const kraSuffix = individualKraPin ? ` (KRA PIN: ${individualKraPin})` : idSuffix;
 
             if (letterType === 'kra') {
-                setEmail(selectedIndividual.contact_details?.email || '');
-                setPhone(selectedIndividual.contact_details?.phone || '+254700298298');
+                setEmail(resolveIndividualEmail(selectedIndividual));
+                setPhone(bclContact.phone);
                 setRecipient("Kenya Revenue Authority,\nP.O. Box 48240 - 00100,\nNairobi, Kenya.");
-                setSubject(`APPLICATION FOR TAX COMPLIANCE CERTIFICATE${idSuffix}`);
+                setSubject(`APPLICATION FOR TAX COMPLIANCE CERTIFICATE${kraSuffix}`);
+                setKraPin(individualKraPin);
             } else {
-                setEmail(selectedIndividual.contact_details?.email || '');
-                setPhone(selectedIndividual.contact_details?.phone || '+254700000000');
+                setEmail(resolveIndividualEmail(selectedIndividual));
+                setPhone(resolveIndividualPhone(selectedIndividual, '+254700000000'));
                 setRecipient("Select Bank Ltd,\nIndustrial Area Branch,\nNairobi.");
                 setSubject(`REQUEST FOR BANK STATEMENT${idSuffix}`);
                 setReference('');
+                setKraPin(individualKraPin);
             }
         }
-    }, [selectedIndividual, letterType, identificationNumbers]);
+    }, [selectedIndividual, letterType, identificationNumbers, bclContact.phone]);
 
     useEffect(() => {
         if (availableSignatories.length > 0) {
@@ -235,55 +241,17 @@ export default function LetterGenerationModule() {
 
         if (shouldUseFallbackHeader) {
             const entityName = tab === 'companies' ? selectedCompany?.company_name : selectedIndividual?.full_name;
-            const displayEmail = tab === 'companies' ? (selectedCompany?.kra_email_address || email) : email;
-
-            // 1. Draw Manual PDF Header
-            pdf.setTextColor(15, 23, 42); // Slate 900
-            if (letterType === 'kra') {
-                pdf.setFontSize(18);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text(entityName?.toUpperCase() || '', pdfWidth / 2, 25, { align: 'center' });
-                pdf.setFontSize(10);
-                pdf.setFont('helvetica', 'normal');
-                pdf.text(`EMAIL: ${displayEmail}    MOBILE NO: ${phone}`, pdfWidth / 2, 32, { align: 'center' });
-                pdf.text('P.O. BOX 12345 - 00100, NAIROBI, KENYA', pdfWidth / 2, 38, { align: 'center' });
-                pdf.setLineWidth(0.8);
-                pdf.line(20, 45, pdfWidth - 20, 45); // Thick KRA Line
-                var contentStart = 55;
-            } else {
-                pdf.setFontSize(16);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text(entityName?.toUpperCase() || '', 20, 25);
-                pdf.setFontSize(9);
-                pdf.setTextColor(37, 99, 235); // Blue 600
-                pdf.text(`Ref: ${reference}`, 20, 31);
-                pdf.setTextColor(100, 116, 139); // Slate 500
-                pdf.text('P.O. BOX 12345 - 00100', pdfWidth - 20, 25, { align: 'right' });
-                pdf.text('NAIROBI, KENYA', pdfWidth - 20, 30, { align: 'right' });
-                pdf.text(`TEL: ${phone}`, pdfWidth - 20, 35, { align: 'right' });
-                pdf.setLineWidth(0.3);
-                pdf.setDrawColor(226, 232, 240);
-                pdf.line(20, 42, pdfWidth - 20, 42); // Thin General Line
-                var contentStart = 50;
-            }
-
-            // 2. Capture Content (Body & Signature)
             const canvas = await html2canvas(paperRef.current, {
-                scale: 4, // Higher scale for crisp text
+                scale: 4,
                 useCORS: true,
                 backgroundColor: '#ffffff',
-                ignoreElements: (el) => {
-                    // Ignore the UI header (which we just drew manually)
-                    return el.classList.contains('border-b-2') || el.classList.contains('border-b-[3px]');
-                }
             });
 
             const imgData = canvas.toDataURL('image/png');
-            const imgWidth = pdfWidth - 40; // 20mm margin on each side
+            const imgWidth = pdfWidth;
             const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
-            // Add body image exactly at the contentStart coordinate
-            pdf.addImage(imgData, 'PNG', 20, contentStart, imgWidth, imgHeight);
+            pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
         } else {
             // Handle full-image letterhead capture
             const canvas = await html2canvas(paperRef.current, { scale: 4, useCORS: true });
@@ -324,6 +292,8 @@ export default function LetterGenerationModule() {
             generateLetterWithLetterhead,
             downloadBlob,
             individualIdInfo,
+            kraPin: kra_pin,
+            theme: letterTheme,
         });
     };
 
@@ -428,6 +398,7 @@ export default function LetterGenerationModule() {
                                                             valediction={valediction}
                                                             activeSignatory={activeSignatory}
                                                             individualIdInfo={individualIdInfo}
+                                                            kraPin={kra_pin}
                                                         />
                                                     ) : (
                                                         <GeneralLetterLayout
@@ -448,6 +419,9 @@ export default function LetterGenerationModule() {
                                                             footerUrl={footerUrl}
                                                             headerImageUrl={headerImageUrl}
                                                             footerImageUrl={footerImageUrl}
+                                                            theme={letterTheme}
+                                                            isCleared={isLetterCleared}
+                                                            kraPin={kra_pin}
                                                         />
                                                     )}
                                                 </div>
@@ -500,6 +474,10 @@ export default function LetterGenerationModule() {
                                     setSelectedLetterheadId={setSelectedLetterheadId}
                                     onSignatureUpload={handleSignatureUploadHook}
                                     individualIdInfo={individualIdInfo}
+                                    theme={letterTheme}
+                                    onThemeChange={(t) => setLetterTheme(t)}
+                                    onClearAll={() => setIsLetterCleared(true)}
+                                    onReset={() => setIsLetterCleared(false)}
                                 />
                             </ResizablePanel>
                         </ResizablePanelGroup>

@@ -2,6 +2,17 @@
 
 import { Document, Packer, Paragraph, TextRun, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, ImageRun, UnderlineType, Header, Footer, } from 'docx';
 import { saveAs } from 'file-saver';
+import type { LetterTheme } from '../components/GeneralLetterLayout';
+import {
+    getBclContactDetails,
+    resolveCompanyGeneralEmail,
+    resolveCompanyKraEmail,
+    resolveCompanyKraPin,
+    resolveCompanyPhone,
+    resolveIndividualEmail,
+    resolveIndividualKraPin,
+    resolveIndividualPhone,
+} from './contactDetails';
 
 interface Signatory {
     id: string | number;
@@ -14,13 +25,15 @@ interface Signatory {
 interface Company {
     company_name?: string;
     registration_number?: string;
+    kra_pin?: string;
     kra_email_address?: string;
-    contact_details?: { email?: string; phone?: string };
+    contact_details?: any;
 }
 
 interface Individual {
     full_name?: string;
-    contact_details?: { email?: string; phone?: string };
+    kra_pin?: string;
+    contact_details?: any;
 }
 
 interface IndividualIdInfo {
@@ -56,6 +69,8 @@ export interface ExportOptions {
     generateLetterWithLetterhead?: (filePath: string, content: object) => Promise<Blob | null>;
     downloadBlob?: (blob: Blob, filename: string) => void;
     individualIdInfo?: IndividualIdInfo | null;
+    kraPin?: string;
+    theme?: LetterTheme;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -68,7 +83,13 @@ const CONTENT_WIDTH = PAGE_WIDTH - SIDE_MARGIN * 2; // 9346 DXA
 const SLATE_900 = '0F172A';
 const SLATE_700 = '334155';
 const SLATE_500 = '64748B';
+const SLATE_200 = 'E2E8F0';
+const TEAL_400 = '2DD4BF';
 const BLUE_600 = '2563EB';
+const VIOLET_700 = '6D28D9';
+const INDIGO_600 = '4F46E5';
+const STONE_900 = '1C1917';
+const STONE_500 = '78716C';
 const FONT = 'Times New Roman';
 
 // ─── Image helpers ────────────────────────────────────────────────────────────
@@ -119,13 +140,14 @@ const noBorderSet = () => {
 // ─── KRA Word Header section ──────────────────────────────────────────────────
 function buildKRAWordHeader(opts: ExportOptions): Header {
     const { tab, selectedCompany, selectedIndividual, email, phone } = opts;
+    const bclContact = getBclContactDetails();
     const entityName = tab === 'companies'
         ? (selectedCompany?.company_name ?? '')
         : (selectedIndividual?.full_name ?? '');
 
     const displayEmail = tab === 'companies'
-        ? (selectedCompany?.kra_email_address ?? email ?? '')
-        : (email ?? '');
+        ? resolveCompanyKraEmail(selectedCompany, email)
+        : resolveIndividualEmail(selectedIndividual, email);
 
     return new Header({
         children: [
@@ -139,7 +161,7 @@ function buildKRAWordHeader(opts: ExportOptions): Header {
             new Paragraph({
                 alignment: AlignmentType.CENTER,
                 children: [new TextRun({
-                    text: `EMAIL: ${displayEmail}    MOBILE NO: ${phone}`,
+                    text: `EMAIL: ${displayEmail}    MOBILE NO: ${bclContact.phone || phone}`,
                     font: FONT, size: 22, bold: true, color: SLATE_700,
                 })],
             }),
@@ -147,7 +169,7 @@ function buildKRAWordHeader(opts: ExportOptions): Header {
                 alignment: AlignmentType.CENTER,
                 spacing: { after: 120 },
                 children: [new TextRun({
-                    text: 'P.O. BOX 12345 - 00100, NAIROBI, KENYA',
+                    text: bclContact.address.toUpperCase(),
                     font: FONT, size: 22, bold: true, color: SLATE_700,
                 })],
             }),
@@ -162,10 +184,25 @@ function buildKRAWordHeader(opts: ExportOptions): Header {
 
 // ─── General Word Header section ──────────────────────────────────────────────
 function buildGeneralWordHeader(opts: ExportOptions): Header {
-    const { tab, selectedCompany, selectedIndividual, email, phone, reference } = opts;
+    const { tab, selectedCompany, selectedIndividual, email, phone, reference, theme = 'corporate-blue' } = opts;
+    const bclContact = getBclContactDetails();
     const entityName = tab === 'companies'
         ? (selectedCompany?.company_name ?? '')
         : (selectedIndividual?.full_name ?? '');
+    const resolvedEmail = tab === 'companies'
+        ? resolveCompanyGeneralEmail(selectedCompany, email)
+        : resolveIndividualEmail(selectedIndividual, email);
+    const resolvedPhone = tab === 'companies'
+        ? resolveCompanyPhone(selectedCompany, phone)
+        : resolveIndividualPhone(selectedIndividual, phone);
+
+    const palette = theme === 'dark-teal'
+        ? { bg: SLATE_900, title: 'FFFFFF', accent: TEAL_400, meta: 'CBD5E1', line: TEAL_400 }
+        : theme === 'bold-violet'
+            ? { bg: VIOLET_700, title: 'FFFFFF', accent: 'DDD6FE', meta: 'EDE9FE', line: INDIGO_600 }
+            : theme === 'classic-serif'
+                ? { bg: 'FFFFFF', title: STONE_900, accent: STONE_500, meta: STONE_500, line: STONE_900 }
+                : { bg: 'FFFFFF', title: SLATE_900, accent: BLUE_600, meta: SLATE_500, line: BLUE_600 };
 
     const leftW = 6000;
     const rightW = CONTENT_WIDTH - leftW;
@@ -180,34 +217,36 @@ function buildGeneralWordHeader(opts: ExportOptions): Header {
                         new TableCell({
                             width: { size: leftW, type: WidthType.DXA },
                             borders: noBorderSet(),
+                            shading: { fill: palette.bg },
                             children: [
                                 new Paragraph({
-                                    children: [new TextRun({ text: safeUpper(entityName), font: FONT, size: 44, bold: true, color: SLATE_900 })]
+                                    children: [new TextRun({ text: safeUpper(entityName), font: FONT, size: 44, bold: true, color: palette.title })]
                                 }),
                                 new Paragraph({
-                                    children: [new TextRun({ text: `Ref: ${reference}`, font: FONT, size: 22, bold: true, color: BLUE_600 })]
+                                    children: [new TextRun({ text: `Ref: ${reference}`, font: FONT, size: 22, bold: true, color: palette.accent })]
                                 }),
                             ],
                         }),
                         new TableCell({
                             width: { size: rightW, type: WidthType.DXA },
                             borders: noBorderSet(),
+                            shading: { fill: palette.bg },
                             children: [
                                 new Paragraph({
                                     alignment: AlignmentType.RIGHT,
-                                    children: [new TextRun({ text: 'P.O. BOX 12345 - 00100', font: FONT, size: 20, color: SLATE_500 })]
+                                    children: [new TextRun({ text: bclContact.addressLine1, font: FONT, size: 20, color: palette.meta })]
                                 }),
                                 new Paragraph({
                                     alignment: AlignmentType.RIGHT,
-                                    children: [new TextRun({ text: 'NAIROBI, KENYA', font: FONT, size: 20, color: SLATE_500 })]
+                                    children: [new TextRun({ text: bclContact.addressLine2, font: FONT, size: 20, color: palette.meta })]
                                 }),
                                 new Paragraph({
                                     alignment: AlignmentType.RIGHT,
-                                    children: [new TextRun({ text: `TEL: ${phone}`, font: FONT, size: 20, color: SLATE_500 })]
+                                    children: [new TextRun({ text: `TEL: ${resolvedPhone}`, font: FONT, size: 20, color: palette.meta })]
                                 }),
                                 new Paragraph({
                                     alignment: AlignmentType.RIGHT,
-                                    children: [new TextRun({ text: email, font: FONT, size: 20, color: BLUE_600 })]
+                                    children: [new TextRun({ text: resolvedEmail, font: FONT, size: 20, color: palette.accent })]
                                 }),
                             ],
                         }),
@@ -215,8 +254,48 @@ function buildGeneralWordHeader(opts: ExportOptions): Header {
                 })],
             }),
             new Paragraph({
-                border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: 'E2E8F0', space: 1 } },
+                border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: palette.line, space: 1 } },
                 children: [],
+            }),
+        ],
+    });
+}
+
+function buildGeneralWordFooter(opts: ExportOptions): Footer {
+    const { tab, selectedCompany, selectedIndividual, reference, theme = 'corporate-blue', kraPin: kraPinProp = '' } = opts;
+    const bclContact = getBclContactDetails();
+    const entityName = tab === 'companies'
+        ? (selectedCompany?.company_name ?? '')
+        : (selectedIndividual?.full_name ?? '');
+    const regNumber = tab === 'companies' ? (selectedCompany?.registration_number ?? '') : '';
+    const kraPin = tab === 'companies'
+        ? resolveCompanyKraPin(selectedCompany, kraPinProp)
+        : resolveIndividualKraPin(selectedIndividual, kraPinProp);
+    const bg = theme === 'dark-teal' ? SLATE_900 : theme === 'bold-violet' ? VIOLET_700 : 'FFFFFF';
+    const text = theme === 'dark-teal' || theme === 'bold-violet' ? 'FFFFFF' : theme === 'classic-serif' ? STONE_500 : SLATE_500;
+    const accent = theme === 'dark-teal' ? TEAL_400 : theme === 'bold-violet' ? 'DDD6FE' : theme === 'classic-serif' ? STONE_900 : BLUE_600;
+
+    return new Footer({
+        children: [
+            new Table({
+                width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+                borders: noBorderSet(),
+                rows: [new TableRow({
+                    children: [
+                        new TableCell({
+                            borders: noBorderSet(),
+                            shading: { fill: bg },
+                            children: [
+                                new Paragraph({
+                                    children: [new TextRun({ text: safeUpper(entityName), font: FONT, size: 18, bold: true, color: text })],
+                                }),
+                                new Paragraph({
+                                    children: [new TextRun({ text: [kraPin ? `PIN: ${kraPin}` : '', regNumber ? `REG: ${regNumber}` : '', bclContact.address.toUpperCase(), 'CONFIDENTIAL'].filter(Boolean).join('  |  '), font: FONT, size: 16, color: accent })],
+                                }),
+                            ],
+                        }),
+                    ],
+                })],
             }),
         ],
     });
@@ -273,7 +352,7 @@ async function buildLetterBody(opts: ExportOptions): Promise<Paragraph[]> {
     children.push(new Paragraph({
         alignment: AlignmentType.RIGHT,
         spacing: { before: 200, after: 200 },
-        children: [new TextRun({ text: new Date(letterDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }), font: FONT, size: DATE_FONT_SIZE })],
+        children: [new TextRun({ text: letterDate, font: FONT, size: DATE_FONT_SIZE })],
     }));
 
     // 2. Salutation
@@ -375,13 +454,24 @@ async function buildLetterBody(opts: ExportOptions): Promise<Paragraph[]> {
 export async function exportToWord(opts: ExportOptions): Promise<void> {
     console.log('[Word Export] Function called!');
 
-    const { tab, letterType, selectedCompany, selectedIndividual, useLetterhead, selectedLetterheadId, letterheads, generateLetterWithLetterhead, downloadBlob, headerImageUrl, footerImageUrl, valediction, activeSignatory, recipient, subject, letterDate, reference } = opts;
+    const { tab, letterType, selectedCompany, selectedIndividual, useLetterhead, selectedLetterheadId, letterheads, generateLetterWithLetterhead, downloadBlob, headerImageUrl, footerImageUrl, valediction, activeSignatory, recipient, subject, letterDate, reference, kraPin: kraPinProp = '' } = opts;
 
     const entityName = tab === 'companies'
         ? (selectedCompany?.company_name ?? 'Letter')
         : (selectedIndividual?.full_name ?? 'Letter');
 
     const filename = `${entityName}_${new Date().toISOString().split('T')[0]}.docx`;
+    const kraPin = tab === 'companies'
+        ? resolveCompanyKraPin(selectedCompany, kraPinProp)
+        : resolveIndividualKraPin(selectedIndividual, kraPinProp);
+    const resolvedEmail = tab === 'companies'
+        ? (letterType === 'kra' ? resolveCompanyKraEmail(selectedCompany, opts.email) : resolveCompanyGeneralEmail(selectedCompany, opts.email))
+        : resolveIndividualEmail(selectedIndividual, opts.email);
+    const resolvedPhone = letterType === 'kra'
+        ? getBclContactDetails().phone
+        : tab === 'companies'
+            ? resolveCompanyPhone(selectedCompany, opts.phone)
+            : resolveIndividualPhone(selectedIndividual, opts.phone);
 
     // ── Case 1: Uploaded .docx letterhead template ────────────────────────────
     if (useLetterhead && selectedLetterheadId && letterheads && generateLetterWithLetterhead && downloadBlob) {
@@ -393,6 +483,9 @@ export async function exportToWord(opts: ExportOptions): Promise<void> {
                     RECIPIENT: recipient,
                     SUBJECT: safeUpper(subject),
                     REFERENCE: reference,
+                    KRA_PIN: kraPin,
+                    EMAIL: resolvedEmail,
+                    PHONE: resolvedPhone,
                     SALUTATION: 'Dear Sir/Madam,',
                     BODY: letterType === 'kra'
                         ? 'I am writing on behalf of the company to request for the issuance of a Tax Compliance Certificate.\nAll relevant returns have been filed and payments made up to date.\n\nYour prompt assistance in this matter will be highly appreciated.'
@@ -441,6 +534,10 @@ export async function exportToWord(opts: ExportOptions): Promise<void> {
         wordHeader = letterType === 'kra'
             ? buildKRAWordHeader(opts)
             : buildGeneralWordHeader(opts);
+    }
+
+    if (!wordFooter && letterType === 'general') {
+        wordFooter = buildGeneralWordFooter(opts);
     }
 
     // Build body content
