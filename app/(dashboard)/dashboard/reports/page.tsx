@@ -1,17 +1,15 @@
 // @ts-nocheck
 "use client";
 
-import React, { useMemo, useState, useEffect, useCallback } from "react";
+import React, { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, LayoutGrid, Rows, Plus, Minus, Briefcase, FileDown, ChevronDown, ChevronsRight, ChevronsDown, FileText, ChevronLeft, ChevronRight, RefreshCw, AlertTriangle, Clock, ArrowUpDown, Search, Timer, AlertCircle, CheckCircle2, Clock3, User, EyeOff, Eye, Filter, PanelLeftClose, PanelLeftOpen, RotateCcw, X, TableProperties, Download, ArrowRight } from "lucide-react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { Loader2, LayoutGrid, Plus, Minus, Briefcase, FileDown, ChevronDown, FileText, ChevronLeft, ChevronRight, RefreshCw, AlertTriangle, Clock, ArrowUpDown, Search, Timer, AlertCircle, CheckCircle2, Clock3, User, EyeOff, Eye, Filter, RotateCcw, X, TableProperties, Download, ArrowRight, Send, Shield, Users } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format, parse, isValid } from "date-fns";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/lib/hooks/use-toast";
@@ -29,6 +27,7 @@ import { cn } from "@/lib/utils";
 import { StandardReportView } from "./components/StandardReportView";
 import { TransposedReportView } from "./components/TransposedReportView";
 import { ReportColumnVisibilityDialog } from "./components/ReportColumnVisibilityDialog";
+import { ReportsSidebar, ReportsToolbar, PersonFilterStrip, StatusFilterBar } from "./components/ReportsHeader";
 
 const SPECIAL_STAGE_IDS = [
   '072b9710-45df-4a05-ba65-01b4ef29d61d',
@@ -189,6 +188,21 @@ export default function ReportsPage() {
   const [showDocRequirementsColumns, setShowDocRequirementsColumns] = useState(false);
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>([]);
   const [expandedStageColumns, setExpandedStageColumns] = useState<Set<string>>(new Set());
+  const [activePerspective, setActivePerspective] = useState<'overview' | 'officers' | 'managers' | 'clients' | 'companies'>('overview');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const sidebarPanelRef = useRef<any>(null);
+  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
+  const [showDefaultDisplayOnly, setShowDefaultDisplayOnly] = useState(false);
+
+  const handleSidebarToggle = useCallback(() => {
+    const panel = sidebarPanelRef.current;
+    if (panel) {
+      sidebarCollapsed ? panel.expand() : panel.collapse();
+    } else {
+      setSidebarCollapsed(prev => !prev);
+    }
+  }, [sidebarCollapsed]);
+
   const getStaffName = useCallback((userId: any) => {
     if (!userId) return '';
     const userIdStr = String(userId);
@@ -209,6 +223,35 @@ export default function ReportsPage() {
 
     return userIdStr;
   }, [tmUsers, unifiedOfficers, unifiedManagers, unifiedAssistants]);
+
+  const sidebarDepartments = useMemo(() => departments.map(dept => ({
+    id: dept.id.toString(),
+    name: dept.name,
+    description: dept.description,
+    default_display: dept.default_display,
+    order: dept.order_num || dept.order,
+    subdepartments: (dept.tm_subdepartments || []).map((sub: any) => ({
+      id: sub.id.toString(),
+      name: sub.name,
+      description: sub.description,
+      default_display: sub.default_display,
+      order: sub.order_num || sub.order,
+      classes: (sub.classes || []).map((cls: any) => ({
+        id: cls.id.toString(),
+        name: cls.name,
+        description: cls.description,
+        default_display: cls.default_display,
+        order: cls.order_num || cls.order,
+        subClasses: (cls.subClasses || []).map((sc: any) => ({
+          id: sc.id.toString(),
+          name: sc.name,
+          description: sc.description,
+          default_display: sc.default_display,
+          order: sc.order_num || sc.order,
+        }))
+      }))
+    }))
+  })), [departments]);
 
   const getTaskHierarchy = useCallback((task: any) => {
     if (!task || !departments.length) return null;
@@ -446,11 +489,19 @@ export default function ReportsPage() {
     setActiveTaskManagerTab(prev => (prev === 'all' || availableManagers.some(m => m.id === prev) ? prev : 'all'));
   }, [availableManagers]);
 
-  // Populate availableClients (extract unique companies/sponsors from tasks)
+  const getTaskCompanyParticipant = useCallback((task: any) => {
+    return task.participants_details?.find((p: any) => {
+      const role = p.role?.toString().toLowerCase() || '';
+      const type = p.type?.toString().toLowerCase() || '';
+      return type === 'company' || role.includes('sponsor') || role.includes('company');
+    });
+  }, []);
+
+  // Populate availableClients (company participants for the By Company tab)
   useEffect(() => {
     const clientsMap = new Map<string, any>();
     tasks.forEach(task => {
-      const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
+      const company = getTaskCompanyParticipant(task);
       if (company && company.name) {
         const clientId = company.name;
         if (!clientsMap.has(clientId)) {
@@ -464,7 +515,7 @@ export default function ReportsPage() {
       }
     });
     setAvailableClients(Array.from(clientsMap.values()));
-  }, [tasks]);
+  }, [tasks, getTaskCompanyParticipant]);
 
   // Populate availableBCLs (same as availableAssistants)
   useEffect(() => {
@@ -475,13 +526,13 @@ export default function ReportsPage() {
 
   const effectiveOfficerIds = useMemo(() => {
     const ids = new Set(selectedOfficers);
-    if (activeOfficerTab !== 'all') ids.add(activeOfficerTab);
+    if (activeOfficerTab !== 'all' && activeOfficerTab !== '__unallocated__') ids.add(activeOfficerTab);
     return Array.from(ids);
   }, [activeOfficerTab, selectedOfficers]);
 
   const effectiveTaskManagerIds = useMemo(() => {
     const ids = new Set(selectedTaskManagers);
-    if (activeTaskManagerTab !== 'all') ids.add(activeTaskManagerTab);
+    if (activeTaskManagerTab !== 'all' && activeTaskManagerTab !== '__unallocated__') ids.add(activeTaskManagerTab);
     return Array.from(ids);
   }, [activeTaskManagerTab, selectedTaskManagers]);
 
@@ -566,6 +617,11 @@ export default function ReportsPage() {
     return allocatedOfficerIds.some(id => officerIds.includes(id));
   }, [getStageOfficerIds]);
 
+  const isTaskWithClient = useCallback((task: any) => {
+    const tracking = getCurrentStageTracking(task);
+    return tracking?.stage?.follow_up?.toString().toLowerCase() === 'client';
+  }, [getCurrentStageTracking]);
+
   const tasksByFilters = useMemo(() => {
     return tasks.filter(task => {
       if (activeDeptId && task.department_id?.toString() !== activeDeptId) return false;
@@ -573,74 +629,45 @@ export default function ReportsPage() {
       if (activeClassId !== 'all' && task.class_id?.toString() !== activeClassId) return false;
       if (activeSubClassId !== 'all' && task.subclass_id?.toString() !== activeSubClassId) return false;
 
-      // Officer filtering
-      if (effectiveOfficerIds.length > 0) {
-        if (!taskHasStageOfficer(task, effectiveOfficerIds, officerFilterMode)) return false;
-      }
-
-      // Task Manager filtering - only applies if current stage's follow_up is BCL
-      if (effectiveTaskManagerIds.length > 0) {
-        const tracking = getCurrentStageTracking(task);
-        if (!tracking) return false;
-        const stage = tracking.stage;
-        if (stage.follow_up !== 'BCL') return false;
-
-        if (taskManagerFilterMode === 'current') {
-          const taskManager = task.task_manager;
-          if (!taskManager || !taskManager.id) return false;
-          const hasTaskManager = effectiveTaskManagerIds.includes(taskManager.id.toString());
-          if (!hasTaskManager) return false;
-        } else {
-          const taskManager = task.task_manager;
-          if (!taskManager || !taskManager.id) return false;
-          const hasTaskManager = effectiveTaskManagerIds.includes(taskManager.id.toString());
-          if (!hasTaskManager) return false;
+      // Officer filtering — only when officers perspective is active
+      if (activePerspective === 'officers') {
+        if (activeOfficerTab === '__unallocated__') {
+          if (getStageOfficerIds(task, 'current').length !== 0) return false;
+        } else if (effectiveOfficerIds.length > 0) {
+          if (!taskHasStageOfficer(task, effectiveOfficerIds, officerFilterMode)) return false;
         }
       }
 
-      // Client filtering - only applies if current stage's follow_up is Client
-      if (effectiveClientIds.length > 0) {
+      // Task Manager filtering — only when managers perspective is active
+      if (activePerspective === 'managers') {
         const tracking = getCurrentStageTracking(task);
-        if (!tracking) return false;
-        const stage = tracking.stage;
-        if (stage.follow_up !== 'Client') return false;
-
-        if (clientFilterMode === 'current') {
-          const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
-          if (!company || !company.name) return false;
-          const hasClient = effectiveClientIds.includes(company.name);
-          if (!hasClient) return false;
-        } else {
-          const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
-          if (!company || !company.name) return false;
-          const hasClient = effectiveClientIds.includes(company.name);
-          if (!hasClient) return false;
-        }
-      }
-
-      if (effectiveBCLIds.length > 0) {
-        if (bclFilterMode === 'current') {
-          // Filter by current stage BCL (tasks in BCL's basket)
-          const tracking = getCurrentStageTracking(task);
+        if (activeTaskManagerTab === '__unallocated__') {
+          if (!tracking || tracking.stage.follow_up !== 'BCL') return false;
+          if (task.task_manager?.id) return false;
+        } else if (effectiveTaskManagerIds.length > 0) {
           if (!tracking) return false;
-          const stageData = task.stages?.[tracking.stage.id];
-          const assistantIds = stageData?.assistant_ids || [];
-          const hasBCL = assistantIds.some((id: string) => effectiveBCLIds.includes(id.toString()));
-          if (!hasBCL) return false;
-        } else {
-          // Filter by history - check if BCL handled any stage
-          const hasBCL = stages.some(stage => {
-            const stageData = task.stages?.[stage.id];
-            const assistantIds = stageData?.assistant_ids || [];
-            return assistantIds.some((id: string) => effectiveBCLIds.includes(id.toString()));
-          });
-          if (!hasBCL) return false;
+          if (tracking.stage.follow_up !== 'BCL') return false;
+          const taskManager = task.task_manager;
+          if (!taskManager || !taskManager.id) return false;
+          if (!effectiveTaskManagerIds.includes(taskManager.id.toString())) return false;
         }
+      }
+
+      // Client filtering means the current task stage is waiting on the client.
+      if (activePerspective === 'clients' && !isTaskWithClient(task)) {
+        return false;
+      }
+
+      // Company filtering uses company/sponsor participants.
+      if (activePerspective === 'companies' && effectiveClientIds.length > 0) {
+        const company = getTaskCompanyParticipant(task);
+        if (!company || !company.name) return false;
+        if (!effectiveClientIds.includes(company.name)) return false;
       }
 
       return true;
     });
-  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, effectiveOfficerIds, officerFilterMode, effectiveTaskManagerIds, taskManagerFilterMode, effectiveClientIds, clientFilterMode, effectiveBCLIds, bclFilterMode, stages, getCurrentStageTracking, taskHasStageOfficer]);
+  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, activePerspective, activeOfficerTab, activeTaskManagerTab, effectiveOfficerIds, officerFilterMode, effectiveTaskManagerIds, taskManagerFilterMode, effectiveClientIds, clientFilterMode, stages, getCurrentStageTracking, taskHasStageOfficer, isTaskWithClient, getTaskCompanyParticipant, getStageOfficerIds]);
 
   // Dept/subdept/class filter only — used for stable status tab counts (unaffected by officer/TM/BCL tabs)
   const tasksByDeptFilter = useMemo(() => {
@@ -653,51 +680,49 @@ export default function ReportsPage() {
     });
   }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId]);
 
-  const allTasksCount = useMemo(() => tasksByDeptFilter.length, [tasksByDeptFilter]);
+  const allTasksCount = useMemo(() => tasksByFilters.length, [tasksByFilters]);
   const wipTasksCount = useMemo(() => {
-    return tasksByDeptFilter.filter(task => {
+    return tasksByFilters.filter(task => {
       const isWriteUp = task.status === 'write_up_completed';
       const isEndorsed = task.status === 'endorsed';
       const isCancelled = task.status === 'cancel';
       const isCompleted = isWriteUp || isEndorsed || ['completed', 'archived'].includes(task.status);
       return !isCompleted && !isCancelled;
     }).length;
-  }, [tasksByDeptFilter]);
-  const writeUpCompletedCount = useMemo(() => tasksByDeptFilter.filter(t => t.status === 'write_up_completed').length, [tasksByDeptFilter]);
-  const endorsedCount = useMemo(() => tasksByDeptFilter.filter(t => t.status === 'endorsed').length, [tasksByDeptFilter]);
-  const cancelledCount = useMemo(() => tasksByDeptFilter.filter(t => t.status === 'cancel').length, [tasksByDeptFilter]);
+  }, [tasksByFilters]);
+  const writeUpCompletedCount = useMemo(() => tasksByFilters.filter(t => t.status === 'write_up_completed').length, [tasksByFilters]);
+  const endorsedCount = useMemo(() => tasksByFilters.filter(t => t.status === 'endorsed').length, [tasksByFilters]);
+  const cancelledCount = useMemo(() => tasksByFilters.filter(t => t.status === 'cancel').length, [tasksByFilters]);
 
-  // Count tasks per officer — always use 'history' mode so badges show total allocation (not just current stage)
+  // Count tasks per officer — 'history' mode for per-officer badges; 'current' for unallocated
   const officerTaskCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: 0 };
-    availableOfficers.forEach(officer => {
-      counts[officer.id] = 0;
-    });
+    const counts: Record<string, number> = { all: 0, __unallocated__: 0 };
+    availableOfficers.forEach(officer => { counts[officer.id] = 0; });
 
     tasksByDeptFilter.forEach(task => {
       counts.all++;
-      getStageOfficerIds(task, 'history').forEach(officerId => {
-        if (counts[officerId] !== undefined) counts[officerId]++;
-      });
+      const historyIds = getStageOfficerIds(task, 'history');
+      historyIds.forEach(id => { if (counts[id] !== undefined) counts[id]++; });
+      if (getStageOfficerIds(task, 'current').length === 0) counts.__unallocated__++;
     });
 
     return counts;
   }, [tasksByDeptFilter, availableOfficers, getStageOfficerIds]);
 
-  // Count tasks per task manager — use dept filter base so counts remain stable
+  // Count tasks per task manager — unallocated = BCL stage with no manager assigned
   const taskManagerTaskCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: 0 };
-    availableTaskManagers.forEach(tm => {
-      counts[tm.id] = 0;
-    });
+    const counts: Record<string, number> = { all: 0, __unallocated__: 0 };
+    availableTaskManagers.forEach(tm => { counts[tm.id] = 0; });
 
     tasksByDeptFilter.forEach(task => {
       const tracking = getCurrentStageTracking(task);
       if (tracking && tracking.stage.follow_up === 'BCL') {
         counts.all++;
-        const taskManager = task.task_manager;
-        if (taskManager && taskManager.id && counts[taskManager.id.toString()] !== undefined) {
-          counts[taskManager.id.toString()]++;
+        const tm = task.task_manager;
+        if (tm?.id && counts[tm.id.toString()] !== undefined) {
+          counts[tm.id.toString()]++;
+        } else {
+          counts.__unallocated__++;
         }
       }
     });
@@ -705,17 +730,22 @@ export default function ReportsPage() {
     return counts;
   }, [tasksByDeptFilter, availableTaskManagers, getCurrentStageTracking]);
 
-  // Count tasks per client — use dept filter base so counts remain stable
+  // Count tasks waiting on the client.
   const clientTaskCounts = useMemo(() => {
+    return { all: tasksByDeptFilter.filter(task => isTaskWithClient(task)).length };
+  }, [tasksByDeptFilter, isTaskWithClient]);
+
+  // Count tasks per company participant.
+  const companyTaskCounts = useMemo(() => {
     const counts: Record<string, number> = { all: 0 };
     availableClients.forEach(client => {
       counts[client.id] = 0;
     });
 
     tasksByDeptFilter.forEach(task => {
-      counts.all++;
-      const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
+      const company = getTaskCompanyParticipant(task);
       if (company && company.name) {
+        counts.all++;
         const client = availableClients.find(c => c.id === company.name);
         if (client && counts[client.id] !== undefined) {
           counts[client.id]++;
@@ -724,7 +754,7 @@ export default function ReportsPage() {
     });
 
     return counts;
-  }, [tasksByDeptFilter, availableClients]);
+  }, [tasksByDeptFilter, availableClients, getTaskCompanyParticipant]);
 
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
@@ -748,73 +778,38 @@ export default function ReportsPage() {
         if (task.status !== 'cancel') return false;
       }
 
-      // Officer filtering
-      if (effectiveOfficerIds.length > 0) {
-        if (!taskHasStageOfficer(task, effectiveOfficerIds, officerFilterMode)) return false;
-      }
-
-      // Task Manager filtering - only applies if current stage's follow_up is BCL
-      if (effectiveTaskManagerIds.length > 0) {
-        const tracking = getCurrentStageTracking(task);
-        if (!tracking) return false;
-        const stage = tracking.stage;
-        if (stage.follow_up !== 'BCL') return false;
-
-        if (taskManagerFilterMode === 'current') {
-          const taskManager = task.task_manager;
-          if (!taskManager || !taskManager.id) return false;
-          const hasTaskManager = effectiveTaskManagerIds.includes(taskManager.id.toString());
-          if (!hasTaskManager) return false;
-        } else {
-          const taskManager = task.task_manager;
-          if (!taskManager || !taskManager.id) return false;
-          const hasTaskManager = effectiveTaskManagerIds.includes(taskManager.id.toString());
-          if (!hasTaskManager) return false;
+      // Officer filtering — only when officers perspective is active
+      if (activePerspective === 'officers') {
+        if (activeOfficerTab === '__unallocated__') {
+          if (getStageOfficerIds(task, 'current').length !== 0) return false;
+        } else if (effectiveOfficerIds.length > 0) {
+          if (!taskHasStageOfficer(task, effectiveOfficerIds, officerFilterMode)) return false;
         }
       }
 
-      // Client filtering - only applies if current stage's follow_up is Client
-      if (effectiveClientIds.length > 0) {
+      // Task Manager filtering — only when managers perspective is active
+      if (activePerspective === 'managers') {
         const tracking = getCurrentStageTracking(task);
-        if (!tracking) return false;
-        const stage = tracking.stage;
-        if (stage.follow_up !== 'Client') return false;
-
-        if (clientFilterMode === 'current') {
-          const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
-          if (!company || !company.name) return false;
-          const hasClient = effectiveClientIds.includes(company.name);
-          if (!hasClient) return false;
-        } else {
-          const company = task.participants_details?.find((p: any) => p.role?.includes('sponsor') || p.role?.includes('company'));
-          if (!company || !company.name) return false;
-          const hasClient = effectiveClientIds.includes(company.name);
-          if (!hasClient) return false;
-        }
-      }
-
-      // BCL filtering
-      if (effectiveBCLIds.length > 0) {
-        if (bclFilterMode === 'current') {
-          const tracking = getCurrentStageTracking(task);
+        if (activeTaskManagerTab === '__unallocated__') {
+          if (!tracking || tracking.stage.follow_up !== 'BCL') return false;
+          if (task.task_manager?.id) return false;
+        } else if (effectiveTaskManagerIds.length > 0) {
           if (!tracking) return false;
-          const stageData = task.stages?.[tracking.stage.id];
-          const assistantIds = stageData?.assistant_ids || [];
-          const hasBCL = assistantIds.some((id: string) => effectiveBCLIds.includes(id.toString()));
-          if (!hasBCL) return false;
-        } else {
-          const hasBCL = stages.some(stage => {
-            const stageData = task.stages?.[stage.id];
-            const assistantIds = stageData?.assistant_ids || [];
-            return assistantIds.some((id: string) => effectiveBCLIds.includes(id.toString()));
-          });
-          if (!hasBCL) return false;
+          if (tracking.stage.follow_up !== 'BCL') return false;
+          const taskManager = task.task_manager;
+          if (!taskManager || !taskManager.id) return false;
+          if (!effectiveTaskManagerIds.includes(taskManager.id.toString())) return false;
         }
+      }
+
+      // Client filtering — tasks where current stage is waiting on the client
+      if (activePerspective === 'clients' && !isTaskWithClient(task)) {
+        return false;
       }
 
       return true;
     });
-  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, activeStatus, effectiveOfficerIds, officerFilterMode, effectiveTaskManagerIds, taskManagerFilterMode, effectiveClientIds, clientFilterMode, effectiveBCLIds, bclFilterMode, stages, getCurrentStageTracking, taskHasStageOfficer]);
+  }, [tasks, activeDeptId, activeSubDeptId, activeClassId, activeSubClassId, activeStatus, activePerspective, activeOfficerTab, activeTaskManagerTab, effectiveOfficerIds, officerFilterMode, effectiveTaskManagerIds, taskManagerFilterMode, stages, getCurrentStageTracking, taskHasStageOfficer, isTaskWithClient, getStageOfficerIds]);
 
   const searchedTasks = useMemo(() => {
     if (!searchQuery) return filteredTasks;
@@ -1773,7 +1768,242 @@ export default function ReportsPage() {
     );
   }, [sortedTasks, showNARows, stageOnlyColumns, stages, checkStageApplicableForTask]);
 
-  const columnGroups = useMemo(() => {
+  const handleSendReport = useCallback(async (reportType: 'officer' | 'manager' | 'client', exportFormat: 'excel' | 'pdf') => {
+    const deptName = activeDepartment?.name || 'All Departments';
+    const subdeptLabel = activeSubDeptId !== 'all'
+      ? activeSubDepartments.find((s: any) => s.id.toString() === activeSubDeptId)?.name || 'All'
+      : 'All Subdepartments';
+    const statusLabel = activeStatus === 'all' ? 'All Statuses'
+      : activeStatus === 'wip' ? 'WIP'
+      : activeStatus === 'write_up_completed' ? 'Write-Up Completed'
+      : activeStatus === 'endorsed' ? 'Endorsed'
+      : activeStatus === 'cancelled' ? 'Cancelled'
+      : activeStatus;
+    const dateStr = format(new Date(), 'dd MMM yyyy');
+    const reportTitle = reportType === 'officer' ? 'Officer Report'
+      : reportType === 'manager' ? 'Manager Report'
+      : 'Client Follow-Up Report';
+    const accentHex = reportType === 'officer' ? '2563EB' : reportType === 'manager' ? '7C3AED' : 'EA580C';
+
+    type Group = { name: string; tasks: any[] };
+    const groups: Group[] = [];
+
+    if (reportType === 'officer') {
+      for (const o of availableOfficers) {
+        const oTasks = filteredByNARows.filter(t => getStageOfficerIds(t, 'current').includes(o.id));
+        if (oTasks.length > 0) groups.push({ name: o.full_name || o.name || o.displayName || `Officer ${o.id}`, tasks: oTasks });
+      }
+      const unallocated = filteredByNARows.filter(t => getStageOfficerIds(t, 'current').length === 0);
+      if (unallocated.length > 0) groups.push({ name: 'Unallocated', tasks: unallocated });
+    } else if (reportType === 'manager') {
+      for (const tm of availableTaskManagers) {
+        const tmTasks = filteredByNARows.filter(t => t.task_manager?.id?.toString() === tm.id);
+        if (tmTasks.length > 0) groups.push({ name: tm.full_name || tm.name || tm.displayName || `Manager ${tm.id}`, tasks: tmTasks });
+      }
+      const unallocated = filteredByNARows.filter(t => !t.task_manager?.id);
+      if (unallocated.length > 0) groups.push({ name: 'Unallocated', tasks: unallocated });
+    } else {
+      const clientTasks = filteredByNARows.filter(t => isTaskWithClient(t));
+      groups.push({ name: 'Tasks Awaiting Client Response', tasks: clientTasks });
+    }
+
+    const totalTasks = groups.reduce((s, g) => s + g.tasks.length, 0);
+    if (totalTasks === 0) {
+      toast({ title: 'No Data', description: 'No tasks available for this report.' });
+      return;
+    }
+
+    const exportCols = filteredColumns;
+    const numDataCols = exportCols.length + 1;
+    const safeDept = deptName.replace(/[^a-zA-Z0-9]/g, '_');
+    const fileName = `${reportType.charAt(0).toUpperCase() + reportType.slice(1)}_Report_${safeDept}_${format(new Date(), 'yyyy-MM-dd')}`;
+
+    if (exportFormat === 'excel') {
+      const wb = new ExcelJS.Workbook();
+      wb.creator = 'Task Manager System';
+      wb.created = new Date();
+      const ws = wb.addWorksheet(reportTitle);
+
+      // Title row
+      ws.mergeCells(1, 1, 1, numDataCols);
+      const titleCell = ws.getCell(1, 1);
+      titleCell.value = reportTitle.toUpperCase();
+      titleCell.font = { name: 'Calibri', bold: true, size: 18, color: { argb: 'FFFFFFFF' } };
+      titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${accentHex}` } };
+      titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws.getRow(1).height = 44;
+
+      // Subtitle row
+      ws.mergeCells(2, 1, 2, numDataCols);
+      const subCell = ws.getCell(2, 1);
+      subCell.value = `${deptName}  ·  ${subdeptLabel}  ·  ${statusLabel}  ·  Generated: ${dateStr}  ·  Total: ${totalTasks} tasks`;
+      subCell.font = { name: 'Calibri', size: 10, color: { argb: 'FF475569' } };
+      subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+      subCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws.getRow(2).height = 22;
+
+      // Spacer
+      ws.addRow([]);
+      ws.getRow(3).height = 8;
+
+      let currentRow = 4;
+
+      for (const group of groups) {
+        if (group.tasks.length === 0) continue;
+        const isUnalloc = group.name === 'Unallocated';
+        const groupFg = isUnalloc ? 'FF64748B' : `FF${accentHex}`;
+
+        // Group section header
+        ws.mergeCells(currentRow, 1, currentRow, numDataCols);
+        const ghCell = ws.getCell(currentRow, 1);
+        ghCell.value = `  ${group.name.toUpperCase()}    (${group.tasks.length} ${group.tasks.length === 1 ? 'task' : 'tasks'})`;
+        ghCell.font = { name: 'Calibri', bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+        ghCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: groupFg } };
+        ghCell.alignment = { horizontal: 'left', vertical: 'middle' };
+        ws.getRow(currentRow).height = 26;
+        currentRow++;
+
+        // Column headers
+        const hRow = ws.addRow(['#', ...exportCols.map(c => c.label)]);
+        hRow.height = 20;
+        hRow.eachCell(cell => {
+          cell.font = { name: 'Calibri', bold: true, size: 9, color: { argb: 'FF1E293B' } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          cell.border = { bottom: { style: 'medium', color: { argb: 'FF94A3B8' } }, right: { style: 'hair', color: { argb: 'FFE2E8F0' } } };
+        });
+        currentRow++;
+
+        // Data rows
+        group.tasks.forEach((task, idx) => {
+          const dRow = ws.addRow([idx + 1, ...exportCols.map(col => getExportCellValue(task, col))]);
+          dRow.height = 16;
+          const bg = idx % 2 === 0 ? 'FFFFFFFF' : 'FFF8FAFC';
+          dRow.eachCell((cell, colNum) => {
+            const v = String(cell.value ?? '');
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+            cell.font = {
+              name: 'Calibri', size: 9, bold: v === 'Unallocated',
+              color: { argb: v === 'N/A' ? 'FFEF4444' : v === 'Unallocated' ? 'FFF59E0B' : 'FF334155' }
+            };
+            cell.alignment = { horizontal: colNum === 1 ? 'center' : 'left', vertical: 'middle' };
+            cell.border = { bottom: { style: 'hair', color: { argb: 'FFE2E8F0' } }, right: { style: 'hair', color: { argb: 'FFE2E8F0' } } };
+          });
+          currentRow++;
+        });
+
+        // Spacer between groups
+        ws.addRow([]);
+        ws.getRow(currentRow).height = 10;
+        currentRow++;
+      }
+
+      // Column widths
+      ws.getColumn(1).width = 5;
+      exportCols.forEach((col, i) => {
+        const id = (col.id || '').toLowerCase();
+        ws.getColumn(i + 2).width = id.includes('name') || id.includes('stage') ? 34 : 22;
+      });
+      ws.views = [{ state: 'frozen', xSplit: 0, ySplit: 3 }];
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `${fileName}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+    } else {
+      // PDF using jsPDF + autoTable (dynamic import to keep bundle lean)
+      const { default: jsPDF } = await import('jspdf');
+      const { default: autoTable } = await import('jspdf-autotable');
+
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+
+      // Only use task-type columns for PDF readability (landscape A4 fits ~8 cols nicely)
+      const pdfCols = filteredColumns.filter(c => c.type === 'task').slice(0, 9);
+      if (pdfCols.length === 0) pdfCols.push(...filteredColumns.slice(0, 6));
+
+      const hexToRgb = (hex: string): [number, number, number] => [
+        parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)
+      ];
+      const accent = hexToRgb(accentHex);
+
+      // Header block (first page)
+      doc.setFillColor(...accent);
+      doc.rect(0, 0, pageW, 18, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(15);
+      doc.setFont('helvetica', 'bold');
+      doc.text(reportTitle.toUpperCase(), pageW / 2, 11, { align: 'center' });
+
+      doc.setFillColor(248, 250, 252);
+      doc.rect(0, 18, pageW, 9, 'F');
+      doc.setTextColor(71, 85, 105);
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.text(
+        `${deptName}  ·  ${subdeptLabel}  ·  ${statusLabel}  ·  Generated: ${dateStr}  ·  Total: ${totalTasks} tasks`,
+        pageW / 2, 23, { align: 'center' }
+      );
+
+      let startY = 31;
+
+      for (const group of groups) {
+        if (group.tasks.length === 0) continue;
+        const isUnalloc = group.name === 'Unallocated';
+        const gColor: [number, number, number] = isUnalloc ? [100, 116, 139] : accent;
+
+        if (startY > pageH - 35) { doc.addPage(); startY = 10; }
+
+        // Group banner
+        doc.setFillColor(...gColor);
+        doc.rect(0, startY, pageW, 7, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`  ${group.name.toUpperCase()}   —   ${group.tasks.length} tasks`, 5, startY + 4.8);
+        startY += 9;
+
+        const headers = ['#', ...pdfCols.map(c => c.label)];
+        const rows = group.tasks.map((task, i) => [String(i + 1), ...pdfCols.map(col => getExportCellValue(task, col) || '—')]);
+
+        autoTable(doc, {
+          startY,
+          head: [headers],
+          body: rows,
+          styles: { fontSize: 7.5, cellPadding: 1.8, overflow: 'ellipsize', lineColor: [226, 232, 240], lineWidth: 0.15 },
+          headStyles: { fillColor: [226, 232, 240], textColor: [30, 41, 59], fontStyle: 'bold', fontSize: 8, halign: 'center' },
+          alternateRowStyles: { fillColor: [248, 250, 252] },
+          columnStyles: { 0: { halign: 'center', cellWidth: 8 } },
+          margin: { left: 4, right: 4 },
+          didParseCell: (data: any) => {
+            if (data.cell.raw === 'N/A') data.cell.styles.textColor = [239, 68, 68];
+            else if (data.cell.raw === 'Unallocated') data.cell.styles.textColor = [245, 158, 11];
+          },
+          didDrawPage: (data: any) => {
+            const pg = doc.getNumberOfPages();
+            doc.setFontSize(6.5);
+            doc.setTextColor(148, 163, 184);
+            doc.setFont('helvetica', 'normal');
+            doc.text(`${reportTitle}  ·  ${deptName}  ·  ${dateStr}  ·  Page ${data.pageNumber}`, pageW / 2, pageH - 3, { align: 'center' });
+          }
+        });
+
+        startY = (doc as any).lastAutoTable.finalY + 8;
+      }
+
+      doc.save(`${fileName}.pdf`);
+    }
+
+    toast({ title: 'Report Downloaded', description: `${reportTitle} exported as ${exportFormat.toUpperCase()}.` });
+  }, [activeDepartment, activeSubDeptId, activeSubDepartments, activeStatus, filteredColumns, filteredByNARows, availableOfficers, availableTaskManagers, getStageOfficerIds, isTaskWithClient, getExportCellValue]);
+
+   const columnGroups = useMemo(() => {
     if (!filteredColumns.length) return [];
     const groups: any[] = [];
     const taskCols = filteredColumns.filter(c => c.type === 'task');
@@ -1852,7 +2082,7 @@ export default function ReportsPage() {
 
   if (reportLoading) {
     return (
-      <div className="flex-1 p-8 bg-slate-50/30 flex items-center justify-center min-h-screen">
+      <div className="flex-1 p-8 bg-slate-50 flex items-center justify-center min-h-screen">
         <div className="text-center space-y-4">
           <Loader2 className="h-12 w-12 animate-spin text-slate-400 mx-auto" />
           <p className="text-slate-700">Loading Reports...</p>
@@ -1862,541 +2092,150 @@ export default function ReportsPage() {
   }
 
   return (
-    <div className="flex-1 space-y-2 px-2 bg-slate-50/30 min-h-screen">
-      {/* ── Header exactly like DepartmentTasksManager ── */}
-      <div className="flex justify-between items-center px-1 pt-2">
-        <div className="flex gap-6">
-          <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <FileText className="h-6 w-6 text-blue-600" />
-            {activeReport ? activeReport.name : "Reports"}
-          </h2>
-          <Button variant="outline" size="sm" onClick={() => setIsReportDialogOpen(true)} className="flex items-center gap-2">
-            <Filter className="h-4 w-4" />
-            {activeReport ? "Change Report" : "Select Report"}
-          </Button>
+  <div className="flex h-screen w-full overflow-hidden bg-slate-50">
+  {/* 1. Sidebar: Now sits to the left of the main content */}
+  <ReportsSidebar
+    departments={departments}
+    activeDeptId={activeDeptId}
+    setActiveDeptId={setActiveDeptId}
+    activeSubDepartments={activeSubDepartments}
+    activeSubDeptId={activeSubDeptId}
+    setActiveSubDeptId={setActiveSubDeptId}
+    isCollapsed={sidebarCollapsed}
+    onToggleCollapse={handleSidebarToggle}
+  />
+
+  {/* 2. Main Content Area: Takes up remaining width */}
+  <div className="flex-1 flex flex-col min-w-0">
+    
+    {/* Top Row: Report Info & High-level Perspectives */}
+    <ReportsToolbar
+      activeReport={activeReport}
+      setIsReportDialogOpen={setIsReportDialogOpen}
+      activePerspective={activePerspective}
+      setActivePerspective={setActivePerspective}
+      allTasksCount={allTasksCount}
+      officerTaskCounts={officerTaskCounts}
+      taskManagerTaskCounts={taskManagerTaskCounts}
+      clientTaskCounts={clientTaskCounts}
+      columns={columns}
+      visibleColumnIds={visibleColumnIds}
+      setVisibleColumnIds={setVisibleColumnIds}
+      showTimeTrackingColumns={showTimeTrackingColumns}
+      setShowTimeTrackingColumns={setShowTimeTrackingColumns}
+      showDocRequirementsColumns={showDocRequirementsColumns}
+      setShowDocRequirementsColumns={setShowDocRequirementsColumns}
+      view={view}
+      setView={setView}
+      handleSendReport={handleSendReport}
+      showTimeStatuses={showTimeStatuses}
+      setShowTimeStatuses={setShowTimeStatuses}
+      showNARows={showNARows}
+      setShowNARows={setShowNARows}
+      handleExport={handleExport}
+      refreshData={refreshData}
+      loading={loading}
+    />
+
+    {/* Second Row: Person Specific Filters (Conditional based on perspective) */}
+    <PersonFilterStrip
+      activePerspective={activePerspective}
+      availableOfficers={availableOfficers}
+      activeOfficerTab={activeOfficerTab}
+      setActiveOfficerTab={setActiveOfficerTab}
+      officerTaskCounts={officerTaskCounts}
+      officerFilterMode={officerFilterMode}
+      setOfficerFilterMode={setOfficerFilterMode}
+      availableTaskManagers={availableTaskManagers}
+      activeTaskManagerTab={activeTaskManagerTab}
+      setActiveTaskManagerTab={setActiveTaskManagerTab}
+      taskManagerTaskCounts={taskManagerTaskCounts}
+      taskManagerFilterMode={taskManagerFilterMode}
+      setTaskManagerFilterMode={setTaskManagerFilterMode}
+    />
+
+    {/* Third Row: Status, Search, and Category Filters */}
+    <StatusFilterBar
+      activeStatus={activeStatus}
+      setActiveStatus={setActiveStatus}
+      allTasksCount={allTasksCount}
+      wipTasksCount={wipTasksCount}
+      writeUpCompletedCount={writeUpCompletedCount}
+      endorsedCount={endorsedCount}
+      cancelledCount={cancelledCount}
+      searchQuery={searchQuery}
+      setSearchQuery={setSearchQuery}
+      activeClassId={activeClassId}
+      setActiveClassId={setActiveClassId}
+      activeSubClassId={activeSubClassId}
+      setActiveSubClassId={setActiveSubClassId}
+      activeSubDeptId={activeSubDeptId}
+      activeSubDepartments={activeSubDepartments}
+      isFiltersDropdownOpen={isFiltersDropdownOpen}
+      setIsFiltersDropdownOpen={setIsFiltersDropdownOpen}
+    />
+ {/* Table Area */}
+        <div className="flex-1 overflow-hidden p-3">
+          {!activeReport ? (
+            <div className="h-full flex flex-col items-center justify-center bg-white rounded-xl border border-slate-200">
+              <FileText className="h-16 w-16 mb-4 opacity-20 text-blue-600" />
+              <p className="text-lg font-bold text-slate-600">No Report Selected</p>
+              <p className="text-sm text-slate-400 mt-1">Select a report template to view data</p>
+              <Button size="sm" className="mt-4" onClick={() => setIsReportDialogOpen(true)}>
+                <Filter className="h-3.5 w-3.5 mr-1.5" />Select Report
+              </Button>
+            </div>
+          ) : loading ? (
+            <div className="h-full flex flex-col items-center justify-center bg-white rounded-xl border border-slate-200">
+              <Loader2 className="h-10 w-10 animate-spin text-blue-600 mb-3" />
+              <p className="text-sm font-bold text-slate-500">Processing Report Data...</p>
+            </div>
+          ) : view === 'standard' ? (
+            <StandardReportView
+              allTasks={filteredByNARows}
+              filteredColumns={filteredColumns}
+              columnGroups={columnGroups}
+              sortConfig={sortConfig}
+              expandedStageColumns={expandedStageColumns}
+              renderCellValue={renderCellValue}
+              safeRender={safeRender}
+              handleSort={handleSort}
+              toggleStageColumns={toggleStageColumns}
+              isStageApplicableToCurrentFilter={isStageApplicableToCurrentFilter}
+              userData={{ officers: unifiedOfficers, managers: unifiedManagers, assistants: unifiedAssistants, allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants] }}
+              departments={departments}
+              stages={stages}
+            />
+          ) : (
+            <TransposedReportView
+              paginatedTasks={filteredByNARows}
+              transposedRows={transposedRows}
+              currentPage={1}
+              itemsPerPage={filteredByNARows.length}
+              expandedSections={expandedSections}
+              renderCellValue={renderCellValue}
+              toggleSection={toggleSection}
+              userData={{ officers: unifiedOfficers, managers: unifiedManagers, assistants: unifiedAssistants, allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants] }}
+              departments={departments}
+            />
+          )}
         </div>
-        {!areJobLevelTabsVisible && (
-          <div className="text-sm text-slate-600 font-medium flex items-center gap-2 flex-wrap">
-            <span className="font-bold text-slate-800">Viewing:</span>
-            {breadcrumbParts.map((part, index) => (
-              <React.Fragment key={index}>
-                <span className="bg-slate-100 px-2 py-1 rounded-md">{part}</span>
-                {index < breadcrumbParts.length - 1 && <ChevronRight className="h-4 w-4 text-slate-400" />}
-              </React.Fragment>
-            ))}
-          </div>
-        )}
-        <div className="flex items-center gap-2">
-          <ReportColumnVisibilityDialog
-            columns={columns}
-            visibleColumnIds={visibleColumnIds}
-            setVisibleColumnIds={setVisibleColumnIds}
-            showTimeTrackingColumns={showTimeTrackingColumns}
-            setShowTimeTrackingColumns={setShowTimeTrackingColumns}
-            showDocRequirementsColumns={showDocRequirementsColumns}
-            setShowDocRequirementsColumns={setShowDocRequirementsColumns}
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setAreJobLevelTabsVisible(!areJobLevelTabsVisible)}
-            className={`transition-all ${!areJobLevelTabsVisible ? 'bg-slate-100' : ''}`}
-          >
-            {areJobLevelTabsVisible ? <PanelLeftClose className="h-4 w-4 mr-2" /> : <PanelLeftOpen className="h-4 w-4 mr-2" />}
-            {areJobLevelTabsVisible ? 'Hide Navigation' : 'Show Navigation'}
-          </Button>
-        </div>
+
       </div>
-
-      {/* ── Tabs Navigation exactly like DepartmentTasksManager ── */}
-      <Tabs value={activeDeptId} onValueChange={(val) => { setActiveDeptId(val); setActiveSubDeptId('all'); }} className="space-y-2">
-        {areJobLevelTabsVisible && departments.length > 0 && (
-          <TabsList className="grid w-full rounded-lg p-1 shadow-sm bg-gradient-to-r from-slate-50 to-slate-100 border border-slate-200" style={{ gridTemplateColumns: `repeat(${departments.length}, 1fr)` }}>
-            {departments.map(dept => (
-              <TabsTrigger key={dept.id} value={dept.id.toString()} className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600 data-[state=active]:to-indigo-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                {dept.name}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        )}
-
-        {activeDepartment && (
-          <TabsContent value={activeDeptId} className="space-y-4 m-0">
-            {/* Subdepartments Tab */}
-            {areJobLevelTabsVisible && activeSubDepartments.length > 0 && (
-              <Tabs value={activeSubDeptId} onValueChange={(v) => { setActiveSubDeptId(v); }}>
-                <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-gray-50 to-gray-100 border border-gray-200 h-auto">
-                  <TabsTrigger value="all" className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-teal-600 data-[state=active]:to-teal-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                    All Subdepartments
-                  </TabsTrigger>
-                  {activeSubDepartments.map(subdept => (
-                    <TabsTrigger key={subdept.id} value={subdept.id.toString()} className="text-sm font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-teal-600 data-[state=active]:to-teal-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                      {subdept.name}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-              </Tabs>
-            )}
-
-            {/* Statuses Tab */}
-            <Tabs value={activeStatus} onValueChange={(v) => { setActiveStatus(v); }}>
-              {areJobLevelTabsVisible && (
-                <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-slate-50 to-slate-100 border border-slate-200">
-                  <TabsTrigger value="all" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-slate-600 data-[state=active]:to-slate-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                    All Statuses <Badge variant="secondary" className="bg-slate-100 text-slate-800">{allTasksCount}</Badge>
-                  </TabsTrigger>
-                  <TabsTrigger value="wip" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-amber-600 data-[state=active]:to-amber-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                    WIP Stages <Badge variant="secondary" className="bg-amber-100 text-amber-800">{wipTasksCount}</Badge>
-                  </TabsTrigger>
-                  <TabsTrigger value="write_up_completed" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-green-600 data-[state=active]:to-green-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                    Write Up Completed <Badge variant="secondary" className="bg-green-100 text-green-800">{writeUpCompletedCount}</Badge>
-                  </TabsTrigger>
-                  <TabsTrigger value="endorsed" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                    Endorsement Completed <Badge variant="secondary" className="bg-purple-100 text-purple-800">{endorsedCount}</Badge>
-                  </TabsTrigger>
-                  <TabsTrigger value="cancelled" className="text-sm md:text-sm gap-2 font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-red-600 data-[state=active]:to-red-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200">
-                    Cancelled <Badge variant="secondary" className="bg-red-100 text-red-800">{cancelledCount}</Badge>
-                  </TabsTrigger>
-                </TabsList>
-              )}
-
-              <TabsContent value={activeStatus} className="mt-4">
-                {/* Officer tabs - always visible regardless of job level tabs visibility */}
-                {availableOfficers.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Tabs value={activeOfficerTab} onValueChange={setActiveOfficerTab} className="flex-1">
-                        <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-slate-50 to-slate-100 border border-slate-200 h-auto">
-                          <TabsTrigger value="all" className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                            All Officers <Badge className={`ml-1 text-xs h-5 px-2 ${(officerTaskCounts.all || 0) > 0 ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-700 border border-slate-200'}`}>{officerTaskCounts.all || 0}</Badge>
-                          </TabsTrigger>
-                          {availableOfficers.map(officer => (
-                            <TabsTrigger key={officer.id} value={officer.id} className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                              {officer.full_name || officer.name || officer.displayName || `Officer ${officer.id}`} <Badge className={`ml-1 text-xs h-5 px-2 ${(officerTaskCounts[officer.id] || 0) > 0 ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-700 border border-slate-200'}`}>{officerTaskCounts[officer.id] || 0}</Badge>
-                            </TabsTrigger>
-                          ))}
-                        </TabsList>
-                      </Tabs>
-                      <Select value={officerFilterMode} onValueChange={(value: 'current' | 'history') => setOfficerFilterMode(value)}>
-                        <SelectTrigger className="w-32 h-7 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="current">Current</SelectItem>
-                          <SelectItem value="history">History</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                )}
-
-                {/* Task Managers tabs - always visible regardless of job level tabs visibility */}
-                {availableTaskManagers.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Tabs value={activeTaskManagerTab} onValueChange={setActiveTaskManagerTab} className="flex-1">
-                        <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 h-auto">
-                          <TabsTrigger value="all" className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                            All Task Managers <Badge className={`ml-1 text-xs h-5 px-2 ${(taskManagerTaskCounts.all || 0) > 0 ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-700 border border-slate-200'}`}>{taskManagerTaskCounts.all || 0}</Badge>
-                          </TabsTrigger>
-                          {availableTaskManagers.map(taskManager => (
-                            <TabsTrigger key={taskManager.id} value={taskManager.id} className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-purple-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                              {taskManager.full_name || taskManager.name || taskManager.displayName || `Task Manager ${taskManager.id}`} <Badge className={`ml-1 text-xs h-5 px-2 ${(taskManagerTaskCounts[taskManager.id] || 0) > 0 ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-700 border border-slate-200'}`}>{taskManagerTaskCounts[taskManager.id] || 0}</Badge>
-                            </TabsTrigger>
-                          ))}
-                        </TabsList>
-                      </Tabs>
-                      <Select value={taskManagerFilterMode} onValueChange={(value: 'current' | 'history') => setTaskManagerFilterMode(value)}>
-                        <SelectTrigger className="w-32 h-7 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="current">Current</SelectItem>
-                          <SelectItem value="history">History</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                )}
-
-                {/* Clients filter - simple toggle button with mode select */}
-                {availableClients.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="flex justify-between gap-2">
-                      <div>
-                        <Button
-                          variant={selectedClients.length > 0 ? "default" : "outline"}
-                          size="sm"
-                          onClick={() => {
-                            if (selectedClients.length > 0) {
-                              setSelectedClients([]);
-                            } else {
-                              setSelectedClients(availableClients.map(c => c.id));
-                            }
-                          }}
-                          className="flex-1 h-8 text-xs font-semibold bg-gradient-to-r from-orange-50 to-orange-100 border border-orange-200 text-slate-700 hover:from-orange-600 hover:to-orange-700 hover:text-white hover:border-orange-600 transition-all duration-200"
-                        >
-                          {selectedClients.length > 0 ? (
-                            <>
-                              Filtering {selectedClients.length} Clients
-                            </>
-                          ) : (
-                            <>
-                              Filter All Clients <Badge variant="secondary" className="ml-1 text-xs h-5 px-2">{clientTaskCounts.all || 0}</Badge>
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                      <Select value={clientFilterMode} onValueChange={(value: 'current' | 'history') => setClientFilterMode(value)}>
-                        <SelectTrigger className="w-32 h-7 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="current">Current</SelectItem>
-                          <SelectItem value="history">History</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                )}
-
-                {/* BCL tabs - always visible regardless of job level tabs visibility */}
-                {availableBCLs.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Tabs value={activeBCLTab} onValueChange={setActiveBCLTab} className="flex-1">
-                        <TabsList className="rounded-lg p-1 shadow-sm bg-gradient-to-r from-teal-50 to-teal-100 border border-teal-200 h-auto">
-                          <TabsTrigger value="all" className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-teal-600 data-[state=active]:to-teal-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                            All BCLs
-                          </TabsTrigger>
-                          {availableBCLs.map(bcl => (
-                            <TabsTrigger key={bcl.id} value={bcl.id} className="text-xs font-semibold text-slate-700 data-[state=active]:bg-gradient-to-r data-[state=active]:from-teal-600 data-[state=active]:to-teal-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0 rounded-md transition-all duration-200 flex-1">
-                              {bcl.full_name || bcl.name || bcl.displayName || `BCL ${bcl.id}`}
-                            </TabsTrigger>
-                          ))}
-                        </TabsList>
-                      </Tabs>
-                      <Select value={bclFilterMode} onValueChange={(value: 'current' | 'history') => setBCLFilterMode(value)}>
-                        <SelectTrigger className="w-32 h-7 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="current">Current</SelectItem>
-                          <SelectItem value="history">History</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                )}
-
-                {/* Wrapper Card */}
-                <Card className="bg-white/80 backdrop-blur-sm shadow-lg border-slate-100 flex flex-col h-[calc(100vh - 100px)]">
-                  <CardHeader className="border-b border-slate-100 bg-white shrink-0 pb-3">
-                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                      <div>
-                        <CardTitle className="text-lg text-slate-800">
-                          {activeReport ? activeReport.name : "Report Viewer"}
-                          {activeDeptId && ` - ${activeDepartment?.name}`}
-                        </CardTitle>
-                        <CardDescription className="text-slate-600">
-                          {activeReport ? activeReport.description : "Select a template"}
-                        </CardDescription>
-                      </div>
-
-                      {/* Action Tools aligned to right exactly like DepartmentTasksManager */}
-                      <div className="flex items-center gap-2 flex-wrap justify-end">
-                        <div className="relative">
-                          <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
-                          <Input
-                            placeholder="Search..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="pl-8 w-48 sm:w-64 h-9"
-                          />
-                          {searchQuery && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="absolute right-1 top-1.5 h-6 w-6"
-                              onClick={() => setSearchQuery('')}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
-                        <Button onClick={() => setView(view === 'standard' ? 'transposed' : 'standard')} className="flex items-center gap-2 cursor-pointer">
-                          {view === 'standard' ? <LayoutGrid className="h-4 w-4" /> : <TableProperties className="h-4 w-4" />}
-                          {view === 'standard' ? 'Transposed View' : 'Standard View'}
-                        </Button>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="outline" size="sm" className="flex items-center gap-2">
-                              <Filter className="h-4 w-4" />Actions
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-48">
-                            <DropdownMenuItem onClick={() => setShowTimeStatuses(!showTimeStatuses)} className="flex items-center gap-2 cursor-pointer">
-                              <Clock className="h-4 w-4" />
-                              {showTimeStatuses ? 'Hide Time Details' : 'Show Time Details'}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => setShowNARows(!showNARows)} className="flex items-center gap-2 cursor-pointer">
-                              {showNARows ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                              {showNARows ? 'Hide N/A Rows' : 'Show N/A Rows'}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleExport('excel')} className="flex items-center gap-2 cursor-pointer">
-                              <Download className="h-4 w-4" />Export to Excel
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => refreshData()} disabled={loading} className="flex items-center gap-2 cursor-pointer">
-                              <RotateCcw className={`h-4 w-4 ${loading ? 'animate-spin text-blue-600' : ''}`} />Refresh
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                        {areJobLevelTabsVisible && (
-                          <div className="flex justify-between">
-                            <DropdownMenu open={isFiltersDropdownOpen} onOpenChange={setIsFiltersDropdownOpen}>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="outline" size="sm" className="flex items-center gap-2">
-                                  <Filter className="h-4 w-4" />Filters
-                                  {activeClassId !== 'all' || activeSubClassId !== 'all' || selectedOfficers.length > 0 || selectedManagers.length > 0 || selectedAssistants.length > 0 || activeOfficerTab !== 'all' ? (
-                                    <Badge variant="secondary" className="ml-1 h-5 px-2">Active</Badge>
-                                  ) : null}
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="start" className="w-80 max-h-[80vh] overflow-y-auto">
-                                <div className="p-4 space-y-4">
-                                  {/* Class Select */}
-                                  <div>
-                                    <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Class</label>
-                                    <Select value={activeClassId} onValueChange={v => { setActiveClassId(v); setActiveSubClassId('all'); }}>
-                                      <SelectTrigger className="w-full h-9 text-sm font-medium bg-white border-slate-200 text-slate-700">
-                                        <SelectValue placeholder="All Classes" />
-                                      </SelectTrigger>
-                                      <SelectContent className="z-[100]">
-                                        <SelectItem value="all">All Classes</SelectItem>
-                                        {activeSubDepartments.find(s => s.id.toString() === (activeSubDeptId === 'all' ? activeSubDepartments[0]?.id.toString() : activeSubDeptId))?.classes?.map((cls: any) => (
-                                          <SelectItem key={cls.id} value={cls.id.toString()}>{cls.name}</SelectItem>
-                                        )) || []}
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
-
-                                  {/* Subclass Select */}
-                                  {activeClassId && activeClassId !== 'all' && (
-                                    <div>
-                                      <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Subclass</label>
-                                      <Select value={activeSubClassId} onValueChange={v => { setActiveSubClassId(v); }}>
-                                        <SelectTrigger className="w-full h-9 text-sm font-medium bg-white border-slate-200 text-slate-700">
-                                          <SelectValue placeholder="All Subclasses" />
-                                        </SelectTrigger>
-                                        <SelectContent className="z-[100]">
-                                          <SelectItem value="all">All Subclasses</SelectItem>
-                                          {activeSubDepartments.find(s => s.id.toString() === (activeSubDeptId === 'all' ? activeSubDepartments[0]?.id.toString() : activeSubDeptId))?.classes?.find((c: any) => c.id.toString() === activeClassId)?.subClasses?.map((subCls: any) => (
-                                            <SelectItem key={subCls.id} value={subCls.id.toString()}>{subCls.name}</SelectItem>
-                                          )) || []}
-                                        </SelectContent>
-                                      </Select>
-                                    </div>
-                                  )}
-
-                                  {/* Officer Dropdown */}
-                                  <div>
-                                    <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Officers</label>
-                                    <DropdownMenu open={isOfficerDropdownOpen} onOpenChange={setIsOfficerDropdownOpen}>
-                                      <DropdownMenuTrigger asChild>
-                                        <Button variant="outline" size="sm" disabled={!activeDeptId} className={cn("w-full h-9 text-sm font-medium justify-between", selectedOfficers.length > 0 ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-white text-slate-700 border-slate-200")}>
-                                          <span className="flex items-center gap-2">
-                                            <User className="h-4 w-4" />
-                                            {selectedOfficers.length > 0 ? `${selectedOfficers.length} Selected` : "Filter Officers"}
-                                          </span>
-                                          <ChevronDown className="h-4 w-4 opacity-50" />
-                                        </Button>
-                                      </DropdownMenuTrigger>
-                                      <DropdownMenuContent className="w-64 p-2 z-[100] border-slate-200 shadow-xl max-h-80 overflow-y-auto">
-                                        {availableOfficers.length === 0 ? (
-                                          <div className="p-3 text-sm text-slate-500 text-center italic">No officers assigned</div>
-                                        ) : (
-                                          <>
-                                            <div className="space-y-1">
-                                              {availableOfficers.map(o => (
-                                                <div key={o.id} className="flex items-center space-x-2.5 p-1.5 hover:bg-slate-50 rounded-md transition-colors cursor-pointer" onClick={() => { setSelectedOfficers(prev => prev.includes(o.id) ? prev.filter(id => id !== o.id) : [...prev, o.id]); }}>
-                                                  <Checkbox checked={selectedOfficers.includes(o.id)} className="pointer-events-none" />
-                                                  <label className="text-sm font-medium text-slate-700 cursor-pointer">{o.full_name || o.name || o.displayName || `Officer ${o.id}`}</label>
-                                                </div>
-                                              ))}
-                                            </div>
-                                            {selectedOfficers.length > 0 && (
-                                              <div className="border-t border-slate-100 mt-2 pt-2">
-                                                <Button variant="ghost" size="sm" className="w-full text-sm text-slate-500 hover:text-slate-800" onClick={() => { setSelectedOfficers([]); }}>Clear Selection</Button>
-                                              </div>
-                                            )}
-                                          </>
-                                        )}
-                                      </DropdownMenuContent>
-                                    </DropdownMenu>
-                                  </div>
-
-                                  {/* Manager Dropdown */}
-                                  <div>
-                                    <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Managers</label>
-                                    <DropdownMenu open={isManagerDropdownOpen} onOpenChange={setIsManagerDropdownOpen}>
-                                      <DropdownMenuTrigger asChild>
-                                        <Button variant="outline" size="sm" disabled={!activeDeptId} className={cn("w-full h-9 text-sm font-medium justify-between", selectedManagers.length > 0 ? "bg-purple-50 text-purple-700 border-purple-200" : "bg-white text-slate-700 border-slate-200")}>
-                                          <span className="flex items-center gap-2">
-                                            <Briefcase className="h-4 w-4" />
-                                            {selectedManagers.length > 0 ? `${selectedManagers.length} Selected` : "Filter Managers"}
-                                          </span>
-                                          <ChevronDown className="h-4 w-4 opacity-50" />
-                                        </Button>
-                                      </DropdownMenuTrigger>
-                                      <DropdownMenuContent className="w-64 p-2 z-[100] border-slate-200 shadow-xl max-h-80 overflow-y-auto">
-                                        {availableManagers.length === 0 ? (
-                                          <div className="p-3 text-sm text-slate-500 text-center italic">No managers assigned</div>
-                                        ) : (
-                                          <>
-                                            <div className="space-y-1">
-                                              {availableManagers.map(m => (
-                                                <div key={m.id} className="flex items-center space-x-2.5 p-1.5 hover:bg-slate-50 rounded-md transition-colors cursor-pointer" onClick={() => { setSelectedManagers(prev => prev.includes(m.id) ? prev.filter(id => id !== m.id) : [...prev, m.id]); }}>
-                                                  <Checkbox checked={selectedManagers.includes(m.id)} className="pointer-events-none" />
-                                                  <label className="text-sm font-medium text-slate-700 cursor-pointer">{m.full_name || m.name || m.displayName || `Manager ${m.id}`}</label>
-                                                </div>
-                                              ))}
-                                            </div>
-                                            {selectedManagers.length > 0 && (
-                                              <div className="border-t border-slate-100 mt-2 pt-2">
-                                                <Button variant="ghost" size="sm" className="w-full text-sm text-slate-500 hover:text-slate-800" onClick={() => { setSelectedManagers([]); }}>Clear Selection</Button>
-                                              </div>
-                                            )}
-                                          </>
-                                        )}
-                                      </DropdownMenuContent>
-                                    </DropdownMenu>
-                                  </div>
-
-                                  {/* Assistant Dropdown */}
-                                  <div>
-                                    <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Assistants</label>
-                                    <DropdownMenu open={isAssistantDropdownOpen} onOpenChange={setIsAssistantDropdownOpen}>
-                                      <DropdownMenuTrigger asChild>
-                                        <Button variant="outline" size="sm" disabled={!activeDeptId} className={cn("w-full h-9 text-sm font-medium justify-between", selectedAssistants.length > 0 ? "bg-green-50 text-green-700 border-green-200" : "bg-white text-slate-700 border-slate-200")}>
-                                          <span className="flex items-center gap-2">
-                                            <User className="h-4 w-4" />
-                                            {selectedAssistants.length > 0 ? `${selectedAssistants.length} Selected` : "Filter Assistants"}
-                                          </span>
-                                          <ChevronDown className="h-4 w-4 opacity-50" />
-                                        </Button>
-                                      </DropdownMenuTrigger>
-                                      <DropdownMenuContent className="w-64 p-2 z-[100] border-slate-200 shadow-xl max-h-80 overflow-y-auto">
-                                        {availableAssistants.length === 0 ? (
-                                          <div className="p-3 text-sm text-slate-500 text-center italic">No assistants assigned</div>
-                                        ) : (
-                                          <>
-                                            <div className="space-y-1">
-                                              {availableAssistants.map(a => (
-                                                <div key={a.id} className="flex items-center space-x-2.5 p-1.5 hover:bg-slate-50 rounded-md transition-colors cursor-pointer" onClick={() => { setSelectedAssistants(prev => prev.includes(a.id) ? prev.filter(id => id !== a.id) : [...prev, a.id]); }}>
-                                                  <Checkbox checked={selectedAssistants.includes(a.id)} className="pointer-events-none" />
-                                                  <label className="text-sm font-medium text-slate-700 cursor-pointer">{a.full_name || a.name || a.displayName || `Assistant ${a.id}`}</label>
-                                                </div>
-                                              ))}
-                                            </div>
-                                            {selectedAssistants.length > 0 && (
-                                              <div className="border-t border-slate-100 mt-2 pt-2">
-                                                <Button variant="ghost" size="sm" className="w-full text-sm text-slate-500 hover:text-slate-800" onClick={() => { setSelectedAssistants([]); }}>Clear Selection</Button>
-                                              </div>
-                                            )}
-                                          </>
-                                        )}
-                                      </DropdownMenuContent>
-                                    </DropdownMenu>
-                                  </div>
-                                </div>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </div>)}
-                      </div>
-                    </div>
-                  </CardHeader>
-
-                  {/* Table Main Area */}
-                  <CardContent className="flex-1 p-0 overflow-hidden relative">
-                    <div className="h-full w-full overflow-auto scrollbar-thin bg-white rounded-b-xl">
-                      {!activeReport ? (
-                        <div className="flex flex-col items-center justify-center h-full text-slate-400 bg-slate-50/50">
-                          <FileText className="h-16 w-16 mb-4 opacity-20 text-blue-600" />
-                          <p className="text-lg font-bold text-slate-600 tracking-tight">No Report Selected</p>
-                          <p className="text-sm font-medium text-slate-400 mt-2">Open the report menu to generate a view</p>
-                        </div>
-                      ) : loading ? (
-                        <div className="flex flex-col items-center justify-center h-full bg-slate-50/50">
-                          <Loader2 className="h-10 w-10 animate-spin text-blue-600 mb-3" />
-                          <p className="text-sm font-bold text-slate-500">Processing Report Data...</p>
-                        </div>
-                      ) : view === 'standard' ? (
-                        <StandardReportView
-                          allTasks={filteredByNARows}
-                          filteredColumns={filteredColumns}
-                          columnGroups={columnGroups}
-                          sortConfig={sortConfig}
-                          expandedStageColumns={expandedStageColumns}
-                          renderCellValue={renderCellValue}
-                          safeRender={safeRender}
-                          handleSort={handleSort}
-                          toggleStageColumns={toggleStageColumns}
-                          isStageApplicableToCurrentFilter={isStageApplicableToCurrentFilter}
-                          userData={{
-                            officers: unifiedOfficers,
-                            managers: unifiedManagers,
-                            assistants: unifiedAssistants,
-                            allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants]
-                          }}
-                          departments={departments}
-                          stages={stages}
-                        />
-                      ) : (
-                        <TransposedReportView
-                          paginatedTasks={filteredByNARows}
-                          transposedRows={transposedRows}
-                          currentPage={1}
-                          itemsPerPage={filteredByNARows.length}
-                          expandedSections={expandedSections}
-                          renderCellValue={renderCellValue}
-                          toggleSection={toggleSection}
-                          userData={{
-                            officers: unifiedOfficers,
-                            managers: unifiedManagers,
-                            assistants: unifiedAssistants,
-                            allUsers: [...unifiedOfficers, ...unifiedManagers, ...unifiedAssistants]
-                          }}
-                          departments={departments}
-                        />
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            </Tabs>
-          </TabsContent >
-        )
-        }
-      </Tabs >
 
       <MemorizedReportDialog
         open={isReportDialogOpen}
         onOpenChange={setIsReportDialogOpen}
-        department={departments.find(d => d.id.toString() === activeDeptId) || null}
+        department={departments.find((d: any) => d.id.toString() === activeDeptId) || null}
         stages={stages}
         kycDocuments={kycDocuments}
         onApplyReport={(report) => { setActiveReport(report); setExpandedStageColumns(new Set()); setIsReportDialogOpen(false); }}
         tableHeaders={ENHANCED_TABLE_HEADERS_IMMIGRATION}
         availableJobLevels={availableJobLevels}
         departments={departments}
-        subdepartments={departments.flatMap(d => d.tm_subdepartments || [])}
-        classes={departments.flatMap(d => (d.tm_subdepartments || []).flatMap((s: any) => s.classes || []))}
+        subdepartments={departments.flatMap((d: any) => d.tm_subdepartments || [])}
+        classes={departments.flatMap((d: any) => (d.tm_subdepartments || []).flatMap((s: any) => s.classes || []))}
       />
-    </div >
+    </div>
   );
 }
-
-
-
-
-

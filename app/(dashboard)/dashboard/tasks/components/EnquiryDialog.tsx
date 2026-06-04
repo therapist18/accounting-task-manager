@@ -145,6 +145,7 @@ export function EnquiryDialog({
     const [applicantPhoto, setApplicantPhoto] = useState<string | null>(null)
     const [loadingPhoto, setLoadingPhoto] = useState(false)
     const [checkingWorkflow, setCheckingWorkflow] = useState(false)
+    const [editableRNumber, setEditableRNumber] = useState('')
 
     // Data lists
     const [individuals, setIndividuals] = useState<Individual[]>([])
@@ -405,7 +406,7 @@ export function EnquiryDialog({
     const fetchIndividualsByType = useCallback(async (type: 'principal' | 'dependant') => {
         const { data, error } = await supabase
             .from('registry_individuals')
-            .select('id, full_name, contact_details, relationships, employment_data')
+            .select('id, full_name, contact_details, relationships, employment_data, r_number')
             .order('full_name', { ascending: true });
 
         if (error) throw error;
@@ -428,36 +429,21 @@ export function EnquiryDialog({
         }
     }, [])
 
-    // Fetch applicant photo
+    // Fetch applicant photo — both queries run in parallel, passport photo takes priority
     const fetchApplicantPhoto = useCallback(async (individualId: number) => {
         setLoadingPhoto(true);
         setApplicantPhoto(null);
-
         try {
-            // Try passport photo first
-            let { data: photoDoc } = await supabase
-                .from('acc_portal_directors_documents')
-                .select('file_path')
-                .eq('director_id', individualId)
-                .eq('document_id', PASSPORT_PHOTO_ID)
-                .maybeSingle();
-
-            // Fallback to clear photo
-            if (!photoDoc) {
-                const result = await supabase
-                    .from('acc_portal_directors_documents')
-                    .select('file_path')
-                    .eq('director_id', individualId)
-                    .eq('document_id', CLEAR_PHOTO_ID)
-                    .maybeSingle();
-                photoDoc = result.data;
-            }
-
+            const [passportResult, clearResult] = await Promise.all([
+                supabase.from('acc_portal_directors_documents').select('file_path')
+                    .eq('director_id', individualId).eq('document_id', PASSPORT_PHOTO_ID).maybeSingle(),
+                supabase.from('acc_portal_directors_documents').select('file_path')
+                    .eq('director_id', individualId).eq('document_id', CLEAR_PHOTO_ID).maybeSingle()
+            ]);
+            const photoDoc = passportResult.data || clearResult.data;
             if (photoDoc?.file_path) {
                 const imageUrl = getSupabaseImageUrl(photoDoc.file_path);
-                if (imageUrl) {
-                    setApplicantPhoto(imageUrl);
-                }
+                if (imageUrl) setApplicantPhoto(imageUrl);
             }
         } catch (error) {
             console.error('Error fetching applicant photo:', error);
@@ -528,6 +514,7 @@ export function EnquiryDialog({
             }
         })
         setSelectedIndividual(null)
+        setEditableRNumber('')
         setSelectedCompany('')
         setSelectedUnderstudy('')
         setUnderstudies([])
@@ -625,24 +612,23 @@ export function EnquiryDialog({
         // 3. Resolve Applicant Type
         setApplicantType(taskToEdit.applicant_details?.role || 'principal');
 
-        // 4. Load the individual and trigger related data (Companies/Understudies)
+        // 4. Load the individual and trigger related data (Companies/Understudies) — in parallel
         if (taskToEdit.individual_id) {
-            supabase.from('registry_individuals')
-                .select('*')
-                .eq('id', taskToEdit.individual_id)
-                .single()
-                .then(({ data }) => {
-                    if (data) {
-                        handleIndividualSelect(data); // This triggers company/understudy fetch
-                        if (taskToEdit.company_id) {
-                            setSelectedCompany(String(taskToEdit.company_id));
-                            fetchUnderstudies(String(taskToEdit.company_id)).then(() => {
-                                const understudyPart = taskToEdit.participants_details?.find(p => p.role?.includes('understudy'));
-                                if (understudyPart) setSelectedUnderstudy(String(understudyPart.id));
-                            });
-                        }
+            const companyId = taskToEdit.company_id ? String(taskToEdit.company_id) : null;
+            if (companyId) setSelectedCompany(companyId);
+
+            Promise.all([
+                supabase.from('registry_individuals').select('*').eq('id', taskToEdit.individual_id).single(),
+                companyId ? fetchUnderstudies(companyId) : Promise.resolve(null)
+            ]).then(([{ data: indData }]) => {
+                if (indData) {
+                    handleIndividualSelect(indData);
+                    if (companyId) {
+                        const understudyPart = taskToEdit.participants_details?.find(p => p.role?.includes('understudy'));
+                        if (understudyPart) setSelectedUnderstudy(String(understudyPart.id));
                     }
-                });
+                }
+            });
         }
 
         // 5. Handle Sponsor if applicable
@@ -936,6 +922,7 @@ export function EnquiryDialog({
     const handleIndividualSelect = useCallback(async (ind: Individual) => {
         setLoadingRelations(true)
         setSelectedIndividual(ind)
+        setEditableRNumber(ind?.r_number || '')
         setCompanies([]); setSelectedCompany('')
         setUnderstudies([]); setSelectedUnderstudy('')
         setAvailableDependants([]); setSelectedDependants([]); setIncludeDependants(false)
@@ -1091,7 +1078,7 @@ export function EnquiryDialog({
 
             const { data, error } = await supabase
                 .from('registry_individuals')
-                .select('id, full_name, contact_details, relationships, employment_data')
+                .select('id, full_name, contact_details, relationships, employment_data, r_number')
                 .eq('id', individualId)
                 .single();
 
@@ -1430,48 +1417,48 @@ export function EnquiryDialog({
                 participants_details: participants,
             }
 
-            let result;
-            if (taskToEdit) {
-                // UPDATE
-                const { data, error } = await supabase.from('tm_tasks')
-                    .update(payload)
-                    .eq('id', taskToEdit.id)
-                    .select()
-                    .single();
-                if (error) throw error;
-                result = data;
-                toast({ title: "Success", description: "Enquiry updated successfully.", variant: "success" });
-            } else {
-                // INSERT
-                const insertPayload = {
-                    ...payload,
-                    status: 'enquiry',
-                    date_initiated: normalizedEnquiryDate.isoDateTime,
-                    applied_by: "11",
-                    created_by: "enquiry_dialog",
-                    job_level: {
-                        level: formData.class_id ? 3 : formData.subdepartment_id ? 2 : 1,
-                        department_id: Number(formData.department_id),
-                        subdepartment_id: formData.subdepartment_id ? Number(formData.subdepartment_id) : null,
-                        class_id: formData.class_id ? Number(formData.class_id) : null,
-                        subclass_id: null
-                    },
-                    registry_metadata: {
-                        triggered_from: "enquiry_dialog",
-                        triggered_at: new Date().toISOString(),
-                        existing_workflow_detected: !!workflowRestrictionSummary?.matchedDocumentTypes?.length,
-                        workflow_blocking_reasons: workflowRestrictionSummary?.blockingReasons || []
-                    },
-                    stages: { '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa': { status: "completed", date: normalizedEnquiryDate.displayDate } }
-                };
-                const { data, error } = await supabase.from('tm_tasks').insert([insertPayload]).select().single();
-                if (error) throw error;
-                result = data;
-                toast({ title: "Success", description: "Enquiry created successfully.", variant: "success" });
-            }
+            const insertPayload = !taskToEdit ? {
+                ...payload,
+                status: 'enquiry',
+                date_initiated: normalizedEnquiryDate.isoDateTime,
+                applied_by: "11",
+                created_by: "enquiry_dialog",
+                job_level: {
+                    level: formData.class_id ? 3 : formData.subdepartment_id ? 2 : 1,
+                    department_id: Number(formData.department_id),
+                    subdepartment_id: formData.subdepartment_id ? Number(formData.subdepartment_id) : null,
+                    class_id: formData.class_id ? Number(formData.class_id) : null,
+                    subclass_id: null
+                },
+                registry_metadata: {
+                    triggered_from: "enquiry_dialog",
+                    triggered_at: new Date().toISOString(),
+                    existing_workflow_detected: !!workflowRestrictionSummary?.matchedDocumentTypes?.length,
+                    workflow_blocking_reasons: workflowRestrictionSummary?.blockingReasons || []
+                },
+                stages: { '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa': { status: "completed", date: normalizedEnquiryDate.displayDate } }
+            } : null;
+
+            const taskPromise = taskToEdit
+                ? supabase.from('tm_tasks').update(payload).eq('id', taskToEdit.id).select().single()
+                : supabase.from('tm_tasks').insert([insertPayload]).select().single();
+
+            const rNumberChanged = editableRNumber !== (selectedIndividual?.r_number || '');
+            const rNumberPromise = (rNumberChanged && selectedIndividual?.id)
+                ? supabase.from('registry_individuals').update({ r_number: editableRNumber }).eq('id', selectedIndividual.id)
+                : Promise.resolve({ error: null });
+
+            const [{ data: taskData, error: taskError }] = await Promise.all([taskPromise, rNumberPromise]);
+            if (taskError) throw taskError;
+
+            toast({
+                title: "Success",
+                description: taskToEdit ? "Enquiry updated successfully." : "Enquiry created successfully.",
+                variant: "success"
+            });
 
             // Call the callback with the updated/created task to refresh parent state
-            onEnquiryCreated(result);
+            onEnquiryCreated(taskData);
 
             // Close dialog after successful submission
             onOpenChange(false);
@@ -1486,6 +1473,14 @@ export function EnquiryDialog({
     const dialogTitle = taskToEdit
         ? `Edit Enquiry: ${taskToEdit.applicant_details?.name || 'Loading...'}`
         : "New Client Enquiry";
+
+    const jobLevelLabel = useMemo(() => {
+        if (!taskToEdit || !formData.department_id) return null;
+        const dept = departments.find(d => d.id.toString() === formData.department_id);
+        const sub = availableSubdepartments.find(s => s.id.toString() === formData.subdepartment_id);
+        const cls = availableClasses.find(c => c.id.toString() === formData.class_id);
+        return [dept?.name, sub?.name, cls?.name].filter(Boolean).join(' › ') || null;
+    }, [taskToEdit, formData.department_id, formData.subdepartment_id, formData.class_id, departments, availableSubdepartments, availableClasses]);
 
     return (
         <>
@@ -1510,6 +1505,13 @@ export function EnquiryDialog({
                                     <DialogDescription className="text-blue-100 font-medium">
                                         {taskToEdit ? "Updating existing records" : "Logical requirement engine active"}
                                     </DialogDescription>
+                                    {taskToEdit && jobLevelLabel && (
+                                        <div className="mt-1">
+                                            <Badge className="bg-white/20 text-white border-white/20 text-xs font-semibold px-2 py-0.5">
+                                                {jobLevelLabel}
+                                            </Badge>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -1956,9 +1958,26 @@ export function EnquiryDialog({
                                             <Input
                                                 type="text"
                                                 value={formData.passport_number}
-                                                disabled
+                                                disabled={!taskToEdit}
                                                 onChange={e => setFormData(prev => ({ ...prev, passport_number: e.target.value }))}
                                                 placeholder="Enter passport number"
+                                                className="h-11 border-slate-200 bg-white"
+                                            />
+                                            {!taskToEdit && selectedIndividual && !formData.passport_number && (
+                                                <div className="mt-2 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded-md">
+                                                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                                                    No passport found. Please upload the passport document for this individual first.
+                                                </div>
+                                            )}
+                                        </TableRow>
+
+                                        <TableRow label="R Number">
+                                            <Input
+                                                type="text"
+                                                value={editableRNumber}
+                                                onChange={e => setEditableRNumber(e.target.value)}
+                                                disabled={!selectedIndividual}
+                                                placeholder={selectedIndividual ? "Enter R number" : "—"}
                                                 className="h-11 border-slate-200 bg-white"
                                             />
                                         </TableRow>

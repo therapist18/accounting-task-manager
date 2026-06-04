@@ -336,80 +336,7 @@ export function StandardReportView({
   };
 
   return (
-    <div className="space-y-4">
-      {/* Row Pagination Controls */}
-      {totalRows > 0 && (
-        <div className="flex items-center justify-between p-4 bg-white border rounded-xl shadow-sm">
-          <div className="text-sm text-slate-500">
-            Showing{' '}
-            <span className="font-bold text-slate-800">{((currentPage - 1) * rowsPerPage) + 1}</span> to{' '}
-            <span className="font-bold text-slate-800">{Math.min(currentPage * rowsPerPage, totalRows)}</span> of{' '}
-            <span className="font-bold text-slate-800">{totalRows}</span> rows
-          </div>
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-500 uppercase">Rows:</span>
-              <Select
-                value={String(rowsPerPage)}
-                onValueChange={handleRowsPerPageChange}
-              >
-                <SelectTrigger className="w-20 h-8">
-                  <SelectValue placeholder={rowsPerPage} />
-                </SelectTrigger>
-                <SelectContent>
-                  {[10, 25, 50, 100].map(size => (
-                    <SelectItem key={size} value={String(size)}>{size}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex items-center gap-1">
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-8 w-8"
-                onClick={handleFirstPage}
-                disabled={currentPage === 1}
-                aria-label="Go to first page"
-              >
-                <ChevronsLeft className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-8 w-8"
-                onClick={handlePreviousPage}
-                disabled={currentPage === 1}
-                aria-label="Go to previous page"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <span className="px-4 text-sm font-bold">Page {totalPages > 0 ? currentPage : 0} / {Math.max(1, totalPages)}</span>
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-8 w-8"
-                onClick={handleNextPage}
-                disabled={currentPage >= totalPages}
-                aria-label="Go to next page"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-8 w-8"
-                onClick={handleLastPage}
-                disabled={currentPage >= totalPages}
-                aria-label="Go to last page"
-              >
-                <ChevronsRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
+    <div className="flex flex-col gap-2">
       <div className="border-2 border-slate-300 rounded-b-lg rounded-tl-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 200px)' }}>
         <Table className="border-separate border-spacing-0 w-full min-w-max">
           <TableHeader className="sticky top-0 z-30 shadow-sm backdrop-blur-md">
@@ -616,6 +543,48 @@ export function StandardReportView({
           </TableBody>
         </Table>
       </div>
+
+      {/* Row Pagination Controls */}
+      {totalRows > 0 && (
+        <div className="flex items-center justify-between px-4 py-2 bg-white border border-slate-200 rounded-lg shadow-sm shrink-0">
+          <div className="text-sm text-slate-500">
+            Showing{' '}
+            <span className="font-bold text-slate-800">{((currentPage - 1) * rowsPerPage) + 1}</span> to{' '}
+            <span className="font-bold text-slate-800">{Math.min(currentPage * rowsPerPage, totalRows)}</span> of{' '}
+            <span className="font-bold text-slate-800">{totalRows}</span> rows
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-slate-500 uppercase">Rows:</span>
+              <Select value={String(rowsPerPage)} onValueChange={handleRowsPerPageChange}>
+                <SelectTrigger className="w-16 h-7 text-xs">
+                  <SelectValue placeholder={rowsPerPage} />
+                </SelectTrigger>
+                <SelectContent>
+                  {[10, 25, 50, 100].map(size => (
+                    <SelectItem key={size} value={String(size)}>{size}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="icon" className="h-7 w-7" onClick={handleFirstPage} disabled={currentPage === 1}>
+                <ChevronsLeft className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="outline" size="icon" className="h-7 w-7" onClick={handlePreviousPage} disabled={currentPage === 1}>
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </Button>
+              <span className="px-3 text-sm font-bold text-slate-700">Page {totalPages > 0 ? currentPage : 0} / {Math.max(1, totalPages)}</span>
+              <Button variant="outline" size="icon" className="h-7 w-7" onClick={handleNextPage} disabled={currentPage >= totalPages}>
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="outline" size="icon" className="h-7 w-7" onClick={handleLastPage} disabled={currentPage >= totalPages}>
+                <ChevronsRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

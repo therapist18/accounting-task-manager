@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Separator } from "@/components/ui/separator"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import React from "react"
 
 type SubClass = {
@@ -62,6 +63,60 @@ interface DepartmentSidebarProps {
   onCollapseToggle?: () => void;
   showDefaultDisplayOnly?: boolean;
   onToggleDefaultDisplay?: () => void;
+}
+
+interface DepartmentSidebarLayoutProps {
+  sidebar: React.ReactNode;
+  children: React.ReactNode;
+  sidebarRef?: React.Ref<any>;
+  defaultSize?: number;
+  minSize?: number;
+  maxSize?: number;
+  collapsedSize?: number;
+  collapsible?: boolean;
+  onCollapse?: () => void;
+  onExpand?: () => void;
+  className?: string;
+  sidebarClassName?: string;
+  contentClassName?: string;
+}
+
+export function DepartmentSidebarLayout({
+  sidebar,
+  children,
+  sidebarRef,
+  defaultSize = 22,
+  minSize = 14,
+  maxSize = 34,
+  collapsedSize = 4,
+  collapsible = true,
+  onCollapse,
+  onExpand,
+  className,
+  sidebarClassName,
+  contentClassName,
+}: DepartmentSidebarLayoutProps) {
+  return (
+    <ResizablePanelGroup direction="horizontal" className={cn("h-full w-full", className)}>
+      <ResizablePanel
+        ref={sidebarRef}
+        defaultSize={defaultSize}
+        minSize={minSize}
+        maxSize={maxSize}
+        collapsedSize={collapsedSize}
+        collapsible={collapsible}
+        onCollapse={onCollapse}
+        onExpand={onExpand}
+        className={cn("min-w-[48px]", sidebarClassName)}
+      >
+        {sidebar}
+      </ResizablePanel>
+      <ResizableHandle withHandle />
+      <ResizablePanel defaultSize={100 - defaultSize} minSize={40} className={contentClassName}>
+        {children}
+      </ResizablePanel>
+    </ResizablePanelGroup>
+  )
 }
 
 // Helper component to render index with level-based colors

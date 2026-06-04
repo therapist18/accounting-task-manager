@@ -2324,7 +2324,9 @@ export default function DepartmentTasksManager({
     onTaskUpdate?.(updatedTask);
     setEditDialogOpen(false);
     setEditingTask(null);
-    loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true);
+    setTasks(prevTasks => prevTasks.map(t => t.id === updatedTask.id ? updatedTask : t));
+    const cacheKey = `${activeDepartmentTab}-${activeSubdepartmentTab || 'all'}`;
+    tasksCacheRef.current.delete(cacheKey);
   }
 
   const handleCancelTask = async (task: any, reason: string) => {
@@ -2431,26 +2433,18 @@ export default function DepartmentTasksManager({
     }
   };
 
-  const handleEnquiryCreated = useCallback(async (newEnquiry: any) => {
-    try {
-      setTasks(prevTasks => [newEnquiry, ...prevTasks])
-      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true);
-      onTaskUpdate?.(newEnquiry);
-
-      toast({
-        title: "Success",
-        description: "New enquiry created successfully",
-        variant: "success"
-      })
-    } catch (error) {
-      console.error('Error creating enquiry:', error);
-      toast({
-        title: "Error",
-        description: "Failed to create enquiry",
-        variant: "destructive"
-      });
-    }
-  }, [loadTasksData, activeDepartmentTab, activeSubdepartmentTab])
+  const handleEnquiryCreated = useCallback((result: any) => {
+    setTasks(prevTasks => {
+      const exists = prevTasks.some(t => t.id === result.id);
+      return exists
+        ? prevTasks.map(t => t.id === result.id ? result : t)
+        : [result, ...prevTasks];
+    });
+    // Invalidate cache so the next navigation triggers a fresh fetch
+    const cacheKey = `${activeDepartmentTab}-${activeSubdepartmentTab || 'all'}`;
+    tasksCacheRef.current.delete(cacheKey);
+    onTaskUpdate?.(result);
+  }, [activeDepartmentTab, activeSubdepartmentTab, onTaskUpdate])
 
   const handleTaskAction = useCallback((action: { type: string; taskId?: string | number;[key: string]: any }) => {
     switch (action.type) {
