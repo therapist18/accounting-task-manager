@@ -15,6 +15,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { toast } from "@/lib/hooks/use-toast";
 import { supabase } from "@/lib/supabase/client";
 import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver'
 import { getCurrentStageStatus, getCellContent, getEnhancedImmigrationStatus, renderImmigrationStatusCell, renderCurrentStageStatusCell, ENHANCED_TABLE_HEADERS_IMMIGRATION, enhanceTasksWithIndividualData, getRawCellValue, getTimeStatus, formatDuration } from "../tasks/overall-view/tableUtils";
 import { parseDate } from "@/app/generic-functions/dateUtils";
 import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields } from "../tasks/utils/taskManagerData";
@@ -694,20 +695,20 @@ export default function ReportsPage() {
   const endorsedCount = useMemo(() => tasksByFilters.filter(t => t.status === 'endorsed').length, [tasksByFilters]);
   const cancelledCount = useMemo(() => tasksByFilters.filter(t => t.status === 'cancel').length, [tasksByFilters]);
 
-  // Count tasks per officer — 'history' mode for per-officer badges; 'current' for unallocated
+  // Count tasks per officer — respects officerFilterMode for per-officer badges; 'current' for unallocated
   const officerTaskCounts = useMemo(() => {
     const counts: Record<string, number> = { all: 0, __unallocated__: 0 };
     availableOfficers.forEach(officer => { counts[officer.id] = 0; });
 
     tasksByDeptFilter.forEach(task => {
       counts.all++;
-      const historyIds = getStageOfficerIds(task, 'history');
-      historyIds.forEach(id => { if (counts[id] !== undefined) counts[id]++; });
+      const modeIds = getStageOfficerIds(task, officerFilterMode);
+      modeIds.forEach(id => { if (counts[id] !== undefined) counts[id]++; });
       if (getStageOfficerIds(task, 'current').length === 0) counts.__unallocated__++;
     });
 
     return counts;
-  }, [tasksByDeptFilter, availableOfficers, getStageOfficerIds]);
+  }, [tasksByDeptFilter, availableOfficers, getStageOfficerIds, officerFilterMode]);
 
   // Count tasks per task manager — unallocated = BCL stage with no manager assigned
   const taskManagerTaskCounts = useMemo(() => {
@@ -1695,50 +1696,181 @@ export default function ReportsPage() {
   }, [departments, stages, kycDocuments, companies, enhancedTasksData, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, checkStageApplicableForTask, isDocumentApplicable, getDocumentForTaskStage, getCurrentStageTracking, getTaskInitiatedDate, getStageOfficerIds, unifiedOfficers]);
 
   const handleExport = async (type: 'excel' | 'pdf') => {
-    if (type !== 'excel') {
-      toast({ title: "Coming Soon", description: "PDF export is being upgraded." });
-      return;
-    }
+    const dateStr = format(new Date(), 'dd MMM yyyy HH:mm');
+    const reportName = activeReport?.name || 'Task Report';
+    const deptLabel = activeDepartment?.name || 'All Departments';
+    const totalCols = filteredColumns.length + 1; // +1 for # index
 
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet('Report');
-    ws.views = [{ state: 'frozen', xSplit: 0, ySplit: 1 }];
+    // ── Shared helper: apply semantic colour to a cell based on its text value ──
+    const applySemanticColor = (cell: ExcelJS.Cell) => {
+      const v = String(cell.value ?? '');
+      if (v === 'Missing' || v === 'N/A' || v.toLowerCase().includes('missing')) {
+        cell.font = { name: 'Calibri', size: 9, color: { argb: 'FFDC2626' }, italic: true };
+      } else if (v.toLowerCase().includes('completed')) {
+        cell.font = { name: 'Calibri', size: 9, color: { argb: 'FF15803D' }, bold: true };
+      } else if (v.toLowerCase().includes('wip') || v.toLowerCase().includes('in progress')) {
+        cell.font = { name: 'Calibri', size: 9, color: { argb: 'FFB45309' }, bold: true };
+      } else if (v.toLowerCase().includes('cancel')) {
+        cell.font = { name: 'Calibri', size: 9, color: { argb: 'FFBE123C' } };
+      } else if (v.toLowerCase().includes('skipped')) {
+        cell.font = { name: 'Calibri', size: 9, color: { argb: 'FF6B7280' }, italic: true };
+      }
+    };
 
-    ws.columns = [
-      { header: 'Task ID', key: 'id', width: 10 },
-      ...filteredColumns.map(col => ({ header: col.label, key: col.id, width: 30 }))
-    ];
+    if (type === 'excel') {
+      const wb = new ExcelJS.Workbook();
+      wb.creator = 'Task Manager';
+      wb.created = new Date();
+      const ws = wb.addWorksheet('Report', { views: [{ showGridLines: false }] });
 
-    const headerRow = ws.getRow(1);
-    headerRow.height = 30;
-    headerRow.eachCell(cell => {
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
-      cell.font = { color: { argb: 'FFFFFFFF' }, bold: true, size: 11 };
-      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-      cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-    });
+      const accentArgb = 'FF4F46E5'; // indigo-600
+      const accentLightArgb = 'FFF5F3FF'; // indigo-50
+      const headerFg = 'FF1E1B4B'; // dark indigo
+      const rowAlt = 'FFF8F9FF';
+      const borderColor = 'FFCBD5E1';
 
-    searchedTasks.forEach((task, index) => {
-      const rowData = [task.id, ...filteredColumns.map(col => getExportCellValue(task, col))];
-      const row = ws.addRow(rowData);
-      const isOdd = index % 2 !== 0;
-      const bg = isOdd ? 'FFEFF6FF' : 'FFFFFFFF';
-      row.eachCell((cell, colNumber) => {
-        const isNA = cell.value === 'N/A';
-        const isUnallocated = cell.value === 'Unallocated';
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
-        cell.font = { color: { argb: (isNA || isUnallocated) ? 'FFFF0000' : 'FF000000' }, bold: isUnallocated };
-        cell.alignment = { vertical: 'middle', horizontal: colNumber === 1 ? 'center' : 'left' };
-        cell.border = { top: { style: 'thin', color: { argb: 'FFCBD5E1' } }, left: { style: 'thin', color: { argb: 'FFCBD5E1' } }, bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } }, right: { style: 'thin', color: { argb: 'FFCBD5E1' } } };
+      // ── Row 1: Full-width branded cover ──────────────────────────────────
+      ws.mergeCells(1, 1, 1, totalCols);
+      const coverCell = ws.getCell('A1');
+      coverCell.value = reportName.toUpperCase();
+      coverCell.font = { name: 'Calibri', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
+      coverCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: accentArgb } };
+      coverCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 2 };
+      ws.getRow(1).height = 36;
+
+      // ── Row 2: Metadata subtitle ─────────────────────────────────────────
+      ws.mergeCells(2, 1, 2, totalCols);
+      const metaCell = ws.getCell('A2');
+      metaCell.value = `${deptLabel}   ·   ${dateStr}   ·   ${searchedTasks.length} records`;
+      metaCell.font = { name: 'Calibri', size: 9, color: { argb: 'FFB0A8F0' } };
+      metaCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headerFg } };
+      metaCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 2 };
+      ws.getRow(2).height = 20;
+
+      // ── Row 3: Stats pill strip ──────────────────────────────────────────
+      const pillLabels = ['Total', 'WIP', 'Completed', 'Endorsed', 'Cancelled'];
+      const pillValues = [allTasksCount, wipTasksCount, writeUpCompletedCount, endorsedCount, cancelledCount];
+      const pillArgbs = ['FF4F46E5', 'FFF59E0B', 'FF16A34A', 'FF0284C7', 'FFDC2626'];
+      const pillLightArgbs = ['FFF5F3FF', 'FFFEF3C7', 'FFF0FDF4', 'FFE0F2FE', 'FFFEF2F2'];
+      pillLabels.forEach((label, i) => {
+        const col = i + 1;
+        const labelCell = ws.getCell(3, col);
+        labelCell.value = label;
+        labelCell.font = { name: 'Calibri', size: 8, bold: true, color: { argb: pillArgbs[i] } };
+        labelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pillLightArgbs[i] } };
+        labelCell.alignment = { vertical: 'middle', horizontal: 'center' };
+        labelCell.border = { top: { style: 'thin', color: { argb: pillArgbs[i] } }, bottom: { style: 'thin', color: { argb: pillArgbs[i] } } };
+
+        const valCell = ws.getCell(4, col);
+        valCell.value = pillValues[i];
+        valCell.font = { name: 'Calibri', size: 14, bold: true, color: { argb: pillArgbs[i] } };
+        valCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pillLightArgbs[i] } };
+        valCell.alignment = { vertical: 'middle', horizontal: 'center' };
+        valCell.border = { bottom: { style: 'medium', color: { argb: pillArgbs[i] } } };
       });
-    });
+      ws.getRow(3).height = 18;
+      ws.getRow(4).height = 30;
 
-    const buffer = await wb.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `Report_${activeReport.name}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`;
-    link.click();
+      // ── Spacer row ────────────────────────────────────────────────────────
+      ws.getRow(5).height = 8;
+
+      // ── Row 6: Column Headers ─────────────────────────────────────────────
+      const colHeaders = ['#', ...filteredColumns.map(c => c.label)];
+      const hRow = ws.getRow(6);
+      hRow.values = colHeaders;
+      hRow.height = 26;
+      hRow.eachCell((cell) => {
+        cell.font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF374151' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1, wrapText: false };
+        cell.border = {
+          top: { style: 'thin', color: { argb: borderColor } },
+          bottom: { style: 'medium', color: { argb: accentArgb } }
+        };
+      });
+
+      ws.views = [{ state: 'frozen', xSplit: 0, ySplit: 6, showGridLines: false }];
+
+      // ── Data rows ─────────────────────────────────────────────────────────
+      searchedTasks.forEach((task, idx) => {
+        const vals = [idx + 1, ...filteredColumns.map(col => getExportCellValue(task, col))];
+        const row = ws.addRow(vals); // row 7+
+        row.height = 20;
+        row.eachCell({ includeEmpty: true }, (cell, c) => {
+          const isEven = idx % 2 === 0;
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: isEven ? 'FFFFFFFF' : rowAlt } };
+          cell.font = { name: 'Calibri', size: 9, color: { argb: 'FF1F2937' } };
+          cell.alignment = { vertical: 'middle', horizontal: c === 1 ? 'center' : 'left', indent: c === 1 ? 0 : 1 };
+          cell.border = { bottom: { style: 'hair', color: { argb: borderColor } } };
+          applySemanticColor(cell);
+        });
+      });
+
+      // ── Column widths ──────────────────────────────────────────────────────
+      ws.getColumn(1).width = 5;
+      filteredColumns.forEach((col, i) => {
+        ws.getColumn(i + 2).width = Math.min(45, Math.max(18, col.label.length * 1.4));
+      });
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `Report_${reportName.replace(/[^a-zA-Z0-9]/g, '_')}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`;
+      link.click();
+      toast({ title: 'Export Complete', description: `${searchedTasks.length} rows exported to Excel.` });
+
+    } else {
+      // ── PDF export ────────────────────────────────────────────────────────
+      const { default: jsPDF } = await import('jspdf');
+      const { default: autoTable } = await import('jspdf-autotable');
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const accentRgb: [number, number, number] = [79, 70, 229];
+      const darkRgb: [number, number, number] = [30, 27, 75];
+
+      // Cover accent bar
+      doc.setFillColor(...accentRgb);
+      doc.rect(0, 0, 297, 18, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(255, 255, 255);
+      doc.text(reportName.toUpperCase(), 14, 12);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(180, 174, 240);
+      doc.text(`${deptLabel}  ·  ${dateStr}  ·  ${searchedTasks.length} records`, 14, 16.5);
+
+      autoTable(doc, {
+        startY: 24,
+        head: [['#', ...filteredColumns.map(c => c.label)]],
+        body: searchedTasks.map((t, i) => [i + 1, ...filteredColumns.map(col => getExportCellValue(t, col))]),
+        theme: 'grid',
+        headStyles: { fillColor: darkRgb, textColor: [255, 255, 255], fontSize: 8, fontStyle: 'bold', cellPadding: 3 },
+        alternateRowStyles: { fillColor: [248, 249, 255] },
+        styles: { fontSize: 8, cellPadding: 2.5, textColor: [31, 41, 55], overflow: 'linebreak' },
+        columnStyles: { 0: { cellWidth: 8, halign: 'center' } },
+        margin: { left: 10, right: 10 },
+        didParseCell: (data) => {
+          if (data.section === 'body') {
+            const v = String(data.cell.raw ?? '');
+            if (v === 'Missing' || v === 'N/A') { data.cell.styles.textColor = [220, 38, 38]; data.cell.styles.fontStyle = 'italic'; }
+            else if (v.toLowerCase().includes('completed')) { data.cell.styles.textColor = [21, 128, 61]; data.cell.styles.fontStyle = 'bold'; }
+            else if (v.toLowerCase().includes('wip')) { data.cell.styles.textColor = [180, 83, 9]; data.cell.styles.fontStyle = 'bold'; }
+            else if (v.toLowerCase().includes('cancel')) { data.cell.styles.textColor = [190, 18, 60]; }
+          }
+        },
+        didDrawPage: (data) => {
+          const pageCount = doc.internal.getNumberOfPages();
+          doc.setFontSize(7);
+          doc.setTextColor(156, 163, 175);
+          doc.text(`${reportName}  ·  Generated ${dateStr}`, 10, 208);
+          doc.text(`Page ${data.pageNumber} of ${pageCount}`, 287, 208, { align: 'right' });
+        }
+      });
+
+      doc.save(`Report_${reportName.replace(/[^a-zA-Z0-9]/g, '_')}_${format(new Date(), 'yyyy-MM-dd')}.pdf`);
+      toast({ title: 'Export Complete', description: `${searchedTasks.length} rows exported to PDF.` });
+    }
   };
 
   const sortedTasks = useMemo(() => {
@@ -1768,7 +1900,7 @@ export default function ReportsPage() {
     );
   }, [sortedTasks, showNARows, stageOnlyColumns, stages, checkStageApplicableForTask]);
 
-  const handleSendReport = useCallback(async (reportType: 'officer' | 'manager' | 'client', exportFormat: 'excel' | 'pdf') => {
+const handleSendReport = useCallback(async (reportType: 'officer' | 'manager' | 'client', exportFormat: 'excel' | 'pdf') => {
     const deptName = activeDepartment?.name || 'All Departments';
     const subdeptLabel = activeSubDeptId !== 'all'
       ? activeSubDepartments.find((s: any) => s.id.toString() === activeSubDeptId)?.name || 'All'
@@ -2003,7 +2135,7 @@ export default function ReportsPage() {
     toast({ title: 'Report Downloaded', description: `${reportTitle} exported as ${exportFormat.toUpperCase()}.` });
   }, [activeDepartment, activeSubDeptId, activeSubDepartments, activeStatus, filteredColumns, filteredByNARows, availableOfficers, availableTaskManagers, getStageOfficerIds, isTaskWithClient, getExportCellValue]);
 
-   const columnGroups = useMemo(() => {
+    const columnGroups = useMemo(() => {
     if (!filteredColumns.length) return [];
     const groups: any[] = [];
     const taskCols = filteredColumns.filter(c => c.type === 'task');
@@ -2015,7 +2147,6 @@ export default function ReportsPage() {
 
     const stageMap = new Map<string, { id: string; label: string; count: number; applicable: boolean }>();
     filteredColumns.filter(c => c.type !== 'task' && c.type !== 'current_stage_age' && c.type !== 'total_process_age').forEach(col => {
-      // For gap columns, use fromStageId; for other stage columns, use stageId
       const stageId = col.type === 'stage_gap' ? col.fromStageId : col.stageId;
       if (!stageId) return;
 
@@ -2072,6 +2203,26 @@ export default function ReportsPage() {
     return rows;
   }, [activeReport, filteredColumns, expandedSections, stages, isStageApplicableToCurrentFilter]);
 
+  const jobLevelLabel = useMemo(() => {
+    if (!activeReport?.job_level) return null;
+    const jl = activeReport.job_level;
+    if (jl.class_id) {
+      const allClasses = departments.flatMap((d: any) => (d.tm_subdepartments || []).flatMap((s: any) => s.classes || []));
+      const cls = allClasses.find((c: any) => c.id.toString() === jl.class_id.toString());
+      return cls?.name || `Class ${jl.class_id}`;
+    }
+    if (jl.subdepartment_id) {
+      const allSubs = departments.flatMap((d: any) => d.tm_subdepartments || []);
+      const sub = allSubs.find((s: any) => s.id.toString() === jl.subdepartment_id.toString());
+      return sub?.name || `Subdept ${jl.subdepartment_id}`;
+    }
+    if (jl.department_id) {
+      const dept = departments.find((d: any) => d.id.toString() === jl.department_id.toString());
+      return dept?.name || `Dept ${jl.department_id}`;
+    }
+    return null;
+  }, [activeReport, departments]);
+
   const breadcrumbParts = [
     activeReport?.name,
     activeDepartment?.name,
@@ -2092,89 +2243,90 @@ export default function ReportsPage() {
   }
 
   return (
-  <div className="flex h-screen w-full overflow-hidden bg-slate-50">
-  {/* 1. Sidebar: Now sits to the left of the main content */}
-  <ReportsSidebar
-    departments={departments}
-    activeDeptId={activeDeptId}
-    setActiveDeptId={setActiveDeptId}
-    activeSubDepartments={activeSubDepartments}
-    activeSubDeptId={activeSubDeptId}
-    setActiveSubDeptId={setActiveSubDeptId}
-    isCollapsed={sidebarCollapsed}
-    onToggleCollapse={handleSidebarToggle}
-  />
+    <div className="flex h-screen w-full overflow-hidden bg-slate-50">
+      {/* 1. Sidebar: Now sits to the left of the main content */}
+      <ReportsSidebar
+        departments={departments}
+        activeDeptId={activeDeptId}
+        setActiveDeptId={setActiveDeptId}
+        activeSubDepartments={activeSubDepartments}
+        activeSubDeptId={activeSubDeptId}
+        setActiveSubDeptId={setActiveSubDeptId}
+        isCollapsed={sidebarCollapsed}
+        onToggleCollapse={handleSidebarToggle}
+      />
 
-  {/* 2. Main Content Area: Takes up remaining width */}
-  <div className="flex-1 flex flex-col min-w-0">
-    
-    {/* Top Row: Report Info & High-level Perspectives */}
-    <ReportsToolbar
-      activeReport={activeReport}
-      setIsReportDialogOpen={setIsReportDialogOpen}
-      activePerspective={activePerspective}
-      setActivePerspective={setActivePerspective}
-      allTasksCount={allTasksCount}
-      officerTaskCounts={officerTaskCounts}
-      taskManagerTaskCounts={taskManagerTaskCounts}
-      clientTaskCounts={clientTaskCounts}
-      columns={columns}
-      visibleColumnIds={visibleColumnIds}
-      setVisibleColumnIds={setVisibleColumnIds}
-      showTimeTrackingColumns={showTimeTrackingColumns}
-      setShowTimeTrackingColumns={setShowTimeTrackingColumns}
-      showDocRequirementsColumns={showDocRequirementsColumns}
-      setShowDocRequirementsColumns={setShowDocRequirementsColumns}
-      view={view}
-      setView={setView}
-      handleSendReport={handleSendReport}
-      showTimeStatuses={showTimeStatuses}
-      setShowTimeStatuses={setShowTimeStatuses}
-      showNARows={showNARows}
-      setShowNARows={setShowNARows}
-      handleExport={handleExport}
-      refreshData={refreshData}
-      loading={loading}
-    />
+      {/* 2. Main Content Area: Takes up remaining width */}
+      <div className="flex-1 flex flex-col min-w-0">
 
-    {/* Second Row: Person Specific Filters (Conditional based on perspective) */}
-    <PersonFilterStrip
-      activePerspective={activePerspective}
-      availableOfficers={availableOfficers}
-      activeOfficerTab={activeOfficerTab}
-      setActiveOfficerTab={setActiveOfficerTab}
-      officerTaskCounts={officerTaskCounts}
-      officerFilterMode={officerFilterMode}
-      setOfficerFilterMode={setOfficerFilterMode}
-      availableTaskManagers={availableTaskManagers}
-      activeTaskManagerTab={activeTaskManagerTab}
-      setActiveTaskManagerTab={setActiveTaskManagerTab}
-      taskManagerTaskCounts={taskManagerTaskCounts}
-      taskManagerFilterMode={taskManagerFilterMode}
-      setTaskManagerFilterMode={setTaskManagerFilterMode}
-    />
+        {/* Top Row: Report Info & High-level Perspectives */}
+        <ReportsToolbar
+          activeReport={activeReport}
+          setIsReportDialogOpen={setIsReportDialogOpen}
+          activePerspective={activePerspective}
+          setActivePerspective={setActivePerspective}
+          allTasksCount={allTasksCount}
+          officerTaskCounts={officerTaskCounts}
+          taskManagerTaskCounts={taskManagerTaskCounts}
+          clientTaskCounts={clientTaskCounts}
+          columns={columns}
+          visibleColumnIds={visibleColumnIds}
+          setVisibleColumnIds={setVisibleColumnIds}
+          showTimeTrackingColumns={showTimeTrackingColumns}
+          setShowTimeTrackingColumns={setShowTimeTrackingColumns}
+          showDocRequirementsColumns={showDocRequirementsColumns}
+          setShowDocRequirementsColumns={setShowDocRequirementsColumns}
+          view={view}
+          setView={setView}
+          handleSendReport={handleSendReport}
+          showTimeStatuses={showTimeStatuses}
+          setShowTimeStatuses={setShowTimeStatuses}
+          showNARows={showNARows}
+          setShowNARows={setShowNARows}
+          handleExport={handleExport}
+          refreshData={refreshData}
+          loading={loading}
+          jobLevelLabel={jobLevelLabel}
+        />
 
-    {/* Third Row: Status, Search, and Category Filters */}
-    <StatusFilterBar
-      activeStatus={activeStatus}
-      setActiveStatus={setActiveStatus}
-      allTasksCount={allTasksCount}
-      wipTasksCount={wipTasksCount}
-      writeUpCompletedCount={writeUpCompletedCount}
-      endorsedCount={endorsedCount}
-      cancelledCount={cancelledCount}
-      searchQuery={searchQuery}
-      setSearchQuery={setSearchQuery}
-      activeClassId={activeClassId}
-      setActiveClassId={setActiveClassId}
-      activeSubClassId={activeSubClassId}
-      setActiveSubClassId={setActiveSubClassId}
-      activeSubDeptId={activeSubDeptId}
-      activeSubDepartments={activeSubDepartments}
-      isFiltersDropdownOpen={isFiltersDropdownOpen}
-      setIsFiltersDropdownOpen={setIsFiltersDropdownOpen}
-    />
- {/* Table Area */}
+        {/* Second Row: Person Specific Filters (Conditional based on perspective) */}
+        <PersonFilterStrip
+          activePerspective={activePerspective}
+          availableOfficers={availableOfficers}
+          activeOfficerTab={activeOfficerTab}
+          setActiveOfficerTab={setActiveOfficerTab}
+          officerTaskCounts={officerTaskCounts}
+          officerFilterMode={officerFilterMode}
+          setOfficerFilterMode={setOfficerFilterMode}
+          availableTaskManagers={availableTaskManagers}
+          activeTaskManagerTab={activeTaskManagerTab}
+          setActiveTaskManagerTab={setActiveTaskManagerTab}
+          taskManagerTaskCounts={taskManagerTaskCounts}
+          taskManagerFilterMode={taskManagerFilterMode}
+          setTaskManagerFilterMode={setTaskManagerFilterMode}
+        />
+
+        {/* Third Row: Status, Search, and Category Filters */}
+        <StatusFilterBar
+          activeStatus={activeStatus}
+          setActiveStatus={setActiveStatus}
+          allTasksCount={allTasksCount}
+          wipTasksCount={wipTasksCount}
+          writeUpCompletedCount={writeUpCompletedCount}
+          endorsedCount={endorsedCount}
+          cancelledCount={cancelledCount}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          activeClassId={activeClassId}
+          setActiveClassId={setActiveClassId}
+          activeSubClassId={activeSubClassId}
+          setActiveSubClassId={setActiveSubClassId}
+          activeSubDeptId={activeSubDeptId}
+          activeSubDepartments={activeSubDepartments}
+          isFiltersDropdownOpen={isFiltersDropdownOpen}
+          setIsFiltersDropdownOpen={setIsFiltersDropdownOpen}
+        />
+        {/* Table Area */}
         <div className="flex-1 overflow-hidden p-3">
           {!activeReport ? (
             <div className="h-full flex flex-col items-center justify-center bg-white rounded-xl border border-slate-200">

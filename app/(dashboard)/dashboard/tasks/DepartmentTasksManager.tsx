@@ -437,7 +437,7 @@ export default function DepartmentTasksManager({
     tableRowsCacheRef.current.clear();
   }, []);
 
-  const loadTasksData = useCallback(async (departmentId?: string, subdepartmentId?: string, forceRefresh: boolean = false) => {
+  const loadTasksData = useCallback(async (departmentId?: string, subdepartmentId?: string, forceRefresh: boolean = false, silent: boolean = false) => {
     if (!departmentId) return null;
 
     const cacheKey = `${departmentId}-${subdepartmentId || 'all'}`;
@@ -458,7 +458,7 @@ export default function DepartmentTasksManager({
     }
 
     try {
-      setIsLoadingTasks(true);
+      if (!silent) setIsLoadingTasks(true);
       const [tasksData, stagesData] = await Promise.all([
         fetchTasks(departmentId, subdepartmentId, companies),
         fetchStages(departmentId, departments)
@@ -485,7 +485,7 @@ export default function DepartmentTasksManager({
       })
       return null
     } finally {
-      setIsLoadingTasks(false);
+      if (!silent) setIsLoadingTasks(false);
     }
   }, [departments, companies])
 
@@ -2447,23 +2447,51 @@ export default function DepartmentTasksManager({
   }, [activeDepartmentTab, activeSubdepartmentTab, onTaskUpdate])
 
   const handleTaskAction = useCallback((action: { type: string; taskId?: string | number;[key: string]: any }) => {
+    const STATUS_PRIORITY: Record<string, number> = {
+      pending: 0, new: 0, enquiry: 0, in_progress: 1, write_up_completed: 2, endorsed: 3
+    };
+    const STATUS_TAB_MAP: Record<string, string> = {
+      enquiry: 'enquiries', new: 'enquiries', pending: 'enquiries',
+      in_progress: 'wip-stages',
+      write_up_completed: 'write_up_completed',
+      endorsed: 'endorsed',
+      cancelled: 'cancelled'
+    };
+
     switch (action.type) {
       case 'task-updated':
         if (action.task?.id) {
+          let nextStatus: string | undefined;
           setTasks(prevTasks =>
-            prevTasks.map(existingTask =>
-              existingTask.id === action.task.id
-                ? {
-                  ...existingTask,
-                  ...action.task,
-                  stages: action.task.stages || existingTask.stages,
-                  source_document_id: action.task.source_document_id ?? existingTask.source_document_id,
-                  updated_at: action.task.updated_at || existingTask.updated_at
-                }
-                : existingTask
-            )
+            prevTasks.map(existingTask => {
+              if (existingTask.id !== action.task.id) return existingTask;
+
+              // Never downgrade status from a higher-priority local state
+              // (guards against stale task refs in dialogs opened before a realtime update)
+              const existingPriority = STATUS_PRIORITY[existingTask.status] ?? -1;
+              const incomingPriority = STATUS_PRIORITY[action.task?.status] ?? -1;
+              const effectiveStatus = incomingPriority >= existingPriority
+                ? action.task.status
+                : existingTask.status;
+
+              nextStatus = effectiveStatus;
+
+              return {
+                ...existingTask,
+                ...action.task,
+                status: effectiveStatus,
+                stages: action.task.stages || existingTask.stages,
+                source_document_id: action.task.source_document_id ?? existingTask.source_document_id,
+                updated_at: action.task.updated_at || existingTask.updated_at
+              };
+            })
           );
           clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
+
+          // Auto-switch to the tab where the task now lives when status changed
+          if (nextStatus && STATUS_TAB_MAP[nextStatus] && STATUS_TAB_MAP[nextStatus] !== activeSubTab) {
+            setActiveSubTab(STATUS_TAB_MAP[nextStatus]);
+          }
         }
         break
       case 'refresh':
@@ -2473,7 +2501,7 @@ export default function DepartmentTasksManager({
       default:
         onTaskAction?.(action)
     }
-  }, [onTaskAction, activeDepartmentTab, activeSubdepartmentTab])
+  }, [onTaskAction, activeDepartmentTab, activeSubdepartmentTab, activeSubTab, refreshAllData])
 
   const renderCellContent = useCallback((row: any, task: any, columnType?: 'date' | 'actions') => {
     const value = row.getValue?.(task) ?? '';
@@ -2596,7 +2624,7 @@ export default function DepartmentTasksManager({
         renderMode={renderMode}
         taskName={task.name}
         clientName={task.client_name || task.clientName}
-        onFetchData={() => loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true)}
+        onFetchData={() => loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true, true)}
         officers={realOfficers}
         onOfficerChange={updateTaskOfficer}
       />
@@ -3245,16 +3273,32 @@ export default function DepartmentTasksManager({
           if (!isRelevant) return;
 
           if (payload.eventType === 'UPDATE') {
-            // Merge DB columns into existing enriched task — no loading state
-            setTasks(prevTasks => prevTasks.map(t =>
-              t.id?.toString() === newTask?.id?.toString()
-                ? { ...t, ...newTask }
-                : t
-            ));
+            const REALTIME_STATUS_PRIORITY: Record<string, number> = {
+              pending: 0, new: 0, enquiry: 0, in_progress: 1, write_up_completed: 2, endorsed: 3
+            };
+            // Merge DB columns into existing enriched task — no loading state.
+            // Preserve enriched fields (officer_ids, officer_id, participants_details)
+            // when the raw DB payload has null, to avoid dropping join-computed values.
+            // Also never downgrade status from a higher-priority local value.
+            setTasks(prevTasks => prevTasks.map(t => {
+              if (t.id?.toString() !== newTask?.id?.toString()) return t;
+              const existingPriority = REALTIME_STATUS_PRIORITY[t.status] ?? -1;
+              const incomingPriority = REALTIME_STATUS_PRIORITY[newTask.status] ?? -1;
+              return {
+                ...t,
+                ...newTask,
+                status: incomingPriority >= existingPriority ? newTask.status : t.status,
+                // Preserve enriched array/object fields when DB returns null
+                officer_ids: newTask.officer_ids ?? t.officer_ids,
+                officer_id: newTask.officer_id ?? t.officer_id,
+                participants_details: newTask.participants_details ?? t.participants_details,
+              };
+            }));
             clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
           } else if (payload.eventType === 'INSERT') {
             clearTasksCache(activeDepartmentTab, activeSubdepartmentTab);
-            await loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true);
+            // Use silent mode so the insert doesn't flash a full-table loading spinner
+            await loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true, true);
             toast({
               title: "New Task Added",
               description: "A new task has been added to the current view.",

@@ -13,7 +13,7 @@ import {
 import {
   Loader2, LayoutGrid, FileText, ChevronDown, Clock, User,
   EyeOff, Eye, Filter, RotateCcw, X, TableProperties, Download,
-  Search, Send, Shield, Users, Building2, ChevronRight, ChevronLeft, 
+  Search, Send, Shield, Users, Building2, ChevronRight, ChevronLeft,
   Layers, Sparkles, Briefcase, Settings2, CheckCircle2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -37,10 +37,16 @@ export function ReportsSidebar({
   activeSubDepartments, activeSubDeptId, setActiveSubDeptId,
   isCollapsed = false, onToggleCollapse,
 }: ReportsSidebarProps) {
+  const [sidebarSearch, setSidebarSearch] = React.useState("");
+
   const getInitials = (name: string) => {
     if (!name) return "";
     return name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
   };
+
+  const filteredDepartments = sidebarSearch.trim()
+    ? departments.filter(d => d.name?.toLowerCase().includes(sidebarSearch.toLowerCase()))
+    : departments;
 
   return (
     <div className={cn(
@@ -69,16 +75,37 @@ export function ReportsSidebar({
           </button>
         )}
       </div>
-      
+
+      {/* Sidebar Search */}
+      {!isCollapsed && (
+        <div className="px-4 pb-3 shrink-0">
+          <div className="relative group">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
+            <input
+              type="text"
+              placeholder="Search departments..."
+              value={sidebarSearch}
+              onChange={e => setSidebarSearch(e.target.value)}
+              className="w-full pl-8 pr-8 h-8 text-xs rounded-lg bg-white border border-slate-200 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 transition-all"
+            />
+            {sidebarSearch && (
+              <button onClick={() => setSidebarSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Sidebar Content */}
       <div className={cn(
         "flex-1 overflow-y-auto px-4 pb-6 space-y-6 scrollbar-thin",
         isCollapsed && "px-2"
       )}>
         <div className="space-y-1.5">
-          {departments.map((dept) => {
+          {filteredDepartments.map((dept) => {
             const isActive = activeDeptId === dept.id.toString();
-            
+
             if (isCollapsed) {
               return (
                 <button
@@ -86,8 +113,8 @@ export function ReportsSidebar({
                   onClick={() => { setActiveDeptId(dept.id.toString()); setActiveSubDeptId('all'); }}
                   className={cn(
                     "w-12 h-12 mx-auto mb-3 flex items-center justify-center rounded-2xl text-xs font-bold transition-all duration-300 relative group",
-                    isActive 
-                      ? "bg-indigo-600 text-white shadow-lg shadow-indigo-200" 
+                    isActive
+                      ? "bg-indigo-600 text-white shadow-lg shadow-indigo-200"
                       : "bg-white text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 border border-slate-200"
                   )}
                   title={dept.name}
@@ -106,8 +133,8 @@ export function ReportsSidebar({
                   onClick={() => { setActiveDeptId(dept.id.toString()); setActiveSubDeptId('all'); }}
                   className={cn(
                     "w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all duration-200 mb-1",
-                    isActive 
-                      ? "bg-white text-indigo-600 shadow-sm border border-slate-200/60" 
+                    isActive
+                      ? "bg-white text-indigo-600 shadow-sm border border-slate-200/60"
                       : "text-slate-600 hover:bg-slate-200/50"
                   )}
                 >
@@ -154,11 +181,18 @@ export function ReportsSidebar({
               </div>
             );
           })}
+          {filteredDepartments.length === 0 && sidebarSearch && (
+            <div className="text-center py-6 text-slate-400 text-xs">
+              No departments match &ldquo;{sidebarSearch}&rdquo;
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 }
+
+// ─── Main Toolbar ─────────────────────────────────────────────────────────────
 
 // ─── Main Toolbar ─────────────────────────────────────────────────────────────
 
@@ -174,40 +208,53 @@ export function ReportsToolbar({
   showTimeStatuses, setShowTimeStatuses,
   showNARows, setShowNARows,
   handleExport, refreshData, loading,
+  jobLevelLabel,
 }: ReportsToolbarProps) {
   const perspectiveCounts: Record<string, number> = {
     overview: allTasksCount,
     officers: officerTaskCounts.all,
     managers: taskManagerTaskCounts.all,
-    clients:  clientTaskCounts.all,
+    clients: clientTaskCounts.all,
   };
 
   return (
-    <div className="bg-white border-b border-slate-200 px-6 py-4 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-30">
-      <div className="flex items-center gap-6">
-        {/* Report Selector Card */}
-        <div 
+    <div className="bg-white border-b border-slate-200 px-6 py-5 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-30">
+      <div className="flex items-center gap-8">
+        {/* LARGE REPORT TITLE SELECTOR */}
+        <div
           onClick={() => setIsReportDialogOpen(true)}
-          className="group flex items-center gap-3 cursor-pointer bg-slate-50 hover:bg-white hover:shadow-md border border-slate-200/60 p-2 pr-4 rounded-2xl transition-all duration-300"
+          className="group cursor-pointer flex flex-col"
         >
-          <div className="h-10 w-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-100 group-hover:scale-105 transition-transform">
-            <FileText className="h-5 w-5" />
+          <div className="flex items-center gap-2 mb-0.5">
+            <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-[0.2em]">Active Report</span>
+            <div className="h-px w-8 bg-indigo-100" />
           </div>
-          <div className="flex flex-col">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight leading-none mb-1">Active Template</span>
-            <div className="flex items-center gap-1.5">
-              <span className="text-sm font-bold text-slate-900 truncate max-w-[180px]">
-                {activeReport?.name || "Select Report"}
-              </span>
-              <Settings2 className="h-3 w-3 text-slate-400 group-hover:text-indigo-600" />
-            </div>
+          <div className="flex items-center gap-3">
+             <h1 className="text-3xl font-black text-slate-900 tracking-tight group-hover:text-indigo-600 transition-colors">
+               {activeReport?.name || "Select Report"}
+             </h1>
+             <div className="p-1.5 rounded-lg bg-slate-50 border border-slate-200 group-hover:bg-indigo-50 group-hover:border-indigo-200 transition-all">
+               <Settings2 className="h-5 w-5 text-slate-400 group-hover:text-indigo-600" />
+             </div>
           </div>
         </div>
+
+        {/* Active Job Level */}
+        {jobLevelLabel && (
+          <div className="flex items-center gap-3 px-4 py-2 rounded-2xl bg-amber-50/50 border border-amber-100 text-amber-700">
+            <Layers className="h-5 w-5 text-amber-500" />
+            <div className="flex flex-col border-l border-amber-200 pl-3">
+              <span className="text-[9px] font-bold uppercase tracking-widest text-amber-500/80">Job Level</span>
+              <span className="text-sm font-extrabold">{jobLevelLabel}</span>
+            </div>
+          </div>
+        )}
 
         {/* Perspective Switcher */}
         <div className="hidden lg:flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
           {PERSPECTIVE_TABS.map(p => {
             const active = activePerspective === p.value;
+            const count = perspectiveCounts[p.value];
             return (
               <button
                 key={p.value}
@@ -220,15 +267,18 @@ export function ReportsToolbar({
                 )}
               >
                 {p.label}
-                <Badge variant={active ? "default" : "secondary"} className={cn("px-1.5 py-0 text-[10px]", active ? "bg-indigo-600" : "bg-slate-200 text-slate-500")}>
-                  {perspectiveCounts[p.value]}
-                </Badge>
+                {count > 0 && (
+                  <Badge variant={active ? "default" : "secondary"} className={cn("px-1.5 py-0 text-[10px]", active ? "bg-indigo-600" : "bg-slate-200 text-slate-500")}>
+                    {count}
+                  </Badge>
+                )}
               </button>
             );
           })}
         </div>
       </div>
 
+      {/* Action Buttons */}
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2 border-r border-slate-200 pr-3">
           <ReportColumnVisibilityDialog
@@ -243,7 +293,7 @@ export function ReportsToolbar({
 
           <Button
             variant="outline"
-            className="h-9 px-3 text-xs font-bold border-slate-200 rounded-xl hover:bg-slate-50"
+            className="h-10 px-4 text-xs font-bold border-slate-200 rounded-xl hover:bg-slate-50"
             onClick={() => setView(view === 'standard' ? 'transposed' : 'standard')}
           >
             {view === 'standard' ? (
@@ -257,55 +307,46 @@ export function ReportsToolbar({
         <div className="flex items-center gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button className="h-9 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg shadow-indigo-100 gap-2 font-bold transition-all hover:-translate-y-0.5">
+              <Button className="h-10 px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg shadow-indigo-100 gap-2 font-bold transition-all hover:-translate-y-0.5">
                 <Send className="h-4 w-4" />
-                Send
+                Send Report
                 <ChevronDown className="h-3 w-3 opacity-50" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56 p-2 rounded-2xl">
-              <div className="px-2 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Excel Reports</div>
-              <DropdownMenuItem onClick={() => handleSendReport('officer', 'excel')} className="rounded-xl cursor-pointer py-2 font-semibold">
-                <Shield className="h-4 w-4 mr-2 text-blue-500" /> Officer Excel
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleSendReport('manager', 'excel')} className="rounded-xl cursor-pointer py-2 font-semibold">
-                <User className="h-4 w-4 mr-2 text-violet-500" /> Manager Excel
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleSendReport('client', 'excel')} className="rounded-xl cursor-pointer py-2 font-semibold">
-                <Users className="h-4 w-4 mr-2 text-orange-500" /> Client Excel
-              </DropdownMenuItem>
-              <DropdownMenuSeparator className="my-2" />
-              <div className="px-2 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">PDF Formats</div>
-              <DropdownMenuItem onClick={() => handleSendReport('officer', 'pdf')} className="rounded-xl cursor-pointer py-2 font-semibold">
-                <FileText className="h-4 w-4 mr-2 text-rose-500" /> Officer PDF
-              </DropdownMenuItem>
+            <DropdownMenuContent align="end" className="w-64 p-2 rounded-2xl">
+              {/* Officer */}
+              <div className="px-2 pt-2 pb-1 flex items-center gap-2">
+                <Shield className="h-3.5 w-3.5 text-blue-500" />
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Officer</span>
+              </div>
+              <div className="flex gap-1.5 px-2 pb-2">
+                <button onClick={() => handleSendReport('officer', 'excel')} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-xs font-semibold transition-colors">
+                  <Download className="h-3.5 w-3.5" /> Excel
+                </button>
+                <button onClick={() => handleSendReport('officer', 'pdf')} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-xs font-semibold transition-colors">
+                  <FileText className="h-3.5 w-3.5" /> PDF
+                </button>
+              </div>
+              <DropdownMenuSeparator className="my-1" />
+              {/* Manager */}
+              <div className="px-2 pt-2 pb-1 flex items-center gap-2">
+                <User className="h-3.5 w-3.5 text-violet-500" />
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Manager</span>
+              </div>
+              <div className="flex gap-1.5 px-2 pb-2">
+                <button onClick={() => handleSendReport('manager', 'excel')} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-violet-50 hover:bg-violet-100 border border-violet-200 text-violet-700 text-xs font-semibold transition-colors">
+                  <Download className="h-3.5 w-3.5" /> Excel
+                </button>
+                <button onClick={() => handleSendReport('manager', 'pdf')} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-violet-50 hover:bg-violet-100 border border-violet-200 text-violet-700 text-xs font-semibold transition-colors">
+                  <FileText className="h-3.5 w-3.5" /> PDF
+                </button>
+              </div>
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="h-9 w-9 p-0 border-slate-200 rounded-xl hover:bg-slate-50">
-                <ChevronDown className="h-4 w-4 text-slate-500" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56 p-2 rounded-2xl">
-              <DropdownMenuItem onClick={() => setShowTimeStatuses(!showTimeStatuses)} className="rounded-xl cursor-pointer py-2 font-semibold">
-                <Clock className="h-4 w-4 mr-2 text-slate-500" />
-                {showTimeStatuses ? 'Hide' : 'Show'} Time Details
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setShowNARows(!showNARows)} className="rounded-xl cursor-pointer py-2 font-semibold">
-                {showNARows ? <EyeOff className="h-4 w-4 mr-2 text-slate-500" /> : <Eye className="h-4 w-4 mr-2 text-slate-500" />}
-                {showNARows ? 'Hide' : 'Show'} N/A Rows
-              </DropdownMenuItem>
-              <DropdownMenuSeparator className="my-2" />
-              <DropdownMenuItem onClick={() => handleExport('excel')} className="rounded-xl cursor-pointer py-2 font-semibold text-emerald-600">
-                <Download className="h-4 w-4 mr-2" /> Export to Excel
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={refreshData} disabled={loading} className="rounded-xl cursor-pointer py-2 font-semibold">
-                <RotateCcw className={cn('h-4 w-4 mr-2 text-slate-500', loading && 'animate-spin')} /> Refresh Data
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Button variant="outline" onClick={refreshData} disabled={loading} className="h-10 w-10 p-0 border-slate-200 rounded-xl hover:bg-slate-50">
+             <RotateCcw className={cn('h-4 w-4 text-slate-500', loading && 'animate-spin')} />
+          </Button>
         </div>
       </div>
     </div>
@@ -329,58 +370,120 @@ export function PersonFilterStrip({
   const mode = isOfficer ? officerFilterMode : taskManagerFilterMode;
   const setMode = isOfficer ? setOfficerFilterMode : setTaskManagerFilterMode;
 
+  const gradientClasses = isOfficer 
+    ? "data-[active=true]:bg-gradient-to-r data-[active=true]:from-blue-600 data-[active=true]:to-blue-700" 
+    : "data-[active=true]:bg-gradient-to-r data-[active=true]:from-violet-600 data-[active=true]:to-violet-700";
+
   return (
-    <div className="bg-slate-50/50 border-b border-slate-200 px-6 py-3 flex items-center gap-4">
+    <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center gap-4">
+      {/* Icon Label */}
       <div className={cn(
-        "flex items-center gap-2 px-3 py-1.5 rounded-xl border font-bold text-xs shadow-sm",
+        "flex items-center gap-2 px-3 py-2 rounded-xl border font-black text-[10px] uppercase tracking-tighter shadow-sm shrink-0",
         isOfficer ? "bg-blue-50 border-blue-100 text-blue-700" : "bg-violet-50 border-violet-100 text-violet-700"
       )}>
-        {isOfficer ? <Shield className="h-4 w-4" /> : <User className="h-4 w-4" />}
-        {isOfficer ? "Officer" : "Manager"}
+        {isOfficer ? <Shield className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
+        {isOfficer ? "Officer Filter" : "Manager Filter"}
       </div>
 
-      <div className="flex-1 flex items-center gap-2 overflow-x-auto no-scrollbar">
-        <FilterPill active={activeTab === 'all'} onClick={() => setActiveTab('all')}>
+      {/* Updated Tabs List Styling for Persons */}
+      <div className="flex-1 flex items-center gap-1 p-1 shadow-sm bg-gradient-to-r from-slate-50 to-slate-100 border border-slate-200 rounded-lg overflow-x-auto no-scrollbar">
+        <button
+          onClick={() => setActiveTab('all')}
+          data-active={activeTab === 'all'}
+          className={cn(
+            "px-4 h-8 rounded-md text-xs gap-2 font-bold transition-all duration-200 flex items-center whitespace-nowrap",
+            activeTab === 'all'
+              ? `${isOfficer ? 'bg-gradient-to-r from-blue-600 to-blue-700' : 'bg-gradient-to-r from-violet-600 to-violet-700'} text-white shadow-md`
+              : "text-slate-600 hover:bg-slate-200/50"
+          )}
+        >
           All {isOfficer ? "Officers" : "Managers"}
-          <span className="ml-1.5 opacity-60">({counts.all})</span>
-        </FilterPill>
-        {data.map((p: any) => (
-          <FilterPill
-            key={p.id}
-            active={activeTab === p.id.toString()}
-            onClick={() => setActiveTab(activeTab === p.id.toString() ? 'all' : p.id.toString())}
-          >
-            {p.full_name || p.name || p.displayName}
-            <span className="ml-1.5 opacity-60 text-[10px]">({counts[p.id] || 0})</span>
-          </FilterPill>
-        ))}
+          <Badge variant="secondary" className={cn("ml-1 px-1.5 py-0 text-[10px]", activeTab === 'all' ? "bg-white/20 text-white" : "bg-slate-200 text-slate-600")}>
+            {counts.all}
+          </Badge>
+        </button>
+
+        {data.map((p: any) => {
+          const isActive = activeTab === p.id.toString();
+          const count = counts[p.id] || 0;
+          return (
+            <button
+              key={p.id}
+              onClick={() => setActiveTab(isActive ? 'all' : p.id.toString())}
+              data-active={isActive}
+              className={cn(
+                "px-4 h-8 rounded-md text-xs gap-2 font-bold transition-all duration-200 flex items-center whitespace-nowrap",
+                isActive
+                  ? `${isOfficer ? 'bg-gradient-to-r from-blue-600 to-blue-700' : 'bg-gradient-to-r from-violet-600 to-violet-700'} text-white shadow-md`
+                  : "text-slate-600 hover:bg-slate-200/50"
+              )}
+            >
+              {p.full_name || p.name || p.displayName}
+              {count > 0 && (
+                <Badge variant="secondary" className={cn("ml-1 px-1.5 py-0 text-[10px]", isActive ? "bg-white/20 text-white" : "bg-slate-200 text-slate-600")}>
+                  {count}
+                </Badge>
+              )}
+            </button>
+          );
+        })}
+
+        {counts.__unallocated__ > 0 && (
+           <button
+            onClick={() => setActiveTab('__unallocated__')}
+            className={cn(
+              "px-4 h-8 rounded-md text-xs gap-2 font-bold transition-all duration-200 flex items-center whitespace-nowrap ml-2",
+              activeTab === '__unallocated__'
+                ? "bg-gradient-to-r from-amber-500 to-amber-600 text-white shadow-md"
+                : "text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-100"
+            )}
+           >
+             Unallocated
+             <Badge variant="secondary" className={cn("ml-1 px-1.5 py-0 text-[10px]", activeTab === '__unallocated__' ? "bg-white/20 text-white" : "bg-amber-200 text-amber-800")}>
+               {counts.__unallocated__}
+             </Badge>
+           </button>
+        )}
       </div>
 
+      {/* Perspective Mode Toggle */}
       <Select value={mode} onValueChange={setMode}>
-        <SelectTrigger className="w-40 h-9 bg-white border-slate-200 rounded-xl text-xs font-bold shadow-sm">
+        <SelectTrigger className="w-40 h-10 bg-white border-slate-200 rounded-xl text-xs font-bold shadow-sm">
           <div className="flex items-center gap-2">
             <Clock className="h-3.5 w-3.5 text-slate-400" />
             <SelectValue />
           </div>
         </SelectTrigger>
         <SelectContent className="rounded-xl">
-          <SelectItem value="current" className="text-xs font-medium">Current Basket</SelectItem>
-          <SelectItem value="history" className="text-xs font-medium">Historical View</SelectItem>
+          <SelectItem value="current" className="text-xs font-bold">Current Basket</SelectItem>
+          <SelectItem value="history" className="text-xs font-bold">Historical View</SelectItem>
         </SelectContent>
       </Select>
     </div>
   );
 }
 
-function FilterPill({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function FilterPill({ active, onClick, children, color = 'slate' }: { active: boolean; onClick: () => void; children: React.ReactNode; color?: 'slate' | 'blue' | 'violet' | 'amber' }) {
+  const activeColors = {
+    slate: 'bg-slate-900 text-white border-slate-900',
+    blue: 'bg-blue-600 text-white border-blue-600',
+    violet: 'bg-violet-600 text-white border-violet-600',
+    amber: 'bg-amber-500 text-white border-amber-500',
+  };
+  const inactiveColors = {
+    slate: 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50',
+    blue: 'bg-white text-blue-600 border-blue-200 hover:border-blue-300 hover:bg-blue-50',
+    violet: 'bg-white text-violet-600 border-violet-200 hover:border-violet-300 hover:bg-violet-50',
+    amber: 'bg-amber-50 text-amber-700 border-amber-200 hover:border-amber-300 hover:bg-amber-100',
+  };
   return (
     <button
       onClick={onClick}
       className={cn(
         'shrink-0 h-8 px-4 rounded-full text-xs font-bold transition-all duration-200 border whitespace-nowrap',
-        active 
-          ? "bg-slate-900 text-white border-slate-900 shadow-md translate-y-[-1px]" 
-          : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+        active
+          ? `${activeColors[color]} shadow-md -translate-y-px`
+          : inactiveColors[color]
       )}
     >
       {children}
@@ -389,7 +492,6 @@ function FilterPill({ active, onClick, children }: { active: boolean; onClick: (
 }
 
 // ─── Status + Search Bar ─────────────────────────────────────────────────────
-
 export function StatusFilterBar({
   activeStatus, setActiveStatus,
   allTasksCount, wipTasksCount, writeUpCompletedCount, endorsedCount, cancelledCount,
@@ -398,36 +500,46 @@ export function StatusFilterBar({
   activeSubDeptId, activeSubDepartments,
   isFiltersDropdownOpen, setIsFiltersDropdownOpen,
 }: any) {
-  const counts = { all: allTasksCount, wip: wipTasksCount, write_up_completed: writeUpCompletedCount, endorsed: endorsedCount, cancelled: cancelledCount };
-  
-  const currentSubDept = activeSubDepartments.find((s: any) => 
+  const counts = {
+    all: allTasksCount,
+    wip: wipTasksCount,
+    write_up_completed: writeUpCompletedCount,
+    endorsed: endorsedCount,
+    cancelled: cancelledCount
+  };
+
+  const currentSubDept = activeSubDepartments.find((s: any) =>
     s.id.toString() === (activeSubDeptId === 'all' ? activeSubDepartments[0]?.id.toString() : activeSubDeptId)
   );
 
   return (
     <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between gap-6">
-      <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-2xl border border-slate-200/60">
+      {/* Updated Tabs List Styling */}
+      <div className="flex items-center gap-1 p-1 shadow-sm bg-gradient-to-r from-slate-50 to-slate-100 border border-slate-200 rounded-lg">
         {STATUS_TABS.map(status => {
           const isActive = activeStatus === status.id;
+          const count = counts[status.id];
           return (
             <button
               key={status.id}
               onClick={() => setActiveStatus(status.id)}
               className={cn(
-                "px-4 h-9 rounded-xl text-xs font-bold transition-all flex items-center gap-2.5",
-                isActive 
-                  ? "bg-white text-slate-900 shadow-sm ring-1 ring-slate-200"
-                  : "text-slate-500 hover:text-slate-800"
+                "px-4 h-9 rounded-md text-sm gap-2 font-semibold transition-all duration-200 flex items-center whitespace-nowrap",
+                isActive
+                  ? `bg-gradient-to-r ${status.activeGradient} text-white shadow-lg border-0`
+                  : "text-slate-700 hover:bg-slate-200/50"
               )}
             >
-              <div className={cn("h-2 w-2 rounded-full", status.dotColor)} />
               {status.label}
-              <span className={cn(
-                "px-1.5 py-0.5 rounded-md text-[10px]",
-                isActive ? "bg-slate-100 text-slate-900" : "bg-slate-200/50 text-slate-500"
-              )}>
-                {counts[status.id]}
-              </span>
+              <Badge
+                variant="secondary"
+                className={cn(
+                  "ml-1 px-1.5 py-0 text-xs font-bold",
+                  isActive ? "bg-white/20 text-white border-transparent" : status.badgeBg
+                )}
+              >
+                {count}
+              </Badge>
             </button>
           );
         })}
@@ -468,39 +580,39 @@ export function StatusFilterBar({
               <Sparkles className="h-4 w-4 text-indigo-500" />
             </div>
             <div className="space-y-4">
-               <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Task Class</label>
-                  <Select value={activeClassId} onValueChange={v => { setActiveClassId(v); setActiveSubClassId('all'); }}>
-                    <SelectTrigger className="h-10 rounded-xl font-semibold border-slate-200"><SelectValue placeholder="Select Class" /></SelectTrigger>
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Task Class</label>
+                <Select value={activeClassId} onValueChange={v => { setActiveClassId(v); setActiveSubClassId('all'); }}>
+                  <SelectTrigger className="h-10 rounded-xl font-semibold border-slate-200"><SelectValue placeholder="Select Class" /></SelectTrigger>
+                  <SelectContent className="rounded-xl">
+                    <SelectItem value="all">All Classes</SelectItem>
+                    {currentSubDept?.classes?.map((cls: any) => (
+                      <SelectItem key={cls.id} value={cls.id.toString()}>{cls.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {activeClassId !== 'all' && (
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Sub-Class</label>
+                  <Select value={activeSubClassId} onValueChange={setActiveSubClassId}>
+                    <SelectTrigger className="h-10 rounded-xl font-semibold border-slate-200"><SelectValue placeholder="Select Sub-class" /></SelectTrigger>
                     <SelectContent className="rounded-xl">
-                      <SelectItem value="all">All Classes</SelectItem>
-                      {currentSubDept?.classes?.map((cls: any) => (
-                        <SelectItem key={cls.id} value={cls.id.toString()}>{cls.name}</SelectItem>
+                      <SelectItem value="all">All Sub-classes</SelectItem>
+                      {currentSubDept?.classes?.find((c: any) => c.id.toString() === activeClassId)?.subClasses?.map((sc: any) => (
+                        <SelectItem key={sc.id} value={sc.id.toString()}>{sc.name}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-               </div>
-               {activeClassId !== 'all' && (
-                 <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Sub-Class</label>
-                    <Select value={activeSubClassId} onValueChange={setActiveSubClassId}>
-                      <SelectTrigger className="h-10 rounded-xl font-semibold border-slate-200"><SelectValue placeholder="Select Sub-class" /></SelectTrigger>
-                      <SelectContent className="rounded-xl">
-                        <SelectItem value="all">All Sub-classes</SelectItem>
-                        {currentSubDept?.classes?.find((c: any) => c.id.toString() === activeClassId)?.subClasses?.map((sc: any) => (
-                          <SelectItem key={sc.id} value={sc.id.toString()}>{sc.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                 </div>
-               )}
-               <Button 
-                variant="ghost" 
+                </div>
+              )}
+              <Button
+                variant="ghost"
                 className="w-full text-xs h-10 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl font-bold mt-2"
                 onClick={() => { setActiveClassId('all'); setActiveSubClassId('all'); }}
-               >
-                 Clear all filters
-               </Button>
+              >
+                Clear all filters
+              </Button>
             </div>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -510,16 +622,41 @@ export function StatusFilterBar({
 }
 
 const PERSPECTIVE_TABS = [
-  { value: 'overview',  label: 'Overview' },
-  { value: 'officers',  label: 'By Officer' },
-  { value: 'managers',  label: 'By Manager' },
-  { value: 'clients',   label: 'By Client' },
+  { value: 'overview', label: 'Overview' },
+  { value: 'officers', label: 'By Officer' },
+  { value: 'managers', label: 'By Manager' },
+  { value: 'clients', label: 'By Client' },
 ] as const;
 
 const STATUS_TABS = [
-  { id: 'all', label: 'Total', dotColor: 'bg-slate-400' },
-  { id: 'wip', label: 'WIP', dotColor: 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]' },
-  { id: 'write_up_completed', label: 'Completed', dotColor: 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]' },
-  { id: 'endorsed', label: 'Endorsed', dotColor: 'bg-indigo-400 shadow-[0_0_8px_rgba(129,140,248,0.5)]' },
-  { id: 'cancelled', label: 'Cancelled', dotColor: 'bg-rose-400 shadow-[0_0_8px_rgba(248,113,113,0.5)]' },
+  {
+    id: 'all',
+    label: 'Total',
+    activeGradient: 'from-blue-600 to-blue-700',
+    badgeBg: 'bg-blue-100 text-blue-800'
+  },
+  {
+    id: 'wip',
+    label: 'WIP Stages',
+    activeGradient: 'from-amber-600 to-amber-700',
+    badgeBg: 'bg-amber-100 text-amber-800'
+  },
+  {
+    id: 'write_up_completed',
+    label: 'Write Up Completed',
+    activeGradient: 'from-green-600 to-green-700',
+    badgeBg: 'bg-green-100 text-green-800'
+  },
+  {
+    id: 'endorsed',
+    label: 'Endorsement Completed',
+    activeGradient: 'from-purple-600 to-purple-700',
+    badgeBg: 'bg-purple-100 text-purple-800'
+  },
+  {
+    id: 'cancelled',
+    label: 'Cancelled',
+    activeGradient: 'from-red-600 to-red-700',
+    badgeBg: 'bg-red-100 text-red-800'
+  },
 ];
