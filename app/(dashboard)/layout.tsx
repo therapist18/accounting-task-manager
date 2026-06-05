@@ -3,10 +3,10 @@ import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { Navbar } from "../../components/navbar"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
+import { AppSidebar } from "@/components/sidebar"
 import { Toaster } from "@/components/ui/toaster"
 import { canAccessPath } from "@/lib/auth/access-controls"
 import { getServerAppSession } from "@/lib/auth/session"
-import AppSidebar from "@/components/sidebar"
 
 export default async function DashboardLayout({
   children,
